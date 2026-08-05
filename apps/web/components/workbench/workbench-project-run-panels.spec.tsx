@@ -72,6 +72,23 @@ describe("ProjectTranscriptPanel", () => {
     expect(within(mobileStatus!).getByText("生成支付改造需求说明书")).not.toBeNull();
   });
 
+  it("keeps a PRD run expanded after the project enters generated mode", () => {
+    const { container } = renderRunSurfaces({
+      generationStage: null,
+      isPrdRun: true,
+      projectMode: "generated",
+      prompt: "",
+      runPhaseLabel: null,
+      runStatus: "running",
+    });
+    const agentCard = getAgentCard(container);
+
+    expect(agentCard.style.height).toBe("auto");
+    expect(agentCard.dataset.prdBodyless).toBeUndefined();
+    expect(within(agentCard).getByText("正在处理需求文档，当前阶段：准备中")).not.toBeNull();
+    expect(agentCard.querySelector(".workbench-status-spinner")).not.toBeNull();
+  });
+
   it("keeps an active PRD run expanded with prompt and stage context", () => {
     const { container } = renderPanel({
       generationStage: "structuring-prd",
@@ -525,12 +542,15 @@ function renderRunSurfaces({
   generationStage,
   projectMode,
   isPrdRun = projectMode === "document",
+  prompt: promptOverride,
   runPhaseLabel,
   runStatus = "running",
 }: Pick<TranscriptPanelProps, "generationStage" | "projectMode" | "runPhaseLabel"> & {
   isPrdRun?: boolean;
+  prompt?: string;
   runStatus?: TranscriptPanelProps["runStatus"];
 }) {
+  const prompt = promptOverride ?? "生成支付改造需求说明书";
   return render(
     <>
       <LeftInspector
@@ -545,7 +565,7 @@ function renderRunSurfaces({
         onSelectTask={vi.fn()}
         phase="generating"
         projectMode={projectMode}
-        prompt="生成支付改造需求说明书"
+        prompt={prompt}
         runPhaseLabel={runPhaseLabel}
         runStatus={runStatus}
         selectedTask={null}
@@ -555,7 +575,7 @@ function renderRunSurfaces({
         generationStage,
         isPrdRun,
         projectMode,
-        prompt: "生成支付改造需求说明书",
+        prompt,
         runPhaseLabel,
         runStatus,
       })}
@@ -568,7 +588,7 @@ function renderRunSurfaces({
         isPrdRun={isPrdRun}
         onCancel={vi.fn()}
         onRetry={vi.fn()}
-        prompt="生成支付改造需求说明书"
+        prompt={prompt}
         runPhaseLabel={runPhaseLabel}
         runStatus={runStatus}
       />

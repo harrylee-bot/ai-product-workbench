@@ -14,9 +14,9 @@ describe("Project Preview contracts", () => {
         kind: "artifact",
         artifactId: "artifact-1",
         artifactVersionId: "version-1",
-        screenId: "screen-1",
       },
-    })).toMatchObject({ boardId: "board-1", boardRevision: 4 });
+      initialScreenId: "screen-1",
+    })).toMatchObject({ boardId: "board-1", boardRevision: 4, initialScreenId: "screen-1" });
 
     expect(projectPreviewSchema.parse({
       id: "preview-1",
@@ -24,6 +24,7 @@ describe("Project Preview contracts", () => {
       boardId: "board-1",
       boardRevision: 4,
       selection: { kind: "release" },
+      initialScreenId: null,
       status: "queued",
       revision: 0,
       failure: null,
@@ -38,6 +39,7 @@ describe("Project Preview contracts", () => {
       boardId: "board-1",
       boardRevision: 4,
       selection: { kind: "release" },
+      initialScreenId: null,
       format: "html",
     }).success).toBe(false);
     expect(projectPreviewSchema.safeParse({
@@ -46,6 +48,7 @@ describe("Project Preview contracts", () => {
       boardId: "board-1",
       boardRevision: 4,
       selection: { kind: "release" },
+      initialScreenId: null,
       status: "succeeded",
       revision: 1,
       failure: null,
@@ -53,6 +56,60 @@ describe("Project Preview contracts", () => {
       expiresAt: "2026-07-15T00:15:00.000Z",
       updatedAt: "2026-07-15T00:01:00.000Z",
       output: { blobId: "blob-1" },
+    }).success).toBe(false);
+  });
+
+  it("keeps Preview initial-screen intent separate from single-screen Export selection", () => {
+    expect(createProjectPreviewRequestSchema.safeParse({
+      boardId: "board-1",
+      boardRevision: 4,
+      selection: {
+        kind: "artifact",
+        artifactId: "artifact-1",
+        artifactVersionId: "version-1",
+        screenId: "screen-1",
+      },
+      initialScreenId: "screen-1",
+    }).success).toBe(false);
+    expect(createProjectPreviewRequestSchema.safeParse({
+      boardId: "board-1",
+      boardRevision: 4,
+      selection: { kind: "release" },
+      initialScreenId: "screen-1",
+    }).success).toBe(false);
+
+    expect(projectPreviewSchema.safeParse({
+      id: "preview-1",
+      projectId: "project-1",
+      boardId: "board-1",
+      boardRevision: 4,
+      selection: {
+        kind: "artifact",
+        artifactId: "artifact-1",
+        artifactVersionId: "version-1",
+        screenId: "screen-1",
+      },
+      initialScreenId: "screen-1",
+      status: "succeeded",
+      revision: 1,
+      failure: null,
+      createdAt: "2026-07-15T00:00:00.000Z",
+      expiresAt: "2026-07-15T00:15:00.000Z",
+      updatedAt: "2026-07-15T00:01:00.000Z",
+    }).success).toBe(false);
+    expect(projectPreviewSchema.safeParse({
+      id: "preview-1",
+      projectId: "project-1",
+      boardId: "board-1",
+      boardRevision: 4,
+      selection: { kind: "release" },
+      initialScreenId: "screen-1",
+      status: "succeeded",
+      revision: 1,
+      failure: null,
+      createdAt: "2026-07-15T00:00:00.000Z",
+      expiresAt: "2026-07-15T00:15:00.000Z",
+      updatedAt: "2026-07-15T00:01:00.000Z",
     }).success).toBe(false);
   });
 });

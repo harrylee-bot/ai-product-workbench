@@ -3,7 +3,6 @@
 import "@testing-library/jest-dom/vitest";
 import type {
   ExportPreviewTokenResponse,
-  ExportSelection,
 } from "@workbench/workbench-contracts";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -42,6 +41,7 @@ import {
   workbenchPreviewHandshakeTimeoutMs,
   workbenchPreviewRenewalLeadMs,
   workbenchPreviewSandbox,
+  type WorkbenchPreviewRequest,
 } from "./workbench-isolated-preview";
 
 const previewOrigin = "https://preview.example.test";
@@ -69,7 +69,7 @@ describe("Workbench isolated Preview", () => {
         createPreview={createPreview}
         onCapabilityChange={onCapabilityChange}
         refreshKey={0}
-        selection={selection("artifact-1", "version-1", "screen-home")}
+        request={previewRequest("artifact-1", "version-1", "screen-home")}
         title="项目预览"
       />,
     );
@@ -199,7 +199,7 @@ describe("Workbench isolated Preview", () => {
     const first = deferred<ExportPreviewTokenResponse>();
     const second = deferred<ExportPreviewTokenResponse>();
     const signals: AbortSignal[] = [];
-    const createPreview = vi.fn((_: ExportSelection, signal?: AbortSignal) => {
+    const createPreview = vi.fn((_: WorkbenchPreviewRequest, signal?: AbortSignal) => {
       signals.push(signal!);
       return signals.length === 1 ? first.promise : second.promise;
     });
@@ -207,7 +207,7 @@ describe("Workbench isolated Preview", () => {
       <WorkbenchIsolatedPreview
         createPreview={createPreview}
         refreshKey={0}
-        selection={selection("artifact-1", "version-1", "screen-home")}
+        request={previewRequest("artifact-1", "version-1", "screen-home")}
         title="项目预览"
       />,
     );
@@ -216,7 +216,7 @@ describe("Workbench isolated Preview", () => {
       <WorkbenchIsolatedPreview
         createPreview={createPreview}
         refreshKey={0}
-        selection={selection("artifact-1", "version-1", "screen-success")}
+        request={previewRequest("artifact-1", "version-1", "screen-success")}
         title="项目预览"
       />,
     );
@@ -235,7 +235,7 @@ describe("Workbench isolated Preview", () => {
       .mockResolvedValueOnce(capability("refreshed"));
     const props = {
       createPreview,
-      selection: selection("artifact-1", "version-1"),
+      request: previewRequest("artifact-1", "version-1", "screen-home"),
       title: "项目预览",
     };
     const rendered = render(<WorkbenchIsolatedPreview {...props} refreshKey={0} />);
@@ -265,10 +265,10 @@ describe("Workbench isolated Preview", () => {
   });
 
   it("does not restart the capability request when only the callback reference changes", async () => {
-    const request = vi.fn(async (_selection: ExportSelection, _signal?: AbortSignal) => capability("stable"));
+    const request = vi.fn(async (_request: WorkbenchPreviewRequest, _signal?: AbortSignal) => capability("stable"));
     const props = {
       refreshKey: 0,
-      selection: selection("artifact-1", "version-1"),
+      request: previewRequest("artifact-1", "version-1", "screen-home"),
       title: "项目预览",
     };
     const rendered = render(
@@ -286,7 +286,7 @@ describe("Workbench isolated Preview", () => {
     const first = deferred<ExportPreviewTokenResponse>();
     let firstSignal: AbortSignal | undefined;
     const createPreview = vi.fn()
-      .mockImplementationOnce((_selection: ExportSelection, signal?: AbortSignal) => {
+      .mockImplementationOnce((_request: WorkbenchPreviewRequest, signal?: AbortSignal) => {
         firstSignal = signal;
         return first.promise;
       })
@@ -294,7 +294,7 @@ describe("Workbench isolated Preview", () => {
     const props = {
       createPreview,
       refreshKey: 0,
-      selection: selection("artifact-shared", "version-shared"),
+      request: previewRequest("artifact-shared", "version-shared", "screen-home"),
       title: "项目预览",
     };
     const rendered = render(<WorkbenchIsolatedPreview {...props} sessionKey="project-1" />);
@@ -319,7 +319,10 @@ describe("Workbench isolated Preview", () => {
       <WorkbenchIsolatedPreview
         createPreview={createPreview}
         refreshKey={0}
-        selection={{ kind: "board_nodes", nodeIds: ["node-b", "node-a"] }}
+        request={{
+          initialScreenId: null,
+          selection: { kind: "board_nodes", nodeIds: ["node-b", "node-a"] },
+        }}
         title="多选预览"
       />,
     );
@@ -329,7 +332,10 @@ describe("Workbench isolated Preview", () => {
       <WorkbenchIsolatedPreview
         createPreview={createPreview}
         refreshKey={0}
-        selection={{ kind: "board_nodes", nodeIds: ["node-a", "node-b"] }}
+        request={{
+          initialScreenId: null,
+          selection: { kind: "board_nodes", nodeIds: ["node-a", "node-b"] },
+        }}
         title="多选预览"
       />,
     );
@@ -353,13 +359,16 @@ describe("Workbench isolated Preview", () => {
 function renderPreview({
   createPreview,
 }: {
-  createPreview: (selection: ExportSelection, signal?: AbortSignal) => Promise<ExportPreviewTokenResponse>;
+  createPreview: (
+    request: WorkbenchPreviewRequest,
+    signal?: AbortSignal,
+  ) => Promise<ExportPreviewTokenResponse>;
 }) {
   return render(
     <WorkbenchIsolatedPreview
       createPreview={createPreview}
       refreshKey={0}
-      selection={selection("artifact-1", "version-1")}
+      request={previewRequest("artifact-1", "version-1", "screen-home")}
       title="项目预览"
     />,
   );
@@ -384,12 +393,18 @@ function readyStatus() {
   } as const;
 }
 
-function selection(artifactId: string, artifactVersionId: string, screenId?: string): ExportSelection {
+function previewRequest(
+  artifactId: string,
+  artifactVersionId: string,
+  initialScreenId: string,
+): WorkbenchPreviewRequest {
   return {
-    kind: "artifact",
-    artifactId,
-    artifactVersionId,
-    ...(screenId ? { screenId } : {}),
+    initialScreenId,
+    selection: {
+      kind: "artifact",
+      artifactId,
+      artifactVersionId,
+    },
   };
 }
 

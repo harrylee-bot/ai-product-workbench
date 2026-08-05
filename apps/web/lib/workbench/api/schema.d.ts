@@ -4579,10 +4579,12 @@ export interface components {
             token: string;
             deliveryStatus: components["schemas"]["ProjectInvitationDeliveryStatus"];
         };
+        /** @description Project Preview keeps initial-screen intent separate from single-screen Export cropping, and only Artifact selections can name an initial screen. */
         CreateProjectPreviewRequest: {
             boardId: string;
             boardRevision: components["schemas"]["Revision"];
             selection: components["schemas"]["ExportSelection"];
+            initialScreenId: string | null;
         };
         CreateProjectReleaseRequest: {
             boardId: string;
@@ -5791,6 +5793,7 @@ export interface components {
             boardId: string;
             boardRevision: components["schemas"]["Revision"];
             selection: components["schemas"]["ExportSelection"];
+            initialScreenId: string | null;
             status: components["schemas"]["PreviewStatus"];
             revision: components["schemas"]["Revision"];
             failure: {

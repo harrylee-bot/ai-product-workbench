@@ -2,8 +2,8 @@
 
 import type {
   CreateExportJobRequest,
+  CreateProjectPreviewRequest,
   ExportJob,
-  ProjectPreview,
 } from "@workbench/workbench-contracts";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
@@ -127,11 +127,8 @@ export function useCreateWorkbenchProjectPreview(projectId: string) {
   const api = useWorkbenchExportsApi();
   return useMutation({
     mutationKey: [...workbenchQueryKeys.projectPreviews(projectId), "create"],
-    mutationFn: ({ boardId, boardRevision, selection }: Pick<
-      ProjectPreview,
-      "boardId" | "boardRevision" | "selection"
-    >) => (
-      api.createProjectPreview(projectId, { boardId, boardRevision, selection })
+    mutationFn: (request: CreateProjectPreviewRequest) => (
+      api.createProjectPreview(projectId, request)
     ),
   });
 }

@@ -1,4 +1,7 @@
-import { exportDeliveryQueueOptions } from "@workbench/workbench-contracts";
+import {
+  exportDeliveryQueueOptions,
+  loadExternalExportProviderConfig,
+} from "@workbench/workbench-contracts";
 import { parseConditionalObjectCreateMode } from "@workbench/workbench-content-security";
 
 export type ExportWorkerConfig = ReturnType<typeof loadExportWorkerConfig>;
@@ -41,6 +44,7 @@ export function loadExportWorkerConfig() {
     exportS3SecretAccessKey,
     pendingBlobPrefix: cleanPrefix(optional("WORKBENCH_EXPORT_PENDING_BLOB_PREFIX") ?? "pending/exports"),
     canonicalBlobPrefix: cleanPrefix(optional("WORKBENCH_CANONICAL_BLOB_PREFIX") ?? "blobs"),
+    externalExportProviders: loadExternalExportProviderConfig(),
   };
 }
 

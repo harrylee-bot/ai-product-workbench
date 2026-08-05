@@ -2,6 +2,7 @@
 
 import type {
   Board,
+  CreateProjectPreviewRequest,
   ExternalExportDelivery,
   ExternalExportTarget,
   ExportCapabilities,
@@ -46,6 +47,7 @@ import {
   exportSelectionIdentityKey,
   exportSelectionsEqual,
 } from "./export-selection";
+import { workbenchPreviewRenewalLeadMs } from "./preview-timing";
 
 export type WorkbenchExportTarget =
   | "AI Studio"
@@ -763,7 +765,7 @@ export function useWorkbenchPublicationController({
   ]);
 
   const createPreview = useCallback(async (
-    selection: ExportSelection,
+    request: Pick<CreateProjectPreviewRequest, "initialScreenId" | "selection">,
     signal?: AbortSignal,
   ): Promise<ExportPreviewTokenResponse> => {
     if (!canPreview) throw new Error("This Project role cannot create isolated Previews");
@@ -773,18 +775,21 @@ export function useWorkbenchPublicationController({
     try {
       const board = await persistedPreviewBoard(boardController, canExport);
       throwIfPreviewAborted(signal);
-      const cacheKey = previewSelectionKey(`${board.id}:${board.revision}`, selection);
+      const cacheKey = previewSelectionKey(`${board.id}:${board.revision}`, request);
       let previewId = previewIdsRef.current.get(cacheKey);
       let preview: ProjectPreview | null = null;
 
       if (previewId) {
-        const current = await exportOperations.getProjectPreview(previewId);
+        const current = await exportOperations.getProjectPreview(previewId, signal);
+        throwIfPreviewAborted(signal);
         if (current.boardId === board.id
           && current.boardRevision === board.revision
-          && exportSelectionsEqual(current.selection, selection)
+          && current.initialScreenId === request.initialScreenId
+          && exportSelectionsEqual(current.selection, request.selection)
           && current.status !== "failed"
           && current.status !== "cancelled"
-          && current.status !== "expired") {
+          && current.status !== "expired"
+          && (current.status !== "succeeded" || previewCanBeReused(current))) {
           preview = current;
         } else {
           previewIdsRef.current.delete(cacheKey);
@@ -793,11 +798,14 @@ export function useWorkbenchPublicationController({
       }
 
       if (!preview) {
-        preview = await exportOperations.createProjectPreview(projectId, {
+        const created = await exportOperations.createProjectPreview(projectId, {
           boardId: board.id,
           boardRevision: board.revision,
-          selection,
-        });
+          initialScreenId: request.initialScreenId,
+          selection: request.selection,
+        }, undefined, signal);
+        throwIfPreviewAborted(signal);
+        preview = created;
         previewId = preview.id;
         previewIdsRef.current.set(cacheKey, previewId);
       }
@@ -807,10 +815,14 @@ export function useWorkbenchPublicationController({
         intervalMs: previewPollIntervalMs,
         timeoutMs: previewPollTimeoutMs,
       });
-      const capability = await exportOperations.createProjectPreviewToken(succeeded.id);
+      throwIfPreviewAborted(signal);
+      const capability = await exportOperations.createProjectPreviewToken(succeeded.id, signal);
+      throwIfPreviewAborted(signal);
       return validateIsolatedPreviewCapability(capability);
     } catch (error) {
-      if (session.isCurrent()) setPreviewOperationError(error);
+      if (!previewOperationWasAborted(error, signal) && session.isCurrent()) {
+        setPreviewOperationError(error);
+      }
       throw error;
     } finally {
       setPreviewOperationCount((count) => Math.max(0, count - 1));
@@ -972,14 +984,17 @@ export async function waitForProjectPreview(
 
   const deadline = Date.now() + timeoutMs;
   let preview = initialPreview;
+  throwIfPreviewAborted(signal);
   while (preview.status === "queued" || preview.status === "running") {
     throwIfPreviewAborted(signal);
     if (Date.now() >= deadline) throw new Error("Timed out while preparing the isolated Preview");
     await previewDelay(Math.min(intervalMs, Math.max(0, deadline - Date.now())), signal);
     throwIfPreviewAborted(signal);
-    preview = await api.getProjectPreview(preview.id);
+    preview = await api.getProjectPreview(preview.id, signal);
+    throwIfPreviewAborted(signal);
     if (preview.boardId !== initialPreview.boardId
       || preview.boardRevision !== initialPreview.boardRevision
+      || preview.initialScreenId !== initialPreview.initialScreenId
       || !exportSelectionsEqual(preview.selection, initialPreview.selection)) {
       throw new Error("Preview identity changed while polling");
     }
@@ -1145,8 +1160,21 @@ function waitForBoardSave(store: BoardStore): Promise<void> {
   });
 }
 
-function previewSelectionKey(snapshotId: string, selection: ExportSelection): string {
-  return JSON.stringify([snapshotId, exportSelectionIdentityKey(selection)]);
+function previewSelectionKey(
+  snapshotId: string,
+  request: Pick<CreateProjectPreviewRequest, "initialScreenId" | "selection">,
+): string {
+  return JSON.stringify([
+    snapshotId,
+    exportSelectionIdentityKey(request.selection),
+    request.initialScreenId,
+  ]);
+}
+
+function previewCanBeReused(preview: ProjectPreview, now = Date.now()): boolean {
+  const expiresAt = Date.parse(preview.expiresAt);
+  return Number.isFinite(expiresAt)
+    && expiresAt - now > workbenchPreviewRenewalLeadMs;
 }
 
 function previewDelay(milliseconds: number, signal?: AbortSignal): Promise<void> {
@@ -1168,6 +1196,12 @@ function previewDelay(milliseconds: number, signal?: AbortSignal): Promise<void>
 function throwIfPreviewAborted(signal?: AbortSignal): void {
   if (!signal?.aborted) return;
   throw signal.reason instanceof Error ? signal.reason : new DOMException("Aborted", "AbortError");
+}
+
+function previewOperationWasAborted(error: unknown, signal?: AbortSignal): boolean {
+  return signal?.aborted === true
+    || (error instanceof DOMException && error.name === "AbortError")
+    || (error instanceof Error && error.name === "AbortError");
 }
 
 function exportFileName(projectId: string, job: ExportJob): string {

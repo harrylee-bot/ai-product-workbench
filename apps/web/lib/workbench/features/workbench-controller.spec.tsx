@@ -13,7 +13,10 @@ import {
   submissionIntentRunRequest,
   useWorkbenchController,
 } from "./workbench-controller";
-import { WORKBENCH_MIXED_ARTIFACT_REQUEST_MESSAGE } from "../run";
+import {
+  requestedArtifactKindsForPrompt,
+  WORKBENCH_MIXED_ARTIFACT_REQUEST_MESSAGE,
+} from "../run";
 
 const mocks = vi.hoisted(() => ({
   archiveProject: vi.fn(),
@@ -146,11 +149,12 @@ afterEach(() => {
 
 describe("Workbench Home Run boundary", () => {
   it("rejects mixed PRD and Prototype work before a Home submission can create a Project", () => {
+    const prompt = "Generate a PRD and a prototype";
     expect(() => resolveHomeSubmissionModel({
-      prompt: "Create a PRD and a prototype",
+      prompt,
       modelChoiceKey: "model:quality",
       targetSurface: "app",
-      requestedArtifactKinds: ["prd", "prototype"],
+      requestedArtifactKinds: requestedArtifactKindsForPrompt(prompt),
     }, [{
       description: "Generate",
       key: "model:quality",
@@ -247,6 +251,16 @@ describe("Workbench Project targeted Generate boundary", () => {
     artifactVersionId: "version-1",
     screenIds: ["screen-1"],
   };
+
+  it("rejects a classified mixed request before starting a Project Run", () => {
+    const prompt = "生成需求文档和页面设计";
+    expect(() => resolveRunnableSubmissionModel({
+      prompt,
+      modelChoiceKey: model.key,
+      targetSurface: "app",
+      requestedArtifactKinds: requestedArtifactKindsForPrompt(prompt),
+    }, [model])).toThrow(WORKBENCH_MIXED_ARTIFACT_REQUEST_MESSAGE);
+  });
 
   it("accepts only explicit Prototype screen targets", () => {
     expect(resolveRunnableSubmissionModel({

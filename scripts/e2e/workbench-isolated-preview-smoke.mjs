@@ -290,8 +290,14 @@ await context.route("**/api/v1/**", async (route) => {
     const requestBody = request.postDataJSON();
     assert(requestBody.boardId === board.id, "ProjectPreview must pin the persisted Board identity");
     assert(requestBody.boardRevision === board.revision, "ProjectPreview must pin the persisted Board revision");
+    assert(!Object.hasOwn(requestBody.selection, "screenId"), "ProjectPreview selection must not crop the Prototype");
+    const artifactPosition = Number(requestBody.selection.artifactId.slice("artifact-".length));
+    assert(
+      requestBody.initialScreenId === `screen-${artifactPosition}`,
+      "ProjectPreview must carry the selected initial screen outside its immutable selection",
+    );
     const id = `preview-${++projectPreviewCount}`;
-    const preview = projectPreview(id, requestBody.selection);
+    const preview = projectPreview(id, requestBody.selection, requestBody.initialScreenId);
     projectPreviews.set(id, preview);
     return json(route, preview, { location: `/api/v1/previews/${id}` }, 202);
   }
@@ -536,13 +542,14 @@ function prototypeDocument(position) {
   };
 }
 
-function projectPreview(id, selection) {
+function projectPreview(id, selection, initialScreenId) {
   return {
     id,
     projectId: project.id,
     boardId: board.id,
     boardRevision: board.revision,
     selection,
+    initialScreenId,
     status: "succeeded",
     revision: 0,
     failure: null,

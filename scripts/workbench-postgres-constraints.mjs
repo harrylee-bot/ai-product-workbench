@@ -568,7 +568,7 @@ async function seedMinimumGraph(db) {
       "knowledge_release_id"
     ) VALUES (
       'version-prototype-ready', 'artifact-prototype', 'project-a', 1, 1, 'staging',
-      '{"protocol":"workbench.prototype.v1","assets":[{"id":"hero-image","kind":"image","name":"Hero","blobId":"blob-prototype-image","mediaType":"image/png","byteSize":128,"sha256":"abababababababababababababababababababababababababababababababab","width":320,"height":180}]}'::jsonb,
+      '{"protocol":"workbench.prototype.v1","screens":[{"id":"screen-home"}],"assets":[{"id":"hero-image","kind":"image","name":"Hero","blobId":"blob-prototype-image","mediaType":"image/png","byteSize":128,"sha256":"abababababababababababababababababababababababababababababababab","width":320,"height":180}]}'::jsonb,
       NULL, repeat('8a', 32), '[]'::jsonb, 'run-a', NULL
     );
 
@@ -1558,7 +1558,7 @@ async function runConstraintChecks(db) {
           "lease_expires_at" = NULL,
           "response" = '{"protocol":"workbench.knowledge-retrieval-result.v1"}'::jsonb,
           "response_sha256" = repeat('9', 64),
-          "finished_at" = clock_timestamp(),
+          "finished_at" = "last_started_at",
           "updated_at" = clock_timestamp()
       WHERE "id" = 'candidate-knowledge-invocation'
     `);
@@ -1992,6 +1992,58 @@ async function runConstraintChecks(db) {
   await expectAccept(db, "Private Preview snapshot does not require a ProjectRelease", async () => {
     await insertProjectPreview(db);
   });
+
+  await expectAccept(db, "ProjectPreview accepts an initial screen from its selected Prototype", async () => {
+    await insertProjectPreview(db, {
+      artifactPin: prototypePreviewArtifactPin(),
+      exportJobOverrides: {
+        selectionKind: "artifact",
+        selectionArtifactId: "artifact-prototype",
+        selectionArtifactVersionId: "version-prototype-ready",
+      },
+      initialScreenId: "screen-home",
+    });
+  });
+
+  await expectReject(db, "ProjectPreview initial screen must exist in its selected Prototype", async () => {
+    await insertProjectPreview(db, {
+      artifactPin: prototypePreviewArtifactPin(),
+      exportJobOverrides: {
+        selectionKind: "artifact",
+        selectionArtifactId: "artifact-prototype",
+        selectionArtifactVersionId: "version-prototype-ready",
+      },
+      initialScreenId: "screen-missing",
+    });
+  }, trigger("23514", "PROJECT_PREVIEW_INITIAL_SCREEN_INVALID"));
+
+  await expectReject(db, "ProjectPreview initial screen requires a Prototype Artifact", async () => {
+    await insertProjectPreview(db, {
+      artifactPin: previewArtifactPin(),
+      exportJobOverrides: {
+        selectionKind: "artifact",
+        selectionArtifactId: "artifact-a",
+        selectionArtifactVersionId: "version-a-ready",
+      },
+      initialScreenId: "screen-home",
+    });
+  }, trigger("23514", "PROJECT_PREVIEW_INITIAL_SCREEN_INVALID"));
+
+  await expectReject(db, "ProjectPreview initial screen requires an Artifact selection", async () => {
+    await insertProjectPreview(db, { initialScreenId: "screen-home" });
+  }, trigger("23514", "PROJECT_PREVIEW_INITIAL_SCREEN_SELECTION_INVALID"));
+
+  await expectReject(db, "ProjectPreview selection cannot crop the selected Prototype", async () => {
+    await insertProjectPreview(db, {
+      artifactPin: prototypePreviewArtifactPin(),
+      exportJobOverrides: {
+        selectionKind: "artifact",
+        selectionArtifactId: "artifact-prototype",
+        selectionArtifactVersionId: "version-prototype-ready",
+        selectionScreenId: "screen-home",
+      },
+    });
+  }, trigger("23514", "PROJECT_PREVIEW_SELECTION_SCREEN_CROP_FORBIDDEN"));
 
   await expectReject(db, "ProjectPreview cannot attach to a public ExportJob", async () => {
     await insertExportJob(db);
@@ -2745,7 +2797,7 @@ async function runConstraintChecks(db) {
     await db.query(`
       UPDATE "file_verification_attempts"
       SET "status" = 'succeeded', "file_status" = 'ready',
-          "finished_at" = clock_timestamp(), "updated_at" = clock_timestamp()
+          "finished_at" = "started_at", "updated_at" = clock_timestamp()
       WHERE "id" = 'candidate-file-verification-attempt'
     `);
     const result = await db.query(`
@@ -2780,12 +2832,14 @@ async function runConstraintChecks(db) {
 
   await expectReject(db, "FileVerificationAttempt terminal state requires matching evidence", async () => {
     await insertVerificationUpload(db);
-    await insertFileVerificationAttempt(db, {
-      status: "terminal_failed",
-      fileStatus: "ready",
-      failureCode: "FILE_VERIFICATION_RETRY_EXHAUSTED",
-      finishedAt: new Date(),
-    });
+    await insertFileVerificationAttempt(db);
+    await db.query(`
+      UPDATE "file_verification_attempts"
+      SET "status" = 'terminal_failed', "file_status" = 'ready',
+          "failure_code" = 'FILE_VERIFICATION_RETRY_EXHAUSTED',
+          "finished_at" = "started_at", "updated_at" = clock_timestamp()
+      WHERE "id" = 'candidate-file-verification-attempt'
+    `);
   }, constraint("23514", "file_verification_attempts_state_check"));
 
   await expectReject(db, "FileVerificationAttempt identity is immutable", async () => {
@@ -2804,7 +2858,7 @@ async function runConstraintChecks(db) {
     await db.query(`
       UPDATE "file_verification_attempts"
       SET "status" = 'retryable_failed', "failure_code" = 'SCANNER_TIMEOUT',
-          "finished_at" = clock_timestamp(), "updated_at" = clock_timestamp()
+          "finished_at" = "started_at", "updated_at" = clock_timestamp()
       WHERE "id" = 'candidate-file-verification-attempt'
     `);
     await db.query(`
@@ -5658,8 +5712,23 @@ function previewArtifactPin(overrides = {}) {
   };
 }
 
-async function insertProjectPreview(db, { artifactPin = null, ...overrides } = {}) {
-  await insertPreviewExportJob(db);
+function prototypePreviewArtifactPin(overrides = {}) {
+  return previewArtifactPin({
+    artifactId: "artifact-prototype",
+    artifactVersionId: "version-prototype-ready",
+    title: "Prototype Artifact",
+    kind: "prototype",
+    checksum: "8a".repeat(32),
+    ...overrides,
+  });
+}
+
+async function insertProjectPreview(db, {
+  artifactPin = null,
+  exportJobOverrides = {},
+  ...overrides
+} = {}) {
+  await insertPreviewExportJob(db, exportJobOverrides);
   const artifactPins = artifactPin ? [artifactPin] : [];
   await insertProjectPreviewRecord(db, { artifactPins, ...overrides });
   if (artifactPin) await insertProjectPreviewArtifactPin(db, artifactPin);
@@ -5689,6 +5758,7 @@ async function insertProjectPreviewRecord(db, overrides = {}) {
     },
     boardChecksum: "c".repeat(64),
     artifactPins: [],
+    initialScreenId: null,
     exportJobId: "candidate-preview-export",
     createdById: "principal-a",
     idempotencyKey: "candidate-preview-key",
@@ -5709,10 +5779,11 @@ async function insertProjectPreviewRecord(db, overrides = {}) {
   await db.query(`
     INSERT INTO "project_previews" (
       "id", "project_id", "board_id", "board_revision", "board_snapshot",
-      "board_checksum", "manifest", "manifest_sha256", "export_job_id",
-      "created_by_id", "idempotency_key", "request_hash", "expires_at", "updated_at"
+      "board_checksum", "manifest", "manifest_sha256", "initial_screen_id",
+      "export_job_id", "created_by_id", "idempotency_key", "request_hash",
+      "expires_at", "updated_at"
     ) VALUES (
-      $1, $2, $3, $4, $5::jsonb, $6, $7::jsonb, $8, $9, $10, $11, $12,
+      $1, $2, $3, $4, $5::jsonb, $6, $7::jsonb, $8, $9, $10, $11, $12, $13,
       clock_timestamp() + interval '1 hour', clock_timestamp()
     )
   `, [
@@ -5724,6 +5795,7 @@ async function insertProjectPreviewRecord(db, overrides = {}) {
     preview.boardChecksum,
     JSON.stringify(manifest),
     "d".repeat(64),
+    preview.initialScreenId,
     preview.exportJobId,
     preview.createdById,
     preview.idempotencyKey,
@@ -5891,7 +5963,11 @@ async function expectReject(db, name, operation, expected) {
     assert.equal(databaseError.constraint, expected.constraint, `${name}: unexpected constraint`);
   }
   if (expected.message) {
-    assert.match(databaseError.message, new RegExp(escapeRegExp(expected.message)), `${name}: unexpected trigger error`);
+    assert.match(
+      databaseError.message,
+      new RegExp(escapeRegExp(expected.message)),
+      `${name}: unexpected trigger error (${databaseError.message})`,
+    );
   }
   checks.push({
     name,

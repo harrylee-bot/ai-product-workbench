@@ -1,8 +1,8 @@
 "use client";
 
 import type {
+  CreateProjectPreviewRequest,
   ExportPreviewTokenResponse,
-  ExportSelection,
 } from "@workbench/workbench-contracts";
 import {
   workbenchPreviewHandshake,
@@ -19,6 +19,7 @@ import {
 import { useEffect, useRef, type IframeHTMLAttributes } from "react";
 
 import { exportSelectionIdentityKey } from "@/lib/workbench/features/export-selection";
+import { workbenchPreviewRenewalLeadMs } from "@/lib/workbench/features/preview-timing";
 import {
   useWorkbenchProjectRef,
   useWorkbenchProjectSession,
@@ -34,7 +35,7 @@ export const workbenchPreviewSandbox = [
 
 export const workbenchPreviewConnectionTimeoutMs = 8_000;
 export const workbenchPreviewHandshakeTimeoutMs = 2_000;
-export const workbenchPreviewRenewalLeadMs = 30_000;
+export { workbenchPreviewRenewalLeadMs } from "@/lib/workbench/features/preview-timing";
 const maximumBrowserTimerDelayMs = 2_147_000_000;
 const workbenchPreviewCredentiallessProps = {
   credentialless: "",
@@ -53,21 +54,26 @@ type PreviewRuntimeState<Status extends string, Url extends string | null> = {
   connectionGeneration: number | null;
 };
 
+export type WorkbenchPreviewRequest = Pick<
+  CreateProjectPreviewRequest,
+  "initialScreenId" | "selection"
+>;
+
 export function WorkbenchIsolatedPreview({
   createPreview,
   onCapabilityChange,
   refreshKey,
-  selection,
+  request,
   sessionKey = "",
   title,
 }: {
   createPreview: (
-    selection: ExportSelection,
+    request: WorkbenchPreviewRequest,
     signal?: AbortSignal,
   ) => Promise<ExportPreviewTokenResponse>;
   onCapabilityChange?: (capability: ExportPreviewTokenResponse | null) => void;
   refreshKey: number;
-  selection: ExportSelection;
+  request: WorkbenchPreviewRequest;
   sessionKey?: string;
   title: string;
 }) {
@@ -77,7 +83,10 @@ export function WorkbenchIsolatedPreview({
     () => ({ status: "preparing", url: null, generation: 0, connectionGeneration: null }),
   );
   const [renewalKey, setRenewalKey] = useWorkbenchProjectState(session, () => 0);
-  const selectionKey = exportSelectionIdentityKey(selection);
+  const requestKey = JSON.stringify([
+    exportSelectionIdentityKey(request.selection),
+    request.initialScreenId,
+  ]);
   const createPreviewRef = useRef(createPreview);
   const onCapabilityChangeRef = useRef(onCapabilityChange);
   const generationRef = useWorkbenchProjectRef(session, () => 0);
@@ -102,7 +111,7 @@ export function WorkbenchIsolatedPreview({
     setState({ status: "preparing", url: null, generation, connectionGeneration: null });
     onCapabilityChangeRef.current?.(null);
 
-    void createPreviewRef.current(selection, abortController.signal)
+    void createPreviewRef.current(request, abortController.signal)
       .then((capability) => {
         if (!current || abortController.signal.aborted) return;
         const validated = validatePreviewCapability(
@@ -141,7 +150,7 @@ export function WorkbenchIsolatedPreview({
     generationRef,
     refreshKey,
     renewalKey,
-    selectionKey,
+    requestKey,
     setRenewalKey,
     setState,
   ]);

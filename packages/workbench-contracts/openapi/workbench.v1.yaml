@@ -10394,11 +10394,19 @@ components:
           $ref: "#/components/schemas/Revision"
         selection:
           $ref: "#/components/schemas/ExportSelection"
+        initialScreenId:
+          type:
+            - string
+            - "null"
+          minLength: 1
+          maxLength: 128
       required:
         - boardId
         - boardRevision
         - selection
+        - initialScreenId
       additionalProperties: false
+      description: Project Preview keeps initial-screen intent separate from single-screen Export cropping, and only Artifact selections can name an initial screen.
     CreateProjectReleaseRequest:
       type: object
       properties:
@@ -14416,6 +14424,12 @@ components:
           $ref: "#/components/schemas/Revision"
         selection:
           $ref: "#/components/schemas/ExportSelection"
+        initialScreenId:
+          type:
+            - string
+            - "null"
+          minLength: 1
+          maxLength: 128
         status:
           $ref: "#/components/schemas/PreviewStatus"
         revision:
@@ -14453,6 +14467,7 @@ components:
         - boardId
         - boardRevision
         - selection
+        - initialScreenId
         - status
         - revision
         - failure
@@ -14460,6 +14475,7 @@ components:
         - expiresAt
         - updatedAt
       additionalProperties: false
+      description: Project Preview responses preserve the same full-Prototype selection and Artifact-only initial-screen invariant as creation requests.
     ProjectReleaseArtifactAssetKind:
       type: string
       enum:

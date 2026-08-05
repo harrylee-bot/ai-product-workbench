@@ -1,6 +1,8 @@
 import { Injectable } from "@nestjs/common";
 import {
+  externalExportProviderAvailable,
   exportCapabilitiesSchema,
+  loadExternalExportProviderConfig,
   type ExternalExportAuthentication,
   type ExternalExportTarget,
   type ExportCapabilities,
@@ -19,18 +21,11 @@ const externalAuthRequired = {
   reasonCode: "EXPORT_EXTERNAL_AUTHENTICATION_REQUIRED" as const,
 };
 
-function e2eEnabledExternalTargets() {
-  if (
-    process.env.NODE_ENV !== "test"
-    || process.env.WORKBENCH_E2E_EXTERNAL_DELIVERY_AVAILABLE !== "netlify"
-  ) return new Set<string>();
-  return new Set(["netlify"]);
-}
-
 @Injectable()
 export class ExportCapabilitiesConfig {
+  private readonly providers = loadExternalExportProviderConfig();
+
   catalog(): ExportCapabilities {
-    const e2eTargets = e2eEnabledExternalTargets();
     return exportCapabilitiesSchema.parse({
       formats: {
         html: localAvailable,
@@ -48,7 +43,7 @@ export class ExportCapabilitiesConfig {
           authentication: "not_required",
           reasonCode: "EXPORT_EXTERNAL_AI_STUDIO_UNAVAILABLE",
         },
-        netlify: e2eTargets.has("netlify")
+        netlify: externalExportProviderAvailable(this.providers, "netlify")
           ? { available: true, authentication: "authenticated", reasonCode: null }
           : externalAuthRequired,
         lovable: externalAuthRequired,

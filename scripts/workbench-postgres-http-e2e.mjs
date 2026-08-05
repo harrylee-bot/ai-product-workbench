@@ -55,6 +55,8 @@ assertSchemaResetConfirmation(databaseName);
 const commandTimeoutMs = positiveInteger("WORKBENCH_E2E_COMMAND_TIMEOUT_MS", 180_000);
 const scenarioTimeoutMs = positiveInteger("WORKBENCH_E2E_SCENARIO_TIMEOUT_MS", 60_000);
 const fakeRuntimeToken = `workbench-e2e-${randomUUID()}`;
+const fakeNetlifyAccessToken = `workbench-netlify-e2e-${randomUUID()}`;
+const fakeNetlifySiteId = "workbench-e2e-site";
 const fakeStorageBucket = "workbench-e2e-sources";
 const fakeStorageAccessKeyId = "workbench-e2e-access-key";
 const fakeStorageSecretAccessKey = "workbench-e2e-secret-key";
@@ -189,7 +191,7 @@ try {
   await rebuildSchemas();
   await migrateDatabase();
 
-  fakeRuntime = await startFakeDeerFlow(fakeRuntimeToken);
+  fakeRuntime = await startFakeDeerFlow(fakeRuntimeToken, fakeNetlifyAccessToken);
   const apiPort = await reservePort();
   const webPort = runRealStackBrowser ? await reservePort() : null;
   const webOrigin = webPort === null ? "http://127.0.0.1:3000" : `http://127.0.0.1:${webPort}`;
@@ -220,6 +222,13 @@ try {
     WORKBENCH_EXPORT_S3_SECRET_ACCESS_KEY: `${fakeStorageSecretAccessKey}-export`,
     WORKBENCH_PREVIEW_S3_ACCESS_KEY_ID: `${fakeStorageAccessKeyId}-preview`,
     WORKBENCH_PREVIEW_S3_SECRET_ACCESS_KEY: `${fakeStorageSecretAccessKey}-preview`,
+    ...(runRealStackBrowser ? {
+      WORKBENCH_NETLIFY_SITE_ID: fakeNetlifySiteId,
+      WORKBENCH_NETLIFY_ACCESS_TOKEN: fakeNetlifyAccessToken,
+      WORKBENCH_NETLIFY_API_BASE_URL: `${fakeRuntime.url}/netlify/api/v1`,
+      WORKBENCH_NETLIFY_REQUEST_TIMEOUT_MS: "5000",
+      WORKBENCH_NETLIFY_POLL_INTERVAL_MS: "50",
+    } : {}),
   };
 
   const api = spawnService("workbench-api", process.execPath, ["apps/workbench-api/dist/main.js"], {
@@ -3827,7 +3836,7 @@ function eventIdentity(event) {
   };
 }
 
-async function startFakeDeerFlow(expectedToken) {
+async function startFakeDeerFlow(expectedToken, expectedNetlifyAccessToken) {
   const storageObjects = new Map();
   const browserPrdDraftGate = controlledGate();
   const browserPrdFinalizationGate = controlledGate();
@@ -3863,6 +3872,8 @@ async function startFakeDeerFlow(expectedToken) {
     requests: [],
     runtimeRuns: new Map(),
     multipartCreates: [],
+    netlifyDeploys: new Map(),
+    netlifyRequests: [],
     storageWrites: [],
   };
   const sockets = new Set();
@@ -3871,6 +3882,7 @@ async function startFakeDeerFlow(expectedToken) {
       request,
       response,
       expectedToken,
+      expectedNetlifyAccessToken,
       state,
       storageObjects,
       browserPrdDraftGate,
@@ -3941,6 +3953,7 @@ async function handleFakeDeerFlow(
   request,
   response,
   expectedToken,
+  expectedNetlifyAccessToken,
   state,
   storageObjects,
   browserPrdDraftGate,
@@ -4045,6 +4058,17 @@ async function handleFakeDeerFlow(
       `<UploadId>${uploadId}</UploadId>`,
       "</CreateMultipartUploadResult>",
     ].join(""));
+    return;
+  }
+  if (url.pathname.startsWith("/netlify/api/v1/")) {
+    await handleFakeNetlify(
+      request,
+      response,
+      url,
+      expectedNetlifyAccessToken,
+      fakeNetlifySiteId,
+      state,
+    );
     return;
   }
   if (request.headers["x-deerflow-internal-token"] !== expectedToken) {
@@ -4398,6 +4422,134 @@ async function handleFakeDeerFlow(
 
   response.writeHead(404, { "content-type": "application/json" });
   response.end(JSON.stringify({ error: "not found" }));
+}
+
+async function handleFakeNetlify(
+  request,
+  response,
+  url,
+  expectedAccessToken,
+  expectedSiteId,
+  state,
+) {
+  const authorizationValid = request.headers.authorization === `Bearer ${expectedAccessToken}`;
+  if (!authorizationValid) {
+    state.netlifyRequests.push({
+      authorizationValid: false,
+      kind: "authentication-rejected",
+      method: request.method,
+    });
+    response.writeHead(401, { "content-type": "application/json" });
+    response.end(JSON.stringify({ message: "unauthorized" }));
+    return;
+  }
+
+  const collectionMatch = /^\/netlify\/api\/v1\/sites\/([^/]+)\/deploys$/u.exec(url.pathname);
+  const deployMatch = /^\/netlify\/api\/v1\/sites\/([^/]+)\/deploys\/([^/]+)$/u.exec(url.pathname);
+  const encodedSiteId = collectionMatch?.[1] ?? deployMatch?.[1];
+  const siteId = encodedSiteId ? decodeURIComponent(encodedSiteId) : null;
+  if (siteId !== expectedSiteId) {
+    state.netlifyRequests.push({
+      authorizationValid: true,
+      kind: "site-rejected",
+      method: request.method,
+      siteIdMatches: false,
+    });
+    response.writeHead(404, { "content-type": "application/json" });
+    response.end(JSON.stringify({ message: "site not found" }));
+    return;
+  }
+
+  if (request.method === "GET" && collectionMatch) {
+    const deploys = [...state.netlifyDeploys.values()]
+      .filter((deploy) => deploy.site_id === siteId);
+    state.netlifyRequests.push({
+      authorizationValid: true,
+      kind: "deploy-list",
+      method: request.method,
+      page: url.searchParams.get("page"),
+      perPage: url.searchParams.get("per_page"),
+      siteIdMatches: true,
+    });
+    response.writeHead(200, { "content-type": "application/json" });
+    response.end(JSON.stringify(deploys));
+    return;
+  }
+
+  if (request.method === "POST" && collectionMatch) {
+    assert.equal(request.headers["content-type"], "application/zip", "fake Netlify received a non-ZIP deploy");
+    const bytes = await readRequestBuffer(request, 2 * 1024 * 1024);
+    assert.equal(
+      Number(request.headers["content-length"]),
+      bytes.byteLength,
+      "fake Netlify received a truncated ZIP deploy",
+    );
+    const title = url.searchParams.get("title");
+    assert.match(title ?? "", /^workbench-[0-9a-f]{24}-[0-9a-f]{16}$/u, "fake Netlify deploy title was invalid");
+    const deployId = `deploy-${randomUUID()}`;
+    const deploy = {
+      id: deployId,
+      site_id: siteId,
+      state: "building",
+      title,
+      deploy_ssl_url: `https://${deployId}.netlify-e2e.invalid`,
+      deploy_url: null,
+      ssl_url: null,
+      url: null,
+      error_message: null,
+    };
+    state.netlifyDeploys.set(deployId, deploy);
+    state.netlifyRequests.push({
+      authorizationValid: true,
+      byteSize: bytes.byteLength,
+      contentType: request.headers["content-type"],
+      kind: "deploy-create",
+      method: request.method,
+      sha256: sha256(bytes),
+      siteIdMatches: true,
+      titleValid: true,
+    });
+    response.writeHead(201, { "content-type": "application/json" });
+    response.end(JSON.stringify(deploy));
+    return;
+  }
+
+  if (deployMatch && (request.method === "GET" || request.method === "DELETE")) {
+    const deployId = decodeURIComponent(deployMatch[2]);
+    const deploy = state.netlifyDeploys.get(deployId);
+    if (!deploy || deploy.site_id !== siteId) {
+      response.writeHead(404, { "content-type": "application/json" });
+      response.end(JSON.stringify({ message: "deploy not found" }));
+      return;
+    }
+    if (request.method === "DELETE") {
+      state.netlifyDeploys.delete(deployId);
+      state.netlifyRequests.push({
+        authorizationValid: true,
+        kind: "deploy-delete",
+        method: request.method,
+        siteIdMatches: true,
+      });
+      response.writeHead(204);
+      response.end();
+      return;
+    }
+    const readyDeploy = { ...deploy, state: "ready" };
+    state.netlifyDeploys.set(deployId, readyDeploy);
+    state.netlifyRequests.push({
+      authorizationValid: true,
+      kind: "deploy-status",
+      method: request.method,
+      siteIdMatches: true,
+      state: readyDeploy.state,
+    });
+    response.writeHead(200, { "content-type": "application/json" });
+    response.end(JSON.stringify(readyDeploy));
+    return;
+  }
+
+  response.writeHead(404, { "content-type": "application/json" });
+  response.end(JSON.stringify({ message: "not found" }));
 }
 
 function storageAccessRole(request) {
@@ -5339,14 +5491,53 @@ function minimalPrototypeDocument() {
 
 function interactiveBrowserPrototypeDocument() {
   const document = minimalPrototypeDocument();
-  document.nodes[0].actionIds = ["action-open-preview-reference"];
+  const homeRoot = document.nodes[0];
+  const successRoot = structuredClone(homeRoot);
+  successRoot.id = "frame-success";
+  successRoot.screenId = "screen-success";
+  successRoot.name = "base-success";
+  successRoot.childIds = [];
+
+  const navigationButton = structuredClone(homeRoot);
+  delete navigationButton.clipContent;
+  navigationButton.id = "button-navigate";
+  navigationButton.screenId = "screen-home";
+  navigationButton.parentId = "frame-home";
+  navigationButton.name = "continue-to-success";
+  navigationButton.layout = {
+    ...navigationButton.layout,
+    x: { kind: "literal", value: 115 },
+    y: { kind: "literal", value: 398 },
+    width: { kind: "literal", value: 160 },
+    height: { kind: "literal", value: 48 },
+  };
+  navigationButton.style = {
+    ...navigationButton.style,
+    fill: { kind: "literal", value: "#2563eb" },
+  };
+  navigationButton.actionIds = ["action-navigate"];
+  navigationButton.kind = "button";
+  navigationButton.label = "Continue";
+  navigationButton.childIds = [];
+  navigationButton.buttonType = "button";
+  navigationButton.disabled = false;
+
+  homeRoot.childIds = [navigationButton.id];
+  document.screens.push({
+    id: "screen-success",
+    name: "Success",
+    route: "/success",
+    rootNodeId: successRoot.id,
+    initialStateId: null,
+    viewport: { width: 390, height: 844 },
+  });
+  document.nodes.push(navigationButton, successRoot);
   document.actions = [{
-    id: "action-open-preview-reference",
-    nodeId: "frame-home",
+    id: "action-navigate",
+    nodeId: navigationButton.id,
     event: "click",
-    kind: "openUrl",
-    target: "newWindow",
-    url: "https://example.com/preview-reference",
+    kind: "navigate",
+    targetScreenId: "screen-success",
   }];
   return document;
 }
@@ -5560,7 +5751,6 @@ async function runRealStackBrowserScenario({
     WORKBENCH_API_PORT: String(oidcApiPort),
     WORKBENCH_WEB_ORIGIN: webOrigin,
     WORKBENCH_AUTH_MODE: "oidc",
-    WORKBENCH_E2E_EXTERNAL_DELIVERY_AVAILABLE: "netlify",
     OIDC_ISSUER: webOrigin,
     OIDC_AUDIENCE: "workbench",
     OIDC_JWKS_URL: `${webOrigin}/api/auth/jwks`,
@@ -5909,14 +6099,24 @@ async function runRealStackBrowserScenario({
     ), { timeout: scenarioTimeoutMs });
     await prepareDeliveryButton.click();
     assert.equal((await deliveryCreationResponse).status(), 201, "product External Delivery preparation did not return 201");
-    await exportPanel.locator("[data-external-delivery-confirmation]")
-      .waitFor({ state: "visible", timeout: scenarioTimeoutMs });
+    const deliveryConfirmation = exportPanel.locator("[data-external-delivery-confirmation]");
+    await deliveryConfirmation.waitFor({ state: "visible", timeout: scenarioTimeoutMs });
     const deliveryBeforeConfirmation = await latestBrowserExternalDelivery(projectId);
     assert.equal(deliveryBeforeConfirmation.status, "pending_confirmation", "External Delivery was not pending confirmation");
     assert.equal(deliveryBeforeConfirmation.attempt, 0, "pending External Delivery already had an execution attempt");
     assert.equal(deliveryBeforeConfirmation.confirmedAt, null, "pending External Delivery was already confirmed");
     assert.equal(deliveryBeforeConfirmation.transferAuthorizedAt, null, "pending External Delivery was already authorized");
+    assert.equal(deliveryBeforeConfirmation.remoteReference, null, "pending External Delivery already had a remote reference");
     assert.equal(deliveryBeforeConfirmation.queueJobs, 0, "pending External Delivery was queued before confirmation");
+    const deliveryConfirmationText = (await deliveryConfirmation.textContent())?.replace(/\s+/gu, " ").trim() ?? "";
+    assert.ok(
+      deliveryConfirmationText.includes(deliveryBeforeConfirmation.output.fileName),
+      "External Delivery confirmation omitted the Export output file name",
+    );
+    assert.ok(
+      deliveryConfirmationText.includes(deliveryBeforeConfirmation.output.sha256.slice(0, 12)),
+      "External Delivery confirmation omitted the Export output SHA-256 summary",
+    );
 
     const deliveryConfirmationResponse = page.waitForResponse((response) => (
       response.request().method() === "POST"
@@ -5924,16 +6124,68 @@ async function runRealStackBrowserScenario({
     ), { timeout: scenarioTimeoutMs });
     await exportPanel.getByRole("button", { name: "确认发布至 Netlify", exact: true }).click();
     assert.equal((await deliveryConfirmationResponse).status(), 202, "product External Delivery confirmation did not return 202");
-    await exportPanel.getByRole("button", { name: "重试发布 Netlify", exact: true })
+    await exportPanel.getByRole("button", { name: "撤销发布 Netlify", exact: true })
       .waitFor({ state: "visible", timeout: scenarioTimeoutMs });
     const deliveryAfterConfirmation = await latestBrowserExternalDelivery(projectId);
     assert.equal(deliveryAfterConfirmation.id, deliveryBeforeConfirmation.id, "External Delivery identity changed after confirmation");
-    assert.equal(deliveryAfterConfirmation.status, "failed", "controlled unavailable external adapter did not fail closed");
-    assert.equal(deliveryAfterConfirmation.failureCode, "EXPORT_EXTERNAL_AUTHENTICATION_REQUIRED", "External Delivery lost its stable failure code");
+    assert.equal(deliveryAfterConfirmation.status, "succeeded", "controlled Netlify delivery did not succeed");
+    assert.equal(deliveryAfterConfirmation.failureCode, null, "succeeded External Delivery retained a failure code");
     assert.ok(deliveryAfterConfirmation.confirmedAt, "confirmed External Delivery omitted its confirmation timestamp");
     assert.ok(deliveryAfterConfirmation.transferAuthorizedAt, "confirmed External Delivery omitted transfer authorization");
+    assert.match(
+      deliveryAfterConfirmation.remoteReference ?? "",
+      /^netlify:workbench-e2e-site:deploy-[0-9a-f-]+:/u,
+      "succeeded External Delivery omitted its controlled Netlify remote reference",
+    );
     assert.ok(deliveryAfterConfirmation.queueJobs >= 1, "confirmed External Delivery did not enqueue durable work");
-    assert.ok(fakeRuntime.state.exportReads.some((read) => read.role === "export"), "Export Worker did not read the canonical object with its dedicated identity");
+    assert.deepEqual(
+      deliveryAfterConfirmation.output,
+      deliveryBeforeConfirmation.output,
+      "External Delivery Export output identity changed after confirmation",
+    );
+    const netlifyUploadRequests = fakeRuntime.state.netlifyRequests.filter((request) => request.kind === "deploy-create");
+    assert.equal(netlifyUploadRequests.length, 1, "controlled Netlify did not receive exactly one ZIP deploy");
+    const netlifyUpload = netlifyUploadRequests[0];
+    assert.equal(netlifyUpload.authorizationValid, true, "Netlify deploy did not use the configured bearer token");
+    assert.equal(netlifyUpload.siteIdMatches, true, "Netlify deploy targeted a different site");
+    assert.equal(netlifyUpload.contentType, "application/zip", "Netlify deploy did not upload a ZIP");
+    assert.equal(
+      netlifyUpload.byteSize,
+      deliveryAfterConfirmation.output.byteSize,
+      "Netlify ZIP byte size did not match the Export output summary",
+    );
+    assert.equal(
+      netlifyUpload.sha256,
+      deliveryAfterConfirmation.output.sha256,
+      "Netlify ZIP SHA-256 did not match the Export output summary",
+    );
+    assert.ok(
+      fakeRuntime.state.netlifyRequests.some((request) => request.kind === "deploy-list"),
+      "Netlify delivery did not perform its idempotent deploy lookup",
+    );
+    assert.ok(
+      fakeRuntime.state.netlifyRequests.some((request) => request.kind === "deploy-status" && request.state === "ready"),
+      "Netlify delivery did not poll the deploy to ready",
+    );
+    assert.ok(
+      fakeRuntime.state.netlifyRequests.every((request) => request.authorizationValid),
+      "controlled Netlify observed an unauthenticated request",
+    );
+    assert.ok(
+      fakeRuntime.state.exportReads.some((read) => (
+        read.role === "export"
+        && read.byteSize === deliveryAfterConfirmation.output.byteSize
+        && read.sha256 === deliveryAfterConfirmation.output.sha256
+      )),
+      "Export Worker did not read the canonical ZIP with its dedicated identity",
+    );
+    const netlifyDeliveryEvidence = {
+      authorizationValidated: true,
+      outputSummary: deliveryAfterConfirmation.output,
+      remoteReferencePresent: true,
+      requestKinds: fakeRuntime.state.netlifyRequests.map((request) => request.kind),
+      uploadMatchesOutput: true,
+    };
     await page.getByRole("button", { name: "Close", exact: true }).click();
     await exportPanel.waitFor({ state: "detached", timeout: scenarioTimeoutMs });
 
@@ -5945,22 +6197,33 @@ async function runRealStackBrowserScenario({
     )).length;
     const mixedComposer = page.locator('input[placeholder="您想更改或创建什么内容?"]');
     await mixedComposer.waitFor({ state: "visible", timeout: scenarioTimeoutMs });
-    const mixedArtifactPrompt = "生成需求文档。然后生成原型";
-    await mixedComposer.fill(mixedArtifactPrompt);
-    await page.getByRole("button", { name: "提交项目请求" }).click();
-    await page.locator('[data-panel-motion="agent-card"]').getByText("提交失败", { exact: true })
-      .waitFor({ state: "visible", timeout: scenarioTimeoutMs });
     const mixedErrorMessage = "一次运行只能生成需求文档或原型。请先完成需求文档，再发起原型生成。";
     const mixedErrorToast = page.locator('[data-sonner-toast][data-type="error"]')
       .filter({ hasText: mixedErrorMessage });
-    await mixedErrorToast.waitFor({ state: "visible", timeout: scenarioTimeoutMs });
-    const mixedErrorToastText = (await mixedErrorToast.textContent())?.replace(/\s+/gu, " ").trim() ?? "";
-    assert.ok(mixedErrorToastText.includes(mixedErrorMessage), "mixed Composer rejection omitted its localized product message");
-    assert.doesNotMatch(
-      mixedErrorToastText,
-      /requestedArtifactKinds|two sequential Runs|\[\s*\{/u,
-      "mixed Composer rejection exposed its schema validation payload",
-    );
+    const mixedArtifactPrompts = [
+      "生成需求文档。然后生成原型",
+      "Generate a PRD and a prototype",
+    ];
+    for (const [index, mixedArtifactPrompt] of mixedArtifactPrompts.entries()) {
+      if (index > 0) {
+        await mixedErrorToast.waitFor({ state: "detached", timeout: scenarioTimeoutMs });
+      }
+      await mixedComposer.fill(mixedArtifactPrompt);
+      await page.getByRole("button", { name: "提交项目请求" }).click();
+      await page.locator('[data-panel-motion="agent-card"]').getByText("提交失败", { exact: true })
+        .waitFor({ state: "visible", timeout: scenarioTimeoutMs });
+      await mixedErrorToast.waitFor({ state: "visible", timeout: scenarioTimeoutMs });
+      const mixedErrorToastText = (await mixedErrorToast.textContent())?.replace(/\s+/gu, " ").trim() ?? "";
+      assert.ok(mixedErrorToastText.includes(mixedErrorMessage), "mixed Composer rejection omitted its localized product message");
+      assert.doesNotMatch(
+        mixedErrorToastText,
+        /requestedArtifactKinds|two sequential Runs|\[\s*\{/u,
+        "mixed Composer rejection exposed its schema validation payload",
+      );
+      assert.equal(await mixedComposer.inputValue(), mixedArtifactPrompt, "rejected mixed prompt was cleared from the Composer");
+      assert.equal(await page.locator('[data-phase="generating"]').count(), 0, "mixed Composer request left an active Run UI");
+      await mixedComposer.fill("");
+    }
     const mixedPersistenceAfter = await browserProjectPersistenceCounts(projectId);
     const mixedSubmissionPostsAfter = bffRequests.filter((request) => (
       request.method === "POST" && /\/threads\/:id\/submission-intents$/u.test(request.pathClass)
@@ -5982,9 +6245,6 @@ async function runRealStackBrowserScenario({
       0,
       "mixed Composer request crossed the client contract boundary",
     );
-    assert.equal(await mixedComposer.inputValue(), mixedArtifactPrompt, "rejected mixed prompt was cleared from the Composer");
-    assert.equal(await page.locator('[data-phase="generating"]').count(), 0, "mixed Composer request left an active Run UI");
-    await mixedComposer.fill("");
 
     const prototypeVisualEvidence = [];
     const prototypeCheckpointResponses = [];
@@ -6125,6 +6385,7 @@ async function runRealStackBrowserScenario({
 
     const previewHttpResponseStart = httpResponses.length;
     let previewEvidence = null;
+    let previewNavigationEvidence = null;
     const productPreviewRequestHeaders = [];
     const captureProductPreviewRequest = (request) => {
       if (new URL(request.url()).origin !== previewOrigin) return;
@@ -6136,6 +6397,10 @@ async function runRealStackBrowserScenario({
       })));
     };
     page.on("request", captureProductPreviewRequest);
+    let productPreviewContentForDiagnostics = null;
+    let productPreviewElementForDiagnostics = null;
+    let previewInteractionBefore = null;
+    let previewLayoutEvidence = null;
     try {
       const previewAction = page.locator('[data-project-action="preview"]');
       await previewAction.waitFor({ state: "visible", timeout: scenarioTimeoutMs });
@@ -6152,6 +6417,86 @@ async function runRealStackBrowserScenario({
       await productPreviewFrame.waitFor({ state: "visible", timeout: scenarioTimeoutMs });
       await productPreview.locator('[data-isolated-preview] [role="status"]')
         .waitFor({ state: "detached", timeout: scenarioTimeoutMs });
+      await productPreview.getByRole("button", { name: "响应式", exact: true }).click({
+        timeout: scenarioTimeoutMs,
+      });
+      await productPreview.locator('[data-preview-device="responsive"][data-preview-scale="1"]')
+        .waitFor({ state: "visible", timeout: scenarioTimeoutMs });
+      const productPreviewElement = await productPreviewFrame.elementHandle();
+      assert.ok(productPreviewElement, "product Preview iframe element was unavailable");
+      productPreviewElementForDiagnostics = productPreviewElement;
+      const productPreviewContent = await productPreviewElement.contentFrame();
+      assert.ok(productPreviewContent, "product Preview iframe content was unavailable");
+      productPreviewContentForDiagnostics = productPreviewContent;
+      const prototypeRuntimeEvidence = await productPreviewContent.evaluate(() => {
+        const host = document.querySelector("[data-wb-prototype]");
+        const dataNode = document.getElementById("workbench-export-data");
+        const runtime = JSON.parse(dataNode?.textContent || "{}");
+        return {
+          installed: host?.getAttribute("data-wb-runtime-installed") === "true",
+          navigationActionPresent: Array.isArray(runtime.prototypes)
+            && runtime.prototypes.some((prototype) => (
+              Array.isArray(prototype.actions)
+              && prototype.actions.some((action) => (
+                action.id === "action-navigate"
+                && action.kind === "navigate"
+                && action.targetScreenId === "screen-success"
+              ))
+            )),
+        };
+      });
+      assert.deepEqual(prototypeRuntimeEvidence, {
+        installed: true,
+        navigationActionPresent: true,
+      }, "product Preview runtime was not ready for navigation");
+      const homePreviewScreen = productPreviewContent.locator('[data-wb-screen="screen-home"]');
+      const successPreviewScreen = productPreviewContent.locator('[data-wb-screen="screen-success"]');
+      await homePreviewScreen.waitFor({ state: "visible", timeout: scenarioTimeoutMs });
+      await successPreviewScreen.waitFor({ state: "hidden", timeout: scenarioTimeoutMs });
+      previewLayoutEvidence = await waitForBrowserPreviewInteractionLayout({
+        contentFrame: productPreviewContent,
+        iframe: productPreviewFrame,
+        timeoutMs: Math.min(scenarioTimeoutMs, 10_000),
+      });
+      previewInteractionBefore = await installBrowserPreviewInteractionObserver(
+        productPreviewContent,
+        `preview-document-${randomUUID()}`,
+      );
+      await productPreviewContent.locator('[data-wb-node="button-navigate"]').click({
+        timeout: scenarioTimeoutMs,
+      });
+      const previewNavigationTimeoutMs = Math.min(scenarioTimeoutMs, 10_000);
+      await Promise.all([
+        homePreviewScreen.waitFor({ state: "hidden", timeout: previewNavigationTimeoutMs }),
+        successPreviewScreen.waitFor({ state: "visible", timeout: previewNavigationTimeoutMs }),
+      ]);
+      assert.equal(productPreviewContent.isDetached(), false, "product Preview iframe renewed during navigation");
+      const previewInteractionAfter = await captureBrowserPreviewInteractionObserver(productPreviewContent);
+      assert.ok(
+        previewInteractionAfter.events.some((event) => (
+          event.type === "click"
+          && event.phase === "action-capture"
+          && event.isTrusted === true
+          && event.target?.closestNodeId === "button-navigate"
+        )),
+        "product Preview navigation lacked a trusted physical click through its action control",
+      );
+      assert.ok(
+        previewInteractionAfter.events.every((event) => event.isTrusted === true),
+        "product Preview navigation evidence included a synthetic interaction event",
+      );
+      previewNavigationEvidence = {
+        homeHiddenAfterNavigation: await homePreviewScreen.isHidden(),
+        initialScreen: "screen-home",
+        navigationControlClicked: true,
+        successVisibleAfterNavigation: await successPreviewScreen.isVisible(),
+      };
+      assert.deepEqual(previewNavigationEvidence, {
+        homeHiddenAfterNavigation: true,
+        initialScreen: "screen-home",
+        navigationControlClicked: true,
+        successVisibleAfterNavigation: true,
+      }, "product Preview navigation did not switch from Home to Success");
       const embeddedPreview = await productPreviewFrame.evaluate((frame) => ({
         credentialless: frame.getAttribute("credentialless"),
         referrerPolicy: frame.getAttribute("referrerpolicy"),
@@ -6190,6 +6535,9 @@ async function runRealStackBrowserScenario({
           frameVisible: true,
           independentOrigin: true,
           loadingStatusDetached: true,
+          navigationControlClicked: previewNavigationEvidence.navigationControlClicked,
+          navigationHomeHidden: previewNavigationEvidence.homeHiddenAfterNavigation,
+          navigationSuccessVisible: previewNavigationEvidence.successVisibleAfterNavigation,
           referrerPolicy: embeddedPreview.referrerPolicy,
           sandbox: embeddedPreview.sandbox,
         },
@@ -6198,6 +6546,8 @@ async function runRealStackBrowserScenario({
           cookieBlocked: productPreviewRequests.every((request) => !request.hasCookie),
           requestCount: productPreviewRequests.length,
         },
+        interaction: previewInteractionAfter,
+        layout: previewLayoutEvidence,
         requests: productPreviewRequests.map(({ method, pathClass }) => ({ method, pathClass })),
         responses: previewResponses,
       };
@@ -6205,12 +6555,28 @@ async function runRealStackBrowserScenario({
       await page.getByRole("button", { name: "退出预览" }).click();
       await productPreview.waitFor({ state: "detached", timeout: scenarioTimeoutMs });
     } catch (error) {
-      evidenceManifest.previewFailureDiagnostics = await captureBrowserPreviewFailure({
+      const previewFailureDiagnostics = await captureBrowserPreviewFailure({
         bffRequests,
         outputDir,
         page,
         projectId,
       });
+      previewFailureDiagnostics.navigationState = productPreviewContentForDiagnostics
+        ? await captureBrowserPreviewInteractionObserver(productPreviewContentForDiagnostics)
+          .catch(() => null)
+        : null;
+      previewFailureDiagnostics.navigationStateBeforeClick = previewInteractionBefore;
+      previewFailureDiagnostics.layout = previewLayoutEvidence;
+      previewFailureDiagnostics.frame = productPreviewContentForDiagnostics
+        ? {
+            detached: productPreviewContentForDiagnostics.isDetached(),
+            sameContentFrame: productPreviewElementForDiagnostics
+              ? await productPreviewElementForDiagnostics.contentFrame() === productPreviewContentForDiagnostics
+              : false,
+            url: previewFrameUrlEvidence(productPreviewContentForDiagnostics.url(), previewOrigin),
+          }
+        : null;
+      evidenceManifest.previewFailureDiagnostics = previewFailureDiagnostics;
       throw error;
     } finally {
       page.off("request", captureProductPreviewRequest);
@@ -6366,6 +6732,7 @@ async function runRealStackBrowserScenario({
       "browser cancellation lacked observed or persisted terminal SSE evidence",
     );
     assert.ok(previewEvidence, "product Preview evidence was not retained in the manifest");
+    assert.ok(previewNavigationEvidence, "product Preview navigation evidence was not retained in the manifest");
     assert.equal(
       consoleErrors.length,
       0,
@@ -6378,12 +6745,15 @@ async function runRealStackBrowserScenario({
       workerArtifactPersistence: true,
       prdPendingPanelAndMotion: true,
       mixedRequestRejected: true,
+      mixedRequestCommonEnglishRejected: true,
       prototypeAfterPrdMotion: true,
       reconnectReload: true,
       previewIndependentOriginAndSandbox: true,
       previewCredentialCanaryBlocked: true,
+      previewPrototypeNavigation: true,
       releaseAndExportBuild: true,
       externalDeliveryConfirmationGate: true,
+      externalDeliveryPublished: true,
       runFailureRetry: true,
       runCancellation: true,
       failedNetworkRequestsAttributed: true,
@@ -6406,6 +6776,7 @@ async function runRealStackBrowserScenario({
       artifactPersistence,
       mixedZeroSideEffects: {
         persistenceCountsUnchanged: true,
+        promptsCovered: mixedArtifactPrompts,
         providerRequestsAdded: mixedProviderRequestsAdded,
         submissionPostsAdded: mixedSubmissionPostsAdded,
       },
@@ -6420,10 +6791,12 @@ async function runRealStackBrowserScenario({
         queueJobsAfterConfirmation: deliveryAfterConfirmation.queueJobs,
         terminalStatus: deliveryAfterConfirmation.status,
       },
+      netlifyDeliveryEvidence,
       bffRequests: bffRequests.map(({ method, pathClass, status }) => ({ method, pathClass, status })),
       externalRequests,
       httpResponses,
       previewEvidence,
+      previewNavigationEvidence,
       navigationAborts,
       terminalSseAborts,
       sseEvents: browserSseEvents,
@@ -6444,6 +6817,8 @@ async function runRealStackBrowserScenario({
         attemptBeforeConfirmation: deliveryBeforeConfirmation.attempt,
         queueJobsBeforeConfirmation: deliveryBeforeConfirmation.queueJobs,
         queueJobsAfterConfirmation: deliveryAfterConfirmation.queueJobs,
+        status: deliveryAfterConfirmation.status,
+        uploadMatchesOutput: netlifyDeliveryEvidence.uploadMatchesOutput,
       },
     }));
   } catch (error) {
@@ -6822,6 +7197,7 @@ function assertActiveGenerationVisualEvidence(evidence, kind) {
       ["utilityPill", "composer"],
       ["suggestions", "composer"],
       ["utilityPill", "suggestions"],
+      ["rightToolRail", "suggestions"],
     ]) {
       assert.ok(
         !rectanglesOverlap(item.layout[left].rect, item.layout[right].rect),
@@ -7267,6 +7643,15 @@ async function latestBrowserExternalDelivery(projectId) {
       delivery.confirmed_at,
       delivery.transfer_authorized_at,
       delivery.failure_code,
+      delivery.remote_reference,
+      delivery.payload#>>'{output,fileName}' AS payload_output_file_name,
+      delivery.payload#>>'{output,sha256}' AS payload_output_sha256,
+      delivery.payload#>>'{output,byteSize}' AS payload_output_byte_size,
+      delivery.payload#>>'{output,mediaType}' AS payload_output_media_type,
+      export_job.status::text AS export_status,
+      output_blob.sha256 AS output_sha256,
+      output_blob.byte_size AS output_byte_size,
+      output_blob.media_type AS output_media_type,
       (
         SELECT count(*)::int
         FROM workbench_jobs.job
@@ -7275,6 +7660,7 @@ async function latestBrowserExternalDelivery(projectId) {
       ) AS queue_jobs
     FROM workbench.external_export_deliveries delivery
     JOIN workbench.export_jobs export_job ON export_job.id = delivery.export_job_id
+    JOIN workbench.blobs output_blob ON output_blob.id = export_job.output_blob_id
     JOIN workbench.project_releases release ON release.id = export_job.release_id
     WHERE release.project_id = $1
     ORDER BY delivery.created_at DESC
@@ -7282,6 +7668,11 @@ async function latestBrowserExternalDelivery(projectId) {
   `, [projectId]);
   const row = result.rows[0];
   assert.ok(row, "browser Project External Delivery was not persisted");
+  const outputByteSize = Number(row.output_byte_size);
+  assert.equal(row.export_status, "succeeded", "External Delivery did not retain a succeeded Export");
+  assert.equal(row.payload_output_sha256, row.output_sha256, "External Delivery payload SHA-256 drifted from its Export output");
+  assert.equal(Number(row.payload_output_byte_size), outputByteSize, "External Delivery payload byte size drifted from its Export output");
+  assert.equal(row.payload_output_media_type, row.output_media_type, "External Delivery payload media type drifted from its Export output");
   return {
     id: row.id,
     status: row.status,
@@ -7289,7 +7680,14 @@ async function latestBrowserExternalDelivery(projectId) {
     confirmedAt: row.confirmed_at,
     transferAuthorizedAt: row.transfer_authorized_at,
     failureCode: row.failure_code,
+    remoteReference: row.remote_reference,
     queueJobs: Number(row.queue_jobs),
+    output: {
+      byteSize: outputByteSize,
+      fileName: row.payload_output_file_name,
+      mediaType: row.output_media_type,
+      sha256: row.output_sha256,
+    },
   };
 }
 
@@ -7366,6 +7764,261 @@ async function captureBrowserPreviewFailure({ bffRequests, outputDir, page, proj
   }
 
   return diagnostics;
+}
+
+async function waitForBrowserPreviewInteractionLayout({
+  contentFrame,
+  iframe,
+  timeoutMs,
+}) {
+  const startedAt = Date.now();
+  const stableFrameCount = 4;
+  const samples = [];
+  let previous = null;
+  let consecutiveStableFrames = 0;
+
+  while (Date.now() - startedAt < timeoutMs) {
+    const sample = await captureBrowserPreviewInteractionLayout(contentFrame, iframe);
+    samples.push(sample);
+    if (samples.length > 12) samples.shift();
+    if (previous && browserPreviewInteractionLayoutMatches(previous, sample)) {
+      consecutiveStableFrames += 1;
+      if (consecutiveStableFrames >= stableFrameCount) {
+        return {
+          consecutiveStableFrames,
+          sample,
+          samplesObserved: samples.length,
+        };
+      }
+    } else {
+      consecutiveStableFrames = 0;
+    }
+    previous = sample;
+    await contentFrame.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => resolve())));
+  }
+
+  throw new Error(`product Preview interaction layout did not stabilize: ${JSON.stringify(samples)}`);
+}
+
+async function captureBrowserPreviewInteractionLayout(contentFrame, iframe) {
+  const [frameRect, childLayout] = await Promise.all([
+    iframe.evaluate((element) => ({
+      clientHeight: element.clientHeight,
+      clientWidth: element.clientWidth,
+      rect: element.getBoundingClientRect().toJSON(),
+    })),
+    contentFrame.evaluate(() => {
+      const actionNode = document.querySelector('[data-wb-node="button-navigate"]');
+      if (!(actionNode instanceof HTMLElement)) return null;
+      return {
+        actionRect: actionNode.getBoundingClientRect().toJSON(),
+        documentHeight: document.documentElement.clientHeight,
+        documentWidth: document.documentElement.clientWidth,
+        viewportHeight: window.innerHeight,
+        viewportWidth: window.innerWidth,
+      };
+    }),
+  ]);
+  assert.ok(childLayout, "product Preview navigation control disappeared while stabilizing layout");
+  return {
+    frameRect: frameRect.rect,
+    iframeClientHeight: frameRect.clientHeight,
+    iframeClientWidth: frameRect.clientWidth,
+    ...childLayout,
+    surfaceMatchesViewport: Math.abs(frameRect.clientWidth - childLayout.viewportWidth) < 0.01
+      && Math.abs(frameRect.clientHeight - childLayout.viewportHeight) < 0.01,
+  };
+}
+
+function browserPreviewInteractionLayoutMatches(left, right) {
+  return left.surfaceMatchesViewport
+    && right.surfaceMatchesViewport
+    && rectangleCoordinatesMatch(left.frameRect, right.frameRect)
+    && rectangleCoordinatesMatch(left.actionRect, right.actionRect)
+    && left.documentHeight === right.documentHeight
+    && left.documentWidth === right.documentWidth
+    && left.viewportHeight === right.viewportHeight
+    && left.viewportWidth === right.viewportWidth;
+}
+
+function rectangleCoordinatesMatch(left, right) {
+  return ["x", "y", "width", "height"].every((key) => Math.abs(left[key] - right[key]) < 0.01);
+}
+
+async function installBrowserPreviewInteractionObserver(frame, documentIdentity) {
+  return frame.evaluate((identity) => {
+    window.__workbenchE2ePreviewInteraction?.cleanup?.();
+    const actionNode = document.querySelector('[data-wb-node="button-navigate"]');
+    const eventTypes = ["pointerdown", "mousedown", "pointerup", "mouseup", "click"];
+    const events = [];
+    const mutations = [];
+    const listeners = [];
+    const observedDocument = document;
+
+    const elementIdentity = (value) => value instanceof Element
+      ? {
+          closestNodeId: value.closest("[data-wb-node]")?.getAttribute("data-wb-node") ?? null,
+          nodeId: value.getAttribute("data-wb-node"),
+          screenId: value.getAttribute("data-wb-screen"),
+          tagName: value.tagName.toLowerCase(),
+        }
+      : null;
+    const record = (phase, event) => {
+      if (events.length >= 80) return;
+      const pointer = "clientX" in event && "clientY" in event
+        ? { clientX: event.clientX, clientY: event.clientY }
+        : null;
+      events.push({
+        type: event.type,
+        phase,
+        isTrusted: event.isTrusted,
+        target: elementIdentity(event.target),
+        currentTarget: elementIdentity(event.currentTarget),
+        hitTarget: pointer ? elementIdentity(document.elementFromPoint(pointer.clientX, pointer.clientY)) : null,
+        pointer,
+        timeStamp: event.timeStamp,
+      });
+    };
+    const listen = (target, type, phase, capture) => {
+      const handler = (event) => record(phase, event);
+      target.addEventListener(type, handler, capture);
+      listeners.push(() => target.removeEventListener(type, handler, capture));
+    };
+    for (const type of eventTypes) {
+      listen(document, type, "document-capture", true);
+      if (actionNode) {
+        listen(actionNode, type, "action-capture", true);
+        listen(actionNode, type, "action-bubble", false);
+      }
+      listen(document, type, "document-bubble", false);
+    }
+    const observer = new MutationObserver((records) => {
+      for (const record of records) {
+        if (mutations.length >= 40 || !(record.target instanceof Element)) continue;
+        mutations.push({
+          attribute: record.attributeName,
+          node: elementIdentity(record.target),
+          value: record.attributeName ? record.target.getAttribute(record.attributeName) : null,
+          timeStamp: performance.now(),
+        });
+      }
+    });
+    const prototypeHost = document.querySelector("[data-wb-prototype]");
+    if (prototypeHost) {
+      observer.observe(prototypeHost, {
+        attributes: true,
+        attributeFilter: ["aria-selected", "hidden"],
+        subtree: true,
+      });
+    }
+    window.__workbenchE2ePreviewInteraction = {
+      cleanup: () => {
+        observer.disconnect();
+        for (const remove of listeners) remove();
+      },
+      document: observedDocument,
+      events,
+      identity,
+      mutations,
+      snapshot: previewInteractionSnapshot,
+    };
+    return previewInteractionSnapshot();
+
+    function previewInteractionSnapshot() {
+      const runtimeNode = document.getElementById("workbench-export-data");
+      let runtime = {};
+      try {
+        runtime = JSON.parse(runtimeNode?.textContent || "{}");
+      } catch {
+        runtime = {};
+      }
+      const prototypes = Array.isArray(runtime.prototypes) ? runtime.prototypes : [];
+      const actions = prototypes.flatMap((prototype) => Array.isArray(prototype.actions) ? prototype.actions : []);
+      const screens = prototypes.flatMap((prototype) => Array.isArray(prototype.screens) ? prototype.screens : []);
+      const domNodeIds = [...document.querySelectorAll("[data-wb-node]")]
+        .map((element) => element.getAttribute("data-wb-node"))
+        .filter(Boolean);
+      const diagnostics = window.__workbenchE2ePreviewInteraction;
+      const node = document.querySelector('[data-wb-node="button-navigate"]');
+      return {
+        actionNode: node ? {
+          connected: node.isConnected,
+          disabled: "disabled" in node ? node.disabled : null,
+          rect: node.getBoundingClientRect().toJSON(),
+        } : null,
+        activeScreen: [...document.querySelectorAll("[data-wb-screen]")]
+          .filter((screen) => !screen.hidden)
+          .map((screen) => screen.getAttribute("data-wb-screen")),
+        documentIdentity: diagnostics?.identity ?? null,
+        documentIdentityMatches: diagnostics?.document === document,
+        events: diagnostics?.events ?? [],
+        mutations: diagnostics?.mutations ?? [],
+        readyState: document.readyState,
+        runtime: {
+          actionCount: actions.length,
+          actionIdsUnique: new Set(actions.map((action) => action.id)).size === actions.length,
+          domNodeCount: domNodeIds.length,
+          domNodeIdsUnique: new Set(domNodeIds).size === domNodeIds.length,
+          installed: document.querySelector("[data-wb-prototype]")?.getAttribute("data-wb-runtime-installed"),
+          navigationActionCount: actions.filter((action) => (
+            action.id === "action-navigate"
+            && action.kind === "navigate"
+            && action.nodeId === "button-navigate"
+            && action.targetScreenId === "screen-success"
+          )).length,
+          prototypeCount: prototypes.length,
+          prototypeIdsUnique: new Set(prototypes.map((prototype) => prototype.id)).size === prototypes.length,
+          screenCount: screens.length,
+          screenIdsUnique: new Set(screens.map((screen) => screen.id)).size === screens.length,
+        },
+        screenAttributes: [...document.querySelectorAll("[data-wb-screen]")].map((screen) => ({
+          hidden: screen.hidden,
+          id: screen.getAttribute("data-wb-screen"),
+        })),
+      };
+    }
+  }, documentIdentity);
+}
+
+async function captureBrowserPreviewInteractionObserver(frame) {
+  return frame.evaluate(() => {
+    const diagnostics = window.__workbenchE2ePreviewInteraction;
+    if (typeof diagnostics?.snapshot === "function") {
+      return { ...diagnostics.snapshot(), observerInstalled: true };
+    }
+    const node = document.querySelector('[data-wb-node="button-navigate"]');
+    return {
+      actionNode: node ? {
+        connected: node.isConnected,
+        disabled: "disabled" in node ? node.disabled : null,
+        rect: node.getBoundingClientRect().toJSON(),
+      } : null,
+      activeScreen: [...document.querySelectorAll("[data-wb-screen]")]
+        .filter((screen) => !screen.hidden)
+        .map((screen) => screen.getAttribute("data-wb-screen")),
+      documentIdentity: diagnostics?.identity ?? null,
+      documentIdentityMatches: false,
+      events: [],
+      mutations: [],
+      observerInstalled: false,
+      readyState: document.readyState,
+      runtime: {
+        installed: document.querySelector("[data-wb-prototype]")?.getAttribute("data-wb-runtime-installed"),
+      },
+      screenAttributes: [...document.querySelectorAll("[data-wb-screen]")].map((screen) => ({
+        hidden: screen.hidden,
+        id: screen.getAttribute("data-wb-screen"),
+      })),
+    };
+  });
+}
+
+function previewFrameUrlEvidence(value, expectedOrigin) {
+  const url = new URL(value);
+  return {
+    originMatchesPreview: url.origin === expectedOrigin,
+    pathClass: browserPathClass(url.pathname),
+  };
 }
 
 async function assertBrowserArtifactPersistence(projectId, expectedPrototypeCheckpoint) {

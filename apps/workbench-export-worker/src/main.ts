@@ -22,7 +22,11 @@ import { ExportProcessor } from "./export/export.processor.js";
 import { PrismaExportStore } from "./export/export.store.js";
 import { ExportSourceLoader } from "./export/source-loader.js";
 import { S3ExportStorageAdapter } from "./storage/s3-export-storage.adapter.js";
-import { UnavailableExternalExportDeliveryAdapter } from "./delivery/external-export-delivery.adapter.js";
+import {
+  UnavailableExternalExportDeliveryAdapter,
+  type ExternalExportDeliveryAdapter,
+} from "./delivery/external-export-delivery.adapter.js";
+import { NetlifyExternalExportDeliveryAdapter } from "./delivery/netlify-external-export-delivery.adapter.js";
 import { ExternalExportDeliveryProcessor } from "./delivery/external-export-delivery.processor.js";
 import { PrismaExternalExportDeliveryStore } from "./delivery/external-export-delivery.store.js";
 
@@ -66,15 +70,18 @@ async function main() {
   const browser = new BrowserExportService(config);
   const processor = new ExportProcessor(store, loader, storage, browser, config);
   const deliveryStore = new PrismaExternalExportDeliveryStore(db, config);
+  const deliveryAdapters: ExternalExportDeliveryAdapter[] = [
+    new UnavailableExternalExportDeliveryAdapter("ai_studio", "EXPORT_EXTERNAL_AI_STUDIO_UNAVAILABLE"),
+    config.externalExportProviders.netlify
+      ? new NetlifyExternalExportDeliveryAdapter(config.externalExportProviders.netlify)
+      : new UnavailableExternalExportDeliveryAdapter("netlify", "EXPORT_EXTERNAL_AUTHENTICATION_REQUIRED"),
+    new UnavailableExternalExportDeliveryAdapter("lovable", "EXPORT_EXTERNAL_AUTHENTICATION_REQUIRED"),
+    new UnavailableExternalExportDeliveryAdapter("bolt", "EXPORT_EXTERNAL_AUTHENTICATION_REQUIRED"),
+  ];
   const deliveryProcessor = new ExternalExportDeliveryProcessor(
     deliveryStore,
     storage,
-    [
-      new UnavailableExternalExportDeliveryAdapter("ai_studio", "EXPORT_EXTERNAL_AI_STUDIO_UNAVAILABLE"),
-      new UnavailableExternalExportDeliveryAdapter("netlify", "EXPORT_EXTERNAL_AUTHENTICATION_REQUIRED"),
-      new UnavailableExternalExportDeliveryAdapter("lovable", "EXPORT_EXTERNAL_AUTHENTICATION_REQUIRED"),
-      new UnavailableExternalExportDeliveryAdapter("bolt", "EXPORT_EXTERNAL_AUTHENTICATION_REQUIRED"),
-    ],
+    deliveryAdapters,
     config,
   );
 

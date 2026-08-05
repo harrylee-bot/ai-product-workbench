@@ -78,6 +78,12 @@ type PrototypeStyle = PrototypeNode["style"];
 const baseStyles = String.raw`*{box-sizing:border-box}html,body{margin:0;min-height:100%;background:#f4f5f7;color:#17191d;font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}button,input,textarea,select{font:inherit}.wb-export{min-height:100vh}.wb-export__header{position:sticky;top:0;z-index:100;display:flex;align-items:center;justify-content:space-between;gap:16px;min-height:56px;padding:10px 20px;background:#fff;border-bottom:1px solid #dfe2e7}.wb-export__title{margin:0;font-size:16px;line-height:1.4;font-weight:650}.wb-export__meta{font-size:12px;color:#69707d}.wb-export__content{padding:20px}.wb-board{position:relative;min-width:720px;min-height:360px;margin:0 0 24px;background:#e9ebef;background-image:linear-gradient(#d9dce2 1px,transparent 1px),linear-gradient(90deg,#d9dce2 1px,transparent 1px);background-size:24px 24px;border:1px solid #ced2d9;overflow:auto}.wb-board__node{position:absolute;display:flex;flex-direction:column;justify-content:center;min-width:120px;min-height:72px;padding:12px;background:#fff;border:1px solid #bcc2cc;box-shadow:0 2px 8px rgba(18,22,30,.08)}.wb-board__node--frame{justify-content:flex-start;min-width:0;min-height:0;padding:0;background:transparent;box-shadow:none}.wb-board__node--frame .wb-board__label{position:absolute;left:0;top:-20px;margin:0}.wb-board__node--drawing{display:block;min-width:0;min-height:0;padding:0;background:transparent;border:0;box-shadow:none}.wb-board__drawing{display:block;width:100%;height:100%;overflow:visible}.wb-board__kind{font-size:11px;color:#69707d;text-transform:uppercase}.wb-board__label{margin-top:4px;font-size:13px;font-weight:600}.wb-artifacts{display:grid;gap:20px}.wb-artifact{min-width:0;background:#fff;border:1px solid #d5d9e0}.wb-artifact__header{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 14px;border-bottom:1px solid #e1e4e9}.wb-artifact__title{margin:0;font-size:14px;font-weight:650}.wb-artifact__kind{font-size:11px;color:#69707d}.wb-artifact__body{padding:14px;overflow:auto}.wb-prototype__tabs{display:flex;gap:6px;margin-bottom:12px;overflow:auto}.wb-prototype__tab{height:32px;padding:0 12px;border:1px solid #cbd0d8;background:#fff;color:#3b414b;cursor:pointer}.wb-prototype__tab[aria-selected="true"]{background:#17191d;color:#fff;border-color:#17191d}.wb-prototype__stage{display:flex;justify-content:flex-start;overflow:auto;padding:16px;background:#e8eaee}.wb-screen{position:relative;flex:0 0 auto;background:#fff;box-shadow:0 8px 24px rgba(18,22,30,.14);overflow:hidden}.wb-node[hidden],.wb-screen[hidden]{display:none!important}.wb-node{letter-spacing:0}.wb-design-system{display:grid;gap:22px}.wb-design-system h3{margin:0 0 10px;font-size:13px}.wb-design-system__tokens,.wb-design-system__assets,.wb-design-system__items{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:10px}.wb-design-system__token,.wb-design-system__asset,.wb-design-system__item{min-width:0;padding:10px;border:1px solid #dfe2e7;background:#fafbfc}.wb-design-system__swatch{display:block;width:100%;height:44px;margin-bottom:8px;border:1px solid rgba(0,0,0,.12)}.wb-design-system__label{display:block;font-size:12px;font-weight:650;overflow-wrap:anywhere}.wb-design-system__value{display:block;margin-top:3px;color:#69707d;font:11px/1.45 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;overflow-wrap:anywhere}.wb-design-system__image{display:block;width:100%;height:120px;margin-bottom:8px;object-fit:contain;background:#eef0f3}.wb-design-system__font-preview{display:flex;align-items:center;width:100%;height:72px;margin-bottom:8px;padding:8px;background:#eef0f3;font-size:28px;line-height:1;overflow:hidden}.wb-design-system__copy{margin:4px 0 0;color:#565d68;font-size:12px;line-height:1.5}.wb-json{max-height:70vh;margin:0;overflow:auto;padding:16px;background:#15171b;color:#e8eaed;font:12px/1.55 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;white-space:pre-wrap}.wb-image{display:block;max-width:100%;height:auto}.wb-document{white-space:pre-wrap;line-height:1.6}.wb-empty{padding:40px;text-align:center;color:#69707d}@media(max-width:700px){.wb-export__content{padding:10px}.wb-export__header{padding:8px 12px}.wb-board{min-width:640px}.wb-artifact__body{padding:8px}.wb-design-system__tokens,.wb-design-system__assets,.wb-design-system__items{grid-template-columns:1fr}}`;
 
 export function renderExportHtml(request: ExportBuildRequest): RenderedHtml {
+  if (request.initialScreenId !== undefined && request.selection.kind !== "artifact") {
+    throw new TerminalExportError(
+      "EXPORT_INITIAL_SCREEN_SELECTION_INVALID",
+      "initialScreenId is supported only for a single Prototype Artifact selection",
+    );
+  }
   const selected = selectExportArtifacts(request.source.artifacts, request.selection, request.source.boardSnapshot.nodes);
   const runtimePrototypes: RuntimePrototype[] = [];
   const fontFaces: string[] = [];
@@ -89,6 +95,7 @@ export function renderExportHtml(request: ExportBuildRequest): RenderedHtml {
       fontFaces,
       fontAssets,
       request.selection.kind === "artifact" ? request.selection.screenId : undefined,
+      request.initialScreenId,
     ))
     .join("");
   const includeBoard = request.selection.kind !== "artifact";
@@ -316,15 +323,23 @@ function renderArtifact(
   fontFaces: string[],
   fontAssets: RenderedFontAsset[],
   screenId?: string,
+  initialScreenId?: string,
 ) {
-  if (screenId !== undefined && artifact.kind !== "prototype") {
+  if ((screenId !== undefined || initialScreenId !== undefined) && artifact.kind !== "prototype") {
     throw new TerminalExportError(
       "EXPORT_SELECTION_SCREEN_KIND_INVALID",
-      "screenId is supported only for Prototype Artifact selections",
+      "screenId and initialScreenId are supported only for Prototype Artifact selections",
     );
   }
   const body = artifact.kind === "prototype"
-    ? renderPrototypeArtifact(artifact, runtimePrototypes, fontFaces, fontAssets, screenId)
+    ? renderPrototypeArtifact(
+        artifact,
+        runtimePrototypes,
+        fontFaces,
+        fontAssets,
+        screenId,
+        initialScreenId,
+      )
     : artifact.kind === "design_system"
       ? renderDesignSystemArtifact(artifact, fontFaces, fontAssets)
     : renderGenericArtifact(artifact);
@@ -443,6 +458,7 @@ function renderPrototypeArtifact(
   fontFaces: string[],
   fontAssets: RenderedFontAsset[],
   screenId?: string,
+  initialScreenId?: string,
 ) {
   const content = jsonContent(artifact);
   const parsed = prototypeDocumentSchema.safeParse(content);
@@ -468,6 +484,13 @@ function renderPrototypeArtifact(
       `Screen ${screenId} does not exist in Prototype ${artifact.artifactVersionId}`,
     );
   }
+  const resolvedInitialScreenId = initialScreenId ?? screens[0]!.id;
+  if (!screens.some((screen) => screen.id === resolvedInitialScreenId)) {
+    throw new TerminalExportError(
+      "EXPORT_INITIAL_SCREEN_NOT_FOUND",
+      `Initial screen ${resolvedInitialScreenId} does not exist in the rendered Prototype ${artifact.artifactVersionId}`,
+    );
+  }
 
   for (const asset of document.assets) {
     if (asset.kind !== "font") continue;
@@ -476,10 +499,10 @@ function renderPrototypeArtifact(
     fontAssets.push(renderedFontAsset(artifact.artifactVersionId, asset, blob));
   }
 
-  const screenMarkup = screens.map((screen, index) => {
+  const screenMarkup = screens.map((screen) => {
     const root = nodes.get(screen.rootNodeId);
     if (!root) throw new TerminalExportError("EXPORT_PROTOTYPE_ROOT_MISSING", `Screen ${screen.id} has no root node`);
-    return `<section class="wb-screen" data-wb-screen="${escapeHtml(screen.id)}" style="width:${screen.viewport.width}px;height:${screen.viewport.height}px"${index === 0 ? "" : " hidden"}>${renderNode(root, {
+    return `<section class="wb-screen" data-wb-screen="${escapeHtml(screen.id)}" style="width:${screen.viewport.width}px;height:${screen.viewport.height}px"${screen.id === resolvedInitialScreenId ? "" : " hidden"}>${renderNode(root, {
       nodes,
       tokens,
       assets,
@@ -488,8 +511,16 @@ function renderPrototypeArtifact(
       variables: new Map(document.variables.map((variable) => [variable.path, variable.initialValue])),
     })}</section>`;
   }).join("");
-  const tabs = screens.map((screen, index) => `<button class="wb-prototype__tab" type="button" data-wb-screen-target="${escapeHtml(screen.id)}" role="tab" aria-selected="${index === 0}">${escapeHtml(screen.name)}</button>`).join("");
-  runtimePrototypes.push(runtimeModel(prefix, document, tokens, assets, blobs, screens));
+  const tabs = screens.map((screen) => `<button class="wb-prototype__tab" type="button" data-wb-screen-target="${escapeHtml(screen.id)}" role="tab" aria-selected="${screen.id === resolvedInitialScreenId}">${escapeHtml(screen.name)}</button>`).join("");
+  runtimePrototypes.push(runtimeModel(
+    prefix,
+    document,
+    tokens,
+    assets,
+    blobs,
+    screens,
+    resolvedInitialScreenId,
+  ));
   return `<section class="wb-prototype" data-wb-prototype="${prefix}"><nav class="wb-prototype__tabs" role="tablist" aria-label="Prototype screens">${tabs}</nav><div class="wb-prototype__stage">${screenMarkup}</div></section>`;
 }
 
@@ -627,6 +658,7 @@ function runtimeModel(
   assets: Map<string, PrototypeAsset>,
   blobs: Map<string, ExportBinaryAsset>,
   screens: PrototypeDocument["screens"],
+  initialScreenId: string,
 ): RuntimePrototype {
   const nodes = new Map(document.nodes.map((node) => [node.id, node]));
   const screenIds = new Set(screens.map((screen) => screen.id));
@@ -644,7 +676,7 @@ function runtimeModel(
   return {
     id,
     documentId: document.documentId,
-    initialScreenId: screens[0]!.id,
+    initialScreenId,
     screens,
     variables: document.variables,
     states: states.map((state) => ({

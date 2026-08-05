@@ -119,6 +119,7 @@ describeWithPostgres("Project Preview PostgreSQL transaction", () => {
             boardId: board.id,
             boardRevision: board.revision,
             selection: { kind: "release" },
+            initialScreenId: null,
           },
         );
 
@@ -133,6 +134,7 @@ describeWithPostgres("Project Preview PostgreSQL transaction", () => {
           projectId: project.id,
           boardId: board.id,
           boardRevision: board.revision,
+          initialScreenId: null,
           status: "queued",
         });
         expect(await tx.projectRelease.count({ where: { projectId: project.id } })).toBe(0);

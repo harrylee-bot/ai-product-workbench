@@ -34,6 +34,7 @@ const projectPreview: ProjectPreview = {
   boardId: "board-1",
   boardRevision: 3,
   selection: { kind: "release" },
+  initialScreenId: null,
   status: "queued",
   revision: 0,
   failure: null,
@@ -162,16 +163,39 @@ describe("Exports API contracts", () => {
       boardId: projectPreview.boardId,
       boardRevision: projectPreview.boardRevision,
       selection: projectPreview.selection,
+      initialScreenId: projectPreview.initialScreenId,
     };
+    const createController = new AbortController();
+    const getController = new AbortController();
+    const tokenController = new AbortController();
 
-    await expect(api.createProjectPreview("project-1", request, "preview:req_123"))
+    await expect(api.createProjectPreview(
+      "project-1",
+      request,
+      "preview:req_123",
+      createController.signal,
+    ))
       .resolves.toEqual(projectPreview);
-    await expect(api.getProjectPreview(projectPreview.id)).resolves.toEqual(projectPreview);
-    await expect(api.createProjectPreviewToken(projectPreview.id)).resolves.toEqual(previewToken);
+    await expect(api.getProjectPreview(projectPreview.id, getController.signal))
+      .resolves.toEqual(projectPreview);
+    await expect(api.createProjectPreviewToken(projectPreview.id, tokenController.signal))
+      .resolves.toEqual(previewToken);
 
     const create = requests.find((item) => item.url.endsWith("/projects/project-1/previews"));
+    const get = requests.find((item) => item.url.endsWith("/previews/preview-1"));
+    const token = requests.find((item) => item.url.endsWith("/previews/preview-1/token"));
     expect(create?.headers.get("idempotency-key")).toBe("preview:req_123");
     await expect(create?.clone().json()).resolves.toEqual(request);
+    expect(create?.signal.aborted).toBe(false);
+    expect(get?.signal.aborted).toBe(false);
+    expect(token?.signal.aborted).toBe(false);
+
+    createController.abort();
+    getController.abort();
+    tokenController.abort();
+    expect(create?.signal.aborted).toBe(true);
+    expect(get?.signal.aborted).toBe(true);
+    expect(token?.signal.aborted).toBe(true);
   });
 
   it("forwards the polling AbortSignal to External Export delivery reads", async () => {

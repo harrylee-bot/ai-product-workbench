@@ -33,6 +33,16 @@ assertExactNetworks(
   ["workbench-internal", "workbench-egress"],
 );
 assertExactNetworks(
+  base.services?.["netlify-egress"],
+  "netlify-egress",
+  ["workbench-internal", "workbench-netlify-egress"],
+);
+assertExactNetworks(
+  base.services?.["netlify-egress-upstream"],
+  "netlify-egress-upstream",
+  ["workbench-netlify-egress", "workbench-egress"],
+);
+assertExactNetworks(
   base.services?.["workbench-import-worker"],
   "workbench-import-worker",
   ["workbench-internal", "workbench-egress"],
@@ -43,6 +53,18 @@ for (const serviceName of ["workbench-export-worker", "workbench-preview"]) {
 assert(
   (base.services?.["object-storage-egress"]?.ports?.length ?? 0) === 0,
   "object-storage-egress must not publish a host port",
+);
+assert(
+  (base.services?.["netlify-egress"]?.ports?.length ?? 0) === 0,
+  "netlify-egress must not publish a host port",
+);
+assert(
+  (base.services?.["netlify-egress-upstream"]?.ports?.length ?? 0) === 0,
+  "netlify-egress-upstream must not publish a host port",
+);
+assert(
+  base.networks?.["workbench-netlify-egress"]?.internal === true,
+  "workbench-netlify-egress must stay internal",
 );
 
 console.log("Workbench deployment network contract passed.");

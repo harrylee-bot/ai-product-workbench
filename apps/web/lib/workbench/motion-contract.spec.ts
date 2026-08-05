@@ -21,10 +21,9 @@ describe("Workbench motion contract", () => {
 
     expect(css).toMatch(/\.workbench-home-submit-spinner\s*\{\s*animation-duration:\s*1s;/u);
     expect(css).toMatch(/\.workbench-status-spinner\s*\{\s*animation-duration:\s*1s;/u);
-    expect(css).toMatch(/\.workbench-agent-card\[data-prd-bodyless="true"\][\s\S]*?width:\s*200px !important;[\s\S]*?height:\s*92px !important;/u);
+    expect(css).not.toMatch(/\.workbench-agent-card\[data-prd-bodyless="true"\]/u);
     expect(css).toMatch(/\.workbench-agent-card--generating::before\s*\{[^}]*opacity:\s*0\.54;[^}]*animation:\s*workbench-agent-color-wash 4\.2s linear infinite;/u);
     expect(css).toMatch(/\.workbench-agent-card--generating \.workbench-agent-card-base-bg\s*\{[^}]*animation:\s*workbench-agent-surface-shift 4\.2s linear infinite;/u);
-    expect(css).not.toMatch(/\.workbench-agent-card--generating\[data-prd-bodyless="true"\][^{]*\{[^}]*animation:\s*none;/u);
     expect(css).toMatch(/workbench-agent-border-orbit 3\.4s linear infinite/u);
     expect(css).toMatch(/workbench-stage-ellipsis 900ms steps\(4, end\) infinite/u);
     expect(css).toMatch(/workbench-skeleton-fade 2\.5s ease-in-out infinite/u);

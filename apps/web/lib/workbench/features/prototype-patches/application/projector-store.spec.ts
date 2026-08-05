@@ -155,6 +155,35 @@ describe("Prototype patch projector store", () => {
     expect(store.releaseFinalized("version-1")).toBe(false);
   });
 
+  it("lets an in-flight staging checkpoint finish before requesting the ready checkpoint", async () => {
+    const staging = prototypeEditorDocumentFixture();
+    const ready = structuredClone(staging);
+    const stagingCheckpoint = deferred<RunPrototypePatchCheckpoint>();
+    const transport = queuedTransport([
+      stagingCheckpoint.promise,
+      await checkpoint(ready, 1, 2, "ready"),
+    ]);
+    const store = new PrototypePatchProjectorStore({ transport });
+    store.setScope(scope);
+    store.ingest(await draftEvent(staging, 1));
+    expect(transport.getCheckpoint).toHaveBeenCalledOnce();
+    const stagingSignal = transport.getCheckpoint.mock.calls[0]?.[2];
+
+    store.ingest(event(2, "artifact.version.created", {
+      artifactId: "artifact-1",
+      artifactVersionId: "version-1",
+      version: 1,
+    }));
+
+    expect(stagingSignal?.aborted).toBe(false);
+    expect(transport.getCheckpoint).toHaveBeenCalledOnce();
+    stagingCheckpoint.resolve(await checkpoint(staging, 0, 1));
+
+    await waitForProjection(store, (projection) => projection.phase === "finalized");
+    expect(transport.getCheckpoint).toHaveBeenCalledTimes(2);
+    expect(stagingSignal?.aborted).toBe(false);
+  });
+
   it("retries a non-ready final checkpoint within the recovery attempt bound", async () => {
     const staging = prototypeEditorDocumentFixture();
     const ready = structuredClone(staging);

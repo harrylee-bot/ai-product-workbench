@@ -2184,6 +2184,7 @@ model ProjectPreview {
   projectId      String                          @map("project_id")
   boardId        String                          @map("board_id")
   boardRevision  Int                             @map("board_revision")
+  initialScreenId String?                         @map("initial_screen_id")
   boardSnapshot  Json                            @map("board_snapshot")
   boardChecksum  String                          @map("board_checksum")
   manifest       Json

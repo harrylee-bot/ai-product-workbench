@@ -1566,6 +1566,13 @@ textarea:focus-visible {
   }
 }
 
+@media (max-width: 767px) {
+  .workbench-project-suggestions--document,
+  .workbench-project-suggestions--prototype {
+    bottom: 166px;
+  }
+}
+
 .workbench-status-spinner {
   animation-duration: 1s;
   border-left-color: rgba(216, 220, 226, 0.22);
@@ -1699,16 +1706,6 @@ textarea:focus-visible {
     width 340ms cubic-bezier(0.16, 1, 0.3, 1),
     height 340ms cubic-bezier(0.16, 1, 0.3, 1);
   will-change: width, height, transform, opacity;
-}
-
-.workbench-agent-card[data-prd-bodyless="true"] {
-  width: 200px !important;
-  min-width: 200px !important;
-  max-width: 200px !important;
-  height: 92px !important;
-  min-height: 92px !important;
-  max-height: 92px !important;
-  border-radius: 12px;
 }
 
 .workbench-agent-card-base-bg {

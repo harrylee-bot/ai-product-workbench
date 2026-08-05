@@ -330,7 +330,7 @@ export function RightToolRail({
       className={cn(
         "workbench-tool-rail absolute right-[16px] top-1/2 z-40 flex w-[48px] -translate-y-1/2 flex-col items-center gap-[6px] rounded-full border border-white/[0.10] bg-[#1c1d20]/94 py-[7px] shadow-[0_24px_74px_-36px_rgba(0,0,0,0.95)] backdrop-blur-xl max-md:left-1/2 max-md:right-auto max-md:w-auto max-md:-translate-x-1/2 max-md:translate-y-0 max-md:flex-row max-md:px-[7px] max-md:py-[5px]",
         activePanel === null
-          ? "max-md:bottom-[190px] max-md:top-auto"
+          ? "max-md:bottom-[206px] max-md:top-auto"
           : "max-md:bottom-auto max-md:top-[76px]",
       )}
       data-right-tool-rail

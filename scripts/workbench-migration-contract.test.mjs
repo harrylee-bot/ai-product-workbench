@@ -58,6 +58,10 @@ const runtimeProviderCancellationOperationMigration = await readFile(new URL(
   "../packages/workbench-db/prisma/migrations/20260804010000_runtime_provider_cancellation_operation/migration.sql",
   import.meta.url,
 ), "utf8");
+const projectPreviewInitialScreenMigration = await readFile(new URL(
+  "../packages/workbench-db/prisma/migrations/20260805010000_project_preview_initial_screen/migration.sql",
+  import.meta.url,
+), "utf8");
 const prdV2ArtifactVersionGuardsMigration = await readFile(new URL(
   "../packages/workbench-db/prisma/migrations/20260723020000_prd_v2_artifact_version_guards/migration.sql",
   import.meta.url,
@@ -96,7 +100,7 @@ test("export packaging backfill restores the mutation guard", () => {
 test("Canvas grant snapshot digest migration is append-only and fences legacy grants", async () => {
   const migrationEntries = await readdir(migrationsDirectory, { withFileTypes: true });
   const migrationCount = migrationEntries.filter((entry) => entry.isDirectory()).length;
-  assert.equal(migrationCount, 70, "candidate migration inventory must be updated explicitly");
+  assert.equal(migrationCount, 71, "candidate migration inventory must be updated explicitly");
   assert(migrationEntries.some((entry) => (
     entry.isDirectory()
     && entry.name === "20260719010000_canvas_grant_snapshot_digest"
@@ -139,6 +143,28 @@ test("Canvas grant snapshot digest migration is append-only and fences legacy gr
   assert.match(canvasSnapshotDigestMigration, /CANVAS_AGENT_SESSION_SNAPSHOT_IMMUTABLE/u);
   assert.match(canvasSnapshotDigestMigration, /CANVAS_TOOL_GRANT_SNAPSHOT_IMMUTABLE/u);
   assert.match(canvasSnapshotDigestMigration, /CANVAS_TOOL_GRANT_SNAPSHOT_SCOPE_INVALID/u);
+});
+
+test("Project Preview initial screens remain distinct from Export cropping", () => {
+  assert.match(projectPreviewInitialScreenMigration, /^BEGIN;/u);
+  assert.match(projectPreviewInitialScreenMigration, /ADD COLUMN "initial_screen_id" TEXT/u);
+  assert.match(
+    projectPreviewInitialScreenMigration,
+    /PROJECT_PREVIEW_LEGACY_SELECTION_SCREEN_CROP_FORBIDDEN/u,
+  );
+  assert.match(
+    projectPreviewInitialScreenMigration,
+    /FROM "project_previews" AS preview\s+JOIN "export_jobs" AS job[\s\S]+job\."selection_screen_id" IS NOT NULL/u,
+  );
+  assert.match(projectPreviewInitialScreenMigration, /PROJECT_PREVIEW_SELECTION_SCREEN_CROP_FORBIDDEN/u);
+  assert.match(projectPreviewInitialScreenMigration, /workbench\.prototype\.v1/u);
+  assert.match(projectPreviewInitialScreenMigration, /screen ->> 'id' = NEW\."initial_screen_id"/u);
+  assert.match(projectPreviewInitialScreenMigration, /application_schema TEXT := current_schema\(\)/u);
+  assert.match(
+    projectPreviewInitialScreenMigration,
+    /ALTER FUNCTION %I\.%I\(\) SET search_path TO %s/u,
+  );
+  assert.match(projectPreviewInitialScreenMigration, /COMMIT;\s*$/u);
 });
 
 test("Canvas visual cleanup has a bounded lifecycle candidate index", () => {

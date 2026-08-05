@@ -309,7 +309,6 @@ export function ProjectTranscriptPanel({
     || runStatus === "waiting_input"
     || runStatus === "cancelling";
   const isContextualPrdRun = isPrdRun
-    && projectMode === "document"
     && effectiveSelectedTask === null
     && isWorking;
   const currentPrdStageCopy = activePrdStatusCopy({

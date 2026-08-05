@@ -76,7 +76,7 @@ const artifactPreferenceUpdates = [];
 const artifactPreferenceIfMatches = [];
 const stage2SaveCounts = {};
 const projectPreviews = new Map();
-const previewSelections = [];
+const previewRequests = [];
 let uploadSessionAttempts = 0;
 let uploadedPartPuts = 0;
 let uploadCompletionAttempts = 0;
@@ -590,9 +590,10 @@ await context.route("**/api/v1/**", async (route) => {
     assert(body.boardId === board.id, "Project Preview must pin the current Board identity");
     assert(body.boardRevision === board.revision, "Project Preview must pin the current Board revision");
     assert(body.selection?.kind === "artifact", "Screen Preview must use an Artifact selection");
-    previewSelections.push(structuredClone(body.selection));
+    assert(!Object.hasOwn(body.selection, "screenId"), "Project Preview selection must not crop the Prototype");
+    previewRequests.push(structuredClone(body));
     const id = `preview-${++projectPreviewCount}`;
-    const preview = projectPreviewFixture(id, body.selection);
+    const preview = projectPreviewFixture(id, body.selection, body.initialScreenId);
     projectPreviews.set(id, preview);
     return json(route, preview, { location: `/api/v1/previews/${id}` }, 202);
   }
@@ -971,7 +972,7 @@ await waitForAsyncValue(
   () => multiPreviewButton.isEnabled({ timeout: 250 }).catch(() => false),
   "runnable multi-screen Preview availability",
 );
-const previewsBeforeDirectOpen = previewSelections.length;
+const previewsBeforeDirectOpen = previewRequests.length;
 await multiPreviewButton.click();
 const previewOverlay = page.locator("[data-project-preview]");
 await previewOverlay.waitFor();
@@ -982,27 +983,28 @@ assert(
   "Multi-screen Preview must exclude runnable screens outside the frozen selection",
 );
 await waitForValue(
-  () => previewSelections.length === previewsBeforeDirectOpen + 1,
+  () => previewRequests.length === previewsBeforeDirectOpen + 1,
   "first selected-screen Preview creation",
 );
 assert(
-  previewSelections.at(-1)?.screenId === "screen-home",
-  `Multi-screen Preview must preserve its first selected screen: ${JSON.stringify(previewSelections)}`,
+  previewRequests.at(-1)?.initialScreenId === "screen-home",
+  `Multi-screen Preview must preserve its first selected screen: ${JSON.stringify(previewRequests)}`,
 );
 await previewOverlay.getByRole("button", { name: "Checkout Screen", exact: true }).click();
 await waitForValue(
-  () => previewSelections.length === previewsBeforeDirectOpen + 2,
+  () => previewRequests.length === previewsBeforeDirectOpen + 2,
   "second selected-screen Preview creation",
 );
 assert(
-  previewSelections.at(-1)?.screenId === "screen-checkout",
-  `Multi-screen Preview must preserve selected-screen order: ${JSON.stringify(previewSelections)}`,
+  previewRequests.at(-1)?.initialScreenId === "screen-checkout",
+  `Multi-screen Preview must preserve selected-screen order: ${JSON.stringify(previewRequests)}`,
 );
 assert(
-  previewSelections.slice(previewsBeforeDirectOpen).every((selection) => (
-    selection.artifactId === "artifact-1"
-    && selection.artifactVersionId === "version-1"
-    && selection.screenId !== "screen-settings"
+  previewRequests.slice(previewsBeforeDirectOpen).every((request) => (
+    request.selection.artifactId === "artifact-1"
+    && request.selection.artifactVersionId === "version-1"
+    && !Object.hasOwn(request.selection, "screenId")
+    && request.initialScreenId !== "screen-settings"
   )),
   "Multi-screen Preview must remain scoped to the frozen ArtifactVersion screen references",
 );
@@ -1532,7 +1534,7 @@ console.log(JSON.stringify({
   maxArtifactPreferencePutsInFlight,
   artifactPreferenceRefreshRestored: artifactPreference.favorite && artifactPreference.reaction === "like",
   stage2SaveCounts,
-  multiScreenPreviewSelections: previewSelections,
+  multiScreenPreviewRequests: previewRequests,
   fixedViewportAudit,
   homeMobileDrawerAudit,
   screenshots: [
@@ -1708,13 +1710,14 @@ function prototypeDocumentFixture() {
   return document;
 }
 
-function projectPreviewFixture(id, selection) {
+function projectPreviewFixture(id, selection, initialScreenId) {
   return {
     id,
     projectId: project.id,
     boardId: board.id,
     boardRevision: board.revision,
     selection,
+    initialScreenId,
     status: "succeeded",
     revision: 0,
     failure: null,

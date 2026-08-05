@@ -16,6 +16,23 @@ describe("export worker S3 role configuration", () => {
       exportS3AccessKeyId: "export-access",
       exportS3SecretAccessKey: "export-secret",
       s3ConditionalCreateMode: "s3-if-none-match",
+      externalExportProviders: { netlify: null },
+    });
+  });
+
+  it("loads the same complete Netlify provider group used by API capabilities", () => {
+    vi.stubEnv("WORKBENCH_NETLIFY_SITE_ID", "site-123");
+    vi.stubEnv("WORKBENCH_NETLIFY_ACCESS_TOKEN", "netlify-token");
+    vi.stubEnv("WORKBENCH_NETLIFY_API_BASE_URL", "http://netlify-provider.test/api/v1/");
+    vi.stubEnv("WORKBENCH_NETLIFY_REQUEST_TIMEOUT_MS", "30000");
+    vi.stubEnv("WORKBENCH_NETLIFY_POLL_INTERVAL_MS", "75");
+
+    expect(loadExportWorkerConfig().externalExportProviders.netlify).toEqual({
+      siteId: "site-123",
+      accessToken: "netlify-token",
+      apiBaseUrl: "http://netlify-provider.test/api/v1",
+      requestTimeoutMs: 30_000,
+      pollIntervalMs: 75,
     });
   });
 

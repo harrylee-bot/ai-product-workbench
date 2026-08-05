@@ -115,6 +115,7 @@ export class WorkbenchExportsApi {
     projectId: string,
     request: CreateProjectPreviewRequest,
     idempotencyKey = createIdempotencyKey("preview"),
+    signal?: AbortSignal,
   ): Promise<ProjectPreview> {
     const body = createProjectPreviewRequestSchema.parse(request);
     const result = await this.api.POST("/projects/{projectId}/previews", {
@@ -123,20 +124,29 @@ export class WorkbenchExportsApi {
         header: { "Idempotency-Key": normalizeIdempotencyKey(idempotencyKey) },
       },
       body,
+      signal,
     });
     return parseContract(projectPreviewSchema, result.data, "create project preview");
   }
 
-  async getProjectPreview(previewId: string): Promise<ProjectPreview> {
+  async getProjectPreview(
+    previewId: string,
+    signal?: AbortSignal,
+  ): Promise<ProjectPreview> {
     const result = await this.api.GET("/previews/{previewId}", {
       params: { path: { previewId } },
+      signal,
     });
     return parseContract(projectPreviewSchema, result.data, "get project preview");
   }
 
-  async createProjectPreviewToken(previewId: string): Promise<ExportPreviewTokenResponse> {
+  async createProjectPreviewToken(
+    previewId: string,
+    signal?: AbortSignal,
+  ): Promise<ExportPreviewTokenResponse> {
     const result = await this.api.POST("/previews/{previewId}/token", {
       params: { path: { previewId } },
+      signal,
     });
     return parseContract(
       exportPreviewTokenResponseSchema,

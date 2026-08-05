@@ -219,12 +219,14 @@ describe("Workbench publication controller", () => {
     const initial = projectPreview({ status: "queued" });
     const succeeded = projectPreview({ status: "succeeded", revision: 2 });
     const getProjectPreview = vi.fn().mockResolvedValue(succeeded);
+    const controller = new AbortController();
 
     await expect(waitForProjectPreview({ getProjectPreview }, initial, {
+      signal: controller.signal,
       intervalMs: 0,
       timeoutMs: 1_000,
     })).resolves.toEqual(succeeded);
-    expect(getProjectPreview).toHaveBeenCalledWith(initial.id);
+    expect(getProjectPreview).toHaveBeenCalledWith(initial.id, controller.signal);
   });
 
   it("rejects same-origin, expired, credentialed, and non-HTTP Preview capabilities", () => {
@@ -283,6 +285,7 @@ function projectPreview(overrides: Record<string, unknown>) {
     boardId: "board-1",
     boardRevision: 3,
     selection: { kind: "artifact" as const, artifactId: "artifact-1", artifactVersionId: "version-1" },
+    initialScreenId: "screen-home",
     status: "queued" as const,
     revision: 0,
     failure: null,

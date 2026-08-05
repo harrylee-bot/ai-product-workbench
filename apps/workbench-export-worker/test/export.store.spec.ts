@@ -82,7 +82,7 @@ describe("PrismaExportStore", () => {
   });
 
   it("rehydrates only the snapshot selected by ExportJob purpose", async () => {
-    const preview = { id: "preview-1", artifactPins: [] };
+    const preview = { id: "preview-1", initialScreenId: "screen-success", artifactPins: [] };
     const job = {
       id: "preview-export-1",
       createdById: "viewer-1",
@@ -107,7 +107,7 @@ describe("PrismaExportStore", () => {
     await expect(store.loadRunning(job.id)).resolves.toMatchObject({
       purpose: "preview",
       release: null,
-      preview: { id: "preview-1" },
+      preview: { id: "preview-1", initialScreenId: "screen-success" },
     });
 
     findUnique.mockResolvedValueOnce({ ...job, release: {} });

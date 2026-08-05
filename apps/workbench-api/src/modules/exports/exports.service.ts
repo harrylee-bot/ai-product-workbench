@@ -68,6 +68,7 @@ type PreviewRecord = {
   projectId: string;
   boardId: string;
   boardRevision: number;
+  initialScreenId: string | null;
   exportJobId: string;
   createdById: string;
   idempotencyKey: string;
@@ -254,6 +255,7 @@ export class ExportsService {
   ): Promise<ProjectPreview> {
     validateIdempotencyKey(idempotencyKey);
     await this.access.findProject(principalId, projectId, "read");
+    assertPreviewSelectionShape(request);
     const requestHash = hashRequest(request);
     const existing = await this.findPreviewByReceipt(projectId, idempotencyKey);
     if (existing) return this.resolvePreviewIdempotent(existing, principalId, requestHash);
@@ -304,7 +306,7 @@ export class ExportsService {
             },
           });
           if (!artifactVersion) throw validationProblem("The selected Artifact version is unavailable");
-          assertArtifactScreenSelection(selectedSelection, { kind: pin.kind, artifactVersion });
+          assertPreviewInitialScreen(request.initialScreenId, { kind: pin.kind, artifactVersion });
         }
 
         const manifest = projectReleaseManifestSchema.parse({
@@ -332,9 +334,7 @@ export class ExportsService {
             selectionArtifactVersionId: request.selection.kind === "artifact"
               ? request.selection.artifactVersionId
               : null,
-            selectionScreenId: request.selection.kind === "artifact"
-              ? request.selection.screenId ?? null
-              : null,
+            selectionScreenId: null,
             selectionNodeIds: request.selection.kind === "board_nodes"
               ? request.selection.nodeIds
               : [],
@@ -347,6 +347,7 @@ export class ExportsService {
             projectId,
             boardId: board.id,
             boardRevision: board.revision,
+            initialScreenId: request.initialScreenId,
             boardSnapshot: boardSnapshot as Prisma.InputJsonValue,
             boardChecksum,
             manifest: manifest as Prisma.InputJsonValue,
@@ -668,6 +669,7 @@ function mapProjectPreview(record: PreviewRecord): ProjectPreview {
     boardId: record.boardId,
     boardRevision: record.boardRevision,
     selection: mapExportSelection(record.exportJob),
+    initialScreenId: record.initialScreenId,
     status: expired ? "expired" : record.exportJob.status,
     revision: record.exportJob.revision,
     failure: exportFailure(record.exportJob),
@@ -720,34 +722,61 @@ function assertBoardNodeSelection(
 
 function assertArtifactScreenSelection(
   selection: Extract<ExportSelection, { kind: "artifact" }>,
-  pin: {
-    kind: string;
-    artifactVersion: {
-      status: string;
-      content: unknown;
-      contentBlobId: string | null;
-      artifact: { kind: string };
-    };
-  },
+  pin: ArtifactScreenPin,
 ) {
-  if (selection.screenId === undefined) return;
+  assertArtifactScreenId(selection.screenId, pin, "screenId");
+}
+
+type ArtifactScreenPin = {
+  kind: string;
+  artifactVersion: {
+    status: string;
+    content: unknown;
+    contentBlobId: string | null;
+    artifact: { kind: string };
+  };
+};
+
+function assertArtifactScreenId(
+  screenId: string | undefined,
+  pin: ArtifactScreenPin,
+  field: "screenId" | "initialScreenId",
+) {
+  if (screenId === undefined) return;
   if (pin.kind !== "prototype" || pin.artifactVersion.artifact.kind !== "prototype") {
-    throw validationProblem("screenId is supported only for Prototype Artifact selections");
+    throw validationProblem(`${field} is supported only for Prototype Artifact selections`);
   }
   if (
     pin.artifactVersion.status !== "ready"
     || pin.artifactVersion.contentBlobId !== null
     || pin.artifactVersion.content === null
   ) {
-    throw validationProblem("screenId requires a ready inline Prototype Artifact version");
+    throw validationProblem(`${field} requires a ready inline Prototype Artifact version`);
   }
   const document = prototypeDocumentSchema.safeParse(pin.artifactVersion.content);
   if (!document.success) {
     throw validationProblem("The selected Prototype Artifact version has invalid content");
   }
-  if (!document.data.screens.some((screen) => screen.id === selection.screenId)) {
+  if (!document.data.screens.some((screen) => screen.id === screenId)) {
     throw validationProblem("The selected screen does not exist in this Prototype Artifact version");
   }
+}
+
+function assertPreviewSelectionShape(request: CreateProjectPreviewRequest) {
+  if (request.selection.kind === "artifact" && request.selection.screenId !== undefined) {
+    throw validationProblem("Project Preview selection cannot crop a Prototype to one screen");
+  }
+  if (request.initialScreenId !== null && request.selection.kind !== "artifact") {
+    throw validationProblem("initialScreenId requires an Artifact selection");
+  }
+}
+
+function assertPreviewInitialScreen(
+  initialScreenId: string | null,
+  pin: ArtifactScreenPin,
+) {
+  if (initialScreenId === null) return;
+  assertArtifactScreenId(initialScreenId, pin, "initialScreenId");
 }
 
 function selectedReleasePins(selection: ExportSelection, release: ProjectRelease) {

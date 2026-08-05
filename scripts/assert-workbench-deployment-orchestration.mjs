@@ -151,6 +151,68 @@ assert(
   "deployment env must document the ready-object spool boundary",
 );
 
+const exportWorker = compose.services?.["workbench-export-worker"];
+const netlifyEgress = compose.services?.["netlify-egress"];
+const netlifyEgressUpstream = compose.services?.["netlify-egress-upstream"];
+for (const name of [
+  "WORKBENCH_NETLIFY_SITE_ID",
+  "WORKBENCH_NETLIFY_ACCESS_TOKEN",
+  "WORKBENCH_NETLIFY_API_BASE_URL",
+  "WORKBENCH_NETLIFY_REQUEST_TIMEOUT_MS",
+  "WORKBENCH_NETLIFY_POLL_INTERVAL_MS",
+]) {
+  assert(Object.hasOwn(api?.environment ?? {}, name), `API must receive ${name}`);
+  assert(Object.hasOwn(exportWorker?.environment ?? {}, name), `Export Worker must receive ${name}`);
+  assert(
+    api.environment[name] === exportWorker.environment[name],
+    `API and Export Worker must share ${name}`,
+  );
+  assert(envExample.includes(`${name}=`), `deployment env must declare ${name}`);
+}
+assert(
+  exportWorker?.depends_on?.["netlify-egress"]?.condition === "service_healthy",
+  "Export Worker must wait for the Netlify egress proxy",
+);
+assert(
+  netlifyEgress?.depends_on?.["netlify-egress-upstream"]?.condition === "service_healthy",
+  "Netlify egress must wait for its upstream relay",
+);
+assert(
+  netlifyEgress?.networks?.["workbench-internal"]?.aliases?.includes(
+    "${WORKBENCH_NETLIFY_EGRESS_UPSTREAM_HOST:?WORKBENCH_NETLIFY_EGRESS_UPSTREAM_HOST is required}",
+  ),
+  "Netlify egress must own the configured API hostname on the internal network",
+);
+assert(
+  netlifyEgress?.environment?.WORKBENCH_NETLIFY_EGRESS_TARGET_HOST
+    === "netlify-egress-upstream",
+  "Netlify egress must target the separately resolved upstream relay",
+);
+assert(
+  netlifyEgressUpstream?.environment?.WORKBENCH_NETLIFY_EGRESS_TARGET_HOST
+    === "${WORKBENCH_NETLIFY_EGRESS_UPSTREAM_HOST:?WORKBENCH_NETLIFY_EGRESS_UPSTREAM_HOST is required}",
+  "Netlify upstream relay must resolve the configured public hostname",
+);
+assert(
+  !Object.hasOwn(netlifyEgress?.environment ?? {}, "WORKBENCH_NETLIFY_ACCESS_TOKEN"),
+  "Netlify egress must not receive the provider credential",
+);
+assert(
+  !Object.hasOwn(netlifyEgressUpstream?.environment ?? {}, "WORKBENCH_NETLIFY_ACCESS_TOKEN"),
+  "Netlify upstream relay must not receive the provider credential",
+);
+const netlifyEgressTemplate = read("deploy/workbench-netlify-egress-nginx.conf.template");
+for (const fragment of [
+  'set $netlify_upstream "${WORKBENCH_NETLIFY_EGRESS_TARGET_HOST}:443"',
+  "proxy_pass $netlify_upstream",
+  "resolver 127.0.0.11",
+]) {
+  assert(
+    netlifyEgressTemplate.includes(fragment),
+    `Netlify egress template is missing ${fragment}`,
+  );
+}
+
 for (const marker of [
   "prepare_deerflow_runtime",
   "wait_for_deerflow",

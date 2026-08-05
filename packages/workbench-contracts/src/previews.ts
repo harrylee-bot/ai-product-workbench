@@ -4,6 +4,7 @@ import {
   exportFailureSchema,
   exportPreviewTokenResponseSchema,
   exportSelectionSchema,
+  type ExportSelection,
   type ExportPreviewTokenResponse,
 } from "./exports.js";
 import { isoDateTimeSchema, opaqueIdSchema, revisionSchema } from "./common.js";
@@ -22,11 +23,37 @@ export const previewStatusSchema = z.enum([
   "expired",
 ]);
 
+type ProjectPreviewSelectionIntent = {
+  selection: ExportSelection;
+  initialScreenId: string | null;
+};
+
+function refineProjectPreviewSelectionIntent(
+  preview: ProjectPreviewSelectionIntent,
+  context: z.RefinementCtx,
+): void {
+  if (preview.selection.kind === "artifact" && preview.selection.screenId !== undefined) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "Project Preview selection cannot crop a Prototype to one screen",
+      path: ["selection", "screenId"],
+    });
+  }
+  if (preview.initialScreenId !== null && preview.selection.kind !== "artifact") {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "initialScreenId requires an Artifact selection",
+      path: ["initialScreenId"],
+    });
+  }
+}
+
 export const createProjectPreviewRequestSchema = z.object({
   boardId: opaqueIdSchema,
   boardRevision: revisionSchema,
   selection: exportSelectionSchema,
-}).strict();
+  initialScreenId: opaqueIdSchema.nullable(),
+}).strict().superRefine(refineProjectPreviewSelectionIntent);
 
 export const projectPreviewSchema = z.object({
   id: opaqueIdSchema,
@@ -34,13 +61,14 @@ export const projectPreviewSchema = z.object({
   boardId: opaqueIdSchema,
   boardRevision: revisionSchema,
   selection: exportSelectionSchema,
+  initialScreenId: opaqueIdSchema.nullable(),
   status: previewStatusSchema,
   revision: revisionSchema,
   failure: exportFailureSchema.nullable(),
   createdAt: isoDateTimeSchema,
   expiresAt: isoDateTimeSchema,
   updatedAt: isoDateTimeSchema,
-}).strict();
+}).strict().superRefine(refineProjectPreviewSelectionIntent);
 
 export const previewTokenResponseSchema = exportPreviewTokenResponseSchema;
 

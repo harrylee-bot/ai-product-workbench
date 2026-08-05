@@ -302,9 +302,11 @@ describe("ExportJob API invariants", () => {
     });
   });
 
-  it("keeps the E2E external-delivery capability closed outside the test runtime", () => {
+  it("ignores the removed E2E capability switch and opens Netlify only for a complete provider config", () => {
     const originalNodeEnv = process.env.NODE_ENV;
     const originalE2eTarget = process.env.WORKBENCH_E2E_EXTERNAL_DELIVERY_AVAILABLE;
+    const originalSiteId = process.env.WORKBENCH_NETLIFY_SITE_ID;
+    const originalAccessToken = process.env.WORKBENCH_NETLIFY_ACCESS_TOKEN;
     try {
       process.env.NODE_ENV = "production";
       process.env.WORKBENCH_E2E_EXTERNAL_DELIVERY_AVAILABLE = "netlify";
@@ -314,11 +316,23 @@ describe("ExportJob API invariants", () => {
         authentication: "required",
         reasonCode: "EXPORT_EXTERNAL_AUTHENTICATION_REQUIRED",
       });
+
+      process.env.WORKBENCH_NETLIFY_SITE_ID = "site-1";
+      process.env.WORKBENCH_NETLIFY_ACCESS_TOKEN = "provider-token";
+      expect(new ExportCapabilitiesConfig().catalog().external.netlify).toEqual({
+        available: true,
+        authentication: "authenticated",
+        reasonCode: null,
+      });
     } finally {
       if (originalNodeEnv === undefined) delete process.env.NODE_ENV;
       else process.env.NODE_ENV = originalNodeEnv;
       if (originalE2eTarget === undefined) delete process.env.WORKBENCH_E2E_EXTERNAL_DELIVERY_AVAILABLE;
       else process.env.WORKBENCH_E2E_EXTERNAL_DELIVERY_AVAILABLE = originalE2eTarget;
+      if (originalSiteId === undefined) delete process.env.WORKBENCH_NETLIFY_SITE_ID;
+      else process.env.WORKBENCH_NETLIFY_SITE_ID = originalSiteId;
+      if (originalAccessToken === undefined) delete process.env.WORKBENCH_NETLIFY_ACCESS_TOKEN;
+      else process.env.WORKBENCH_NETLIFY_ACCESS_TOKEN = originalAccessToken;
     }
   });
 
@@ -775,6 +789,7 @@ describe("ExportJob API invariants", () => {
       projectId: "project_1",
       boardId: "board_1",
       boardRevision: 0,
+      initialScreenId: null,
       exportJobId: previewExport.id,
       createdById: "viewer_1",
       idempotencyKey: "preview:key:1",
@@ -818,6 +833,7 @@ describe("ExportJob API invariants", () => {
       boardId: "board_1",
       boardRevision: 0,
       selection: { kind: "release" },
+      initialScreenId: null,
     });
 
     expect(result.id).toBe("preview-1");
@@ -834,6 +850,7 @@ describe("ExportJob API invariants", () => {
       data: expect.objectContaining({
         boardId: "board_1",
         boardRevision: 0,
+        initialScreenId: null,
         artifactPins: { create: [] },
       }),
     }));
@@ -850,6 +867,7 @@ describe("ExportJob API invariants", () => {
       boardId: "board_1",
       boardRevision: 0,
       selection: { kind: "release" as const },
+      initialScreenId: null,
     };
     const previewExport = queuedJob({
       id: "preview-export-1",
@@ -860,6 +878,7 @@ describe("ExportJob API invariants", () => {
       projectId: "project_1",
       boardId: "board_1",
       boardRevision: 0,
+      initialScreenId: null,
       exportJobId: previewExport.id,
       createdById: "viewer_1",
       idempotencyKey: "preview:key:1",
@@ -882,6 +901,201 @@ describe("ExportJob API invariants", () => {
 
     await expect(service.createPreview("viewer_1", "project_1", "preview:key:1", request))
       .resolves.toMatchObject({ id: "preview-1", status: "queued" });
+  });
+
+  it("persists a valid Prototype initial screen without cropping the Preview Export selection", async () => {
+    const previewExport = queuedJob({
+      id: "preview-export-1",
+      releaseId: null,
+      selectionScreenId: null,
+    });
+    const content = prototypeDocument();
+    const artifactPin = {
+      position: 0,
+      artifactId: "artifact_1",
+      artifactVersionId: "version_1",
+      title: "Checkout",
+      kind: "prototype",
+      version: 1,
+      schemaVersion: 1,
+      checksum: "b".repeat(64),
+      assets: [],
+    };
+    const board = {
+      id: "board_1",
+      projectId: "project_1",
+      revision: 0,
+      viewport: { x: 0, y: 0, zoom: 1 },
+      nodes: [],
+      edges: [],
+    };
+    const previewRecord = {
+      id: "preview-1",
+      projectId: "project_1",
+      boardId: "board_1",
+      boardRevision: 0,
+      initialScreenId: "screen-success",
+      exportJobId: previewExport.id,
+      createdById: "viewer_1",
+      idempotencyKey: "preview:key:2",
+      requestHash: "c".repeat(64),
+      expiresAt: new Date(Date.now() + 60_000),
+      createdAt: now,
+      updatedAt: now,
+      exportJob: previewExport,
+    };
+    const tx = {
+      $queryRaw: vi.fn()
+        .mockResolvedValueOnce([{ id: "project_1", revision: 0 }])
+        .mockResolvedValueOnce([{ id: "board_1", revision: 0 }])
+        .mockResolvedValueOnce([{
+          id: "artifact_1",
+          title: "Checkout",
+          currentVersionId: "version_1",
+        }]),
+      projectMember: { findUnique: vi.fn().mockResolvedValue({ role: "viewer" }) },
+      board: { findUniqueOrThrow: vi.fn().mockResolvedValue(board) },
+      artifactVersion: {
+        findMany: vi.fn().mockResolvedValue([{
+          id: "version_1",
+          artifactId: "artifact_1",
+          projectId: "project_1",
+          version: 1,
+          schemaVersion: 1,
+          status: "ready",
+          checksum: artifactPin.checksum,
+          artifact: { projectId: "project_1", kind: "prototype" },
+          assets: [],
+        }]),
+        findFirst: vi.fn().mockResolvedValue({
+          status: "ready",
+          content,
+          contentBlobId: null,
+          artifact: { kind: "prototype" },
+        }),
+      },
+      projectPreview: {
+        findUnique: vi.fn().mockResolvedValue(null),
+        create: vi.fn().mockResolvedValue(previewRecord),
+        findUniqueOrThrow: vi.fn().mockResolvedValue(previewRecord),
+      },
+      exportJob: { create: vi.fn().mockResolvedValue(previewExport) },
+    };
+    const db = {
+      projectPreview: { findUnique: vi.fn().mockResolvedValue(null) },
+      $transaction: vi.fn().mockImplementation((callback) => callback(tx)),
+    };
+    const service = serviceWith(db, { sendInTransaction: vi.fn().mockResolvedValue("queued") });
+
+    await expect(service.createPreview("viewer_1", "project_1", "preview:key:2", {
+      boardId: "board_1",
+      boardRevision: 0,
+      selection: {
+        kind: "artifact",
+        artifactId: "artifact_1",
+        artifactVersionId: "version_1",
+      },
+      initialScreenId: "screen-success",
+    })).resolves.toMatchObject({
+      initialScreenId: "screen-success",
+      selection: expect.not.objectContaining({ screenId: expect.anything() }),
+    });
+    expect(tx.exportJob.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ selectionScreenId: null }),
+    }));
+    expect(tx.projectPreview.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ initialScreenId: "screen-success" }),
+    }));
+    const createHash = tx.projectPreview.create.mock.calls[0]![0].data.requestHash;
+    expect(createHash).toBe(hashRequest({
+      boardId: "board_1",
+      boardRevision: 0,
+      selection: {
+        kind: "artifact",
+        artifactId: "artifact_1",
+        artifactVersionId: "version_1",
+      },
+      initialScreenId: "screen-success",
+    }));
+    expect(createHash).not.toBe(hashRequest({
+      boardId: "board_1",
+      boardRevision: 0,
+      selection: {
+        kind: "artifact",
+        artifactId: "artifact_1",
+        artifactVersionId: "version_1",
+      },
+      initialScreenId: "screen-home",
+    }));
+  });
+
+  it("rejects a Preview initial screen outside the selected ready Prototype", async () => {
+    const artifactPin = {
+      position: 0,
+      artifactId: "artifact_1",
+      artifactVersionId: "version_1",
+      title: "Checkout",
+      kind: "prototype",
+      version: 1,
+      schemaVersion: 1,
+      checksum: "b".repeat(64),
+      assets: [],
+    };
+    const tx = {
+      $queryRaw: vi.fn()
+        .mockResolvedValueOnce([{ id: "project_1", revision: 0 }])
+        .mockResolvedValueOnce([{ id: "board_1", revision: 0 }])
+        .mockResolvedValueOnce([{
+          id: "artifact_1",
+          title: "Checkout",
+          currentVersionId: "version_1",
+        }]),
+      projectMember: { findUnique: vi.fn().mockResolvedValue({ role: "viewer" }) },
+      board: { findUniqueOrThrow: vi.fn().mockResolvedValue({
+        id: "board_1",
+        projectId: "project_1",
+        revision: 0,
+        viewport: { x: 0, y: 0, zoom: 1 },
+        nodes: [],
+        edges: [],
+      }) },
+      artifactVersion: {
+        findMany: vi.fn().mockResolvedValue([{
+          id: "version_1",
+          artifactId: "artifact_1",
+          projectId: "project_1",
+          version: 1,
+          schemaVersion: 1,
+          status: "ready",
+          checksum: artifactPin.checksum,
+          artifact: { projectId: "project_1", kind: "prototype" },
+          assets: [],
+        }]),
+        findFirst: vi.fn().mockResolvedValue({
+          status: "ready",
+          content: prototypeDocument(),
+          contentBlobId: null,
+          artifact: { kind: "prototype" },
+        }),
+      },
+      projectPreview: { findUnique: vi.fn().mockResolvedValue(null) },
+    };
+    const db = {
+      projectPreview: { findUnique: vi.fn().mockResolvedValue(null) },
+      $transaction: vi.fn().mockImplementation((callback) => callback(tx)),
+    };
+    const service = serviceWith(db);
+
+    await expect(service.createPreview("viewer_1", "project_1", "preview:key:3", {
+      boardId: "board_1",
+      boardRevision: 0,
+      selection: {
+        kind: "artifact",
+        artifactId: "artifact_1",
+        artifactVersionId: "version_1",
+      },
+      initialScreenId: "screen-missing",
+    })).rejects.toMatchObject({ status: 400 });
   });
 
   it("keeps private Preview jobs outside every public Export read and command surface", async () => {

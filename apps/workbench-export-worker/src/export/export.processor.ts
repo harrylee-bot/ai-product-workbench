@@ -37,6 +37,9 @@ export class ExportProcessor {
         selection: started.command.selection,
         options: started.command.options as ExportBuildRequest["options"],
         source,
+        ...(started.command.purpose === "preview" && started.command.preview?.initialScreenId
+          ? { initialScreenId: started.command.preview.initialScreenId }
+          : {}),
       };
       const output = await buildExport(request);
       if (output.bytes.byteLength <= 0 || output.bytes.byteLength > this.config.maximumOutputBytes) {

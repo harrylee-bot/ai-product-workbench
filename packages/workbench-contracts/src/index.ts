@@ -10,6 +10,7 @@ export * from "./design-systems.js";
 export * from "./design-presets.js";
 export * from "./files.js";
 export * from "./exports.js";
+export * from "./external-export-provider-config.js";
 export * from "./figma-export.js";
 export * from "./http-routes.js";
 export * from "./identity.js";

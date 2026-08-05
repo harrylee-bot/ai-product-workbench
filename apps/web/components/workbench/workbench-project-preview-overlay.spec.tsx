@@ -21,10 +21,13 @@ vi.mock("qrcode.react", () => ({
 vi.mock("./workbench-isolated-preview", () => ({
   WorkbenchIsolatedPreview: ({
     onCapabilityChange,
+    request,
   }: {
     onCapabilityChange?: (capability: ExportPreviewTokenResponse | null) => void;
+    request: unknown;
   }) => (
     <button
+      data-preview-request={JSON.stringify(request)}
       data-isolated-preview-mock
       onClick={() => onCapabilityChange?.(previewHarness.capability)}
       type="button"
@@ -81,6 +84,35 @@ describe("Project Preview overlay", () => {
     fireEvent.click(screen.getByRole("button", { name: "响应式" }));
     await waitFor(() => expect(deviceFrame().dataset.previewWidth).toBe("1176"));
     expect(deviceFrame().dataset.previewHeight).toBe("776");
+    expect(deviceFrame().dataset.previewScale).toBe("1");
+  });
+
+  it("previews the complete Prototype Artifact with the selected screen as its initial screen", () => {
+    renderOverlay();
+    expect(JSON.parse(
+      screen.getByRole("button", { name: "Preview ready" }).dataset.previewRequest!,
+    )).toEqual({
+      initialScreenId: "screen-home",
+      selection: {
+        kind: "artifact",
+        artifactId: "artifact-1",
+        artifactVersionId: "version-1",
+      },
+    });
+  });
+
+  it("previews a complete Prototype without an explicit initial screen", () => {
+    renderOverlay(vi.fn(), { screenId: undefined });
+    expect(JSON.parse(
+      screen.getByRole("button", { name: "Preview ready" }).dataset.previewRequest!,
+    )).toEqual({
+      initialScreenId: null,
+      selection: {
+        kind: "artifact",
+        artifactId: "artifact-1",
+        artifactVersionId: "version-1",
+      },
+    });
   });
 
   it("supports bounded custom viewport dimensions", () => {
@@ -120,25 +152,24 @@ describe("Project Preview overlay", () => {
   });
 });
 
-function renderOverlay(onClose = vi.fn()) {
+function renderOverlay(
+  onClose = vi.fn(),
+  options: { screenId?: string } = { screenId: "screen-home" },
+) {
+  const reference = {
+    projectId: "project-1",
+    artifactId: "artifact-1",
+    artifactVersionId: "version-1",
+    ...(options.screenId ? { screenId: options.screenId } : {}),
+  };
   return render(
     <ProjectPreviewOverlay
       artifacts={[{
-        reference: {
-          projectId: "project-1",
-          artifactId: "artifact-1",
-          artifactVersionId: "version-1",
-          screenId: "screen-home",
-        },
+        reference,
         title: "Home",
       }]}
       createPreview={vi.fn()}
-      initialReference={{
-        projectId: "project-1",
-        artifactId: "artifact-1",
-        artifactVersionId: "version-1",
-        screenId: "screen-home",
-      }}
+      initialReference={reference}
       onClose={onClose}
       projectId="project-1"
       projectTitle="产品工作台"

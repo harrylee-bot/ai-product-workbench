@@ -2,7 +2,6 @@
 
 import type {
   ExportPreviewTokenResponse,
-  ExportSelection,
 } from "@workbench/workbench-contracts";
 import { motion } from "framer-motion";
 import {
@@ -33,11 +32,14 @@ import {
   useWorkbenchProjectState,
 } from "@/lib/workbench/project-session";
 import type { WorkbenchArtifactReference } from "./workbench-artifact-content";
-import { WorkbenchIsolatedPreview } from "./workbench-isolated-preview";
+import {
+  WorkbenchIsolatedPreview,
+  type WorkbenchPreviewRequest,
+} from "./workbench-isolated-preview";
 import { popoverTransition, workbenchEase } from "./workbench-motion";
 
 type WorkbenchPreviewCreator = (
-  selection: ExportSelection,
+  request: WorkbenchPreviewRequest,
   signal?: AbortSignal,
 ) => Promise<ExportPreviewTokenResponse>;
 
@@ -371,15 +373,15 @@ function PreviewViewport({
               createPreview={createPreview}
               onCapabilityChange={onCapabilityChange}
               refreshKey={refreshKey}
-              sessionKey={projectId}
-              selection={{
-                kind: "artifact",
-                artifactId: selectedArtifact.reference.artifactId,
-                artifactVersionId: selectedArtifact.reference.artifactVersionId,
-                ...(selectedArtifact.reference.screenId
-                  ? { screenId: selectedArtifact.reference.screenId }
-                  : {}),
+              request={{
+                initialScreenId: selectedArtifact.reference.screenId ?? null,
+                selection: {
+                  kind: "artifact",
+                  artifactId: selectedArtifact.reference.artifactId,
+                  artifactVersionId: selectedArtifact.reference.artifactVersionId,
+                },
               }}
+              sessionKey={projectId}
               title={`${selectedArtifact.title} 预览`}
             />
           ) : (

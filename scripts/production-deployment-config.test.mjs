@@ -191,6 +191,16 @@ test("binds G1/G4/run attempt to the effective production topology without valid
     true,
   );
   assert.equal(
+    INFRASTRUCTURE_IMAGE_DEFINITIONS.find((dependency) => dependency.name === "gateway")
+      .composeBindings.includes("deploy/workbench-compose.yml#netlify-egress"),
+    true,
+  );
+  assert.equal(
+    INFRASTRUCTURE_IMAGE_DEFINITIONS.find((dependency) => dependency.name === "gateway")
+      .composeBindings.includes("deploy/workbench-compose.yml#netlify-egress-upstream"),
+    true,
+  );
+  assert.equal(
     document.effectiveConfig.values.WORKBENCH_S3_EGRESS_UPSTREAM_HOST,
     "s3.internal.example.test",
   );

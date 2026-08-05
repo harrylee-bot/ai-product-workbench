@@ -307,7 +307,7 @@ try {
   assert(deliveryConfirms === 0, "Preparing an external delivery must not publish before explicit confirmation");
   await externalPanel.getByRole("button", { name: "确认发布至 Netlify" }).click();
   await waitForValue(() => deliveryConfirms === 1, page, "external delivery confirmation");
-  await externalPanel.getByRole("button", { name: "已发布至 Netlify" }).waitFor({ timeout: 8_000 });
+  await externalPanel.getByRole("button", { name: "撤销发布 Netlify" }).waitFor({ timeout: 8_000 });
   await page.screenshot({ path: screenshot, animations: "disabled", caret: "hide", fullPage: true });
 
   await page.setViewportSize({ width: 390, height: 844 });

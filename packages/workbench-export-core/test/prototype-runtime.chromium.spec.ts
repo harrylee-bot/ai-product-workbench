@@ -83,7 +83,18 @@ describe("Prototype HTML export runtime", () => {
           return original.call(this, keyframes, options);
         };
       });
-      await page.setContent(renderExportHtml(interactiveExportRequest()).document, { waitUntil: "load" });
+      const previewRequest = interactiveExportRequest();
+      previewRequest.selection = {
+        kind: "artifact",
+        artifactId: "artifact-1",
+        artifactVersionId: "version-1",
+      };
+      previewRequest.initialScreenId = "screen-home";
+      await page.setContent(renderExportHtml(previewRequest).document, { waitUntil: "load" });
+
+      expect(await page.locator("[data-wb-screen]").count()).toBe(2);
+      await expect.poll(() => page.locator('[data-wb-screen="screen-home"]').isVisible()).toBe(true);
+      await expect.poll(() => page.locator('[data-wb-screen="screen-success"]').isHidden()).toBe(true);
 
       await expect.poll(() => page.locator('[data-wb-node="text-mirror"]').textContent()).toBe("initial@example.test");
       await expect.poll(() => page.locator('[data-wb-node="text-literal"]').textContent()).toBe("Literal ready");
