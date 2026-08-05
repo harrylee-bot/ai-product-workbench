@@ -143,7 +143,9 @@ const generationVisualViewports = [
   { width: 768, height: 1024 },
   { width: 1440, height: 900 },
 ];
-const pendingDocumentEvidenceLatencyMs = 10_000;
+// Keep the pending draft request open for the complete 3-viewport x 2-motion
+// capture matrix on hosted Linux runners, including cold screenshot encoding.
+const pendingDocumentEvidenceLatencyMs = 30_000;
 const browserCleanupTimeoutMs = 5_000;
 const motionFrameSampleCount = 6;
 const motionFrameSampleIntervalMs = 100;
