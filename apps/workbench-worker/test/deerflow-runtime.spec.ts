@@ -3432,7 +3432,6 @@ describe("DeerFlow runtime adapter", () => {
           headers: {
             "content-type": "text/event-stream",
             "content-location": "/threads/deer_thread_1/runs/external_run_idle",
-            location: "/threads/deer_thread_1/runs/external_run_idle/stream",
           },
         });
       }
