@@ -404,6 +404,7 @@ export function ProjectTopBar({
   onRename,
   onShare,
   onToggleMenu,
+  previewAvailable,
   projectTitle,
   projectMenuOpen,
   shareOpen,
@@ -419,10 +420,16 @@ export function ProjectTopBar({
   onRename: () => void;
   onShare: () => void;
   onToggleMenu: () => void;
+  previewAvailable: boolean;
   projectTitle: string;
   projectMenuOpen: boolean;
   shareOpen: boolean;
 }) {
+  const previewDisabled = !capabilities.canPreview || !previewAvailable;
+  let previewTitle = "预览";
+  if (!capabilities.canPreview) previewTitle = "当前角色无法创建预览";
+  else if (!previewAvailable) previewTitle = "暂无可预览的原型";
+
   return (
     <motion.header
       animate={{ opacity: 1, y: 0 }}
@@ -472,8 +479,8 @@ export function ProjectTopBar({
           className="workbench-chrome-button group grid size-[34px] place-items-center rounded-full border border-white/[0.10] bg-[#1c1d20]/86 text-[#f1f3f4] transition hover:border-white/[0.18] hover:bg-[#34353a]/94 active:scale-95 disabled:cursor-not-allowed disabled:opacity-45"
           data-project-action="preview"
           onClick={() => onPreview()}
-          disabled={!capabilities.canPreview}
-          title={capabilities.canPreview ? "预览" : "当前角色无法创建预览"}
+          disabled={previewDisabled}
+          title={previewTitle}
           type="button"
         >
           <PlayIcon className="size-[17px]" />

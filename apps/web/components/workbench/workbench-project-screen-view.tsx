@@ -312,6 +312,7 @@ export function ProjectScreenView({
         onMembers={chrome.onMembers}
         onExport={chrome.onExport}
         onPreview={chrome.onOpenPreview}
+        previewAvailable={chrome.previewArtifacts.length > 0}
         onRename={chrome.onRequestRename}
         onShare={chrome.onShare}
         onToggleMenu={chrome.onToggleProjectMenu}

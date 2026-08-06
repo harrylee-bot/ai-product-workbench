@@ -477,19 +477,52 @@ describe("Mini Workbench Run preview", () => {
       .toBeLessThan(nodes[1]!.position.x);
   });
 
-  it("exposes only authorized ready interactive Prototype screens to Preview", () => {
+  it("exposes ready renderable Prototype screens to Preview without requiring actions", () => {
     const runnable = prototypeVersion("artifact-runnable", "version-runnable", true);
     const staticVersion = prototypeVersion("artifact-static", "version-static", false);
+    const stagingVersion = {
+      ...prototypeVersion("artifact-staging", "version-staging", false),
+      status: "staging" as const,
+    };
+    const missingScreenVersion = prototypeVersion(
+      "artifact-missing-screen",
+      "version-missing-screen",
+      false,
+    );
+    const missingScreenTarget = previewTarget(
+      "node-missing-screen",
+      missingScreenVersion.artifactId,
+      missingScreenVersion.artifactVersionId,
+    );
     const targets = [
       previewTarget("node-runnable", runnable.artifactId, runnable.artifactVersionId),
       previewTarget("node-static", staticVersion.artifactId, staticVersion.artifactVersionId),
+      previewTarget("node-staging", stagingVersion.artifactId, stagingVersion.artifactVersionId),
+      {
+        ...missingScreenTarget,
+        reference: {
+          ...missingScreenTarget.reference,
+          screenId: "screen-missing",
+        },
+      },
       previewTarget("node-unavailable", "artifact-unavailable", "version-unavailable"),
     ];
 
-    expect(projectReadyPrototypePreviewArtifacts(targets, [runnable, staticVersion])).toEqual([{
-      reference: targets[0]!.reference,
-      title: "node-runnable",
-    }]);
+    expect(projectReadyPrototypePreviewArtifacts(targets, [
+      runnable,
+      staticVersion,
+      stagingVersion,
+      missingScreenVersion,
+    ])).toEqual([
+      {
+        reference: targets[0]!.reference,
+        title: "node-runnable",
+      },
+      {
+        reference: targets[1]!.reference,
+        title: "node-static",
+      },
+    ]);
   });
 
   it("projects one immutable document node for a real PRD Draft", () => {

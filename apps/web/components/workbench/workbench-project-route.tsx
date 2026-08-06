@@ -213,7 +213,7 @@ export function projectReadyPrototypePreviewArtifacts(
       reference.artifactId,
       reference.artifactVersionId,
     )) ?? null;
-    return analyzePrototypeScreenRuntime(version, reference.screenId).kind === "runnable"
+    return analyzePrototypeScreenRuntime(version, reference.screenId).kind !== "blocked"
       ? [{ reference, title }]
       : [];
   });
@@ -4070,7 +4070,9 @@ function ProjectScreen({
         setProjectMembersOpen(true);
       },
       onMembersOpenChange: (open) => setProjectMembersOpen(open),
-      onOpenPreview: openPreview,
+      onOpenPreview: () => {
+        if (previewArtifacts.length > 0) openPreview(previewArtifacts.map(({ reference }) => reference));
+      },
       onRenameProject: projectActions.renameProject,
       onRequestArchive: () => {
         setProjectMenuOpen(false);

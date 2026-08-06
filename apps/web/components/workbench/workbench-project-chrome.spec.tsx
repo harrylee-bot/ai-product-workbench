@@ -268,6 +268,7 @@ describe("workbench project chrome", () => {
         onRename={vi.fn()}
         onShare={vi.fn()}
         onToggleMenu={vi.fn()}
+        previewAvailable
         projectMenuOpen
         projectTitle="结算体验优化"
         shareOpen={false}
@@ -306,6 +307,7 @@ describe("workbench project chrome", () => {
         onRename={vi.fn()}
         onShare={vi.fn()}
         onToggleMenu={vi.fn()}
+        previewAvailable
         projectMenuOpen={false}
         projectTitle="结算体验优化"
         shareOpen={false}
@@ -322,6 +324,35 @@ describe("workbench project chrome", () => {
 
     fireEvent.click(preview);
     expect(onPreview).toHaveBeenCalledOnce();
+  });
+
+  it("disables Preview when the project has no renderable Prototype", () => {
+    const onPreview = vi.fn();
+    render(
+      <ProjectTopBar
+        capabilities={workbenchProjectCapabilities("owner")}
+        exportOpen={false}
+        onArchive={vi.fn()}
+        onBack={vi.fn()}
+        onDuplicate={vi.fn()}
+        onExport={vi.fn()}
+        onMembers={vi.fn()}
+        onPreview={onPreview}
+        onRename={vi.fn()}
+        onShare={vi.fn()}
+        onToggleMenu={vi.fn()}
+        previewAvailable={false}
+        projectMenuOpen={false}
+        projectTitle="PRD only"
+        shareOpen={false}
+      />,
+    );
+
+    const preview = screen.getByRole("button", { name: "预览项目" });
+    expect((preview as HTMLButtonElement).disabled).toBe(true);
+    expect(preview.getAttribute("title")).toBe("暂无可预览的原型");
+    fireEvent.click(preview);
+    expect(onPreview).not.toHaveBeenCalled();
   });
 
   it("keeps the generated-project suggestion branded as 产品工作台", () => {
