@@ -1,0 +1,20 @@
+services:
+  workbench-web:
+    image: ${WORKBENCH_GRIST_WEB_IMAGE_REF:-workbench-web:grist-sso-v1}
+    environment:
+      WORKBENCH_GRIST_ORIGIN: ${WORKBENCH_GRIST_ORIGIN:?WORKBENCH_GRIST_ORIGIN is required}
+      WORKBENCH_GRIST_SSO_SECRET: ${WORKBENCH_GRIST_SSO_SECRET:?WORKBENCH_GRIST_SSO_SECRET is required}
+
+  workbench-api:
+    environment:
+      WORKBENCH_NETLIFY_SITE_ID: ""
+      WORKBENCH_NETLIFY_ACCESS_TOKEN: ""
+
+  workbench-export-worker:
+    environment:
+      WORKBENCH_NETLIFY_SITE_ID: ""
+      WORKBENCH_NETLIFY_ACCESS_TOKEN: ""
+
+  workbench-worker:
+    environment:
+      WORKBENCH_RUNTIME_WORKER_IMAGE_REF: ${WORKBENCH_RUNTIME_WORKER_ATTESTED_IMAGE_REF:?WORKBENCH_RUNTIME_WORKER_ATTESTED_IMAGE_REF is required}
