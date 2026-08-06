@@ -1434,8 +1434,8 @@ export class DeerFlowRuntimeAdapter implements RuntimePort {
       timeoutMs: this.config.deerFlowTimeoutMs,
       callerOptions: {
         maxRetries: 0,
-        fetch: (input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => (
-          tracedFetch(input, init)
+        fetch: async (input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => (
+          withLangGraphStreamReconnectLocation(await tracedFetch(input, init))
         ),
       },
       defaultHeaders: {
@@ -1487,6 +1487,27 @@ export class DeerFlowRuntimeAdapter implements RuntimePort {
     }
     return headers;
   }
+}
+
+function withLangGraphStreamReconnectLocation(response: Response): Response {
+  if (
+    response.headers.has("location")
+    || !response.headers.get("content-type")?.toLowerCase().startsWith("text/event-stream")
+  ) return response;
+
+  const contentLocation = response.headers.get("content-location");
+  if (
+    !contentLocation
+    || !/^\/(?:threads\/[^/?#]+\/)?runs\/[^/?#]+\/?$/u.test(contentLocation)
+  ) return response;
+
+  const headers = new Headers(response.headers);
+  headers.set("location", `${contentLocation.replace(/\/$/u, "")}/stream`);
+  return new Response(response.body, {
+    headers,
+    status: response.status,
+    statusText: response.statusText,
+  });
 }
 
 function assertNoKnowledgeGrant<T>(value: T): T {
