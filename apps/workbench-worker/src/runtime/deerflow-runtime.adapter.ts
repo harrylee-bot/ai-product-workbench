@@ -371,13 +371,19 @@ export class DeerFlowRuntimeAdapter implements RuntimePort {
 
     let stream: AsyncGenerator<{ id?: string; event: string; data: unknown }>;
     let submissionMayHaveBeenAccepted = false;
+    // The SDK leaves the underlying reader open when an async generator is
+    // stopped with `break`. Keep stream lifetime separate from the execution
+    // signal so the end sentinel can close the HTTP body without cancelling
+    // final result persistence.
+    const streamAbortController = new AbortController();
+    const streamSignal = AbortSignal.any([signal, streamAbortController.signal]);
     const streamIdleReconnect = Math.min(
       30_000,
       Math.max(1_000, Math.floor(this.config.deerFlowIdleTimeoutMs / 2)),
     );
     if (externalRunId) {
       stream = client.runs.joinStream(execution.externalThreadId, externalRunId, {
-        signal,
+        signal: streamSignal,
         cancelOnDisconnect: false,
         lastEventId: submission.mode === "join"
           ? submission.lastExternalEventId ?? undefined
@@ -411,7 +417,7 @@ export class DeerFlowRuntimeAdapter implements RuntimePort {
         this.config.deerFlowAssistantId,
         {
           ...runRequest,
-          signal,
+          signal: streamSignal,
           onDisconnect: "continue",
           streamIdleReconnect,
           onRunCreated: ({ run_id }) => registerExternalRun(run_id),
@@ -748,7 +754,7 @@ export class DeerFlowRuntimeAdapter implements RuntimePort {
         // must not enter the durable business-event inbox or advance the cursor.
         if (part.event === "end") {
           if (part.data !== null) throw new Error("DEERFLOW_STREAM_END_INVALID");
-          continue;
+          break;
         }
         partEffects = [];
         const metadataRunId = externalRunIdFromEvent(part.event, part.data);
@@ -862,6 +868,8 @@ export class DeerFlowRuntimeAdapter implements RuntimePort {
       }
       if (persistenceError) throw persistenceError;
       throw error;
+    } finally {
+      streamAbortController.abort();
     }
 
     if (!externalRunId || !externalRunPersistence) throw new Error("RUNTIME_EXTERNAL_RUN_ID_MISSING");

@@ -646,6 +646,64 @@ describe("DeerFlow runtime adapter", () => {
     expect(runtimeObserver.onExternalFinalization).toHaveBeenCalledTimes(1);
   });
 
+  it("stops consuming when the end sentinel arrives before the HTTP stream closes", async () => {
+    const finalState = {
+      messages: [
+        { type: "human", content: "current turn" },
+        ...validatedResultToolMessages({
+          protocol: "workbench.runtime.result.v1" as const,
+          message: "done",
+          artifacts: [],
+        }, "open-end-sentinel-result"),
+        { type: "ai", content: "done" },
+      ],
+    };
+    let streamRequestAborted = false;
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request, init: RequestInit = {}) => {
+      const url = new URL(String(input));
+      if (url.pathname === "/api/threads/deer_thread_1/runs" && (init.method ?? "GET") === "GET") {
+        return Response.json([]);
+      }
+      if (url.pathname === "/api/threads/deer_thread_1/runs/stream" && init.method === "POST") {
+        init.signal?.addEventListener("abort", () => {
+          streamRequestAborted = true;
+        }, { once: true });
+        const payload = [
+          "id: provider-event-before-open-end",
+          "event: values",
+          `data: ${JSON.stringify(finalState)}`,
+          "",
+          "event: end",
+          "data: null",
+          "",
+          "",
+        ].join("\n");
+        return new Response(new ReadableStream({
+          start(controller) {
+            controller.enqueue(new TextEncoder().encode(payload));
+          },
+        }), {
+          status: 200,
+          headers: {
+            "content-location": "/threads/deer_thread_1/runs/external_run_open_end",
+            "content-type": "text/event-stream",
+          },
+        });
+      }
+      throw new Error(`Unexpected request: ${init.method ?? "GET"} ${url}`);
+    }));
+    const runtimeObserver = observer();
+    const adapter = new DeerFlowRuntimeAdapter(workerConfig(), { getObject: vi.fn() } as never);
+
+    await expect(adapter.execute(execution(), runtimeObserver)).resolves.toMatchObject({
+      protocol: "workbench.runtime.result.v1",
+      message: "done",
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(streamRequestAborted).toBe(true);
+    expect(runtimeObserver.onExternalFinalization).toHaveBeenCalledTimes(1);
+  });
+
   it("ignores comment-only SSE heartbeats with an SDK-inherited cursor", async () => {
     const finalState = {
       messages: [
