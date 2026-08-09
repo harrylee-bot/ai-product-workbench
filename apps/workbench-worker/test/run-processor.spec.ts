@@ -1998,6 +1998,7 @@ describe("Runtime Artifact draft staging and publication", () => {
       artifactVersion: {
         findFirst: vi.fn(async () => staged),
         create: vi.fn(),
+        updateMany: vi.fn(async () => ({ count: 1 })),
         update: vi.fn(async () => ({ id: "version-staged" })),
       },
     });
@@ -2611,7 +2612,7 @@ describe("Runtime Artifact draft staging and publication", () => {
     expect(tx.runEvent.create).not.toHaveBeenCalled();
   });
 
-  it("rejects final publication when its content differs from the latest staging checkpoint", async () => {
+  it("synchronizes a refined terminal Prototype over the latest staging checkpoint", async () => {
     const fixture = createDraftFixture();
     const staged = {
       id: "version-staged",
@@ -2634,16 +2635,31 @@ describe("Runtime Artifact draft staging and publication", () => {
     const { draft, processor, tx } = createPublicationHarness(staged);
     const mismatched = { ...draft, content: { ...draft.content, revision: 2 } };
 
-    await expect(processor.publishResult(executionClaim, "entry-1", "", {
+    await processor.publishResult(executionClaim, "entry-1", "", {
       protocol: "workbench.runtime.result.v1",
       message: "Done",
       artifacts: [mismatched],
-    })).rejects.toThrow("RUNTIME_FINAL_ARTIFACT_DIVERGED");
+    });
 
-    expect(tx.artifactVersion.update).not.toHaveBeenCalled();
-    expect(tx.artifact.update).not.toHaveBeenCalled();
-    expect(tx.boardNode.create).not.toHaveBeenCalled();
-    expect(tx.runEvent.create).not.toHaveBeenCalled();
+    expect(tx.artifactVersion.updateMany).toHaveBeenCalledWith({
+      where: {
+        id: "version-staged",
+        status: "staging",
+        checksum: sha256Canonical(fixture.content),
+      },
+      data: {
+        content: mismatched.content,
+        checksum: sha256Canonical(mismatched.content),
+        citations: [],
+        runtimeDraftTitle: mismatched.title,
+      },
+    });
+    expect(tx.artifactVersion.update).toHaveBeenCalledWith({
+      where: { id: "version-staged" },
+      data: { status: "ready" },
+    });
+    expect(tx.artifact.update).toHaveBeenCalled();
+    expect(tx.boardNode.create).toHaveBeenCalledTimes(mismatched.content.screens.length);
   });
 
   it("rejects final publication when the persisted staging checksum drifts despite unchanged content", async () => {
