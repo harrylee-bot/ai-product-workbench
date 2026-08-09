@@ -119,8 +119,7 @@ jobs:
           docker image inspect "${{ matrix.tag }}" --format '{{json .Config.Labels}}' \
             > "output/${{ matrix.name }}.labels.json"
           docker save "${{ matrix.tag }}" \
-            | zstd --threads=0 --compression-level=3 \
-              --output "output/${{ matrix.name }}.docker.tar.zst"
+            | zstd -T0 -3 -o "output/${{ matrix.name }}.docker.tar.zst"
           sha256sum output/* > "output/${{ matrix.name }}.sha256"
 
       - name: Upload deployable image artifact
