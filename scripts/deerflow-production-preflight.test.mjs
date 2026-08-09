@@ -140,6 +140,9 @@ test("DeerFlow preflight accepts private paths owned by the pinned runtime ident
     assert.ok(probeArguments.includes(`validator-probe-arg=${argument}`), `missing probe argument: ${argument}`);
   }
   assert.match(result.stderr, /validator-probe-arg=.*validate_runtime_result\(\{\}\)/u);
+  assert.match(result.stderr, /validator-probe-arg=.*configured_tools/u);
+  assert.match(result.stderr, /validator-probe-arg=.*artifact_draft_tool/u);
+  assert.match(result.stderr, /validator-probe-arg=.*runtime_result_tool/u);
 });
 
 test("DeerFlow preflight fails closed when the Validator image probe fails", () => {
@@ -150,6 +153,16 @@ test("DeerFlow preflight fails closed when the Validator image probe fails", () 
 
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /WORKBENCH_RUNTIME_VALIDATOR_IMAGE_PROBE_FAILED/u);
+});
+
+test("DeerFlow preflight fails closed when a configured core tool cannot be imported", () => {
+  const result = runPreflight(validProviderEnv(), {
+    configOwner: "65532:65532",
+    homeOwner: "65532:65532",
+  }, { coreToolsProbeStatus: 43 });
+
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /WORKBENCH_RUNTIME_CORE_TOOLS_IMAGE_PROBE_FAILED/u);
 });
 
 test("DeerFlow preflight rejects the pre-Validator-Node candidate during rollback", () => {
@@ -265,8 +278,15 @@ function runPreflight(providerEnvSource, ownership = null, overrides = {}) {
       "#!/bin/sh",
       "if [ \"$1\" = \"run\" ]; then",
       "  shift",
-      "  for arg in \"$@\"; do printf 'validator-probe-arg=%s\\n' \"$arg\" >&2; done",
-      "  exit \"${TEST_VALIDATOR_PROBE_STATUS:-0}\"",
+      "  status=0",
+      "  for arg in \"$@\"; do",
+      "    printf 'validator-probe-arg=%s\\n' \"$arg\" >&2",
+      "    case \"$arg\" in",
+      "      *configured_tools*) status=${TEST_CORE_TOOLS_PROBE_STATUS:-0} ;;",
+      "      *validate_runtime_result*) status=${TEST_VALIDATOR_PROBE_STATUS:-0} ;;",
+      "    esac",
+      "  done",
+      "  exit \"$status\"",
       "fi",
       "case \" $* \" in",
       "  *' {{join .RepoDigests \" \"}} '*) printf '%s@%s\\n' \"$TEST_IMAGE_REPOSITORY\" \"$TEST_IMAGE_DIGEST\" ;;",
@@ -307,6 +327,7 @@ function runPreflight(providerEnvSource, ownership = null, overrides = {}) {
             ?? `node:22-bookworm-slim@sha256:${"d".repeat(64)}`,
           TEST_INCLUDE_NODE_LABEL: overrides.labelNodeImageRef === null ? "0" : "1",
           TEST_VALIDATOR_PROBE_STATUS: String(overrides.validatorProbeStatus ?? 0),
+          TEST_CORE_TOOLS_PROBE_STATUS: String(overrides.coreToolsProbeStatus ?? 0),
           TEST_PATCH_SHA256: createHash("sha256").update(readFixture(patchManifest)).digest("hex"),
         } : {}),
       },

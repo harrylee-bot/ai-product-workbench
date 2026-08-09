@@ -217,6 +217,23 @@ docker run --rm \
   >/dev/null \
   || fail "WORKBENCH_RUNTIME_VALIDATOR_IMAGE_PROBE_FAILED"
 
+core_tools_probe='import importlib; configured_tools = (("workbench_artifact_draft_publish", "deerflow_workbench_tools.artifact_draft_tool", "workbench_artifact_draft_publish"), ("workbench_generation_stage_update", "deerflow_workbench_tools.generation_stage_tool", "workbench_generation_stage_update"), ("workbench_prototype_patch_publish", "deerflow_workbench_tools.prototype_patch_tool", "workbench_prototype_patch_publish"), ("workbench_knowledge_retrieve", "deerflow_workbench_tools.knowledge_tool", "workbench_knowledge_retrieve"), ("workbench_runtime_result_submit", "deerflow_workbench_tools.runtime_result_tool", "workbench_runtime_result_submit"), ("read_file", "deerflow_workbench_tools.prd_reference_tool", "workbench_prd_reference_read")); resolved_tools = [getattr(importlib.import_module(module), attribute) for _, module, attribute in configured_tools]; assert [getattr(tool, "name", None) for tool in resolved_tools] == [name for name, _, _ in configured_tools]'
+docker run --rm \
+  --network none \
+  --read-only \
+  --user 65532:65532 \
+  --cap-drop ALL \
+  --security-opt no-new-privileges:true \
+  --pids-limit 64 \
+  --tmpfs /tmp:rw,nosuid,nodev,size=67108864,uid=65532,gid=65532,mode=1770 \
+  --env UV_CACHE_DIR=/tmp/uv-cache \
+  --env PYTHONDONTWRITEBYTECODE=1 \
+  --entrypoint /bin/sh \
+  "$image_ref" \
+  -ec "cd /app/backend && PYTHONPATH=/app/backend/packages/harness:/app/backend uv run --no-sync python -c '$core_tools_probe'" \
+  >/dev/null \
+  || fail "WORKBENCH_RUNTIME_CORE_TOOLS_IMAGE_PROBE_FAILED"
+
 docker network inspect "$internal_network" >/dev/null 2>&1 \
   || fail "missing Workbench internal network: $internal_network"
 network_internal=$(docker network inspect --format '{{.Internal}}' "$internal_network")

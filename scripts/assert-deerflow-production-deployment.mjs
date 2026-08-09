@@ -34,10 +34,16 @@ const patchApplierSource = readText(`${patchRoot}/apply.py`);
 const patchContractTestSource = readText(`${patchRoot}/test_workbench_tool_scope_middleware.py`);
 const prdReferenceToolPath = "integrations/deerflow/runtime-tools/deerflow_workbench_tools/prd_reference_tool.py";
 const prdReferenceToolTestPath = "integrations/deerflow/runtime-tools/test_prd_reference_tool.py";
+const prototypeNormalizerPath = "integrations/deerflow/runtime-tools/deerflow_workbench_tools/prototype_runtime_normalizer.py";
+const prototypeNormalizerTestPath = "integrations/deerflow/runtime-tools/test_prototype_runtime_normalizer.py";
 assert(existsSync(new URL(prdReferenceToolPath, root)), "the restricted PRD reference reader module must be shipped");
 assert(existsSync(new URL(prdReferenceToolTestPath, root)), "the restricted PRD reference reader contract test must be shipped");
+assert(existsSync(new URL(prototypeNormalizerPath, root)), "the Prototype runtime normalizer module must be shipped");
+assert(existsSync(new URL(prototypeNormalizerTestPath, root)), "the Prototype runtime normalizer contract test must be shipped");
 const prdReferenceToolSource = readText(prdReferenceToolPath);
 const prdReferenceToolTestSource = readText(prdReferenceToolTestPath);
+const prototypeNormalizerSource = readText(prototypeNormalizerPath);
+const prototypeNormalizerTestSource = readText(prototypeNormalizerTestPath);
 const patchManifestSha256 = sha256(patchManifestSource);
 const expectedCommit = argumentValue("--expected-commit");
 
@@ -143,6 +149,7 @@ for (const requiredLine of [
   "--gateway-root /app/backend",
   "test_workbench_request_context.py",
   "from deerflow_workbench_tools.prd_reference_tool import workbench_prd_reference_read",
+  "configured_tools",
   "tool_call_schema.model_json_schema()",
   "tool.func(",
   "validate_runtime_result({})",
@@ -153,6 +160,13 @@ for (const requiredLine of [
   "io.workbench.deerflow.tool-scope-patch-sha256",
 ]) {
   assert(deerflowDockerfile.includes(requiredLine), `derived DeerFlow Dockerfile is missing: ${requiredLine}`);
+}
+for (const trustedTool of WORKBENCH_TRUSTED_TOOLS) {
+  const [moduleName, functionName] = trustedTool.use.split(":");
+  assert(deerflowDockerfile.includes(moduleName), `derived DeerFlow Dockerfile does not probe ${moduleName}`);
+  assert(deerflowDockerfile.includes(functionName), `derived DeerFlow Dockerfile does not probe ${functionName}`);
+  assert(preflight.includes(moduleName), `DeerFlow preflight does not probe ${moduleName}`);
+  assert(preflight.includes(functionName), `DeerFlow preflight does not probe ${functionName}`);
 }
 const deerflowBuildRootIndex = deerflowDockerfile.indexOf("USER root");
 const deerflowPatchIndex = deerflowDockerfile.indexOf(`test \"\${DEERFLOW_SOURCE_COMMIT}\" = \"${patchCommit}\"`);
@@ -466,6 +480,22 @@ assert(
   "the Workbench reference reader contract must cover schema, scope, traversal, integrity, and UTF-8 failures",
 );
 assert(
+  prototypeNormalizerSource.includes("def normalize_prototype_layout_aliases(")
+    && prototypeNormalizerSource.includes("def normalize_runtime_result_prototype_layout_aliases(")
+    && prototypeNormalizerSource.includes('"space-between": "spaceBetween"')
+    && prototypeNormalizerSource.includes('"space-around": "spaceAround"')
+    && prototypeNormalizerSource.includes("copy.deepcopy"),
+  "the Prototype runtime normalizer must repair only the known layout aliases on copied values",
+);
+assert(
+  prototypeNormalizerTestSource.includes(
+    "test_maps_supported_layout_aliases_without_mutating_the_artifact",
+  )
+    && prototypeNormalizerTestSource.includes("test_prefixes_repairs_for_a_runtime_result")
+    && prototypeNormalizerTestSource.includes("test_leaves_non_prototype_artifacts_unchanged"),
+  "the Prototype runtime normalizer contract must cover aliases, result paths, and non-Prototype input",
+);
+assert(
   toolScopeMiddlewareSource.includes('self._prd_gate_enabled = normalized_kinds == ["prd"]')
     && toolScopeMiddlewareSource.includes('self._prototype_reference_enabled = normalized_kinds == ["prototype"]')
     && prdReferencePins.every(([path, digest]) => (
@@ -738,6 +768,8 @@ for (const requiredPreflightText of [
   "io.workbench.deerflow.tool-scope-patch-sha256",
   "assert-deerflow-runtime-config.mjs",
   "WORKBENCH_RUNTIME_VALIDATOR_IMAGE_PROBE_FAILED",
+  "WORKBENCH_RUNTIME_CORE_TOOLS_IMAGE_PROBE_FAILED",
+  "configured_tools",
   "--network none",
   "--user 65532:65532",
 ]) {

@@ -100,6 +100,25 @@ class ArtifactDraftToolTests(unittest.TestCase):
             "checksum": expected_checksum,
         })
 
+    def test_normalizes_prototype_layout_aliases_before_validation(self) -> None:
+        draft = copy.deepcopy(self.draft)
+        draft["content"]["nodes"][0]["layout"]["justify"] = "space-between"
+
+        content, artifact = workbench_artifact_draft_publish.func(
+            self.runtime,
+            0,
+            draft,
+        )
+
+        response = json.loads(content)
+        self.assertTrue(response["ok"])
+        self.assertEqual(
+            artifact["draft"]["content"]["nodes"][0]["layout"]["justify"],
+            "spaceBetween",
+        )
+        self.assertEqual(response["normalizations"][0]["to"], "spaceBetween")
+        self.assertEqual(draft["content"]["nodes"][0]["layout"]["justify"], "space-between")
+
     def test_returns_scoped_validation_issues_for_an_invalid_draft(self) -> None:
         invalid = copy.deepcopy(self.draft)
         del invalid["title"]

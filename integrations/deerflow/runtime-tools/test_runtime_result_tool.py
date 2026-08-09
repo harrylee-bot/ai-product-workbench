@@ -196,6 +196,44 @@ class RuntimeResultToolTests(unittest.TestCase):
             [],
         )
 
+    def test_normalizes_prototype_layout_aliases_before_final_validation(self) -> None:
+        candidate = {
+            "protocol": "workbench.runtime.result.v1",
+            "message": "done",
+            "artifacts": [{
+                "kind": "prototype",
+                "content": {"nodes": [{"layout": {"justify": "space-between"}}]},
+            }],
+        }
+        validation = {
+            "protocol": "workbench.runtime.validation.v1",
+            "ok": True,
+            "issues": [],
+            "candidateChecksum": "c" * 64,
+            "artifactChecksums": ["a" * 64],
+        }
+
+        with patch(
+            "deerflow_workbench_tools.runtime_result_tool.validate_runtime_result",
+            return_value=validation,
+        ) as validate:
+            content, artifact = workbench_runtime_result_submit.func(
+                _runtime(),
+                candidate,
+            )
+
+        normalized = validate.call_args.args[0]
+        self.assertEqual(
+            normalized["artifacts"][0]["content"]["nodes"][0]["layout"]["justify"],
+            "spaceBetween",
+        )
+        self.assertEqual(artifact["result"], normalized)
+        self.assertEqual(json.loads(content)["normalizations"][0]["to"], "spaceBetween")
+        self.assertEqual(
+            candidate["artifacts"][0]["content"]["nodes"][0]["layout"]["justify"],
+            "space-between",
+        )
+
     def test_rejects_missing_runtime_scope_before_validation(self) -> None:
         runtime = SimpleNamespace(context={}, tool_call_id="call_1")
 
