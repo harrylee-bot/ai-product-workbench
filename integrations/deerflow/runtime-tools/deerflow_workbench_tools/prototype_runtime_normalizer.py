@@ -19,33 +19,91 @@ _LAYOUT_ALIASES: dict[str, dict[str, str]] = {
     },
 }
 
+_PROTOTYPE_COLLECTION_DEFAULTS = (
+    "tokens",
+    "assets",
+    "variables",
+    "states",
+    "actions",
+    "bindings",
+    "motions",
+)
+
+_MOTION_TRIGGER_ALIASES = {
+    "mount": "enter",
+}
+
 
 def normalize_prototype_layout_aliases(
     artifact: dict[str, Any],
 ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
-    """Map common CSS layout spellings to the typed Prototype vocabulary."""
+    """Repair narrow, lossless Prototype compatibility aliases before validation."""
     normalized = copy.deepcopy(artifact)
     if normalized.get("kind") != "prototype":
         return normalized, []
     content = normalized.get("content")
-    nodes = content.get("nodes") if isinstance(content, dict) else None
-    if not isinstance(nodes, list):
+    if not isinstance(content, dict):
         return normalized, []
 
     repairs: list[dict[str, Any]] = []
-    for node_index, node in enumerate(nodes):
-        layout = node.get("layout") if isinstance(node, dict) else None
-        if not isinstance(layout, dict):
-            continue
-        for field, aliases in _LAYOUT_ALIASES.items():
-            value = layout.get(field)
-            canonical = aliases.get(value) if isinstance(value, str) else None
+    nodes = content.get("nodes")
+    if isinstance(nodes, list):
+        for node_index, node in enumerate(nodes):
+            if not isinstance(node, dict):
+                continue
+            layout = node.get("layout")
+            if isinstance(layout, dict):
+                for field, aliases in _LAYOUT_ALIASES.items():
+                    value = layout.get(field)
+                    canonical = aliases.get(value) if isinstance(value, str) else None
+                    if canonical is None:
+                        continue
+                    layout[field] = canonical
+                    repairs.append({
+                        "path": ["content", "nodes", node_index, "layout", field],
+                        "from": value,
+                        "to": canonical,
+                    })
+            if node.get("kind") != "text":
+                continue
+            if "maxLines" not in node:
+                node["maxLines"] = None
+                repairs.append({
+                    "path": ["content", "nodes", node_index, "maxLines"],
+                    "action": "defaulted",
+                    "to": None,
+                })
+            if "textStyle" in node:
+                del node["textStyle"]
+                repairs.append({
+                    "path": ["content", "nodes", node_index, "textStyle"],
+                    "action": "removed-unsupported",
+                })
+
+    if content.get("protocol") == "workbench.prototype.v1":
+        for field in _PROTOTYPE_COLLECTION_DEFAULTS:
+            if field in content:
+                continue
+            content[field] = []
+            repairs.append({
+                "path": ["content", field],
+                "action": "defaulted",
+                "to": [],
+            })
+
+    motions = content.get("motions")
+    if isinstance(motions, list):
+        for motion_index, motion in enumerate(motions):
+            if not isinstance(motion, dict):
+                continue
+            trigger = motion.get("trigger")
+            canonical = _MOTION_TRIGGER_ALIASES.get(trigger) if isinstance(trigger, str) else None
             if canonical is None:
                 continue
-            layout[field] = canonical
+            motion["trigger"] = canonical
             repairs.append({
-                "path": ["content", "nodes", node_index, "layout", field],
-                "from": value,
+                "path": ["content", "motions", motion_index, "trigger"],
+                "from": trigger,
                 "to": canonical,
             })
     return normalized, repairs
