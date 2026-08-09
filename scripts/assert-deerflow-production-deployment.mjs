@@ -45,6 +45,7 @@ const prdReferenceToolTestSource = readText(prdReferenceToolTestPath);
 const prototypeNormalizerSource = readText(prototypeNormalizerPath);
 const prototypeNormalizerTestSource = readText(prototypeNormalizerTestPath);
 const patchManifestSha256 = sha256(patchManifestSource);
+const prototypeNormalizerSha256 = "c24a9bcd295e6edfc3ecfd5a986d6a6a257003f52a8beb4204e6cb3442da8022";
 const expectedCommit = argumentValue("--expected-commit");
 
 assert(gateway, "production runtime Compose must define deerflow");
@@ -158,9 +159,16 @@ for (const requiredLine of [
   "USER 65532:65532",
   `ARG WORKBENCH_DEERFLOW_TOOL_SCOPE_PATCH_SHA256=${patchManifestSha256}`,
   "io.workbench.deerflow.tool-scope-patch-sha256",
+  `ARG WORKBENCH_DEERFLOW_PROTOTYPE_NORMALIZER_SHA256=${prototypeNormalizerSha256}`,
+  "io.workbench.deerflow.prototype-normalizer-sha256",
+  "sha256sum /app/backend/deerflow_workbench_tools/prototype_runtime_normalizer.py",
 ]) {
   assert(deerflowDockerfile.includes(requiredLine), `derived DeerFlow Dockerfile is missing: ${requiredLine}`);
 }
+assert(
+  sha256(prototypeNormalizerSource) === prototypeNormalizerSha256,
+  "Prototype runtime normalizer source hash drifted",
+);
 for (const trustedTool of WORKBENCH_TRUSTED_TOOLS) {
   const [moduleName, functionName] = trustedTool.use.split(":");
   assert(deerflowDockerfile.includes(moduleName), `derived DeerFlow Dockerfile does not probe ${moduleName}`);
@@ -484,13 +492,23 @@ assert(
     && prototypeNormalizerSource.includes("def normalize_runtime_result_prototype_layout_aliases(")
     && prototypeNormalizerSource.includes('"space-between": "spaceBetween"')
     && prototypeNormalizerSource.includes('"space-around": "spaceAround"')
+    && prototypeNormalizerSource.includes('"mount": "enter"')
+    && prototypeNormalizerSource.includes('node["maxLines"] = None')
+    && prototypeNormalizerSource.includes('del node["textStyle"]')
+    && prototypeNormalizerSource.includes("_PROTOTYPE_COLLECTION_DEFAULTS")
     && prototypeNormalizerSource.includes("copy.deepcopy"),
-  "the Prototype runtime normalizer must repair only the known layout aliases on copied values",
+  "the Prototype runtime normalizer must repair only the known compatibility aliases on copied values",
 );
 assert(
   prototypeNormalizerTestSource.includes(
     "test_maps_supported_layout_aliases_without_mutating_the_artifact",
   )
+    && prototypeNormalizerTestSource.includes(
+      "test_repairs_observed_prototype_result_compatibility_gaps",
+    )
+    && prototypeNormalizerTestSource.includes(
+      "test_preserves_existing_invalid_values_but_removes_unsupported_text_style",
+    )
     && prototypeNormalizerTestSource.includes("test_prefixes_repairs_for_a_runtime_result")
     && prototypeNormalizerTestSource.includes("test_leaves_non_prototype_artifacts_unchanged"),
   "the Prototype runtime normalizer contract must cover aliases, result paths, and non-Prototype input",

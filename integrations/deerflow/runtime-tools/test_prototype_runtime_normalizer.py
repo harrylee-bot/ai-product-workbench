@@ -71,6 +71,83 @@ class PrototypeRuntimeNormalizerTests(unittest.TestCase):
             "space-between",
         )
 
+    def test_repairs_observed_prototype_result_compatibility_gaps(self) -> None:
+        artifact = {
+            "kind": "prototype",
+            "content": {
+                "protocol": "workbench.prototype.v1",
+                "nodes": [
+                    {
+                        "kind": "text",
+                        "layout": {},
+                        "style": {"typography": {"align": "left"}},
+                        "textStyle": {"align": "left", "color": "#111111"},
+                    },
+                    {
+                        "kind": "input",
+                        "layout": {},
+                        "style": {"typography": None},
+                        "fieldName": "email",
+                        "optionValue": None,
+                        "required": True,
+                    },
+                ],
+                "motions": [{"trigger": "mount"}],
+            },
+        }
+        original = copy.deepcopy(artifact)
+
+        normalized, repairs = normalize_prototype_layout_aliases(artifact)
+
+        content = normalized["content"]
+        self.assertEqual(artifact, original)
+        self.assertIsNone(content["nodes"][0]["maxLines"])
+        self.assertNotIn("textStyle", content["nodes"][0])
+        self.assertEqual(content["motions"][0]["trigger"], "enter")
+        self.assertEqual(
+            {field: content[field] for field in (
+                "tokens",
+                "assets",
+                "variables",
+                "states",
+                "actions",
+                "bindings",
+            )},
+            {
+                "tokens": [],
+                "assets": [],
+                "variables": [],
+                "states": [],
+                "actions": [],
+                "bindings": [],
+            },
+        )
+        self.assertEqual(content["nodes"][1]["fieldName"], "email")
+        self.assertIsNone(content["nodes"][1]["optionValue"])
+        self.assertTrue(content["nodes"][1]["required"])
+        self.assertGreaterEqual(len(repairs), 9)
+
+    def test_preserves_existing_invalid_values_but_removes_unsupported_text_style(self) -> None:
+        artifact = {
+            "kind": "prototype",
+            "content": {
+                "protocol": "workbench.prototype.v1",
+                "nodes": [{
+                    "kind": "text",
+                    "style": {"typography": None},
+                    "textStyle": {"align": "left"},
+                    "maxLines": "three",
+                }],
+                "tokens": {"invalid": True},
+            },
+        }
+
+        normalized, _ = normalize_prototype_layout_aliases(artifact)
+
+        self.assertNotIn("textStyle", normalized["content"]["nodes"][0])
+        self.assertEqual(normalized["content"]["nodes"][0]["maxLines"], "three")
+        self.assertEqual(normalized["content"]["tokens"], {"invalid": True})
+
     def test_leaves_non_prototype_artifacts_unchanged(self) -> None:
         artifact = {
             "kind": "prd",

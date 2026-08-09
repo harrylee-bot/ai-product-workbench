@@ -7,6 +7,7 @@ import sys
 import unittest
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
+from unittest.mock import patch
 
 
 def _tool(*_args: object, **_kwargs: object):
@@ -118,6 +119,56 @@ class ArtifactDraftToolTests(unittest.TestCase):
         )
         self.assertEqual(response["normalizations"][0]["to"], "spaceBetween")
         self.assertEqual(draft["content"]["nodes"][0]["layout"]["justify"], "space-between")
+
+    def test_normalizes_observed_prototype_gaps_before_draft_validation(self) -> None:
+        draft = {
+            "kind": "prototype",
+            "content": {
+                "protocol": "workbench.prototype.v1",
+                "nodes": [{
+                    "kind": "text",
+                    "style": {"typography": None},
+                    "textStyle": {"align": "left"},
+                }, {
+                    "kind": "input",
+                    "style": {"typography": None},
+                    "required": True,
+                    "fieldName": "email",
+                    "optionValue": None,
+                }],
+                "motions": [{"trigger": "mount"}],
+            },
+        }
+        validation = {
+            "protocol": "workbench.runtime.validation.v1",
+            "ok": True,
+            "issues": [],
+            "candidateChecksum": "c" * 64,
+        }
+
+        with patch(
+            "deerflow_workbench_tools.artifact_draft_tool.validate_runtime_artifact_draft",
+            return_value=validation,
+        ) as validate:
+            content, artifact = workbench_artifact_draft_publish.func(
+                self.runtime,
+                0,
+                draft,
+            )
+
+        normalized = validate.call_args.args[0]
+        document = normalized["content"]
+        self.assertIsNone(document["nodes"][0]["maxLines"])
+        self.assertNotIn("textStyle", document["nodes"][0])
+        self.assertEqual(document["motions"][0]["trigger"], "enter")
+        for field in ("tokens", "assets", "variables", "states", "actions", "bindings"):
+            self.assertEqual(document[field], [])
+        self.assertTrue(document["nodes"][1]["required"])
+        self.assertEqual(document["nodes"][1]["fieldName"], "email")
+        self.assertIsNone(document["nodes"][1]["optionValue"])
+        self.assertEqual(artifact["draft"], normalized)
+        self.assertGreaterEqual(len(json.loads(content)["normalizations"]), 9)
+        self.assertNotIn("maxLines", draft["content"]["nodes"][0])
 
     def test_returns_scoped_validation_issues_for_an_invalid_draft(self) -> None:
         invalid = copy.deepcopy(self.draft)

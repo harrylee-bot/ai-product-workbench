@@ -11,6 +11,7 @@ ARG DEERFLOW_NODE_IMAGE
 ARG DEERFLOW_SOURCE_COMMIT
 ARG WORKBENCH_SOURCE_COMMIT
 ARG WORKBENCH_DEERFLOW_TOOL_SCOPE_PATCH_SHA256=f4289e1b2b30c9e3cb180d5d0e538c6fbd3395344b14e523a6108262f7e5d369
+ARG WORKBENCH_DEERFLOW_PROTOTYPE_NORMALIZER_SHA256=c24a9bcd295e6edfc3ecfd5a986d6a6a257003f52a8beb4204e6cb3442da8022
 
 LABEL org.opencontainers.image.title="产品工作台 DeerFlow Runtime" \
       org.opencontainers.image.revision="${WORKBENCH_SOURCE_COMMIT}" \
@@ -18,6 +19,7 @@ LABEL org.opencontainers.image.title="产品工作台 DeerFlow Runtime" \
       io.workbench.deerflow.validator-node-image="${DEERFLOW_NODE_IMAGE}" \
       io.workbench.deerflow.source-commit="${DEERFLOW_SOURCE_COMMIT}" \
       io.workbench.deerflow.tool-scope-patch-sha256="${WORKBENCH_DEERFLOW_TOOL_SCOPE_PATCH_SHA256}" \
+      io.workbench.deerflow.prototype-normalizer-sha256="${WORKBENCH_DEERFLOW_PROTOTYPE_NORMALIZER_SHA256}" \
       io.workbench.deerflow.contract-version="1"
 
 # The candidate-owned extension is embedded in the derived image. Production
@@ -39,6 +41,7 @@ USER root
 # deterministic patch, run its contracts against the image's real
 # LangChain/LangGraph dependencies, then verify the resulting file hashes.
 RUN test "${DEERFLOW_SOURCE_COMMIT}" = "7a6c4a994a86583d2a3c056ee9d0f157d4f030c2" \
+    && test "$(sha256sum /app/backend/deerflow_workbench_tools/prototype_runtime_normalizer.py | awk '{print $1}')" = "${WORKBENCH_DEERFLOW_PROTOTYPE_NORMALIZER_SHA256}" \
     && python3 /opt/workbench/deerflow/source-patch/apply.py \
       --root /app/backend/packages/harness \
       --gateway-root /app/backend \
