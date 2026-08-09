@@ -363,7 +363,7 @@ class WorkbenchRequestContextTests(unittest.TestCase):
 
     def test_exact_trusted_prd_scope_receives_the_named_recursion_budget(self) -> None:
         self.assertEqual(_DEFAULT_LEAD_GRAPH_RECURSION_LIMIT, 100)
-        self.assertEqual(_WORKBENCH_PRD_LEAD_GRAPH_RECURSION_LIMIT, 200)
+        self.assertEqual(_WORKBENCH_PRD_LEAD_GRAPH_RECURSION_LIMIT, 600)
         trusted_internal_caller = _is_trusted_internal_caller(
             SimpleNamespace(
                 state=SimpleNamespace(
@@ -399,7 +399,7 @@ class WorkbenchRequestContextTests(unittest.TestCase):
         )
 
     def test_exact_trusted_prototype_and_code_scopes_receive_the_named_recursion_budget(self) -> None:
-        self.assertEqual(_WORKBENCH_PROTOTYPE_CODE_LEAD_GRAPH_RECURSION_LIMIT, 200)
+        self.assertEqual(_WORKBENCH_PROTOTYPE_CODE_LEAD_GRAPH_RECURSION_LIMIT, 400)
         trusted_internal_caller = _is_trusted_internal_caller(
             SimpleNamespace(
                 state=SimpleNamespace(

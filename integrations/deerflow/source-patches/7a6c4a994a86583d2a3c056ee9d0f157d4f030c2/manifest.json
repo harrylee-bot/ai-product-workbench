@@ -52,7 +52,7 @@
     {
       "path": "app/gateway/services.py",
       "upstreamSha256": "4d445c3ed264b346f419204f88073868db7030b2ae307eb6c496ef6f5755eb34",
-      "patchedSha256": "00545892b3f57fe50433f03456ffdd54b931a9f467d561d357f604615318f1d8",
+      "patchedSha256": "d6f9f0ec0a2036d45832149d989eb9e15d644d9cbd98787b84a826ad79de8b33",
       "replacements": [
         {
           "anchor": "def merge_run_context_overrides(config: dict[str, Any], context: Mapping[str, Any] | None) -> None:\n",
@@ -67,7 +67,7 @@
         {
           "anchor": "def merge_run_context_overrides(config: dict[str, Any], context: Mapping[str, Any] | None) -> None:\n",
           "position": "before",
-          "insertion": "_DEFAULT_LEAD_GRAPH_RECURSION_LIMIT = 100\n_WORKBENCH_PRD_LEAD_GRAPH_RECURSION_LIMIT = 200\n_WORKBENCH_PROTOTYPE_CODE_LEAD_GRAPH_RECURSION_LIMIT = 200\n\n\ndef _apply_workbench_lead_recursion_limit(\n    config: dict[str, Any],\n    *,\n    trusted_internal_caller: bool,\n) -> None:\n    normalized_scope = None\n    runtime_context = config.get(\"context\")\n    if trusted_internal_caller is True and isinstance(runtime_context, Mapping):\n        normalized_scope = _normalize_workbench_scope(runtime_context.get(\"workbench\"))\n    requested_artifact_kinds = (\n        normalized_scope.get(\"requestedArtifactKinds\")\n        if normalized_scope is not None\n        else None\n    )\n    config[\"recursion_limit\"] = (\n        _WORKBENCH_PRD_LEAD_GRAPH_RECURSION_LIMIT\n        if requested_artifact_kinds == [\"prd\"]\n        else _WORKBENCH_PROTOTYPE_CODE_LEAD_GRAPH_RECURSION_LIMIT\n        if requested_artifact_kinds in ([\"prototype\"], [\"code\"])\n        else _DEFAULT_LEAD_GRAPH_RECURSION_LIMIT\n    )\n\n\n"
+          "insertion": "_DEFAULT_LEAD_GRAPH_RECURSION_LIMIT = 100\n_WORKBENCH_PRD_LEAD_GRAPH_RECURSION_LIMIT = 600\n_WORKBENCH_PROTOTYPE_CODE_LEAD_GRAPH_RECURSION_LIMIT = 400\n\n\ndef _apply_workbench_lead_recursion_limit(\n    config: dict[str, Any],\n    *,\n    trusted_internal_caller: bool,\n) -> None:\n    normalized_scope = None\n    runtime_context = config.get(\"context\")\n    if trusted_internal_caller is True and isinstance(runtime_context, Mapping):\n        normalized_scope = _normalize_workbench_scope(runtime_context.get(\"workbench\"))\n    requested_artifact_kinds = (\n        normalized_scope.get(\"requestedArtifactKinds\")\n        if normalized_scope is not None\n        else None\n    )\n    config[\"recursion_limit\"] = (\n        _WORKBENCH_PRD_LEAD_GRAPH_RECURSION_LIMIT\n        if requested_artifact_kinds == [\"prd\"]\n        else _WORKBENCH_PROTOTYPE_CODE_LEAD_GRAPH_RECURSION_LIMIT\n        if requested_artifact_kinds in ([\"prototype\"], [\"code\"])\n        else _DEFAULT_LEAD_GRAPH_RECURSION_LIMIT\n    )\n\n\n"
         },
         {
           "anchor": "def merge_run_context_overrides(config: dict[str, Any], context: Mapping[str, Any] | None) -> None:\n",
@@ -158,6 +158,6 @@
     "sha256": "deb4714fc7b80e7095daf83ab608c19b1e0cbaa92adac27b128f42f9e6ab2006"
   },
   "requestContextTest": {
-    "sha256": "ee1f181babe6f1aec1194e9d1b159a8d072365fee6b0f40c2d7b673a1ad8241c"
+    "sha256": "c09af390e900a997a8631ac02fd032a96d2f1366ab653ee28b9e203ba6fbbf23"
   }
 }

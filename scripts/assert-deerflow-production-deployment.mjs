@@ -256,7 +256,7 @@ const gatewayContextPatch = patchManifest.gatewaySources.find(
 assert(
   gatewayContextPatch?.path === "app/gateway/services.py"
     && gatewayContextPatch.upstreamSha256 === "4d445c3ed264b346f419204f88073868db7030b2ae307eb6c496ef6f5755eb34"
-    && gatewayContextPatch.patchedSha256 === "00545892b3f57fe50433f03456ffdd54b931a9f467d561d357f604615318f1d8",
+    && gatewayContextPatch.patchedSha256 === "d6f9f0ec0a2036d45832149d989eb9e15d644d9cbd98787b84a826ad79de8b33",
   "DeerFlow Gateway context patch must bind the audited upstream and patched hashes",
 );
 assert(
@@ -288,13 +288,13 @@ const gatewayContextPatchText = JSON.stringify(gatewayContextPatch.replacements 
 assert(
   gatewayContextPatchText.includes('sanitized.pop(\\"recursion_limit\\", None)')
     && gatewayContextPatchText.includes("_DEFAULT_LEAD_GRAPH_RECURSION_LIMIT = 100")
-    && gatewayContextPatchText.includes("_WORKBENCH_PRD_LEAD_GRAPH_RECURSION_LIMIT = 200")
-    && gatewayContextPatchText.includes("_WORKBENCH_PROTOTYPE_CODE_LEAD_GRAPH_RECURSION_LIMIT = 200")
+    && gatewayContextPatchText.includes("_WORKBENCH_PRD_LEAD_GRAPH_RECURSION_LIMIT = 600")
+    && gatewayContextPatchText.includes("_WORKBENCH_PROTOTYPE_CODE_LEAD_GRAPH_RECURSION_LIMIT = 400")
     && gatewayContextPatchText.includes("_apply_workbench_lead_recursion_limit")
     && gatewayContextPatchText.includes('requestedArtifactKinds\\")\\n        if normalized_scope is not None')
     && gatewayContextPatchText.includes('requested_artifact_kinds == [\\"prd\\"]')
     && gatewayContextPatchText.includes('requested_artifact_kinds in ([\\"prototype\\"], [\\"code\\"])'),
-  "DeerFlow Gateway patch must grant bounded 200-step budgets only to trusted single-kind PRD, Prototype, or Code Runs",
+  "DeerFlow Gateway patch must grant bounded artifact-specific budgets only to trusted single-kind PRD, Prototype, or Code Runs",
 );
 const checkpointHistoryPatch = patchManifest.gatewaySources.find(
   (entry) => entry?.path === "app/gateway/routers/threads.py",
