@@ -442,7 +442,18 @@ export class DeerFlowRuntimeAdapter implements RuntimePort {
             haltProviderHeartbeat();
             streamAbortController.abort(providerTerminalStreamAbort);
           }
-        } catch {
+        } catch (error) {
+          // A missing provider Run cannot recover: DeerFlow has already
+          // discarded the stream's source of truth. Treat a 404 as a terminal
+          // provider error so a heartbeat-only SSE connection cannot leave the
+          // Workbench Run stuck in `running` forever.
+          if (isSdkHttpStatus(error, 404)) {
+            lastProviderStatus = "error";
+            terminalProviderStatus = "error";
+            haltProviderHeartbeat();
+            streamAbortController.abort(providerTerminalStreamAbort);
+            return;
+          }
           // The stream remains authoritative. Transient status-probe failures
           // must not turn a healthy provider run into a synthetic failure.
         }

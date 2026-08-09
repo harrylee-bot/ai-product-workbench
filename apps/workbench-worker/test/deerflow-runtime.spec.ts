@@ -3808,6 +3808,70 @@ describe("DeerFlow runtime adapter", () => {
     expect(runtimeObserver.onExternalFinalization).toHaveBeenCalledTimes(1);
   }, 10_000);
 
+  it("fails an open stream when the provider heartbeat observes a missing Run", async () => {
+    vi.useFakeTimers();
+    try {
+      let runLookupCount = 0;
+      let streamRequestAborted = false;
+      vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request, init: RequestInit = {}) => {
+        const url = new URL(String(input));
+        if (url.pathname === "/api/threads/deer_thread_1/runs/external_run_missing") {
+          runLookupCount += 1;
+          if (runLookupCount === 1) {
+            return Response.json(runtimeRun("external_run_missing"));
+          }
+          return new Response("missing", { status: 404 });
+        }
+        if (url.pathname === "/api/threads/deer_thread_1/runs/external_run_missing/stream") {
+          return new Response(new ReadableStream({
+            start(controller) {
+              controller.enqueue(new TextEncoder().encode([
+                "id: missing-run-values",
+                "event: values",
+                `data: ${JSON.stringify({ messages: [{ type: "human", content: "current turn" }] })}`,
+                "",
+                "",
+              ].join("\n")));
+              init.signal?.addEventListener("abort", () => {
+                streamRequestAborted = true;
+                controller.error(new DOMException("Aborted", "AbortError"));
+              }, { once: true });
+            },
+          }), {
+            status: 200,
+            headers: { "content-type": "text/event-stream" },
+          });
+        }
+        throw new Error(`Unexpected request: ${init.method ?? "GET"} ${url}`);
+      }));
+      const runtimeObserver = observer();
+      const adapter = new DeerFlowRuntimeAdapter({
+        ...workerConfig(),
+        deerFlowIdleTimeoutMs: 30_000,
+      }, { getObject: vi.fn() } as never);
+      const observedExecution = adapter.execute(execution({
+        submission: {
+          mode: "join",
+          providerIdempotencyKey: "wbrt:test-attempt-key",
+          externalRunId: "external_run_missing",
+          lastExternalEventId: "missing-run-previous-event",
+        },
+      }), runtimeObserver);
+      const observedFailure = observedExecution.catch((error: unknown) => error);
+
+      await vi.advanceTimersByTimeAsync(10_000);
+      await vi.advanceTimersByTimeAsync(10_000);
+      await vi.advanceTimersByTimeAsync(10_000);
+
+      await expect(observedFailure).resolves.toMatchObject({ message: "DEERFLOW_RUN_ERROR" });
+      expect(runLookupCount).toBe(2);
+      expect(streamRequestAborted).toBe(true);
+      expect(runtimeObserver.onExternalFinalization).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  }, 10_000);
+
   it("propagates observer persistence failure racing with a terminal heartbeat", async () => {
     vi.useFakeTimers();
     try {
