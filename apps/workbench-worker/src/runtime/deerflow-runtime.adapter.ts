@@ -2103,10 +2103,10 @@ function assertRuntimeResultCheckpoints(
     }
   }
   for (const [artifactIndex, finalDraft] of result.artifacts.entries()) {
-    if (
-      (finalDraft.kind === "prd" || finalDraft.kind === "prototype")
-      && !latestCheckpoints.has(artifactIndex)
-    ) {
+    // A validated Prototype result is a usable initial draft when the provider
+    // did not emit an optional streaming checkpoint. Existing checkpoints stay
+    // binding above, and Prototype patches still require their own checkpoint.
+    if (finalDraft.kind === "prd" && !latestCheckpoints.has(artifactIndex)) {
       throw new Error("RUNTIME_ARTIFACT_DRAFT_CHECKPOINT_MISSING");
     }
   }

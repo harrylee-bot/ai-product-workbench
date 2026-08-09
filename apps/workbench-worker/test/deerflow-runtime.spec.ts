@@ -2930,7 +2930,7 @@ describe("DeerFlow runtime adapter", () => {
     }
   });
 
-  it("fails closed when a Prototype final has no checkpoint or differs from the latest checkpoint", async () => {
+  it("persists a terminal Prototype final without a streaming checkpoint but rejects a checkpoint mismatch", async () => {
     const checkpoint = {
       kind: "prototype" as const,
       title: "Prototype",
@@ -2942,7 +2942,6 @@ describe("DeerFlow runtime adapter", () => {
     const mismatched = { ...checkpoint, content: { ...checkpoint.content, revision: 2 } };
     const states = [
       {
-        expected: "RUNTIME_ARTIFACT_DRAFT_CHECKPOINT_MISSING",
         messages: [
           { type: "human", content: "current turn" },
           ...validatedResultToolMessages({
@@ -2982,12 +2981,24 @@ describe("DeerFlow runtime adapter", () => {
       throw new Error(`Unexpected request: ${init.method ?? "GET"} ${url}`);
     }));
 
-    for (const state of states) {
-      const adapter = new DeerFlowRuntimeAdapter(workerConfig(), { getObject: vi.fn() } as never);
-      await expect(adapter.execute(execution({
-        request: { ...execution().request, requestedArtifactKinds: ["prototype"] },
-      }), observer())).rejects.toThrow(state.expected);
-    }
+    const missingCheckpointObserver = observer();
+    const adapter = new DeerFlowRuntimeAdapter(workerConfig(), { getObject: vi.fn() } as never);
+    await expect(adapter.execute(execution({
+      request: { ...execution().request, requestedArtifactKinds: ["prototype"] },
+    }), missingCheckpointObserver)).resolves.toMatchObject({
+      message: "missing checkpoint",
+      artifacts: [checkpoint],
+    });
+    expect(missingCheckpointObserver.onEvent).toHaveBeenCalledWith(expect.objectContaining({
+      type: "artifact.draft",
+      artifactIndex: 0,
+      draft: checkpoint,
+    }));
+
+    const mismatchAdapter = new DeerFlowRuntimeAdapter(workerConfig(), { getObject: vi.fn() } as never);
+    await expect(mismatchAdapter.execute(execution({
+      request: { ...execution().request, requestedArtifactKinds: ["prototype"] },
+    }), observer())).rejects.toThrow("RUNTIME_ARTIFACT_DRAFT_FINAL_MISMATCH");
   });
 
   it("fails closed when a PRD final has no independently published checkpoint", async () => {
