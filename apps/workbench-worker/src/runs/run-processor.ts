@@ -1703,14 +1703,51 @@ export class RunProcessor {
           include: { artifact: true },
         });
         if (!version) throw new Error("RUNTIME_ARTIFACT_DRAFT_MISSING");
-        assertStagedRuntimeArtifactDraft(
+        const artifact = version.artifact;
+        if (isPrototypeDraft(draft) && !stagedRuntimeArtifactMatchesFinal(
           version,
           draft,
           artifactIndex,
           checksum,
-          "RUNTIME_FINAL_ARTIFACT_DIVERGED",
-        );
-        const artifact = version.artifact;
+        )) {
+          // A terminal Prototype is validated independently by the trusted
+          // result tool and may refine the last streamed checkpoint. Keep the
+          // staging row and patch projections aligned with that authoritative
+          // terminal document before finalizing the version.
+          assertStagedPrototypeFinalIdentity(version, draft, artifactIndex);
+          const synchronized = await tx.artifactVersion.updateMany({
+            where: {
+              id: version.id,
+              status: "staging",
+              checksum: version.checksum,
+            },
+            data: {
+              content: draft.content as Prisma.InputJsonValue,
+              checksum,
+              citations: draft.citations as Prisma.InputJsonArray,
+              runtimeDraftTitle: draft.title,
+            },
+          });
+          if (synchronized.count !== 1) {
+            throw new Error("RUNTIME_FINAL_ARTIFACT_DIVERGED");
+          }
+          await this.prototypePatches.synchronizeCheckpointTx(tx, {
+            runId,
+            artifactVersionId: version.id,
+            artifactId: artifact.id,
+            projectId: run.projectId,
+            document: draft.content,
+            mode: "trusted_final",
+          });
+        } else {
+          assertStagedRuntimeArtifactDraft(
+            version,
+            draft,
+            artifactIndex,
+            checksum,
+            "RUNTIME_FINAL_ARTIFACT_DIVERGED",
+          );
+        }
         if (artifact.currentVersionId !== null || version.version !== 1) {
           throw new Error("RUNTIME_ARTIFACT_DRAFT_CREATE_STATE_INVALID");
         }
@@ -3052,6 +3089,54 @@ function assertStagedRuntimeArtifactDraft(
     || canonicalJson(version.citations) !== canonicalJson(draft.citations)
   ) {
     throw new Error(failureCode);
+  }
+}
+
+function stagedRuntimeArtifactMatchesFinal(
+  version: {
+    runtimeDraftIndex: number | null;
+    runtimeDraftTitle: string | null;
+    schemaVersion: number;
+    checksum: string;
+    citations: Prisma.JsonValue;
+    content: Prisma.JsonValue | null;
+    artifact: { kind: string };
+  },
+  draft: RuntimeArtifactDraft,
+  artifactIndex: number,
+  checksum: string,
+) {
+  return (
+    version.runtimeDraftIndex === artifactIndex
+    && version.runtimeDraftTitle === draft.title
+    && version.artifact.kind === draft.kind
+    && version.schemaVersion === draft.schemaVersion
+    && version.checksum === checksum
+    && version.content !== null
+    && sha256Canonical(version.content) === checksum
+    && canonicalJson(version.citations) === canonicalJson(draft.citations)
+  );
+}
+
+function assertStagedPrototypeFinalIdentity(
+  version: {
+    runtimeDraftIndex: number | null;
+    schemaVersion: number;
+    checksum: string;
+    content: Prisma.JsonValue | null;
+    artifact: { kind: string };
+  },
+  draft: Extract<RuntimeArtifactDraft, { kind: "prototype" }>,
+  artifactIndex: number,
+) {
+  if (
+    version.runtimeDraftIndex !== artifactIndex
+    || version.artifact.kind !== draft.kind
+    || version.schemaVersion !== draft.schemaVersion
+    || version.content === null
+    || sha256Canonical(version.content) !== version.checksum
+  ) {
+    throw new Error("RUNTIME_FINAL_ARTIFACT_DIVERGED");
   }
 }
 
