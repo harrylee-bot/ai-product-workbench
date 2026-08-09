@@ -3808,6 +3808,58 @@ describe("DeerFlow runtime adapter", () => {
     expect(runtimeObserver.onExternalFinalization).toHaveBeenCalledTimes(1);
   }, 10_000);
 
+  it("closes an open stream after a trusted terminal result", async () => {
+    const prototype = minimalPrototypeArtifact();
+    const finalState = {
+      messages: [
+        { type: "human", content: "current turn" },
+        ...artifactDraftToolMessages(prototype, 0, "open-result-checkpoint"),
+        ...validatedResultToolMessages({
+          protocol: "workbench.runtime.result.v1" as const,
+          message: "done",
+          artifacts: [prototype],
+        }, "open-result-result"),
+      ],
+    };
+    let streamRequestAborted = false;
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request, init: RequestInit = {}) => {
+      const url = new URL(String(input));
+      if (url.pathname === "/api/threads/deer_thread_1/runs" && (init.method ?? "GET") === "GET") {
+        return Response.json([]);
+      }
+      if (url.pathname === "/api/threads/deer_thread_1/runs/stream" && init.method === "POST") {
+        return openRuntimeStreamResponse([{
+          id: "open-result-event",
+          event: "values",
+          data: finalState,
+        }], {
+          runId: "external_run_open_result",
+          signal: init.signal,
+          onAbort: () => {
+            streamRequestAborted = true;
+          },
+        });
+      }
+      throw new Error(`Unexpected request: ${init.method ?? "GET"} ${url}`);
+    }));
+    const runtimeObserver = observer();
+    const adapter = new DeerFlowRuntimeAdapter({
+      ...workerConfig(),
+      deerFlowIdleTimeoutMs: 60_000,
+    }, { getObject: vi.fn() } as never);
+
+    await expect(adapter.execute(execution({
+      request: { ...execution().request, requestedArtifactKinds: ["prototype"] },
+    }), runtimeObserver)).resolves.toMatchObject({
+      protocol: "workbench.runtime.result.v1",
+      message: "done",
+      artifacts: [{ kind: "prototype" }],
+    });
+
+    expect(streamRequestAborted).toBe(true);
+    expect(runtimeObserver.onExternalFinalization).toHaveBeenCalledTimes(1);
+  }, 10_000);
+
   it("fails an open stream when the provider heartbeat observes a missing Run", async () => {
     vi.useFakeTimers();
     try {

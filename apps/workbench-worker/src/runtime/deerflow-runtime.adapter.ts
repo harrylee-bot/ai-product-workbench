@@ -90,6 +90,7 @@ const PRD_GENERATION_STAGE_SEQUENCE = [
 ] as const;
 const RUN_PAGE_SIZE = 100;
 const MAX_RUN_RECOVERY_PAGES = 100;
+const TERMINAL_RESULT_STREAM_GRACE_MS = 1_000;
 const KNOWLEDGE_GRANT_TOKEN = /wbkg1\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]{43}/u;
 const CANVAS_GRANT_TOKEN = /wbct1\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]{43}/u;
 const TERMINAL_EXTERNAL_RUN_STATUSES = new Set<Run["status"]>(["error", "success", "timeout", "interrupted"]);
@@ -372,6 +373,10 @@ export class DeerFlowRuntimeAdapter implements RuntimePort {
       "AbortError: DEERFLOW_PROVIDER_TERMINAL_STREAM_ABORT",
     );
     providerTerminalStreamAbort.name = "AbortError";
+    const terminalResultStreamAbort = new Error(
+      "AbortError: DEERFLOW_TERMINAL_RESULT_STREAM_ABORT",
+    );
+    terminalResultStreamAbort.name = "AbortError";
     const providerHeartbeatAbort = new Error("AbortError: DEERFLOW_PROVIDER_HEARTBEAT_STOP");
     providerHeartbeatAbort.name = "AbortError";
     const providerHeartbeatAbortController = new AbortController();
@@ -483,6 +488,24 @@ export class DeerFlowRuntimeAdapter implements RuntimePort {
 
     let stream: AsyncGenerator<{ id?: string; event: string; data: unknown }>;
     let submissionMayHaveBeenAccepted = false;
+    let terminalResultStreamTimer: NodeJS.Timeout | null = null;
+    const isTerminalResultStreamAbort = (error: unknown) => {
+      return (resultToolCallId !== null || inputRequired !== null)
+        && !signal.aborted
+        && streamSignal.aborted
+        && streamSignal.reason === terminalResultStreamAbort
+        && (error === terminalResultStreamAbort || isNamedAbortError(error));
+    };
+    const scheduleTerminalResultStreamAbort = () => {
+      if (terminalResultStreamTimer || streamSignal.aborted) return;
+      terminalResultStreamTimer = setTimeout(() => {
+        terminalResultStreamTimer = null;
+        if (!signal.aborted && !streamSignal.aborted && (resultToolCallId !== null || inputRequired !== null)) {
+          streamAbortController.abort(terminalResultStreamAbort);
+        }
+      }, TERMINAL_RESULT_STREAM_GRACE_MS);
+      terminalResultStreamTimer.unref?.();
+    };
     const joinExternalStream = (lastEventId?: string) => {
       if (!externalRunId) throw new Error("RUNTIME_EXTERNAL_RUN_ID_MISSING");
       return client.runs.joinStream(execution.externalThreadId, externalRunId, {
@@ -875,7 +898,7 @@ export class DeerFlowRuntimeAdapter implements RuntimePort {
           try {
             next = await stream.next();
           } catch (error) {
-            if (isProviderTerminalStreamAbort(error)) break;
+            if (isProviderTerminalStreamAbort(error) || isTerminalResultStreamAbort(error)) break;
             streamReadFailed = true;
             streamReadFailure = error;
             break;
@@ -962,6 +985,11 @@ export class DeerFlowRuntimeAdapter implements RuntimePort {
           }
           await observer.onExternalEvent(externalPart!, effects);
           visibleAssistantText += visibleTextDeltaFromEffects(effects);
+          // A trusted result or input-required interrupt is the terminal
+          // Workbench state. Some DeerFlow deployments keep the SSE response
+          // open after the provider Run has already completed, so close the
+          // reader now and continue finalization without waiting for EOF.
+          if (resultToolCallId !== null || inputRequired !== null) scheduleTerminalResultStreamAbort();
         }
 
         if (streamEndedBySentinel) break;
@@ -1047,6 +1075,8 @@ export class DeerFlowRuntimeAdapter implements RuntimePort {
       if (persistenceError) throw persistenceError;
       throw error;
     } finally {
+      if (terminalResultStreamTimer) clearTimeout(terminalResultStreamTimer);
+      terminalResultStreamTimer = null;
       const heartbeatCleanup = stopProviderHeartbeat();
       if (!streamAbortController.signal.aborted) streamAbortController.abort();
       const [heartbeatResult, streamResult] = await Promise.allSettled([
