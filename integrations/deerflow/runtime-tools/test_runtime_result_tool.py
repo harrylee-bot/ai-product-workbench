@@ -234,6 +234,55 @@ class RuntimeResultToolTests(unittest.TestCase):
             "space-between",
         )
 
+    def test_normalizes_observed_prototype_result_gaps_before_final_validation(self) -> None:
+        candidate = {
+            "protocol": "workbench.runtime.result.v1",
+            "message": "done",
+            "artifacts": [{
+                "kind": "prototype",
+                "content": {
+                    "protocol": "workbench.prototype.v1",
+                    "nodes": [{
+                        "kind": "text",
+                        "style": {"typography": {"align": "left"}},
+                        "textStyle": {"align": "left"},
+                    }],
+                    "motions": [{"trigger": "mount"}],
+                },
+            }],
+        }
+        validation = {
+            "protocol": "workbench.runtime.validation.v1",
+            "ok": True,
+            "issues": [],
+            "candidateChecksum": "c" * 64,
+            "artifactChecksums": ["a" * 64],
+        }
+
+        with patch(
+            "deerflow_workbench_tools.runtime_result_tool.validate_runtime_result",
+            return_value=validation,
+        ) as validate:
+            content, artifact = workbench_runtime_result_submit.func(
+                _runtime(),
+                candidate,
+            )
+
+        normalized = validate.call_args.args[0]
+        document = normalized["artifacts"][0]["content"]
+        self.assertIsNone(document["nodes"][0]["maxLines"])
+        self.assertNotIn("textStyle", document["nodes"][0])
+        self.assertEqual(document["motions"][0]["trigger"], "enter")
+        self.assertEqual(document["tokens"], [])
+        self.assertEqual(document["assets"], [])
+        self.assertEqual(document["variables"], [])
+        self.assertEqual(document["states"], [])
+        self.assertEqual(document["actions"], [])
+        self.assertEqual(document["bindings"], [])
+        self.assertEqual(artifact["result"], normalized)
+        self.assertGreaterEqual(len(json.loads(content)["normalizations"]), 9)
+        self.assertNotIn("maxLines", candidate["artifacts"][0]["content"]["nodes"][0])
+
     def test_rejects_missing_runtime_scope_before_validation(self) -> None:
         runtime = SimpleNamespace(context={}, tool_call_id="call_1")
 
