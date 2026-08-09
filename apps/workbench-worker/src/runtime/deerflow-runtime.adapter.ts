@@ -857,13 +857,17 @@ export class DeerFlowRuntimeAdapter implements RuntimePort {
     try {
       while (true) {
         streamEndedBySentinel = false;
+        let streamReadFailed = false;
+        let streamReadFailure: unknown;
         while (true) {
           let next: IteratorResult<{ id?: string; event: string; data: unknown }>;
           try {
             next = await stream.next();
           } catch (error) {
             if (isProviderTerminalStreamAbort(error)) break;
-            throw error;
+            streamReadFailed = true;
+            streamReadFailure = error;
+            break;
           }
           if (next.done) break;
           const part = next.value;
@@ -957,9 +961,9 @@ export class DeerFlowRuntimeAdapter implements RuntimePort {
 
         // A few DeerFlow deployments close an otherwise healthy SSE response
         // at an infrastructure boundary without sending the explicit end
-        // sentinel. Treat a normal EOF as a reconnect point while the provider
-        // Run is still active; otherwise the last checkpoint would be mistaken
-        // for the terminal result.
+        // sentinel. Treat normal EOF and exhausted SDK transport retries as a
+        // reconnect point while the provider Run is still active; otherwise the
+        // last checkpoint would be mistaken for the terminal result.
         let providerStatus: Run["status"] | null = lastProviderStatus;
         try {
           const providerRun = await client.runs.get(
@@ -971,6 +975,7 @@ export class DeerFlowRuntimeAdapter implements RuntimePort {
           lastProviderStatus = providerStatus;
           onProviderActivity();
         } catch {
+          if (streamReadFailed) throw streamReadFailure;
           // Preserve the historical EOF behavior when a status probe is not
           // available (for example, an older provider test double).
           break;

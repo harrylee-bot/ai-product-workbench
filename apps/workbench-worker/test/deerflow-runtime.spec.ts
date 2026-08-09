@@ -4036,6 +4036,66 @@ describe("DeerFlow runtime adapter", () => {
     }
   }, 10_000);
 
+  it("rejoins an active provider after the stream reader exhausts transport retries", async () => {
+    const requests: Array<{ url: URL; init: RequestInit }> = [];
+    const prototype = minimalPrototypeArtifact();
+    const streamFailure = new Error("Exceeded maximum SSE reconnection attempts (5)");
+    let runGetCount = 0;
+    let streamGetCount = 0;
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request, init: RequestInit = {}) => {
+      const url = new URL(String(input));
+      requests.push({ url, init });
+      if (url.pathname === "/api/threads/deer_thread_1/runs/external_run_transport_retry") {
+        runGetCount += 1;
+        return Response.json(runtimeRun("external_run_transport_retry"));
+      }
+      if (url.pathname === "/api/threads/deer_thread_1/runs/external_run_transport_retry/stream") {
+        streamGetCount += 1;
+        if (streamGetCount === 1) {
+          return new Response(new ReadableStream({
+            start(controller) {
+              controller.error(streamFailure);
+            },
+          }), {
+            status: 200,
+            headers: { "content-type": "text/event-stream" },
+          });
+        }
+        return successfulRuntimeResponse({
+          runId: "external_run_transport_retry",
+          eventId: "transport-retry-final",
+          includeContentLocation: false,
+          message: "Prototype recovered",
+          artifacts: [prototype],
+        });
+      }
+      throw new Error(`Unexpected request: ${init.method ?? "GET"} ${url}`);
+    }));
+    const runtimeObserver = observer();
+    const adapter = new DeerFlowRuntimeAdapter(workerConfig(), { getObject: vi.fn() } as never);
+
+    await expect(adapter.execute(execution({
+      request: { ...execution().request, requestedArtifactKinds: ["prototype"] },
+      submission: {
+        mode: "join",
+        providerIdempotencyKey: "wbrt:test-attempt-key",
+        externalRunId: "external_run_transport_retry",
+        lastExternalEventId: "transport-retry-previous",
+      },
+    }), runtimeObserver)).resolves.toMatchObject({
+      protocol: "workbench.runtime.result.v1",
+      message: "Prototype recovered",
+      artifacts: [{ kind: "prototype" }],
+    });
+
+    expect(runGetCount).toBe(2);
+    expect(streamGetCount).toBe(2);
+    const streamRequests = requests.filter((request) => request.url.pathname.endsWith("/stream"));
+    expect(streamRequests.map((request) => new Headers(request.init.headers).get("Last-Event-ID")))
+      .toEqual(["transport-retry-previous", "transport-retry-previous"]);
+    expect(runtimeObserver.onExternalFinalization).toHaveBeenCalledTimes(1);
+  });
+
   it("recovers a missing externalRunId by attempt metadata and joins without another POST", async () => {
     const requests: Array<{ url: URL; init: RequestInit }> = [];
     const fetchMock = vi.fn(async (input: string | URL | Request, init: RequestInit = {}) => {
