@@ -363,43 +363,99 @@ export class DeerFlowRuntimeAdapter implements RuntimePort {
     baselineState ??= prototypePatchBaselineState(execution.prototypePatchBaselines);
 
     let externalRunPersistence: Promise<void> | null = externalRunId ? Promise.resolve() : null;
+    // Keep stream lifetime separate from the execution signal. A terminal
+    // provider status must be able to close an SSE response that stays open
+    // after the Run has finished without cancelling final result persistence.
+    const streamAbortController = new AbortController();
+    const streamSignal = AbortSignal.any([signal, streamAbortController.signal]);
+    const providerTerminalStreamAbort = new Error(
+      "AbortError: DEERFLOW_PROVIDER_TERMINAL_STREAM_ABORT",
+    );
+    providerTerminalStreamAbort.name = "AbortError";
+    const providerHeartbeatAbort = new Error("AbortError: DEERFLOW_PROVIDER_HEARTBEAT_STOP");
+    providerHeartbeatAbort.name = "AbortError";
+    const providerHeartbeatAbortController = new AbortController();
+    const abortProviderHeartbeat = () => {
+      providerHeartbeatAbortController.abort(providerHeartbeatAbort);
+    };
+    if (signal.aborted) abortProviderHeartbeat();
+    else signal.addEventListener("abort", abortProviderHeartbeat, { once: true });
+    const providerHeartbeatSignal = providerHeartbeatAbortController.signal;
+    const isProviderTerminalStreamAbort = (error: unknown) => {
+      return terminalProviderStatus !== null
+        && !signal.aborted
+        && streamSignal.aborted
+        && streamSignal.reason === providerTerminalStreamAbort
+        && (error === providerTerminalStreamAbort || isNamedAbortError(error));
+    };
     let providerHeartbeatTimer: NodeJS.Timeout | null = null;
-    let providerHeartbeatInFlight = false;
-    let lastProviderStatus: Run["status"] | null = null;
+    let providerHeartbeatInFlight: Promise<void> | null = null;
+    let lastProviderStatus: Run["status"] | null = recovered?.status ?? null;
+    let terminalProviderStatus: Run["status"] | null = lastProviderStatus !== null
+      && TERMINAL_EXTERNAL_RUN_STATUSES.has(lastProviderStatus)
+      ? lastProviderStatus
+      : null;
+    let providerHeartbeatStopped = terminalProviderStatus !== null;
+    if (terminalProviderStatus) {
+      abortProviderHeartbeat();
+      streamAbortController.abort(providerTerminalStreamAbort);
+    }
     const providerHeartbeatIntervalMs = Math.min(
       30_000,
       Math.max(5_000, Math.floor(this.config.deerFlowIdleTimeoutMs / 3)),
     );
-    const stopProviderHeartbeat = () => {
+    const haltProviderHeartbeat = () => {
+      providerHeartbeatStopped = true;
       if (providerHeartbeatTimer) clearInterval(providerHeartbeatTimer);
       providerHeartbeatTimer = null;
+      signal.removeEventListener("abort", abortProviderHeartbeat);
+      abortProviderHeartbeat();
     };
-    const pollProviderHeartbeat = async () => {
-      if (providerHeartbeatInFlight || signal.aborted || !externalRunId) return;
-      providerHeartbeatInFlight = true;
+    const stopProviderHeartbeat = async () => {
+      const pending = providerHeartbeatInFlight;
+      haltProviderHeartbeat();
+      await pending;
+    };
+    const pollProviderHeartbeat = () => {
+      if (
+        providerHeartbeatInFlight
+        || providerHeartbeatStopped
+        || providerHeartbeatSignal.aborted
+        || !externalRunId
+      ) return;
       const candidateExternalRunId = externalRunId;
-      try {
-        const providerRun = await client.runs.get(
-          execution.externalThreadId,
-          candidateExternalRunId,
-          { signal },
-        );
-        lastProviderStatus = providerRun.status;
-        // SSE comments are intentionally discarded by the SDK. A successful
-        // status probe is still provider activity and must keep the outer idle
-        // budget alive while a model/tool call is doing useful work.
-        onProviderActivity();
-      } catch {
-        // The stream remains authoritative. Transient status-probe failures
-        // must not turn a healthy provider run into a synthetic failure.
-      } finally {
-        providerHeartbeatInFlight = false;
-      }
+      const operation = (async () => {
+        try {
+          const providerRun = await client.runs.get(
+            execution.externalThreadId,
+            candidateExternalRunId,
+            { signal: providerHeartbeatSignal },
+          );
+          if (providerHeartbeatStopped || providerHeartbeatSignal.aborted) return;
+          lastProviderStatus = providerRun.status;
+          // SSE comments are intentionally discarded by the SDK. A successful
+          // status probe is still provider activity and must keep the outer idle
+          // budget alive while a model/tool call is doing useful work.
+          onProviderActivity();
+          if (TERMINAL_EXTERNAL_RUN_STATUSES.has(providerRun.status)) {
+            terminalProviderStatus = providerRun.status;
+            haltProviderHeartbeat();
+            streamAbortController.abort(providerTerminalStreamAbort);
+          }
+        } catch {
+          // The stream remains authoritative. Transient status-probe failures
+          // must not turn a healthy provider run into a synthetic failure.
+        }
+      })();
+      providerHeartbeatInFlight = operation;
+      void operation.then(() => {
+        if (providerHeartbeatInFlight === operation) providerHeartbeatInFlight = null;
+      });
     };
     const startProviderHeartbeat = () => {
-      if (providerHeartbeatTimer || !externalRunId) return;
+      if (providerHeartbeatTimer || providerHeartbeatStopped || !externalRunId) return;
       providerHeartbeatTimer = setInterval(() => {
-        void pollProviderHeartbeat();
+        pollProviderHeartbeat();
       }, providerHeartbeatIntervalMs);
       providerHeartbeatTimer.unref?.();
     };
@@ -426,12 +482,6 @@ export class DeerFlowRuntimeAdapter implements RuntimePort {
         streamIdleReconnect,
       });
     };
-    // The SDK leaves the underlying reader open when an async generator is
-    // stopped with `break`. Keep stream lifetime separate from the execution
-    // signal so the end sentinel can close the HTTP body without cancelling
-    // final result persistence.
-    const streamAbortController = new AbortController();
-    const streamSignal = AbortSignal.any([signal, streamAbortController.signal]);
     const streamMode = this.streamMode(execution.request.requestedArtifactKinds);
     // Values-only streams intentionally rely on the explicit provider
     // heartbeat poll below instead of the SDK's fixed reconnect watchdog.
@@ -803,10 +853,20 @@ export class DeerFlowRuntimeAdapter implements RuntimePort {
       ? submission.lastExternalEventId ?? null
       : null;
     let streamEndedBySentinel = false;
+    let streamBodyFailed = false;
     try {
       while (true) {
         streamEndedBySentinel = false;
-        for await (const part of stream) {
+        while (true) {
+          let next: IteratorResult<{ id?: string; event: string; data: unknown }>;
+          try {
+            next = await stream.next();
+          } catch (error) {
+            if (isProviderTerminalStreamAbort(error)) break;
+            throw error;
+          }
+          if (next.done) break;
+          const part = next.value;
           onProviderActivity();
           // The SDK retains the previous SSE ID across comment-only heartbeat
           // frames and exposes them as an empty event. They carry no business
@@ -891,6 +951,7 @@ export class DeerFlowRuntimeAdapter implements RuntimePort {
 
         if (streamEndedBySentinel) break;
         if (signal.aborted) throw abortError(signal);
+        if (terminalProviderStatus) break;
         if (!externalRunId) throw new Error("RUNTIME_EXTERNAL_RUN_ID_MISSING");
         if (resultToolCallId || inputRequired) break;
 
@@ -914,12 +975,17 @@ export class DeerFlowRuntimeAdapter implements RuntimePort {
           // available (for example, an older provider test double).
           break;
         }
-        if (providerStatus && TERMINAL_EXTERNAL_RUN_STATUSES.has(providerStatus)) break;
+        if (providerStatus && TERMINAL_EXTERNAL_RUN_STATUSES.has(providerStatus)) {
+          terminalProviderStatus = providerStatus;
+          haltProviderHeartbeat();
+          break;
+        }
         await new Promise<void>((resolve) => setTimeout(resolve, 250));
         if (signal.aborted) throw abortError(signal);
         stream = joinExternalStream(lastExternalEventId ?? undefined);
       }
     } catch (error) {
+      streamBodyFailed = true;
       let persistenceError: unknown = null;
       if (externalRunPersistence) {
         try {
@@ -965,13 +1031,30 @@ export class DeerFlowRuntimeAdapter implements RuntimePort {
       if (persistenceError) throw persistenceError;
       throw error;
     } finally {
-      stopProviderHeartbeat();
-      streamAbortController.abort();
+      const heartbeatCleanup = stopProviderHeartbeat();
+      if (!streamAbortController.signal.aborted) streamAbortController.abort();
+      const [heartbeatResult, streamResult] = await Promise.allSettled([
+        heartbeatCleanup,
+        stream.return(undefined),
+      ]);
+      if (!streamBodyFailed && heartbeatResult.status === "rejected") {
+        throw heartbeatResult.reason;
+      }
+      if (
+        !streamBodyFailed
+        && streamResult.status === "rejected"
+        && !(streamSignal.aborted && isNamedAbortError(streamResult.reason))
+      ) {
+        throw streamResult.reason;
+      }
     }
 
+    if (terminalProviderStatus === "error" || terminalProviderStatus === "timeout") {
+      throw new Error("DEERFLOW_RUN_ERROR");
+    }
     if (!externalRunId || !externalRunPersistence) throw new Error("RUNTIME_EXTERNAL_RUN_ID_MISSING");
     await externalRunPersistence;
-    if (finalState === undefined) {
+    if (finalState === undefined || terminalProviderStatus !== null) {
       finalState = await client.threads.getState(execution.externalThreadId, undefined, { signal });
     }
 
@@ -1730,6 +1813,12 @@ function byteChunk(value: unknown): Uint8Array {
 
 function abortError(signal?: AbortSignal) {
   return signal?.reason instanceof Error ? signal.reason : new Error("RUNTIME_ABORTED");
+}
+
+function isNamedAbortError(error: unknown) {
+  if (!error || typeof error !== "object") return false;
+  const candidate = error as { name?: unknown; message?: unknown };
+  return candidate.name === "AbortError" || candidate.message === "AbortError";
 }
 
 function extractionFileName(source: RuntimeSource) {
