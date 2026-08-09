@@ -1,0 +1,101 @@
+name: Candidate runtime image export
+
+on:
+  pull_request:
+    types: [opened, reopened, synchronize]
+
+permissions:
+  contents: read
+
+env:
+  WORKBENCH_CANDIDATE_SOURCE_COMMIT: 4ad674898c4dde7d22a17688201ac242bd287e3b
+
+jobs:
+  export-runtime-image:
+    if: >-
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.event.pull_request.head.ref == 'codex/trigger-deerflow-export-4ad67489'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - name: Checkout verified candidate source
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          ref: ${{ env.WORKBENCH_CANDIDATE_SOURCE_COMMIT }}
+          persist-credentials: false
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+
+      - name: Build exact DeerFlow candidate image
+        env:
+          DEERFLOW_BASE_IMAGE: ${{ vars.WORKBENCH_DEERFLOW_BASE_IMAGE_REF }}
+          DEERFLOW_NODE_IMAGE: ${{ vars.WORKBENCH_DEERFLOW_NODE_IMAGE_REF }}
+          DEERFLOW_SOURCE_COMMIT: ${{ vars.WORKBENCH_DEERFLOW_COMMIT }}
+          IMAGE_TAG: workbench-candidate-4ad67489-deerflow:canonical-v1
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$WORKBENCH_CANDIDATE_SOURCE_COMMIT"
+          printf '%s' "$DEERFLOW_BASE_IMAGE" | grep -Eq '@sha256:[a-f0-9]{64}$'
+          printf '%s' "$DEERFLOW_NODE_IMAGE" | grep -Eq '@sha256:[a-f0-9]{64}$'
+          printf '%s' "$DEERFLOW_SOURCE_COMMIT" | grep -Eq '^[a-f0-9]{40}$'
+          docker buildx build \
+            --load \
+            --file integrations/deerflow/Dockerfile \
+            --target runtime \
+            --label "org.opencontainers.image.revision=$WORKBENCH_CANDIDATE_SOURCE_COMMIT" \
+            --tag "$IMAGE_TAG" \
+            --build-arg "DEERFLOW_BASE_IMAGE=$DEERFLOW_BASE_IMAGE" \
+            --build-arg "DEERFLOW_NODE_IMAGE=$DEERFLOW_NODE_IMAGE" \
+            --build-arg "DEERFLOW_SOURCE_COMMIT=$DEERFLOW_SOURCE_COMMIT" \
+            --build-arg "WORKBENCH_SOURCE_COMMIT=$WORKBENCH_CANDIDATE_SOURCE_COMMIT" \
+            .
+          docker image inspect "$IMAGE_TAG" \
+            --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}' \
+            | grep -Fx "$WORKBENCH_CANDIDATE_SOURCE_COMMIT"
+
+      - name: Probe image entrypoint and configured tools
+        env:
+          IMAGE_TAG: workbench-candidate-4ad67489-deerflow:canonical-v1
+        run: |
+          set -euo pipefail
+          docker image inspect "$IMAGE_TAG" --format '{{.Config.User}}' | grep -Fx '65532:65532'
+          docker run --rm --network none \
+            --read-only \
+            --cap-drop ALL \
+            --security-opt no-new-privileges:true \
+            --tmpfs /tmp:size=1073741824,uid=65532,gid=65532,mode=1770 \
+            --env UV_CACHE_DIR=/tmp/uv-cache \
+            --entrypoint /bin/sh "$IMAGE_TAG" -ec \
+            'cd /app/backend
+             uv run --no-sync uvicorn --help >/dev/null
+             PYTHONPATH=/app/backend/packages/harness:/app/backend uv run --no-sync python -c '\''import importlib; configured_tools = (("workbench_artifact_draft_publish", "deerflow_workbench_tools.artifact_draft_tool", "workbench_artifact_draft_publish"), ("workbench_generation_stage_update", "deerflow_workbench_tools.generation_stage_tool", "workbench_generation_stage_update"), ("workbench_prototype_patch_publish", "deerflow_workbench_tools.prototype_patch_tool", "workbench_prototype_patch_publish"), ("workbench_knowledge_retrieve", "deerflow_workbench_tools.knowledge_tool", "workbench_knowledge_retrieve"), ("workbench_runtime_result_submit", "deerflow_workbench_tools.runtime_result_tool", "workbench_runtime_result_submit"), ("read_file", "deerflow_workbench_tools.prd_reference_tool", "workbench_prd_reference_read")); resolved_tools = [getattr(importlib.import_module(module), attribute) for _, module, attribute in configured_tools]; assert [getattr(tool, "name", None) for tool in resolved_tools] == [name for name, _, _ in configured_tools]'\'''
+
+      - name: Export image with checksums
+        env:
+          IMAGE_TAG: workbench-candidate-4ad67489-deerflow:canonical-v1
+        run: |
+          set -euo pipefail
+          mkdir -p output
+          docker image inspect "$IMAGE_TAG" --format '{{.Id}}' > output/deerflow.image-id
+          docker image inspect "$IMAGE_TAG" --format '{{json .Config.Labels}}' > output/deerflow.labels.json
+          docker save "$IMAGE_TAG" | zstd -T0 -3 -o output/deerflow.docker.tar.zst
+          sha256sum output/* > output/deerflow.sha256
+
+      - name: Upload deployable image artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: functional-runtime-image-deerflow-4ad67489
+          path: output/
+          if-no-files-found: error
+          retention-days: 1
