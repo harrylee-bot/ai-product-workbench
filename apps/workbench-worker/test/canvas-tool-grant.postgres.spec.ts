@@ -192,7 +192,11 @@ async function seedGrantFixture(db: PrismaClient): Promise<GrantFixture> {
         threadId: fixture.threadId,
         adapter: "deerflow",
         externalThreadId: `canvas_grant_external_thread_${suffix}`,
-        metadata: { workbenchThreadId: fixture.threadId },
+        metadata: {
+          workbenchProjectId: fixture.projectId,
+          workbenchThreadId: fixture.threadId,
+          workbenchPrincipalId: fixture.principalId,
+        },
       },
     });
     await tx.run.create({

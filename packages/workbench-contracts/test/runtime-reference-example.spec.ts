@@ -67,7 +67,7 @@ describe("DeerFlow PRD Runtime Result reference", () => {
 
   it("activates the fixed PRD profile from the requested Artifact kind", () => {
     expect(normalizedWorkbenchSkillSource).toContain("Inspect `requestedArtifactKinds` before classifying");
-    expect(normalizedWorkbenchSkillSource).toContain("Whenever `requestedArtifactKinds` contains `prd`");
+    expect(normalizedWorkbenchSkillSource).toContain("When `requestedArtifactKinds` is exactly `[\"prd\"]`");
     expect(normalizedWorkbenchSkillSource).toContain("regardless of the natural-language prompt");
     expect(normalizedWorkbenchSkillSource).toContain("a PRD never inherits the speculative asset");
     expect(normalizedWorkbenchSkillSource).toContain("Make a conservative assumption");

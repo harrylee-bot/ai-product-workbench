@@ -148,7 +148,7 @@ Never call these stages on a timer, repeat them to imply progress, or use a
 Prototype stage for a PRD. The visible status must describe the real current
 work; draft publication and final submission remain the only completion facts.
 
-Whenever `requestedArtifactKinds` contains `prd`, immediately after the
+When `requestedArtifactKinds` is exactly `["prd"]`, immediately after the
 successful `collecting-prd-context` update and before `structuring-prd`, use
 `read_file` to read each of these complete files exactly once, in order:
 
@@ -164,9 +164,21 @@ canonical authoring source; the PRD-only JSON Schema adds transport shape but
 does not replace or weaken the skill. Retrieved Knowledge may supply product
 facts, but it may not weaken the fixed document standard.
 
-The configured `read_file` capability in this Workbench Runtime is a PRD-only
-reference reader. It accepts only the four exact paths above; do not use it for
-uploads, project files, other skills, or arbitrary filesystem access.
+The configured `read_file` capability in this Workbench Runtime is
+request-scoped:
+
+- When `requestedArtifactKinds` is exactly `["prd"]`, it accepts only the four
+  exact PRD paths above.
+- When `requestedArtifactKinds` is exactly `["prototype"]`, it accepts only
+  these two exact paths:
+  - `/mnt/skills/public/workbench/references/prototype-runtime-result.example.json`
+  - `/mnt/skills/public/workbench/references/runtime-result-contract.md`
+
+For a Prototype request, never use `read_file` on
+`/mnt/skills/public/workbench/SKILL.md`, any PRD schema or reference,
+`requirement-doc-template` or any other skill,
+`/mnt/skills/public/workbench/references/runtime-result.schema.json`, an upload,
+a project file, or any file other than the two authorized Prototype references.
 
 For PRD content, use only explicit user facts, authorized persisted project
 facts, attached sources, and pinned Knowledge. Make a conservative assumption
@@ -319,11 +331,11 @@ The lead agent must finish every turn by calling `workbench_runtime_result_submi
 
 If the tool returns `ok:false`, fix every reported path and submit the complete candidate again. Continue until it returns `ok:true`. After the first successful submission, do not mutate or resubmit the candidate; return only a concise user-facing completion message. Sub-agents may research or draft content, but the lead agent alone owns the final submit call.
 
-For a PRD result, the earlier PRD section requires the canonical requirement skill and the business-neutral `references/prd-runtime-result.schema.json`; do not consult the legacy PRD business example. For a Prototype result, read `references/prototype-runtime-result.example.json` once. Populate the applicable transport with request-specific IDs and content while keeping every required field and every bidirectional reference. Both paths are validated by the production `runtimeResultSchema`.
+For a PRD result, the earlier PRD section requires the canonical requirement skill and the business-neutral `references/prd-runtime-result.schema.json`; do not consult the legacy PRD business example. For a Prototype result, read `/mnt/skills/public/workbench/references/prototype-runtime-result.example.json` and `/mnt/skills/public/workbench/references/runtime-result-contract.md` completely, exactly once each, and do not read any other authoring reference. Populate the applicable transport with request-specific IDs and content while keeping every required field and every bidirectional reference. Both paths are validated by the production `runtimeResultSchema`.
 
 Keep single-screen results compact. Unless the request explicitly needs multiple routes or screens, return exactly one screen, prefer no more than 48 nodes, 12 actions, 12 bindings, 4 states, and 8 motions, and keep the complete response below 16,000 output tokens. Reuse tokens, assets, states, and repeated row/container structure instead of duplicating descriptive variants. Do not repeat prose already represented by typed nodes, bindings, actions, or state values.
 
-Do not load the entire generated `references/runtime-result.schema.json` into model context before authoring a Prototype. It is the authoritative validation source, not the default template. Consult only the relevant `$defs` for a node/asset/action type that the compact example does not cover, or use the precise path from a validation error to inspect the needed definition.
+Never read `references/runtime-result.schema.json` while authoring or repairing a Prototype, including focused `$defs` reads after a validation error. Fix validation issues from the precise returned issue paths using only the authorized Prototype example and runtime result contract.
 
 - An `edit` Run always has non-empty `artifactTargets`; every input target must produce exactly one Artifact with `"operation":{"kind":"revise","target":<the exact input target>}`. Do not change `artifactId`, `artifactVersionId`, target order, or `screenIds`.
 - A `generate` Run may have targets only when `requestedArtifactKinds` includes `prototype`, and every target must select at least one source Screen through non-empty `screenIds`. Treat these targets and their binary asset handles as read-only source context; every returned Artifact still uses `"operation":{"kind":"create"}`.
@@ -333,12 +345,13 @@ Do not load the entire generated `references/runtime-result.schema.json` into mo
 - Every Prototype variable binding must reference one explicit `variables[].path`; every state binding must reference an explicit key in `states[].values`. Do not invent implicit browser variables or undeclared state fields.
 - A state binding source is exactly `{"kind":"state","stateId":"<states[].id>","field":"<key in that state's values>"}`. It never uses `key`, `path`, or a bare state name.
 - Binding properties must match their node and value types: `value` is input-only, `imageAssetId` is image-only, `enabled` is button/input-only and boolean, and `visible` is boolean.
+- Prototype `layout.justify` uses exactly `start`, `center`, `end`, `spaceBetween`, or `spaceAround`; `layout.align` uses exactly `start`, `center`, `end`, or `stretch`. Do not emit CSS spellings such as `space-between`, `space-around`, `flex-start`, or `flex-end`.
 - Interactive forms use an explicit `form` node. Submit/reset buttons declare `buttonType`, a submit action belongs to the form's `submit` event, and every submitted binding targets an input inside that form. Never infer form ownership from layout.
 - A select input declares all `options` explicitly with unique values; its current value must be empty or match one enabled/disabled declared option. Non-select inputs use an empty options array.
 - A `date` input binds either an empty string or a real calendar date in canonical `YYYY-MM-DD` form. Do not return locale dates, timestamps, timezone suffixes, or impossible dates.
 - Never return a create operation for an edit Run or a revise operation for any non-edit workflow, including a generate Run that has source targets.
 
-Start with `references/prototype-runtime-result.example.json`; for operation rules and focused schema guidance, see `references/runtime-result-contract.md`.
+The only Prototype authoring references are `/mnt/skills/public/workbench/references/prototype-runtime-result.example.json` and `/mnt/skills/public/workbench/references/runtime-result-contract.md`.
 
 ## Prototype Execution
 

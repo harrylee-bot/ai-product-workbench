@@ -1717,7 +1717,11 @@ async function seedRunFixture(
           threadId: ids.threadId,
           adapter: "deerflow",
           externalThreadId,
-          metadata: { workbenchThreadId: ids.threadId },
+          metadata: {
+            workbenchProjectId: ids.projectId,
+            workbenchThreadId: ids.threadId,
+            workbenchPrincipalId: ids.principalId,
+          },
         },
       });
     }

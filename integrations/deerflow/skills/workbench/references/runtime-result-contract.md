@@ -41,6 +41,12 @@ Target Prototype snapshots may include `assets` containing verified binary metad
 
 PRD and Prototype content must satisfy the complete schemas in `runtime-result.schema.json`; do not substitute free-form Markdown or an abbreviated object. Prototype `variables` and state `values` are explicit runtime data sources: every variable/state binding must resolve to one of them, and binding node/value types must match the schema. Forms, submit/reset button types, submit ownership, and select options are explicit IR fields; do not rely on renderer inference.
 
+Prototype layout enums use Workbench spellings, not CSS spellings. For
+`layout.justify`, use exactly `start`, `center`, `end`, `spaceBetween`, or
+`spaceAround`; for `layout.align`, use exactly `start`, `center`, `end`, or
+`stretch`. Never emit CSS aliases such as `space-between`, `space-around`,
+`flex-start`, or `flex-end`.
+
 ### PRD authoring fast path
 
 Use `prd-runtime-result.schema.json` as the business-neutral transport shape after reading the installed `requirement-doc-template` skill and its canonical references. New PRDs use Artifact schemaVersion 2 and `workbench.prd.v2`; v1 exists only for compatibility with older Artifacts. Populate the cover, version history, manual table of contents, fixed sections, typed channel table, both product diagrams, degradation plan, 21-row safety baseline, typed inline content, and valid bidirectional goal/requirement/acceptance/flow references only from the current request and authorized sources. Never use a filled PRD business example as an authoring source.

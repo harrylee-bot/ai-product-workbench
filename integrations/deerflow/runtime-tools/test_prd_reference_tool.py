@@ -52,6 +52,12 @@ REFERENCE_SOURCES = {
     "/mnt/skills/public/workbench/references/prd-runtime-result.schema.json": (
         ROOT / "integrations/deerflow/skills/workbench/references/prd-runtime-result.schema.json"
     ),
+    "/mnt/skills/public/workbench/references/prototype-runtime-result.example.json": (
+        ROOT / "integrations/deerflow/skills/workbench/references/prototype-runtime-result.example.json"
+    ),
+    "/mnt/skills/public/workbench/references/runtime-result-contract.md": (
+        ROOT / "integrations/deerflow/skills/workbench/references/runtime-result-contract.md"
+    ),
 }
 EXPECTED_PHYSICAL_PATHS = {
     "/mnt/skills/public/requirement-doc-template/SKILL.md": (
@@ -66,16 +72,27 @@ EXPECTED_PHYSICAL_PATHS = {
     "/mnt/skills/public/workbench/references/prd-runtime-result.schema.json": (
         Path("/app/skills/public/workbench/references/prd-runtime-result.schema.json")
     ),
+    "/mnt/skills/public/workbench/references/prototype-runtime-result.example.json": (
+        Path("/app/skills/public/workbench/references/prototype-runtime-result.example.json")
+    ),
+    "/mnt/skills/public/workbench/references/runtime-result-contract.md": (
+        Path("/app/skills/public/workbench/references/runtime-result-contract.md")
+    ),
 }
+PRD_PATHS = tuple(path for path in REFERENCE_SOURCES if "prototype" not in path and not path.endswith("runtime-result-contract.md"))
+PROTOTYPE_PATHS = tuple(path for path in REFERENCE_SOURCES if path not in PRD_PATHS)
 
 
 class PrdReferenceToolTests(unittest.TestCase):
     def setUp(self) -> None:
-        self.runtime = SimpleNamespace(
+        self.prd_runtime = SimpleNamespace(
             context={"workbench": {"requestedArtifactKinds": ["prd"]}},
         )
+        self.prototype_runtime = SimpleNamespace(
+            context={"workbench": {"requestedArtifactKinds": ["prototype"]}},
+        )
 
-    def test_schema_is_named_read_file_and_allows_only_four_complete_paths(self) -> None:
+    def test_schema_is_named_read_file_and_allows_only_six_complete_paths(self) -> None:
         tool = prd_reference_tool.workbench_prd_reference_read
         signature = inspect.signature(tool.func)
         path_type = get_type_hints(tool.func)["path"]
@@ -88,23 +105,28 @@ class PrdReferenceToolTests(unittest.TestCase):
         self.assertNotIn("end_line", signature.parameters)
         with self.assertRaisesRegex(TypeError, "unexpected keyword argument 'start_line'"):
             tool.func(
-                self.runtime,
+                self.prd_runtime,
                 "Read the complete reference",
                 next(iter(REFERENCE_SOURCES)),
                 start_line=1,
             )
 
-    def test_reads_each_exact_static_path_and_returns_complete_utf8_unchanged(self) -> None:
+    def test_reads_each_exact_authorized_static_path_and_returns_complete_utf8_unchanged(self) -> None:
         self.assertEqual(
-            set(prd_reference_tool.PRD_REFERENCE_FILES),
+            set(prd_reference_tool.WORKBENCH_REFERENCE_FILES),
             set(REFERENCE_SOURCES),
         )
         for virtual_path, source_path in REFERENCE_SOURCES.items():
             with self.subTest(path=virtual_path):
                 content = source_path.read_bytes()
-                reference = prd_reference_tool.PRD_REFERENCE_FILES[virtual_path]
+                reference = prd_reference_tool.WORKBENCH_REFERENCE_FILES[virtual_path]
                 self.assertEqual(reference.physical_path, EXPECTED_PHYSICAL_PATHS[virtual_path])
                 self.assertEqual(hashlib.sha256(content).hexdigest(), reference.sha256)
+                runtime = (
+                    self.prd_runtime
+                    if virtual_path in PRD_PATHS
+                    else self.prototype_runtime
+                )
                 with patch.object(
                     Path,
                     "read_bytes",
@@ -112,8 +134,8 @@ class PrdReferenceToolTests(unittest.TestCase):
                     return_value=content,
                 ) as read_bytes:
                     result = prd_reference_tool.workbench_prd_reference_read.func(
-                        self.runtime,
-                        "Read the complete pinned PRD reference",
+                        runtime,
+                        "Read the complete pinned Workbench reference",
                         virtual_path,
                     )
                 self.assertEqual(result, content.decode("utf-8", errors="strict"))
@@ -130,21 +152,21 @@ class PrdReferenceToolTests(unittest.TestCase):
             with self.subTest(path=invalid_path):
                 with self.assertRaisesRegex(
                     ValueError,
-                    "WORKBENCH_PRD_REFERENCE_PATH_INVALID",
+                    "WORKBENCH_REFERENCE_PATH_INVALID",
                 ):
                     prd_reference_tool.workbench_prd_reference_read.func(
-                        self.runtime,
-                        "Read a PRD reference",
+                        self.prd_runtime,
+                        "Read a Workbench reference",
                         invalid_path,
                     )
         with self.assertRaisesRegex(TypeError, "unexpected keyword argument 'file_path'"):
             prd_reference_tool.workbench_prd_reference_read.func(
-                self.runtime,
-                "Read a PRD reference",
+                self.prd_runtime,
+                "Read a Workbench reference",
                 file_path=next(iter(REFERENCE_SOURCES)),
             )
 
-    def test_rejects_missing_malformed_non_prd_and_mixed_scope(self) -> None:
+    def test_rejects_missing_malformed_unauthorized_and_mixed_scope(self) -> None:
         virtual_path = next(iter(REFERENCE_SOURCES))
         cases = (
             ({}, "WORKBENCH_RUNTIME_SCOPE_MISSING"),
@@ -159,11 +181,11 @@ class PrdReferenceToolTests(unittest.TestCase):
             ),
             (
                 {"workbench": {"requestedArtifactKinds": ["prototype"]}},
-                "WORKBENCH_PRD_REFERENCE_TOOL_NOT_AUTHORIZED",
+                "WORKBENCH_REFERENCE_TOOL_NOT_AUTHORIZED",
             ),
             (
                 {"workbench": {"requestedArtifactKinds": ["prd", "prototype"]}},
-                "WORKBENCH_PRD_REFERENCE_TOOL_NOT_AUTHORIZED",
+                "WORKBENCH_REFERENCE_TOOL_NOT_AUTHORIZED",
             ),
         )
         for context, error_code in cases:
@@ -179,15 +201,15 @@ class PrdReferenceToolTests(unittest.TestCase):
     def test_maps_missing_and_unreadable_files_to_stable_error_codes(self) -> None:
         virtual_path = next(iter(REFERENCE_SOURCES))
         for error, error_code in (
-            (FileNotFoundError(), "WORKBENCH_PRD_REFERENCE_FILE_MISSING"),
-            (PermissionError(), "WORKBENCH_PRD_REFERENCE_FILE_UNREADABLE"),
+            (FileNotFoundError(), "WORKBENCH_REFERENCE_FILE_MISSING"),
+            (PermissionError(), "WORKBENCH_REFERENCE_FILE_UNREADABLE"),
         ):
             with self.subTest(error_code=error_code):
                 with patch.object(Path, "read_bytes", side_effect=error):
                     with self.assertRaisesRegex(ValueError, error_code):
                         prd_reference_tool.workbench_prd_reference_read.func(
-                            self.runtime,
-                            "Read a PRD reference",
+                            self.prd_runtime,
+                            "Read a Workbench reference",
                             virtual_path,
                         )
 
@@ -196,32 +218,33 @@ class PrdReferenceToolTests(unittest.TestCase):
         with patch.object(Path, "read_bytes", return_value=b"tampered"):
             with self.assertRaisesRegex(
                 ValueError,
-                "WORKBENCH_PRD_REFERENCE_SHA256_MISMATCH",
+                "WORKBENCH_REFERENCE_SHA256_MISMATCH",
             ):
                 prd_reference_tool.workbench_prd_reference_read.func(
-                    self.runtime,
-                    "Read a PRD reference",
+                    self.prd_runtime,
+                    "Read a Workbench reference",
                     virtual_path,
                 )
 
     def test_rejects_non_utf8_after_the_pinned_byte_hash_matches(self) -> None:
         virtual_path = next(iter(REFERENCE_SOURCES))
         invalid_utf8 = b"\xff\xfe"
-        original = prd_reference_tool.PRD_REFERENCE_FILES[virtual_path]
-        test_reference = prd_reference_tool.PrdReferenceSpec(
+        original = prd_reference_tool.WORKBENCH_REFERENCE_FILES[virtual_path]
+        test_reference = prd_reference_tool.WorkbenchReferenceSpec(
             physical_path=original.physical_path,
             sha256=hashlib.sha256(invalid_utf8).hexdigest(),
+            requested_artifact_kinds=original.requested_artifact_kinds,
         )
         references = MappingProxyType({virtual_path: test_reference})
-        with patch.object(prd_reference_tool, "PRD_REFERENCE_FILES", references):
+        with patch.object(prd_reference_tool, "WORKBENCH_REFERENCE_FILES", references):
             with patch.object(Path, "read_bytes", return_value=invalid_utf8):
                 with self.assertRaisesRegex(
                     ValueError,
-                    "WORKBENCH_PRD_REFERENCE_UTF8_INVALID",
+                    "WORKBENCH_REFERENCE_UTF8_INVALID",
                 ):
                     prd_reference_tool.workbench_prd_reference_read.func(
-                        self.runtime,
-                        "Read a PRD reference",
+                        self.prd_runtime,
+                        "Read a Workbench reference",
                         virtual_path,
                     )
 

@@ -9,6 +9,7 @@ from langchain.tools import tool
 from deerflow.tools.types import Runtime
 
 from .prd_reference_normalizer import normalize_prd_bidirectional_references
+from .prototype_runtime_normalizer import normalize_prototype_layout_aliases
 from .runtime_result_validator import validate_runtime_artifact_draft
 
 
@@ -64,6 +65,10 @@ def workbench_artifact_draft_publish(
         raise ValueError("WORKBENCH_ARTIFACT_DRAFT_KIND_NOT_REQUESTED")
 
     normalized_draft, normalizations = normalize_prd_bidirectional_references(draft)
+    normalized_draft, prototype_normalizations = normalize_prototype_layout_aliases(
+        normalized_draft,
+    )
+    normalizations.extend(prototype_normalizations)
     validation = validate_runtime_artifact_draft(normalized_draft)
     payload: dict[str, Any] = {
         "protocol": ARTIFACT_DRAFT_PROTOCOL,

@@ -65,6 +65,20 @@ function providerCancellationOperationStubs(externalRunId: string | null) {
   };
 }
 const noKnowledgeToolGrants = () => ({ issue: vi.fn(async () => null) });
+const runtimeBindingMetadata = (ownerId = "principal-thread-owner") => ({
+  workbenchProjectId: "project-1",
+  workbenchThreadId: "thread-1",
+  workbenchPrincipalId: ownerId,
+});
+const runtimeBindingRecord = (ownerId = "principal-binding-owner") => ({
+  id: "binding-1",
+  adapter: "deerflow",
+  externalThreadId: "external-thread-1",
+  metadata: runtimeBindingMetadata(ownerId),
+});
+const runtimeAttemptBinding = (ownerId = "principal-binding-owner") => ({
+  runtimeBinding: { metadata: runtimeBindingMetadata(ownerId) },
+});
 const prototypePatchCoordinator = () => ({
   persistPatch: vi.fn(),
   loadRunBaselinesTx: vi.fn(async () => []),
@@ -223,11 +237,7 @@ describe("Runtime wall-clock terminalization", () => {
     Object.assign(internals, {
       prepare: vi.fn(async () => durableExecutionPrepared()),
       bindings: {
-        ensure: vi.fn(async () => ({
-          id: "binding-1",
-          adapter: "deerflow",
-          externalThreadId: "external-thread-1",
-        })),
+        ensure: vi.fn(async () => runtimeBindingRecord()),
       },
       attempts: {
         ensure: vi.fn(async () => ({ id: "runtime-attempt-1", startedAt: now })),
@@ -254,7 +264,13 @@ describe("Runtime wall-clock terminalization", () => {
     for (let index = 0; index < 10 && runtime.execute.mock.calls.length === 0; index += 1) {
       await Promise.resolve();
     }
-    expect(runtime.execute).toHaveBeenCalledTimes(1);
+    expect(runtime.execute).toHaveBeenCalledWith(
+      expect.objectContaining({
+        runtimeTransportOwnerId: "principal-binding-owner",
+      }),
+      expect.any(Object),
+      expect.any(AbortSignal),
+    );
     await vi.advanceTimersByTimeAsync(899);
     expect(runtime.cancel).not.toHaveBeenCalled();
     await vi.advanceTimersByTimeAsync(1);
@@ -267,6 +283,7 @@ describe("Runtime wall-clock terminalization", () => {
       expect.objectContaining({
         runId: "run-1",
         runtimeAttemptId: "runtime-attempt-1",
+        runtimeTransportOwnerId: "principal-binding-owner",
         externalThreadId: "external-thread-1",
         externalRunId: "external-run-1",
       }),
@@ -702,7 +719,7 @@ function durableExecutionPrepared() {
       createdById: "principal-1",
       knowledgeReleaseId: null,
     },
-    thread: { id: "thread-1" },
+    thread: { id: "thread-1", createdById: "principal-thread-owner" },
     project: { id: "project-1" },
     entryId: "entry-1",
     request: {
@@ -796,11 +813,7 @@ function wallClockRecoveryHarness(input: {
   Object.assign(internals, {
     prepare: vi.fn(async () => durableExecutionPrepared()),
     bindings: {
-      ensure: vi.fn(async () => ({
-        id: "binding-1",
-        adapter: "deerflow",
-        externalThreadId: "external-thread-1",
-      })),
+      ensure: vi.fn(async () => runtimeBindingRecord()),
     },
     attempts,
     publishResult,
@@ -865,11 +878,7 @@ function runtimeLivenessHarness(input: {
   Object.assign(internals, {
     prepare: vi.fn(async () => durableExecutionPrepared()),
     bindings: {
-      ensure: vi.fn(async () => ({
-        id: "binding-1",
-        adapter: "deerflow",
-        externalThreadId: "external-thread-1",
-      })),
+      ensure: vi.fn(async () => runtimeBindingRecord()),
     },
     attempts,
   });
@@ -4164,11 +4173,12 @@ describe("Run durable snapshots", () => {
       },
     };
     const knowledgeToolGrants = noKnowledgeToolGrants();
+    const canvasToolGrants = { issue: vi.fn(async () => null) };
     const processor = new RunProcessor(
       db as never,
       runtime as never,
       knowledgeToolGrants,
-      undefined,
+      canvasToolGrants,
       prototypePatchCoordinator() as never,
     );
     const internals = processor as unknown as ProcessorInternals & {
@@ -4190,7 +4200,7 @@ describe("Run durable snapshots", () => {
           createdById: "principal-1",
           knowledgeReleaseId: null,
         },
-        thread: { id: "thread-1" },
+        thread: { id: "thread-1", createdById: "principal-thread-owner" },
         project: { id: "project-1" },
         entryId: "entry-1",
         request: {
@@ -4205,11 +4215,7 @@ describe("Run durable snapshots", () => {
         previousAssistantText: "",
       })),
       bindings: {
-        ensure: vi.fn(async () => ({
-          id: "binding-1",
-          adapter: "deerflow",
-          externalThreadId: "external-thread-1",
-        })),
+        ensure: vi.fn(async () => runtimeBindingRecord()),
       },
       attempts: {
         ensure: vi.fn(async () => ({
@@ -4242,6 +4248,19 @@ describe("Run durable snapshots", () => {
       projectId: "project-1",
       releaseId: null,
     });
+    expect(canvasToolGrants.issue).toHaveBeenCalledWith(expect.objectContaining({
+      principalId: "principal-1",
+      projectId: "project-1",
+      threadId: "thread-1",
+    }));
+    expect(internals.bindings.ensure).toHaveBeenCalledWith("thread-1", {
+      workbenchProjectId: "project-1",
+      workbenchThreadId: "thread-1",
+      workbenchPrincipalId: "principal-thread-owner",
+    }, expect.any(AbortSignal));
+    expect(runtime.execute).toHaveBeenCalledWith(expect.objectContaining({
+      runtimeTransportOwnerId: "principal-binding-owner",
+    }), expect.any(Object), expect.any(AbortSignal));
     expect(failRun).not.toHaveBeenCalled();
   });
 
@@ -4276,11 +4295,7 @@ describe("Run durable snapshots", () => {
     Object.assign(internals, {
       prepare: vi.fn(async () => durableExecutionPrepared()),
       bindings: {
-        ensure: vi.fn(async () => ({
-          id: "binding-1",
-          adapter: "deerflow",
-          externalThreadId: "external-thread-1",
-        })),
+        ensure: vi.fn(async () => runtimeBindingRecord()),
       },
       attempts: {
         // This row was read before claim and is intentionally stale.
@@ -4312,6 +4327,7 @@ describe("Run durable snapshots", () => {
     expect(onRuntimeAttemptResolved).toHaveBeenCalledWith("runtime-attempt-1");
 
     expect(runtime.execute).toHaveBeenCalledWith(expect.objectContaining({
+      runtimeTransportOwnerId: "principal-binding-owner",
       submission: {
         mode: "join",
         providerIdempotencyKey: "wbrt:test-attempt-key",
@@ -4364,11 +4380,7 @@ describe("Run durable snapshots", () => {
     Object.assign(internals, {
       prepare: vi.fn(async () => prepared),
       bindings: {
-        ensure: vi.fn(async () => ({
-          id: "binding-1",
-          adapter: "deerflow",
-          externalThreadId: "external-thread-1",
-        })),
+        ensure: vi.fn(async () => runtimeBindingRecord()),
       },
       attempts: {
         ensure: vi.fn(async () => ({ id: "runtime-attempt-1" })),
@@ -4446,11 +4458,7 @@ describe("Run durable snapshots", () => {
     Object.assign(internals, {
       prepare: vi.fn(async () => prepared),
       bindings: {
-        ensure: vi.fn(async () => ({
-          id: "binding-1",
-          adapter: "deerflow",
-          externalThreadId: "external-thread-1",
-        })),
+        ensure: vi.fn(async () => runtimeBindingRecord()),
       },
       attempts: {
         ensure: vi.fn(async () => ({ id: "runtime-attempt-1" })),
@@ -4517,11 +4525,7 @@ describe("Run durable snapshots", () => {
     Object.assign(internals, {
       prepare: vi.fn(async () => prepared),
       bindings: {
-        ensure: vi.fn(async () => ({
-          id: "binding-1",
-          adapter: "deerflow",
-          externalThreadId: "external-thread-1",
-        })),
+        ensure: vi.fn(async () => runtimeBindingRecord()),
       },
       attempts: {
         ensure: vi.fn(async () => ({ id: "runtime-attempt-1" })),
@@ -4576,11 +4580,7 @@ describe("Run durable snapshots", () => {
     Object.assign(internals, {
       prepare: vi.fn(async () => durableExecutionPrepared()),
       bindings: {
-        ensure: vi.fn(async () => ({
-          id: "binding-1",
-          adapter: "deerflow",
-          externalThreadId: "external-thread-1",
-        })),
+        ensure: vi.fn(async () => runtimeBindingRecord()),
       },
       attempts: {
         ensure: vi.fn(async () => ({ id: "runtime-attempt-1" })),
@@ -4604,6 +4604,13 @@ describe("Run durable snapshots", () => {
     expect(markSubmissionUnknown).toHaveBeenCalledWith(
       executionClaim,
     );
+    expect(runtime.execute).toHaveBeenCalledWith(expect.objectContaining({
+      runtimeTransportOwnerId: "principal-binding-owner",
+      submission: {
+        mode: "reconcile",
+        providerIdempotencyKey: "wbrt:test-attempt-key",
+      },
+    }), expect.any(Object), expect.any(AbortSignal));
     expect(knowledgeToolGrants.issue).not.toHaveBeenCalled();
     expect(canvasToolGrants.issue).not.toHaveBeenCalled();
     expect(failRun).not.toHaveBeenCalled();
@@ -4692,11 +4699,7 @@ describe("Run durable snapshots", () => {
         previousAssistantText: "",
       })),
       bindings: {
-        ensure: vi.fn(async () => ({
-          id: "binding-1",
-          adapter: "deerflow",
-          externalThreadId: "external-thread-1",
-        })),
+        ensure: vi.fn(async () => runtimeBindingRecord()),
       },
       attempts: {
         ensure: vi.fn(async () => ({
@@ -4759,6 +4762,7 @@ describe("Run durable snapshots", () => {
           status: "cancelling",
           createdById: "principal-1",
           runtimeAttempts: [{
+            ...runtimeAttemptBinding(),
             id: "runtime-attempt-1",
             status: "running",
             externalThreadId: "external-thread-1",
@@ -4792,7 +4796,13 @@ describe("Run durable snapshots", () => {
 
     await expect(processor.cancel("run-1")).rejects.toBe(externalError);
 
-    expect(runtime.cancel).toHaveBeenCalledTimes(1);
+    expect(runtime.cancel).toHaveBeenCalledWith(
+      expect.objectContaining({
+        runtimeTransportOwnerId: "principal-binding-owner",
+      }),
+      expect.any(Function),
+      expect.any(AbortSignal),
+    );
     expect(finalizeCancellation).not.toHaveBeenCalled();
     expect(db.$transaction).not.toHaveBeenCalled();
   });
@@ -4811,6 +4821,7 @@ describe("Run durable snapshots", () => {
           status: "cancelling",
           createdById: "principal-1",
           runtimeAttempts: [{
+            ...runtimeAttemptBinding(),
             id: "runtime-attempt-1",
             status: "running",
             externalThreadId: "external-thread-1",
@@ -4883,6 +4894,7 @@ describe("Run durable snapshots", () => {
             status: "cancelling",
             createdById: "principal-1",
             runtimeAttempts: [{
+              ...runtimeAttemptBinding(),
               id: "runtime-attempt-1",
               status: "running",
               externalThreadId: "external-thread-1",
@@ -4961,6 +4973,7 @@ describe("Run durable snapshots", () => {
           status: "cancelling",
           createdById: "principal-1",
           runtimeAttempts: [{
+            ...runtimeAttemptBinding(),
             id: "runtime-attempt-1",
             status: "submitting",
             externalThreadId: "external-thread-1",
@@ -5018,6 +5031,7 @@ describe("Run durable snapshots", () => {
           status: "cancelling",
           createdById: "principal-1",
           runtimeAttempts: [{
+            ...runtimeAttemptBinding(),
             id: "runtime-attempt-1",
             status: "submitting",
             externalThreadId: "external-thread-1",
@@ -6090,6 +6104,7 @@ describe("Provider cancellation convergence", () => {
           errorDetail: "RUNTIME_PROVIDER_STREAM_IDLE_TIMEOUT",
           createdById: "principal-1",
           runtimeAttempts: [{
+            ...runtimeAttemptBinding(),
             id: "runtime-attempt-1",
             status: "failed",
             errorCode: runtimeProviderCancellationUnconfirmedCode,
@@ -6117,6 +6132,7 @@ describe("Provider cancellation convergence", () => {
       expect.objectContaining({
         runId: "run-1",
         runtimeAttemptId: "runtime-attempt-1",
+        runtimeTransportOwnerId: "principal-binding-owner",
         externalRunId: "external-run-1",
       }),
       expect.any(Function),
@@ -6157,6 +6173,7 @@ describe("Provider cancellation convergence", () => {
           errorDetail: "RUNTIME_PROVIDER_SUBMISSION_TIMEOUT",
           createdById: "principal-1",
           runtimeAttempts: [{
+            ...runtimeAttemptBinding(),
             id: "runtime-attempt-1",
             status: "failed",
             errorCode: runtimeProviderCancellationUnconfirmedCode,
@@ -6207,6 +6224,7 @@ describe("Provider cancellation convergence", () => {
           errorDetail: "RUNTIME_PROVIDER_SUBMISSION_TIMEOUT",
           createdById: "principal-1",
           runtimeAttempts: [{
+            ...runtimeAttemptBinding(),
             id: "runtime-attempt-1",
             status: "failed",
             errorCode: runtimeProviderCancellationUnconfirmedCode,

@@ -9,6 +9,7 @@ from langchain.tools import tool
 from deerflow.tools.types import Runtime
 
 from .prd_reference_normalizer import normalize_runtime_result_prd_references
+from .prototype_runtime_normalizer import normalize_runtime_result_prototype_layout_aliases
 from .runtime_result_validator import validate_runtime_result
 
 
@@ -48,6 +49,10 @@ def workbench_runtime_result_submit(
         maximum_length=512,
     )
     normalized_candidate, normalizations = normalize_runtime_result_prd_references(candidate)
+    normalized_candidate, prototype_normalizations = normalize_runtime_result_prototype_layout_aliases(
+        normalized_candidate,
+    )
+    normalizations.extend(prototype_normalizations)
     validation = validate_runtime_result(normalized_candidate)
     if validation["ok"] is not True:
         artifact = _validated_artifact(

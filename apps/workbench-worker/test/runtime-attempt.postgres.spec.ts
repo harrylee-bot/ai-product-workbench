@@ -2161,7 +2161,11 @@ async function seedAttemptFixture(db: PrismaClient, withAttempt: boolean): Promi
         threadId: fixture.threadId,
         adapter: fixture.binding.adapter,
         externalThreadId: fixture.binding.externalThreadId,
-        metadata: { workbenchThreadId: fixture.threadId },
+        metadata: {
+          workbenchProjectId: fixture.projectId,
+          workbenchThreadId: fixture.threadId,
+          workbenchPrincipalId: fixture.principalId,
+        },
       },
     });
     await tx.run.create({

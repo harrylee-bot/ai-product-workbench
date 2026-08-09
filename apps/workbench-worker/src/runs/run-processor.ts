@@ -69,7 +69,10 @@ import {
   type RuntimeProviderStateMode,
   type RuntimeProviderStateShadowFinding,
 } from "../runtime/runtime-attempt.service.js";
-import { RuntimeBindingService } from "../runtime/runtime-binding.service.js";
+import {
+  RuntimeBindingService,
+  runtimeBindingTransportOwnerId,
+} from "../runtime/runtime-binding.service.js";
 import type { KnowledgeToolGrantIssuer } from "../runtime/knowledge-tool-grant.service.js";
 import type { CanvasToolGrantIssuer } from "../runtime/canvas-tool-grant.service.js";
 import { parseRuntimeFinalizationPayload } from "../runtime/runtime-assistant-text.js";
@@ -323,6 +326,7 @@ export class RunProcessor {
     let attemptWallClockExpired = false;
     let externalThreadId: string | null = null;
     let externalRunId: string | null = null;
+    let runtimeTransportOwnerId: string | null = null;
     let heartbeatTimer: NodeJS.Timeout | null = null;
     let wallClockOutcome: "ok" | "error" | "cancelled" | null = null;
 
@@ -330,9 +334,10 @@ export class RunProcessor {
       const binding = await this.bindings.ensure(prepared.thread.id, {
         workbenchProjectId: prepared.project.id,
         workbenchThreadId: prepared.thread.id,
-        workbenchPrincipalId: prepared.run.createdById,
+        workbenchPrincipalId: prepared.thread.createdById,
       }, signal);
       externalThreadId = binding.externalThreadId;
+      runtimeTransportOwnerId = runtimeBindingTransportOwnerId(binding);
       const runtimeAttempt = await this.attempts.ensure(runId, prepared.run.attempt, binding);
       runtimeAttemptId = runtimeAttempt.id;
       claim = await this.attempts.claim(
@@ -386,7 +391,7 @@ export class RunProcessor {
         attempt: prepared.run.attempt,
         projectId: prepared.project.id,
         threadId: prepared.thread.id,
-        principalId: prepared.run.createdById,
+        runtimeTransportOwnerId,
         externalThreadId: binding.externalThreadId,
         request: prepared.request,
         artifactTargets: prepared.artifactTargets,
@@ -555,7 +560,7 @@ export class RunProcessor {
         if (terminalization === "terminalized") {
           await this.reconcileTerminalLivenessProvider({
             runId,
-            principalId: prepared.run.createdById,
+            runtimeTransportOwnerId: runtimeTransportOwnerId!,
             attemptId: runtimeAttemptId,
             externalThreadId: externalThreadId!,
             externalRunId,
@@ -607,7 +612,7 @@ export class RunProcessor {
 
   private async reconcileTerminalLivenessProvider(input: {
     runId: string;
-    principalId: string;
+    runtimeTransportOwnerId: string;
     attemptId: string;
     externalThreadId: string;
     externalRunId: string | null;
@@ -616,7 +621,7 @@ export class RunProcessor {
     try {
       const result = await this.reconcileFailedProviderCancellation(
         input.runId,
-        input.principalId,
+        input.runtimeTransportOwnerId,
         {
           id: input.attemptId,
           status: "failed",
@@ -645,7 +650,7 @@ export class RunProcessor {
   private async beginProviderCancellationInvocation(input: {
     runId: string;
     runtimeAttemptId: string;
-    principalId: string;
+    runtimeTransportOwnerId: string;
     externalThreadId: string;
     externalRunId: string | null;
     claim?: RuntimeExecutionClaim;
@@ -678,7 +683,7 @@ export class RunProcessor {
     const providerResult = Promise.resolve().then(() => this.runtime.cancel({
       runId: input.runId,
       runtimeAttemptId: input.runtimeAttemptId,
-      principalId: input.principalId,
+      runtimeTransportOwnerId: input.runtimeTransportOwnerId,
       externalThreadId: input.externalThreadId,
       externalRunId: operation.externalRunId,
     }, async (externalRunId) => {
@@ -752,11 +757,13 @@ export class RunProcessor {
         status: true,
         errorCode: true,
         errorDetail: true,
-        createdById: true,
         runtimeAttempts: {
           orderBy: { attempt: "desc" },
           take: 1,
-          include: { providerCancellationResolution: true },
+          include: {
+            providerCancellationResolution: true,
+            runtimeBinding: { select: { metadata: true } },
+          },
         },
       },
     });
@@ -778,6 +785,7 @@ export class RunProcessor {
       await this.finalizeCancellation(runId, "Cancelled before runtime submission");
       return { runId, cancelled: true };
     }
+    const runtimeTransportOwnerId = runtimeBindingTransportOwnerId(initialAttempt.runtimeBinding);
     if (providerCancellationPending) {
       if (
         initialAttempt.status === "failed"
@@ -787,7 +795,7 @@ export class RunProcessor {
       }
       return this.reconcileFailedProviderCancellation(
         runId,
-        run.createdById,
+        runtimeTransportOwnerId,
         initialAttempt,
         jobSignal,
       );
@@ -811,7 +819,7 @@ export class RunProcessor {
       const invocation = await this.beginProviderCancellationInvocation({
         runId,
         runtimeAttemptId: attempt.id,
-        principalId: run.createdById,
+        runtimeTransportOwnerId,
         externalThreadId: attempt.externalThreadId,
         externalRunId: attempt.externalRunId,
       });
@@ -832,7 +840,7 @@ export class RunProcessor {
 
   private async reconcileFailedProviderCancellation(
     runId: string,
-    principalId: string,
+    runtimeTransportOwnerId: string,
     attempt: {
       id: string;
       status: string;
@@ -872,7 +880,7 @@ export class RunProcessor {
         const invocation = await this.beginProviderCancellationInvocation({
           runId,
           runtimeAttemptId: attempt.id,
-          principalId,
+          runtimeTransportOwnerId,
           externalThreadId: attempt.externalThreadId,
           externalRunId: attempt.externalRunId,
           claim,

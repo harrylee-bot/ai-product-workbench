@@ -320,7 +320,10 @@ export class DeerFlowRuntimeAdapter implements RuntimePort {
     let baselineState = submission.mode === "reconcile"
       ? null
       : prototypePatchBaselineState(execution.prototypePatchBaselines);
-    const client = this.client(execution.principalId, submission.providerIdempotencyKey);
+    const client = this.client(
+      execution.runtimeTransportOwnerId,
+      submission.providerIdempotencyKey,
+    );
     let recovered: Run | null;
     try {
       recovered = submission.mode === "join"
@@ -360,6 +363,46 @@ export class DeerFlowRuntimeAdapter implements RuntimePort {
     baselineState ??= prototypePatchBaselineState(execution.prototypePatchBaselines);
 
     let externalRunPersistence: Promise<void> | null = externalRunId ? Promise.resolve() : null;
+    let providerHeartbeatTimer: NodeJS.Timeout | null = null;
+    let providerHeartbeatInFlight = false;
+    let lastProviderStatus: Run["status"] | null = null;
+    const providerHeartbeatIntervalMs = Math.min(
+      30_000,
+      Math.max(5_000, Math.floor(this.config.deerFlowIdleTimeoutMs / 3)),
+    );
+    const stopProviderHeartbeat = () => {
+      if (providerHeartbeatTimer) clearInterval(providerHeartbeatTimer);
+      providerHeartbeatTimer = null;
+    };
+    const pollProviderHeartbeat = async () => {
+      if (providerHeartbeatInFlight || signal.aborted || !externalRunId) return;
+      providerHeartbeatInFlight = true;
+      const candidateExternalRunId = externalRunId;
+      try {
+        const providerRun = await client.runs.get(
+          execution.externalThreadId,
+          candidateExternalRunId,
+          { signal },
+        );
+        lastProviderStatus = providerRun.status;
+        // SSE comments are intentionally discarded by the SDK. A successful
+        // status probe is still provider activity and must keep the outer idle
+        // budget alive while a model/tool call is doing useful work.
+        onProviderActivity();
+      } catch {
+        // The stream remains authoritative. Transient status-probe failures
+        // must not turn a healthy provider run into a synthetic failure.
+      } finally {
+        providerHeartbeatInFlight = false;
+      }
+    };
+    const startProviderHeartbeat = () => {
+      if (providerHeartbeatTimer || !externalRunId) return;
+      providerHeartbeatTimer = setInterval(() => {
+        void pollProviderHeartbeat();
+      }, providerHeartbeatIntervalMs);
+      providerHeartbeatTimer.unref?.();
+    };
     const registerExternalRun = (candidate: string) => {
       if (externalRunId && externalRunId !== candidate) {
         externalRunPersistence = Promise.reject(new Error("RUNTIME_EXTERNAL_RUN_ID_CONFLICT"));
@@ -367,30 +410,43 @@ export class DeerFlowRuntimeAdapter implements RuntimePort {
       }
       externalRunId = candidate;
       externalRunPersistence ??= observer.onExternalRunCreated(candidate);
+      startProviderHeartbeat();
     };
+    startProviderHeartbeat();
 
     let stream: AsyncGenerator<{ id?: string; event: string; data: unknown }>;
     let submissionMayHaveBeenAccepted = false;
+    const joinExternalStream = (lastEventId?: string) => {
+      if (!externalRunId) throw new Error("RUNTIME_EXTERNAL_RUN_ID_MISSING");
+      return client.runs.joinStream(execution.externalThreadId, externalRunId, {
+        signal: streamSignal,
+        cancelOnDisconnect: false,
+        lastEventId,
+        streamMode,
+        streamIdleReconnect,
+      });
+    };
     // The SDK leaves the underlying reader open when an async generator is
     // stopped with `break`. Keep stream lifetime separate from the execution
     // signal so the end sentinel can close the HTTP body without cancelling
     // final result persistence.
     const streamAbortController = new AbortController();
     const streamSignal = AbortSignal.any([signal, streamAbortController.signal]);
-    const streamIdleReconnect = Math.min(
-      30_000,
-      Math.max(1_000, Math.floor(this.config.deerFlowIdleTimeoutMs / 2)),
-    );
+    const streamMode = this.streamMode(execution.request.requestedArtifactKinds);
+    // Values-only streams intentionally rely on the explicit provider
+    // heartbeat poll below instead of the SDK's fixed reconnect watchdog.
+    // The poll keeps the outer liveness budget alive while the stream remains
+    // open; normal EOF is handled by the durable status/reconnect loop.
+    const streamIdleReconnect = streamMode === "values"
+      ? 0
+      : Math.min(
+          30_000,
+          Math.max(1_000, Math.floor(this.config.deerFlowIdleTimeoutMs / 2)),
+        );
     if (externalRunId) {
-      stream = client.runs.joinStream(execution.externalThreadId, externalRunId, {
-        signal: streamSignal,
-        cancelOnDisconnect: false,
-        lastEventId: submission.mode === "join"
-          ? submission.lastExternalEventId ?? undefined
-          : undefined,
-        streamMode: this.streamMode(execution.request.requestedArtifactKinds),
-        streamIdleReconnect,
-      });
+      stream = joinExternalStream(
+        submission.mode === "join" ? submission.lastExternalEventId ?? undefined : undefined,
+      );
     } else {
       if (submission.mode === "reconcile") {
         throw new RuntimeSubmissionUnknownError();
@@ -420,6 +476,7 @@ export class DeerFlowRuntimeAdapter implements RuntimePort {
           signal: streamSignal,
           onDisconnect: "continue",
           streamIdleReconnect,
+          streamMode,
           onRunCreated: ({ run_id }) => registerExternalRun(run_id),
         },
       );
@@ -742,86 +799,125 @@ export class DeerFlowRuntimeAdapter implements RuntimePort {
         resultToolCallId = event.submission.toolCallId;
       }
     };
+    let lastExternalEventId = submission.mode === "join"
+      ? submission.lastExternalEventId ?? null
+      : null;
+    let streamEndedBySentinel = false;
     try {
-      for await (const part of stream) {
-        onProviderActivity();
-        // The SDK retains the previous SSE ID across comment-only heartbeat
-        // frames and exposes them as an empty event. They carry no business
-        // data and must not advance the durable provider cursor.
-        if (!part.event && part.data === null) continue;
-        // DeerFlow terminates its Redis-backed stream with an un-ID'd end/null
-        // sentinel. The SDK carries the previous SSE ID onto that frame, so it
-        // must not enter the durable business-event inbox or advance the cursor.
-        if (part.event === "end") {
-          if (part.data !== null) throw new Error("DEERFLOW_STREAM_END_INVALID");
+      while (true) {
+        streamEndedBySentinel = false;
+        for await (const part of stream) {
+          onProviderActivity();
+          // The SDK retains the previous SSE ID across comment-only heartbeat
+          // frames and exposes them as an empty event. They carry no business
+          // data and must not advance the durable provider cursor.
+          if (!part.event && part.data === null) continue;
+          // DeerFlow terminates its Redis-backed stream with an un-ID'd end/null
+          // sentinel. The SDK carries the previous SSE ID onto that frame, so it
+          // must not enter the durable business-event inbox or advance the cursor.
+          if (part.event === "end") {
+            if (part.data !== null) throw new Error("DEERFLOW_STREAM_END_INVALID");
+            streamEndedBySentinel = true;
+            break;
+          }
+          partEffects = [];
+          const metadataRunId = externalRunIdFromEvent(part.event, part.data);
+          if (metadataRunId) registerExternalRun(metadataRunId);
+          if (!externalRunId || !externalRunPersistence) {
+            throw new Error("RUNTIME_EXTERNAL_RUN_ID_MISSING");
+          }
+          await externalRunPersistence;
+          if (signal?.aborted) throw abortError(signal);
+          const externalPart = part.id
+            ? {
+                externalRunId,
+                externalEventId: part.id,
+                event: part.event,
+                payload: jsonValueSchema.parse(part.data),
+              }
+            : null;
+          if (part.id) lastExternalEventId = part.id;
+          if (externalPart && await observer.isExternalEventProcessed(externalPart)) {
+            partEffects = null;
+            continue;
+          }
+
+          const node = extractNode(part.data);
+          if (node && collapsePrdActivity && !requestActivityStarted) {
+            // Raw graph nodes remain in the persisted provider event above. PRD
+            // activity is request-scoped so middleware names never reach the UI.
+            await emitEvent(requestActivityEvent(execution, "running"));
+            requestActivityStarted = true;
+          } else if (node && !collapsePrdActivity && node !== activeNode) {
+            if (activeNode) {
+              await emitEvent(activityEvent(activeNode, "succeeded"));
+            }
+            activeNode = node;
+            await emitEvent(activityEvent(node, "running"));
+          }
+
+          if (part.event === "error") {
+            throw new Error("DEERFLOW_RUN_ERROR");
+          }
+          if (part.event === "values") {
+            finalState = part.data;
+            inputRequired = extractRuntimeInputRequired(part.data) ?? inputRequired;
+            await processArtifactState(part.data);
+          }
+          const incoming = extractAssistantTextFrame(part.event, part.data);
+          if (incoming) {
+            const delta = assistantTextDelta(assistantText, incoming.text, incoming.kind);
+            assistantText += delta;
+            const visibleDelta = capabilityOutput.push(delta);
+            if (visibleDelta) {
+              if (prototypeRequested && resultToolCallId && visibleDelta.trim()) {
+                await emitStage(
+                  "summarizing",
+                  runtimeToolSourceId(execution.runtimeAttemptId, "assistant-summary", resultToolCallId),
+                );
+              }
+              await emitEvent({ type: "text.delta", delta: visibleDelta });
+            }
+          }
+          const effects = partEffects;
+          partEffects = null;
+          if (!part.id) {
+            if (effects.length > 0) throw new Error("RUNTIME_EXTERNAL_EVENT_ID_MISSING");
+            continue;
+          }
+          await observer.onExternalEvent(externalPart!, effects);
+          visibleAssistantText += visibleTextDeltaFromEffects(effects);
+        }
+
+        if (streamEndedBySentinel) break;
+        if (signal.aborted) throw abortError(signal);
+        if (!externalRunId) throw new Error("RUNTIME_EXTERNAL_RUN_ID_MISSING");
+        if (resultToolCallId || inputRequired) break;
+
+        // A few DeerFlow deployments close an otherwise healthy SSE response
+        // at an infrastructure boundary without sending the explicit end
+        // sentinel. Treat a normal EOF as a reconnect point while the provider
+        // Run is still active; otherwise the last checkpoint would be mistaken
+        // for the terminal result.
+        let providerStatus: Run["status"] | null = lastProviderStatus;
+        try {
+          const providerRun = await client.runs.get(
+            execution.externalThreadId,
+            externalRunId,
+            { signal },
+          );
+          providerStatus = providerRun.status;
+          lastProviderStatus = providerStatus;
+          onProviderActivity();
+        } catch {
+          // Preserve the historical EOF behavior when a status probe is not
+          // available (for example, an older provider test double).
           break;
         }
-        partEffects = [];
-        const metadataRunId = externalRunIdFromEvent(part.event, part.data);
-        if (metadataRunId) registerExternalRun(metadataRunId);
-        if (!externalRunId || !externalRunPersistence) {
-          throw new Error("RUNTIME_EXTERNAL_RUN_ID_MISSING");
-        }
-        await externalRunPersistence;
-        if (signal?.aborted) throw abortError(signal);
-        const externalPart = part.id
-          ? {
-              externalRunId,
-              externalEventId: part.id,
-              event: part.event,
-              payload: jsonValueSchema.parse(part.data),
-            }
-          : null;
-        if (externalPart && await observer.isExternalEventProcessed(externalPart)) {
-          partEffects = null;
-          continue;
-        }
-
-        const node = extractNode(part.data);
-        if (node && collapsePrdActivity && !requestActivityStarted) {
-          // Raw graph nodes remain in the persisted provider event above. PRD
-          // activity is request-scoped so middleware names never reach the UI.
-          await emitEvent(requestActivityEvent(execution, "running"));
-          requestActivityStarted = true;
-        } else if (node && !collapsePrdActivity && node !== activeNode) {
-          if (activeNode) {
-            await emitEvent(activityEvent(activeNode, "succeeded"));
-          }
-          activeNode = node;
-          await emitEvent(activityEvent(node, "running"));
-        }
-
-        if (part.event === "error") {
-          throw new Error("DEERFLOW_RUN_ERROR");
-        }
-        if (part.event === "values") {
-          finalState = part.data;
-          inputRequired = extractRuntimeInputRequired(part.data) ?? inputRequired;
-          await processArtifactState(part.data);
-        }
-        const incoming = extractAssistantTextFrame(part.event, part.data);
-        if (incoming) {
-          const delta = assistantTextDelta(assistantText, incoming.text, incoming.kind);
-          assistantText += delta;
-          const visibleDelta = capabilityOutput.push(delta);
-          if (visibleDelta) {
-            if (prototypeRequested && resultToolCallId && visibleDelta.trim()) {
-              await emitStage(
-                "summarizing",
-                runtimeToolSourceId(execution.runtimeAttemptId, "assistant-summary", resultToolCallId),
-              );
-            }
-            await emitEvent({ type: "text.delta", delta: visibleDelta });
-          }
-        }
-        const effects = partEffects;
-        partEffects = null;
-        if (!part.id) {
-          if (effects.length > 0) throw new Error("RUNTIME_EXTERNAL_EVENT_ID_MISSING");
-          continue;
-        }
-        await observer.onExternalEvent(externalPart!, effects);
-        visibleAssistantText += visibleTextDeltaFromEffects(effects);
+        if (providerStatus && TERMINAL_EXTERNAL_RUN_STATUSES.has(providerStatus)) break;
+        await new Promise<void>((resolve) => setTimeout(resolve, 250));
+        if (signal.aborted) throw abortError(signal);
+        stream = joinExternalStream(lastExternalEventId ?? undefined);
       }
     } catch (error) {
       let persistenceError: unknown = null;
@@ -869,6 +965,7 @@ export class DeerFlowRuntimeAdapter implements RuntimePort {
       if (persistenceError) throw persistenceError;
       throw error;
     } finally {
+      stopProviderHeartbeat();
       streamAbortController.abort();
     }
 
@@ -947,7 +1044,7 @@ export class DeerFlowRuntimeAdapter implements RuntimePort {
     onExternalRunRecovered: (externalRunId: string) => Promise<void>,
     signal?: AbortSignal,
   ): Promise<RuntimeCancellationResult> {
-    const client = this.client(cancellation.principalId);
+    const client = this.client(cancellation.runtimeTransportOwnerId);
     let run: Run | null;
     if (cancellation.externalRunId) {
       try {
@@ -1196,10 +1293,13 @@ export class DeerFlowRuntimeAdapter implements RuntimePort {
       return mode as StreamMode;
     });
     if (modes.length === 0) throw new Error("DEERFLOW_STREAM_MODE_MISSING");
-    // A PRD is delivered through durable stage/draft/result tools found in
-    // values snapshots. Persisting every token-sized messages event creates
-    // enough backpressure to outrun DeerFlow's retained stream buffer.
-    if (requestedArtifactKinds.length === 1 && requestedArtifactKinds[0] === "prd") {
+    // PRD and Prototype artifacts are delivered through durable stage/draft/result
+    // tools found in values snapshots. Persisting every token-sized messages event
+    // creates enough backpressure to outrun DeerFlow's retained stream buffer.
+    if (
+      requestedArtifactKinds.length === 1
+      && (requestedArtifactKinds[0] === "prd" || requestedArtifactKinds[0] === "prototype")
+    ) {
       return "values";
     }
     return modes.length === 1 ? modes[0]! : modes;
@@ -1242,7 +1342,7 @@ export class DeerFlowRuntimeAdapter implements RuntimePort {
       if (signal?.aborted) throw signal.reason ?? new Error("RUNTIME_ABORTED");
       const original = await this.uploadContent(
         execution.externalThreadId,
-        execution.principalId,
+        execution.runtimeTransportOwnerId,
         source.originalName,
         source.original,
         signal,
@@ -1254,7 +1354,7 @@ export class DeerFlowRuntimeAdapter implements RuntimePort {
           ? original
           : await this.uploadContent(
               execution.externalThreadId,
-              execution.principalId,
+              execution.runtimeTransportOwnerId,
               extractionFileName(source),
               content,
               signal,
@@ -1293,7 +1393,7 @@ export class DeerFlowRuntimeAdapter implements RuntimePort {
       if (!handle) {
         handle = await this.uploadContent(
           execution.externalThreadId,
-          execution.principalId,
+          execution.runtimeTransportOwnerId,
           designAssetFileName(asset, position),
           asset.content,
           signal,
@@ -1330,7 +1430,7 @@ export class DeerFlowRuntimeAdapter implements RuntimePort {
       }
       const handle = await this.uploadContent(
         execution.externalThreadId,
-        execution.principalId,
+        execution.runtimeTransportOwnerId,
         fileName,
         locator,
         signal,
@@ -1369,7 +1469,7 @@ export class DeerFlowRuntimeAdapter implements RuntimePort {
 
   private async uploadContent(
     externalThreadId: string,
-    principalId: string,
+    runtimeTransportOwnerId: string,
     fileName: string,
     locator: RuntimeContentLocator,
     signal?: AbortSignal,
@@ -1396,7 +1496,7 @@ export class DeerFlowRuntimeAdapter implements RuntimePort {
         {
           method: "POST",
           headers: {
-            ...this.identityHeaders(principalId),
+            ...this.identityHeaders(runtimeTransportOwnerId),
             "content-type": multipart.contentType,
             "content-length": String(multipart.contentLength),
             accept: "application/json",
@@ -1435,7 +1535,7 @@ export class DeerFlowRuntimeAdapter implements RuntimePort {
     return this.fetchFromBase(this.config.deerFlowGatewayUrl, path, init, signal);
   }
 
-  private client(principalId: string, providerIdempotencyKey?: string) {
+  private client(runtimeTransportOwnerId: string, providerIdempotencyKey?: string) {
     return new Client({
       apiUrl: this.config.deerFlowLangGraphUrl,
       apiKey: null,
@@ -1447,7 +1547,7 @@ export class DeerFlowRuntimeAdapter implements RuntimePort {
         ),
       },
       defaultHeaders: {
-        ...this.jsonHeaders(principalId),
+        ...this.jsonHeaders(runtimeTransportOwnerId),
         ...(providerIdempotencyKey ? { "Idempotency-Key": providerIdempotencyKey } : {}),
       },
       streamProtocol: "legacy",
@@ -1476,20 +1576,22 @@ export class DeerFlowRuntimeAdapter implements RuntimePort {
     }
   }
 
-  private jsonHeaders(principalId?: string) {
+  private jsonHeaders(runtimeTransportOwnerId?: string) {
     const headers: Record<string, string> = {
       "content-type": "application/json",
       accept: "application/json, text/event-stream",
       Cookie: `csrf_token=${this.csrfToken}`,
       "X-CSRF-Token": this.csrfToken,
     };
-    Object.assign(headers, this.identityHeaders(principalId));
+    Object.assign(headers, this.identityHeaders(runtimeTransportOwnerId));
     return headers;
   }
 
-  private identityHeaders(principalId?: string) {
+  private identityHeaders(runtimeTransportOwnerId?: string) {
     const headers: Record<string, string> = {};
-    if (principalId) headers["X-DeerFlow-Owner-User-Id"] = principalId;
+    if (runtimeTransportOwnerId) {
+      headers["X-DeerFlow-Owner-User-Id"] = runtimeTransportOwnerId;
+    }
     if (this.config.deerFlowInternalToken) {
       headers["X-DeerFlow-Internal-Token"] = this.config.deerFlowInternalToken;
     }

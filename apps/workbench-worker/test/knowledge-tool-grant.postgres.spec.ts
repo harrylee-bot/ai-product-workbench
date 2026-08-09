@@ -299,7 +299,11 @@ async function seedIssuerFixture(db: PrismaClient) {
         threadId: ids.threadId,
         adapter: "deerflow",
         externalThreadId: `external_${suffix}`,
-        metadata: { workbenchThreadId: ids.threadId },
+        metadata: {
+          workbenchProjectId: ids.projectId,
+          workbenchThreadId: ids.threadId,
+          workbenchPrincipalId: ids.principalId,
+        },
       },
     });
     await tx.run.create({

@@ -65,6 +65,12 @@ PRD_STAGE_SEQUENCE = (
     "drafting-prd",
     "validating-prd",
 )
+PROTOTYPE_STAGE_SEQUENCE = (
+    "design-system",
+    "mapping-components",
+    "creating-flows",
+    "generating-ui",
+)
 PRD_REFERENCE_FILES = (
     (
         "/mnt/skills/public/requirement-doc-template/SKILL.md",
@@ -81,6 +87,16 @@ PRD_REFERENCE_FILES = (
     (
         "/mnt/skills/public/workbench/references/prd-runtime-result.schema.json",
         "bd2f09b81bf8538a33ccf9eb0942d364c23dedf071979dad991fe09812f9e747",
+    ),
+)
+PROTOTYPE_REFERENCE_FILES = (
+    (
+        "/mnt/skills/public/workbench/references/prototype-runtime-result.example.json",
+        "e76e0c8b8c797a4941e31cc5067b80bb8106d4329b086ef743d6ad76ef958a99",
+    ),
+    (
+        "/mnt/skills/public/workbench/references/runtime-result-contract.md",
+        "a1849a25012bb9226fa5d576cdace96b1273efaf5f26e0593b6754c7dbeca206",
     ),
 )
 RUNTIME_ARTIFACT_KINDS = (
@@ -102,6 +118,7 @@ _ARTIFACT_PROGRESS_BLOCK_CODE = "WORKBENCH_ARTIFACT_PROGRESS_NOT_REQUESTED"
 _PROTOTYPE_BLOCK_CODE = "WORKBENCH_PROTOTYPE_TOOL_NOT_REQUESTED"
 _KNOWLEDGE_BLOCK_CODE = "WORKBENCH_KNOWLEDGE_TOOL_NOT_AUTHORIZED"
 _PRD_REFERENCE_BLOCK_CODE = "WORKBENCH_PRD_REFERENCE_TOOL_NOT_AUTHORIZED"
+_REFERENCE_BLOCK_CODE = "WORKBENCH_REFERENCE_TOOL_NOT_AUTHORIZED"
 _PRD_CLARIFICATION_BLOCK_CODE = "WORKBENCH_PRD_CLARIFICATION_NOT_SUPPORTED"
 _PRD_REFERENCE_ROOT = "/mnt/skills/public/"
 _PRD_REFERENCE_RELATIVE_PATHS = tuple(
@@ -113,6 +130,9 @@ _PRD_RESULT_PROTOCOL = "workbench.runtime.validated-result.v1"
 _PRD_CLARIFICATION_SYSTEM_POLICY = """<workbench_prd_clarification_policy>
 This PRD-only Workbench Run cannot resume free-form clarification. The ask_clarification tool is unavailable. Ignore any general instruction that requires clarification for this Run. Do not ask a question or end early. Keep unsupported high-risk behavior out of committed scope, record conservative typed assumptions or acceptance boundaries, then publish the complete PRD draft and submit the Runtime result.
 </workbench_prd_clarification_policy>"""
+_PROTOTYPE_STAGE_SYSTEM_POLICY = """<workbench_prototype_stage_policy>
+This Prototype-only Workbench Run must call workbench_generation_stage_update exactly once for each real stage, in this order: design-system, mapping-components, creating-flows, generating-ui. Never skip, repeat, regress, batch, or substitute a PRD stage. If a stage call returns an error naming the next required stage, call that stage next and continue the Run. The scoped read_file tool may read only the complete prototype-runtime-result.example.json and runtime-result-contract.md references.
+</workbench_prototype_stage_policy>"""
 _TOOL_CATALOG_PROTOCOL = "workbench.runtime.tool-catalog-observation.v1"
 _TOOL_CATALOG_METADATA_KEY = "workbench_tool_catalog_observation"
 _TOOL_NAME_PATTERN = re.compile(r"^[a-z][a-z0-9_]{0,127}$")
@@ -121,6 +141,7 @@ _WORKBENCH_TOOL_NAMES = frozenset(
         ARTIFACT_DRAFT_TOOL_NAME,
         GENERATION_STAGE_TOOL_NAME,
         KNOWLEDGE_TOOL_NAME,
+        READ_FILE_TOOL_NAME,
         RUNTIME_RESULT_TOOL_NAME,
         *PROTOTYPE_ONLY_TOOL_NAMES,
     }
@@ -364,6 +385,15 @@ def _reference_index(path: Any) -> int | None:
     return None
 
 
+def _prototype_reference(path: Any) -> tuple[str, str] | None:
+    if not isinstance(path, str):
+        return None
+    return next(
+        (reference for reference in PROTOTYPE_REFERENCE_FILES if path == reference[0]),
+        None,
+    )
+
+
 def _reference_like_path(path: Any) -> bool:
     if not isinstance(path, str) or not path:
         return False
@@ -457,6 +487,30 @@ def _stage_progress(state: Any) -> tuple[int, bool]:
     if successful_stages != list(PRD_STAGE_SEQUENCE[: len(successful_stages)]):
         invalid = True
     if len(successful_stages) > len(PRD_STAGE_SEQUENCE):
+        invalid = True
+    return len(successful_stages), invalid
+
+
+def _prototype_stage_progress(state: Any) -> tuple[int, bool]:
+    completed, invalid = _completed_tool_calls(state)
+    successful_stages: list[str] = []
+    for call in completed:
+        if call["name"] != GENERATION_STAGE_TOOL_NAME or not _tool_succeeded(call["response"]):
+            continue
+        stage = call["args"].get("stage")
+        artifact = _value(call["response"], "artifact")
+        if (
+            stage not in PROTOTYPE_STAGE_SEQUENCE
+            or not isinstance(artifact, Mapping)
+            or artifact.get("protocol") != _PRD_STAGE_PROTOCOL
+            or artifact.get("stage") != stage
+        ):
+            invalid = True
+            continue
+        successful_stages.append(stage)
+    if successful_stages != list(PROTOTYPE_STAGE_SEQUENCE[: len(successful_stages)]):
+        invalid = True
+    if len(successful_stages) > len(PROTOTYPE_STAGE_SEQUENCE):
         invalid = True
     return len(successful_stages), invalid
 
@@ -602,6 +656,8 @@ class WorkbenchToolScopeMiddleware(AgentMiddleware[AgentState]):
             kind in {"prd", "prototype"} for kind in normalized_kinds
         )
         self._prototype_enabled = normalized_kinds is not None and "prototype" in normalized_kinds
+        self._prototype_reference_enabled = normalized_kinds == ["prototype"]
+        self._prototype_stage_gate_enabled = normalized_kinds == ["prototype"]
         self._prd_gate_enabled = normalized_kinds == ["prd"]
         self._knowledge_catalog_bound = isinstance(knowledge_enabled, bool)
         self._knowledge_enabled = knowledge_enabled is True
@@ -620,7 +676,11 @@ class WorkbenchToolScopeMiddleware(AgentMiddleware[AgentState]):
                 continue
             if name == KNOWLEDGE_TOOL_NAME and not self._knowledge_enabled:
                 continue
-            if name == READ_FILE_TOOL_NAME and not self._prd_gate_enabled:
+            if (
+                name == READ_FILE_TOOL_NAME
+                and not self._prd_gate_enabled
+                and not self._prototype_reference_enabled
+            ):
                 continue
             visible.append(tool)
         overrides: dict[str, Any] = {}
@@ -634,6 +694,15 @@ class WorkbenchToolScopeMiddleware(AgentMiddleware[AgentState]):
                     f"{system_text.rstrip()}\n\n{_PRD_CLARIFICATION_SYSTEM_POLICY}"
                     if system_text.strip()
                     else _PRD_CLARIFICATION_SYSTEM_POLICY
+                ))
+        if self._prototype_stage_gate_enabled:
+            system_message = overrides.get("system_message", request.system_message)
+            system_text = system_message.text if system_message is not None else ""
+            if _PROTOTYPE_STAGE_SYSTEM_POLICY not in system_text:
+                overrides["system_message"] = SystemMessage(content=(
+                    f"{system_text.rstrip()}\n\n{_PROTOTYPE_STAGE_SYSTEM_POLICY}"
+                    if system_text.strip()
+                    else _PROTOTYPE_STAGE_SYSTEM_POLICY
                 ))
         return request if not overrides else request.override(**overrides)
 
@@ -656,8 +725,12 @@ class WorkbenchToolScopeMiddleware(AgentMiddleware[AgentState]):
             block_code = _PROTOTYPE_BLOCK_CODE
         elif name == KNOWLEDGE_TOOL_NAME and not self._knowledge_enabled:
             block_code = _KNOWLEDGE_BLOCK_CODE
-        elif name == READ_FILE_TOOL_NAME and not self._prd_gate_enabled:
-            block_code = _PRD_REFERENCE_BLOCK_CODE
+        elif (
+            name == READ_FILE_TOOL_NAME
+            and not self._prd_gate_enabled
+            and not self._prototype_reference_enabled
+        ):
+            block_code = _REFERENCE_BLOCK_CODE
         else:
             return None
         tool_call_id = request.tool_call.get("id")
@@ -937,6 +1010,126 @@ class WorkbenchToolScopeMiddleware(AgentMiddleware[AgentState]):
             )
         return result
 
+    def _prototype_reference_preflight(
+        self,
+        request: ToolCallRequest,
+    ) -> ToolMessage | None:
+        if not self._prototype_reference_enabled:
+            return None
+        args = _tool_args(request.tool_call.get("args"))
+        path = args.get("path")
+        reference = _prototype_reference(path)
+        if reference is None:
+            return _error_tool_message(
+                request,
+                "WORKBENCH_PROTOTYPE_REFERENCE_PATH_INVALID",
+                f"Use one exact Prototype Runtime reference path: '{PROTOTYPE_REFERENCE_FILES[0][0]}' or '{PROTOTYPE_REFERENCE_FILES[1][0]}'.",
+            )
+        if not _full_reference_read(args):
+            return _error_tool_message(
+                request,
+                "WORKBENCH_PROTOTYPE_REFERENCE_RANGE_FORBIDDEN",
+                f"Retry read_file for '{path}' while omitting both start_line and end_line.",
+            )
+        return None
+
+    def _prototype_reference_postflight(
+        self,
+        request: ToolCallRequest,
+        result: ToolMessage | Command,
+    ) -> ToolMessage | Command:
+        if (
+            not self._prototype_reference_enabled
+            or request.tool_call.get("name") != READ_FILE_TOOL_NAME
+        ):
+            return result
+        path = _tool_args(request.tool_call.get("args")).get("path")
+        reference = _prototype_reference(path)
+        if reference is None:
+            return result
+        if not isinstance(result, ToolMessage) or not _tool_succeeded(result):
+            return _error_tool_message(
+                request,
+                "WORKBENCH_PROTOTYPE_REFERENCE_READ_FAILED",
+                f"Retry read_file for the exact path '{path}' with no range.",
+            )
+        content = _tool_content(result)
+        actual_digest = (
+            hashlib.sha256(content.encode("utf-8")).hexdigest()
+            if content is not None
+            else None
+        )
+        if actual_digest != reference[1]:
+            return _error_tool_message(
+                request,
+                "WORKBENCH_PROTOTYPE_REFERENCE_CONTENT_MISMATCH",
+                f"The installed file '{path}' does not match the pinned Prototype reference; do not publish until the Runtime image is corrected.",
+            )
+        return result
+
+    def _prototype_stage_preflight(
+        self,
+        request: ToolCallRequest,
+    ) -> ToolMessage | None:
+        if (
+            not self._prototype_stage_gate_enabled
+            or request.tool_call.get("name") != GENERATION_STAGE_TOOL_NAME
+        ):
+            return None
+        stage_count, stage_invalid = _prototype_stage_progress(request.state)
+        expected_stage = (
+            PROTOTYPE_STAGE_SEQUENCE[stage_count]
+            if stage_count < len(PROTOTYPE_STAGE_SEQUENCE)
+            else None
+        )
+        if stage_invalid:
+            return _error_tool_message(
+                request,
+                "WORKBENCH_PROTOTYPE_STAGE_HISTORY_INVALID",
+                "The current turn contains a successful cross-family, duplicate, regressed, malformed, or out-of-order Prototype stage; do not publish from this turn.",
+            )
+        args = _tool_args(request.tool_call.get("args"))
+        stage = args.get("stage")
+        instruction = (
+            f"Call workbench_generation_stage_update next with stage='{expected_stage}'."
+            if expected_stage is not None
+            else "All four Prototype stages already succeeded; continue artifact publication without another generation stage update."
+        )
+        if stage not in PROTOTYPE_STAGE_SEQUENCE:
+            return _error_tool_message(
+                request,
+                "WORKBENCH_PROTOTYPE_STAGE_FAMILY_INVALID",
+                instruction,
+            )
+        batch_stages = [
+            call
+            for call in _current_batch_calls(request)
+            if call["name"] == GENERATION_STAGE_TOOL_NAME
+        ]
+        current_position = next(
+            (index for index, call in enumerate(batch_stages) if call["id"] == request.tool_call.get("id")),
+            None,
+        )
+        if current_position is None:
+            return _error_tool_message(
+                request,
+                "WORKBENCH_PROTOTYPE_STAGE_DECLARATION_MISSING",
+                f"Retry workbench_generation_stage_update with stage='{stage}' in a new model tool-call batch.",
+            )
+        if len(batch_stages) != 1:
+            return _error_tool_message(
+                request,
+                "WORKBENCH_PROTOTYPE_STAGE_BATCH_INVALID",
+                f"Record only one real Prototype stage per model tool-call batch. {instruction}",
+            )
+        if stage != expected_stage:
+            return _error_tool_message(
+                request,
+                "WORKBENCH_PROTOTYPE_STAGE_ORDER_INVALID",
+                instruction,
+            )
+        return None
+
     @override
     def wrap_model_call(
         self,
@@ -961,7 +1154,15 @@ class WorkbenchToolScopeMiddleware(AgentMiddleware[AgentState]):
         blocked = self._prd_preflight(request)
         if blocked is not None:
             return blocked
-        return self._prd_postflight(request, handler(request))
+        blocked = self._prototype_stage_preflight(request)
+        if blocked is not None:
+            return blocked
+        if request.tool_call.get("name") == READ_FILE_TOOL_NAME:
+            blocked = self._prototype_reference_preflight(request)
+            if blocked is not None:
+                return blocked
+        result = self._prd_postflight(request, handler(request))
+        return self._prototype_reference_postflight(request, result)
 
     @override
     async def awrap_model_call(
@@ -987,4 +1188,12 @@ class WorkbenchToolScopeMiddleware(AgentMiddleware[AgentState]):
         blocked = self._prd_preflight(request)
         if blocked is not None:
             return blocked
-        return self._prd_postflight(request, await handler(request))
+        blocked = self._prototype_stage_preflight(request)
+        if blocked is not None:
+            return blocked
+        if request.tool_call.get("name") == READ_FILE_TOOL_NAME:
+            blocked = self._prototype_reference_preflight(request)
+            if blocked is not None:
+                return blocked
+        result = self._prd_postflight(request, await handler(request))
+        return self._prototype_reference_postflight(request, result)

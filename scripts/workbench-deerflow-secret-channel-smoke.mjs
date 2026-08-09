@@ -130,7 +130,7 @@ async function executePositive() {
     attempt: 1,
     projectId,
     threadId,
-    principalId,
+    runtimeTransportOwnerId: principalId,
     externalThreadId: binding.externalThreadId,
     request: {
       prompt: [

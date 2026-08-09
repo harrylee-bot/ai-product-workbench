@@ -119,7 +119,9 @@ ARTIFACT_PROGRESS_TOOL_NAMES = middleware_module.ARTIFACT_PROGRESS_TOOL_NAMES
 PROTOTYPE_ONLY_TOOL_NAMES = middleware_module.PROTOTYPE_ONLY_TOOL_NAMES
 RUNTIME_RESULT_TOOL_NAME = middleware_module.RUNTIME_RESULT_TOOL_NAME
 PRD_REFERENCE_FILES = middleware_module.PRD_REFERENCE_FILES
+PROTOTYPE_REFERENCE_FILES = middleware_module.PROTOTYPE_REFERENCE_FILES
 PRD_STAGE_SEQUENCE = middleware_module.PRD_STAGE_SEQUENCE
+PROTOTYPE_STAGE_SEQUENCE = middleware_module.PROTOTYPE_STAGE_SEQUENCE
 WorkbenchToolScopeMiddleware = middleware_module.WorkbenchToolScopeMiddleware
 normalize_workbench_canvas_policy = middleware_module.normalize_workbench_canvas_policy
 normalize_workbench_requested_artifact_kinds = (
@@ -240,6 +242,19 @@ def tool_message(
     if artifact is not None:
         message["artifact"] = artifact
     return message
+
+
+def successful_stage_message(stage: str, call_id: str):
+    return middleware_module.ToolMessage(
+        content="ok",
+        tool_call_id=call_id,
+        name="workbench_generation_stage_update",
+        status="success",
+        artifact={
+            "protocol": "workbench.runtime.generation-stage.v1",
+            "stage": stage,
+        },
+    )
 
 
 def append_tool_batch(messages: list[dict], calls: list[dict], responses: list[dict]) -> None:
@@ -647,6 +662,7 @@ class WorkbenchToolScopeMiddlewareTests(unittest.TestCase):
             self.visible_names(None, ["prototype"]),
             [
                 "workbench_runtime_result_submit",
+                READ_FILE_TOOL_NAME,
                 *ARTIFACT_PROGRESS_TOOL_NAMES,
                 *PROTOTYPE_ONLY_TOOL_NAMES,
             ],
@@ -687,11 +703,7 @@ class WorkbenchToolScopeMiddlewareTests(unittest.TestCase):
             repeated.system_message.text.count("<workbench_prd_clarification_policy>"),
             1,
         )
-        for non_exact_prd_scope in (
-            ["prototype"],
-            ["prd", "document"],
-            ["prd", "prd"],
-        ):
+        for non_exact_prd_scope in (["prd", "document"], ["prd", "prd"]):
             with self.subTest(non_exact_prd_scope=non_exact_prd_scope):
                 non_exact_prd = WorkbenchToolScopeMiddleware(None, non_exact_prd_scope)
                 observed_non_exact_prd = non_exact_prd.wrap_model_call(
@@ -716,6 +728,34 @@ class WorkbenchToolScopeMiddlewareTests(unittest.TestCase):
         self.assertEqual(blocked.status, "error")
         self.assertEqual(blocked.name, CLARIFICATION_TOOL_NAME)
         self.assertEqual(blocked.content, "Error: WORKBENCH_PRD_CLARIFICATION_NOT_SUPPORTED")
+
+    def test_prototype_stage_policy_is_injected_once_for_exact_scope(self) -> None:
+        base_system_text = "Base DeerFlow policy."
+        middleware = WorkbenchToolScopeMiddleware(None, ["prototype"])
+        observed = middleware.wrap_model_call(
+            FakeModelRequest(
+                self.all_tools,
+                middleware_module.SystemMessage(content=base_system_text),
+            ),
+            lambda scoped: scoped,
+        )
+        self.assertTrue(observed.system_message.text.startswith(base_system_text))
+        self.assertIn("<workbench_prototype_stage_policy>", observed.system_message.text)
+        self.assertIn(
+            "design-system, mapping-components, creating-flows, generating-ui",
+            observed.system_message.text,
+        )
+        repeated = middleware.wrap_model_call(observed, lambda scoped: scoped)
+        self.assertEqual(
+            repeated.system_message.text.count("<workbench_prototype_stage_policy>"),
+            1,
+        )
+
+        mixed = WorkbenchToolScopeMiddleware(None, ["prototype", "document"]).wrap_model_call(
+            FakeModelRequest(self.all_tools),
+            lambda scoped: scoped,
+        )
+        self.assertIsNone(mixed.system_message)
 
     @unittest.skipIf(USING_IMPORT_STUBS, "requires the pinned DeerFlow middleware stack")
     def test_real_middleware_chain_hides_clarification_from_prd_model_binding(self) -> None:
@@ -779,6 +819,7 @@ class WorkbenchToolScopeMiddlewareTests(unittest.TestCase):
             [tool.name for tool in observed.tools],
             [
                 "workbench_runtime_result_submit",
+                READ_FILE_TOOL_NAME,
                 *ARTIFACT_PROGRESS_TOOL_NAMES,
                 *PROTOTYPE_ONLY_TOOL_NAMES,
             ],
@@ -902,10 +943,82 @@ class WorkbenchToolScopeMiddlewareTests(unittest.TestCase):
         middleware = WorkbenchToolScopeMiddleware(None, ["prototype"])
         for name in (*ARTIFACT_PROGRESS_TOOL_NAMES, *PROTOTYPE_ONLY_TOOL_NAMES):
             with self.subTest(name=name):
+                args = {"stage": "design-system"} if name == "workbench_generation_stage_update" else None
                 self.assertIs(
-                    middleware.wrap_tool_call(FakeToolRequest(name), lambda _request: sentinel),
+                    middleware.wrap_tool_call(
+                        FakeToolRequest(name, args=args),
+                        lambda _request: sentinel,
+                    ),
                     sentinel,
                 )
+
+    def test_prototype_stage_gate_recovers_from_first_generating_ui_skip(self) -> None:
+        middleware = WorkbenchToolScopeMiddleware(None, ["prototype"])
+        messages: list = [{"type": "human", "content": "current Prototype turn"}]
+        skipped = request_in_state(
+            messages,
+            "workbench_generation_stage_update",
+            "skip-to-generating-ui",
+            {"stage": "generating-ui"},
+        )
+        called = False
+
+        def skipped_handler(_request):
+            nonlocal called
+            called = True
+            return object()
+
+        blocked = middleware.wrap_tool_call(skipped, skipped_handler)
+        self.assertFalse(called)
+        self.assertEqual(blocked.status, "error")
+        self.assertIn("WORKBENCH_PROTOTYPE_STAGE_ORDER_INVALID", blocked.content)
+        self.assertIn("stage='design-system'", blocked.content)
+        messages.append(blocked)
+
+        corrected = request_in_state(
+            messages,
+            "workbench_generation_stage_update",
+            "corrected-design-system",
+            {"stage": "design-system"},
+        )
+        sentinel = object()
+        self.assertIs(
+            middleware.wrap_tool_call(corrected, lambda _request: sentinel),
+            sentinel,
+        )
+
+    def test_prototype_stage_gate_allows_only_the_full_ordered_sequence(self) -> None:
+        middleware = WorkbenchToolScopeMiddleware(None, ["prototype"])
+        messages: list = [{"type": "human", "content": "current Prototype turn"}]
+        for index, stage in enumerate(PROTOTYPE_STAGE_SEQUENCE):
+            call_id = f"prototype-stage-{index}"
+            request = request_in_state(
+                messages,
+                "workbench_generation_stage_update",
+                call_id,
+                {"stage": stage},
+            )
+            observed = middleware.wrap_tool_call(
+                request,
+                lambda _request, current_stage=stage, current_id=call_id: (
+                    successful_stage_message(current_stage, current_id)
+                ),
+            )
+            self.assertEqual(observed.status, "success")
+            messages.append(observed)
+
+        for stage in ("design-system", "collecting-prd-context"):
+            with self.subTest(rejected_stage=stage):
+                request = request_in_state(
+                    messages,
+                    "workbench_generation_stage_update",
+                    f"rejected-{stage}",
+                    {"stage": stage},
+                )
+                blocked = middleware.wrap_tool_call(request, lambda _request: object())
+                self.assertEqual(blocked.status, "error")
+                self.assertIn("All four Prototype stages already succeeded", blocked.content)
+                messages.append(blocked)
 
     def test_declared_canvas_execution_and_non_canvas_tools_are_unchanged(self) -> None:
         sentinel = object()
@@ -925,6 +1038,18 @@ class WorkbenchToolScopeMiddlewareTests(unittest.TestCase):
         for virtual_path, expected_digest in PRD_REFERENCE_FILES:
             with self.subTest(path=virtual_path):
                 content = REFERENCE_CONTENT[virtual_path]
+                self.assertEqual(
+                    hashlib.sha256(content.encode("utf-8")).hexdigest(),
+                    expected_digest,
+                )
+                self.assertLess(len(content), 50_000)
+
+    def test_prototype_reference_pins_match_every_shipped_runtime_file(self) -> None:
+        for virtual_path, expected_digest in PROTOTYPE_REFERENCE_FILES:
+            with self.subTest(path=virtual_path):
+                content = (
+                    SKILL_ROOT / virtual_path.removeprefix("/mnt/skills/public/")
+                ).read_text(encoding="utf-8")
                 self.assertEqual(
                     hashlib.sha256(content.encode("utf-8")).hexdigest(),
                     expected_digest,
@@ -1319,9 +1444,10 @@ class WorkbenchToolScopeMiddlewareTests(unittest.TestCase):
                 blocked = middleware.wrap_tool_call(request, handler)
                 self.assertFalse(called)
                 self.assertEqual(
-                    blocked.content,
-                    "Error: WORKBENCH_PRD_REFERENCE_TOOL_NOT_AUTHORIZED",
+                    blocked.status,
+                    "error",
                 )
+                self.assertIn("REFERENCE", blocked.content)
 
 
 class WorkbenchToolScopeMiddlewareAsyncTests(unittest.IsolatedAsyncioTestCase):
@@ -1631,12 +1757,16 @@ class WorkbenchToolScopeMiddlewareAsyncTests(unittest.IsolatedAsyncioTestCase):
             [tool.name for tool in prototype_result.tools],
             [
                 "workbench_runtime_result_submit",
+                READ_FILE_TOOL_NAME,
                 *ARTIFACT_PROGRESS_TOOL_NAMES,
                 *PROTOTYPE_ONLY_TOOL_NAMES,
                 CLARIFICATION_TOOL_NAME,
             ],
         )
-        self.assertIsNone(prototype_result.system_message)
+        self.assertIn(
+            "<workbench_prototype_stage_policy>",
+            prototype_result.system_message.text,
+        )
 
     async def test_async_prd_and_prototype_tool_execution_enforces_artifact_scope_matrix(
         self,
@@ -1688,13 +1818,17 @@ class WorkbenchToolScopeMiddlewareAsyncTests(unittest.IsolatedAsyncioTestCase):
         )
         for name in (*ARTIFACT_PROGRESS_TOOL_NAMES, *PROTOTYPE_ONLY_TOOL_NAMES):
             with self.subTest(scope="prototype", name=name):
+                args = {"stage": "design-system"} if name == "workbench_generation_stage_update" else None
                 self.assertIs(
-                    await prototype_middleware.awrap_tool_call(FakeToolRequest(name), handler),
+                    await prototype_middleware.awrap_tool_call(
+                        FakeToolRequest(name, args=args),
+                        handler,
+                    ),
                     sentinel,
                 )
                 self.assertIn(name, called)
 
-        blocked_reference = await prototype_middleware.awrap_tool_call(
+        blocked_prd_reference = await prototype_middleware.awrap_tool_call(
             FakeToolRequest(
                 READ_FILE_TOOL_NAME,
                 args={"path": PRD_REFERENCE_FILES[0][0]},
@@ -1702,10 +1836,80 @@ class WorkbenchToolScopeMiddlewareAsyncTests(unittest.IsolatedAsyncioTestCase):
             handler,
         )
         self.assertEqual(
-            blocked_reference.content,
-            "Error: WORKBENCH_PRD_REFERENCE_TOOL_NOT_AUTHORIZED",
+            blocked_prd_reference.status,
+            "error",
         )
         self.assertNotIn(READ_FILE_TOOL_NAME, called)
+
+        prototype_reference = PROTOTYPE_REFERENCE_FILES[0][0]
+        prototype_content = (
+            SKILL_ROOT / prototype_reference.removeprefix("/mnt/skills/public/")
+        ).read_text(encoding="utf-8")
+        request = FakeToolRequest(
+            READ_FILE_TOOL_NAME,
+            args={"path": prototype_reference},
+        )
+
+        async def read_reference(_request):
+            called.append(READ_FILE_TOOL_NAME)
+            return middleware_module.ToolMessage(
+                content=prototype_content,
+                tool_call_id="call-1",
+                name=READ_FILE_TOOL_NAME,
+                status="success",
+            )
+
+        allowed_reference = await prototype_middleware.awrap_tool_call(
+            request,
+            read_reference,
+        )
+        self.assertEqual(allowed_reference.content, prototype_content)
+        self.assertIn(READ_FILE_TOOL_NAME, called)
+
+    async def test_async_prototype_stage_gate_recovers_and_completes_ordered_sequence(
+        self,
+    ) -> None:
+        middleware = WorkbenchToolScopeMiddleware(None, ["prototype"])
+        messages: list = [{"type": "human", "content": "current Prototype turn"}]
+        skipped = request_in_state(
+            messages,
+            "workbench_generation_stage_update",
+            "async-skip-to-generating-ui",
+            {"stage": "generating-ui"},
+        )
+        called = False
+
+        async def skipped_handler(_request):
+            nonlocal called
+            called = True
+            return object()
+
+        blocked = await middleware.awrap_tool_call(skipped, skipped_handler)
+        self.assertFalse(called)
+        self.assertIn("WORKBENCH_PROTOTYPE_STAGE_ORDER_INVALID", blocked.content)
+        self.assertIn("stage='design-system'", blocked.content)
+        messages.append(blocked)
+
+        for index, stage in enumerate(PROTOTYPE_STAGE_SEQUENCE):
+            call_id = f"async-prototype-stage-{index}"
+            request = request_in_state(
+                messages,
+                "workbench_generation_stage_update",
+                call_id,
+                {"stage": stage},
+            )
+
+            async def stage_handler(
+                _request,
+                *,
+                current_stage=stage,
+                current_id=call_id,
+            ):
+                return successful_stage_message(current_stage, current_id)
+
+            observed = await middleware.awrap_tool_call(request, stage_handler)
+            self.assertEqual(observed.status, "success")
+            messages.append(observed)
 
     async def test_async_knowledge_tool_execution_is_fail_closed(self) -> None:
         middleware = WorkbenchToolScopeMiddleware()

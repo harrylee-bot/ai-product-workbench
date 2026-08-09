@@ -117,7 +117,7 @@ export type RuntimeExecution = {
   attempt: number;
   projectId: string;
   threadId: string;
-  principalId: string;
+  runtimeTransportOwnerId: string;
   externalThreadId: string;
   request: StartRunRequest;
   artifactTargets: RuntimeArtifactTarget[];
@@ -175,7 +175,7 @@ export class RuntimeSubmissionUnknownError extends Error {
 export type RuntimeCancellation = {
   runId: string;
   runtimeAttemptId: string;
-  principalId: string;
+  runtimeTransportOwnerId: string;
   externalThreadId: string;
   externalRunId: string | null;
 };

@@ -242,7 +242,7 @@ const gatewayContextPatch = patchManifest.gatewaySources.find(
 assert(
   gatewayContextPatch?.path === "app/gateway/services.py"
     && gatewayContextPatch.upstreamSha256 === "4d445c3ed264b346f419204f88073868db7030b2ae307eb6c496ef6f5755eb34"
-    && gatewayContextPatch.patchedSha256 === "0ed419e8c8812ca4db2f00d8012d82a9a8017c7142dde1f5f9a067eca676da56",
+    && gatewayContextPatch.patchedSha256 === "00545892b3f57fe50433f03456ffdd54b931a9f467d561d357f604615318f1d8",
   "DeerFlow Gateway context patch must bind the audited upstream and patched hashes",
 );
 assert(
@@ -275,9 +275,12 @@ assert(
   gatewayContextPatchText.includes('sanitized.pop(\\"recursion_limit\\", None)')
     && gatewayContextPatchText.includes("_DEFAULT_LEAD_GRAPH_RECURSION_LIMIT = 100")
     && gatewayContextPatchText.includes("_WORKBENCH_PRD_LEAD_GRAPH_RECURSION_LIMIT = 200")
+    && gatewayContextPatchText.includes("_WORKBENCH_PROTOTYPE_CODE_LEAD_GRAPH_RECURSION_LIMIT = 200")
     && gatewayContextPatchText.includes("_apply_workbench_lead_recursion_limit")
-    && gatewayContextPatchText.includes('requestedArtifactKinds\\") == [\\"prd\\"]'),
-  "DeerFlow Gateway patch must grant the bounded 200-step budget only to trusted PRD-only Runs",
+    && gatewayContextPatchText.includes('requestedArtifactKinds\\")\\n        if normalized_scope is not None')
+    && gatewayContextPatchText.includes('requested_artifact_kinds == [\\"prd\\"]')
+    && gatewayContextPatchText.includes('requested_artifact_kinds in ([\\"prototype\\"], [\\"code\\"])'),
+  "DeerFlow Gateway patch must grant bounded 200-step budgets only to trusted single-kind PRD, Prototype, or Code Runs",
 );
 const checkpointHistoryPatch = patchManifest.gatewaySources.find(
   (entry) => entry?.path === "app/gateway/routers/threads.py",
@@ -391,6 +394,17 @@ const prdReferencePins = [
     "bd2f09b81bf8538a33ccf9eb0942d364c23dedf071979dad991fe09812f9e747",
   ],
 ];
+const prototypeReferencePins = [
+  [
+    "/mnt/skills/public/workbench/references/prototype-runtime-result.example.json",
+    "e76e0c8b8c797a4941e31cc5067b80bb8106d4329b086ef743d6ad76ef958a99",
+  ],
+  [
+    "/mnt/skills/public/workbench/references/runtime-result-contract.md",
+    "a1849a25012bb9226fa5d576cdace96b1273efaf5f26e0593b6754c7dbeca206",
+  ],
+];
+const workbenchReferencePins = [...prdReferencePins, ...prototypeReferencePins];
 const canonicalPrdReferenceReader = {
   name: "read_file",
   group: "workbench",
@@ -399,49 +413,49 @@ const canonicalPrdReferenceReader = {
 assertDeepEqual(
   WORKBENCH_TRUSTED_TOOLS.filter((tool) => tool.name === canonicalPrdReferenceReader.name),
   [canonicalPrdReferenceReader],
-  "the trusted tool contract must register exactly the restricted PRD read_file implementation",
+  "the trusted tool contract must register exactly the restricted Workbench read_file implementation",
 );
 assert(
-  prdReferenceToolSource.includes("class PrdReferenceSpec:")
+  prdReferenceToolSource.includes("class WorkbenchReferenceSpec:")
     && prdReferenceToolSource.includes("@dataclass(frozen=True)")
     && prdReferenceToolSource.includes("MappingProxyType({")
     && prdReferenceToolSource.includes('@tool("read_file", parse_docstring=True)')
     && prdReferenceToolSource.includes("def workbench_prd_reference_read(")
-    && prdReferenceToolSource.includes('requested_artifact_kinds != ["prd"]')
-    && prdReferenceToolSource.includes("reference = PRD_REFERENCE_FILES.get(path)")
+    && prdReferenceToolSource.includes("requested_artifact_kinds != list(reference.requested_artifact_kinds)")
+    && prdReferenceToolSource.includes("reference = WORKBENCH_REFERENCE_FILES.get(path)")
     && prdReferenceToolSource.includes("content = reference.physical_path.read_bytes()")
     && prdReferenceToolSource.includes("actual_sha256 = hashlib.sha256(content).hexdigest()")
     && prdReferenceToolSource.includes('content.decode("utf-8", errors="strict")')
-    && prdReferencePins.every(([virtualPath, digest]) => (
+    && workbenchReferencePins.every(([virtualPath, digest]) => (
       prdReferenceToolSource.includes(`"${virtualPath}"`)
         && prdReferenceToolSource.includes(`"${virtualPath.replace(/^\/mnt/u, "/app")}"`)
         && prdReferenceToolSource.includes(`sha256="${digest}"`)
     )),
-  "the PRD reference reader must map only pinned virtual paths to complete immutable image files",
+  "the Workbench reference reader must map only scoped pinned virtual paths to complete immutable image files",
 );
 const prdReferenceReaderSignature = /def workbench_prd_reference_read\(\n([\s\S]*?)\n\) -> str:/u
   .exec(prdReferenceToolSource)?.[1];
 assert(
   prdReferenceReaderSignature?.includes("runtime: Runtime")
     && prdReferenceReaderSignature.includes("description: str")
-    && prdReferenceReaderSignature.includes("path: PrdReferencePath")
+    && prdReferenceReaderSignature.includes("path: WorkbenchReferencePath")
     && !prdReferenceReaderSignature.includes("start_line")
     && !prdReferenceReaderSignature.includes("end_line")
     && !prdReferenceReaderSignature.includes("file_path"),
-  "the PRD reference reader schema must expose one complete whitelisted path without range or alias parameters",
+  "the Workbench reference reader schema must expose one complete whitelisted path without range or alias parameters",
 );
 assert(
   prdReferenceToolTestSource.includes(
-    "test_schema_is_named_read_file_and_allows_only_four_complete_paths",
+    "test_schema_is_named_read_file_and_allows_only_six_complete_paths",
   )
     && prdReferenceToolTestSource.includes(
-      "test_reads_each_exact_static_path_and_returns_complete_utf8_unchanged",
+      "test_reads_each_exact_authorized_static_path_and_returns_complete_utf8_unchanged",
     )
     && prdReferenceToolTestSource.includes(
       "test_rejects_aliases_traversal_and_non_path_alias_parameters",
     )
     && prdReferenceToolTestSource.includes(
-      "test_rejects_missing_malformed_non_prd_and_mixed_scope",
+      "test_rejects_missing_malformed_unauthorized_and_mixed_scope",
     )
     && prdReferenceToolTestSource.includes(
       "test_rejects_content_that_does_not_match_the_pinned_sha256",
@@ -449,17 +463,30 @@ assert(
     && prdReferenceToolTestSource.includes(
       "test_rejects_non_utf8_after_the_pinned_byte_hash_matches",
     ),
-  "the PRD reference reader contract must cover schema, scope, traversal, integrity, and UTF-8 failures",
+  "the Workbench reference reader contract must cover schema, scope, traversal, integrity, and UTF-8 failures",
 );
 assert(
   toolScopeMiddlewareSource.includes('self._prd_gate_enabled = normalized_kinds == ["prd"]')
+    && toolScopeMiddlewareSource.includes('self._prototype_reference_enabled = normalized_kinds == ["prototype"]')
     && prdReferencePins.every(([path, digest]) => (
       toolScopeMiddlewareSource.includes(`"${path}"`)
         && toolScopeMiddlewareSource.includes(`"${digest}"`)
     ))
+    && prototypeReferencePins.every(([path, digest]) => (
+      toolScopeMiddlewareSource.includes(`"${path}"`)
+        && toolScopeMiddlewareSource.includes(`"${digest}"`)
+    ))
     && toolScopeMiddlewareSource.includes('hashlib.sha256(content.encode("utf-8")).hexdigest()')
-    && toolScopeMiddlewareSource.includes("WORKBENCH_PRD_REFERENCE_CONTENT_MISMATCH"),
-  "Workbench PRD gate must be PRD-only and bind exact Runtime reference paths and SHA-256 pins",
+    && toolScopeMiddlewareSource.includes("WORKBENCH_PRD_REFERENCE_CONTENT_MISMATCH")
+    && toolScopeMiddlewareSource.includes("WORKBENCH_PROTOTYPE_REFERENCE_CONTENT_MISMATCH")
+    && toolScopeMiddlewareSource.includes("PROTOTYPE_STAGE_SEQUENCE = (")
+    && ["design-system", "mapping-components", "creating-flows", "generating-ui"].every(
+      (stage) => toolScopeMiddlewareSource.includes(`\"${stage}\"`),
+    )
+    && toolScopeMiddlewareSource.includes("def _prototype_stage_preflight(")
+    && toolScopeMiddlewareSource.includes("WORKBENCH_PROTOTYPE_STAGE_ORDER_INVALID")
+    && toolScopeMiddlewareSource.includes("WORKBENCH_PROTOTYPE_STAGE_FAMILY_INVALID"),
+  "Workbench reference gates must bind exact kind-scoped Runtime paths and SHA-256 pins",
 );
 const prdErrorToolMessage = /def _error_tool_message\([\s\S]*?\n\s*\)\n\n\nclass WorkbenchToolScopeMiddleware/u
   .exec(toolScopeMiddlewareSource)?.[0];
@@ -593,12 +620,28 @@ assert(
   "DeerFlow patch contract must cover async scope enforcement and the self-correcting PRD workflow gate",
 );
 assert(
+  patchContractTestSource.includes(
+    "test_prototype_stage_gate_recovers_from_first_generating_ui_skip",
+  )
+    && patchContractTestSource.includes(
+      "test_prototype_stage_gate_allows_only_the_full_ordered_sequence",
+    )
+    && patchContractTestSource.includes(
+      "test_async_prototype_stage_gate_recovers_and_completes_ordered_sequence",
+    )
+    && patchContractTestSource.includes("test_prototype_stage_policy_is_injected_once_for_exact_scope"),
+  "DeerFlow Prototype contract must cover recoverable stage correction, ordered sync/async execution, and policy injection",
+);
+assert(
   patchRequestContextTestSource.includes("test_only_an_authenticated_internal_caller_can_deliver_workbench_channels")
     && patchRequestContextTestSource.includes("test_untrusted_context_is_fail_closed_and_persistence_config_is_redacted")
     && patchRequestContextTestSource.includes("test_knowledge_visibility_requires_the_exact_true_flag_and_capability")
     && patchRequestContextTestSource.includes("test_malformed_scope_does_not_create_a_runtime_secret_channel")
     && patchRequestContextTestSource.includes("test_exact_trusted_prd_scope_receives_the_named_recursion_budget")
-    && patchRequestContextTestSource.includes("test_non_prd_malformed_untrusted_and_forged_fields_keep_default_budget"),
+    && patchRequestContextTestSource.includes(
+      "test_exact_trusted_prototype_and_code_scopes_receive_the_named_recursion_budget",
+    )
+    && patchRequestContextTestSource.includes("test_non_exact_malformed_untrusted_and_forged_fields_keep_default_budget"),
   "DeerFlow request-context contract must cover caller auth, redaction, and malformed scope",
 );
 assert(
@@ -643,17 +686,23 @@ assert(
   "Workbench skill must complete PRDs without the unsupported clarification path",
 );
 assert(
+  normalizedWorkbenchSkillSource.includes("request-scoped")
+    && normalizedWorkbenchSkillSource.includes("prototype-runtime-result.example.json")
+    && normalizedWorkbenchSkillSource.includes("runtime-result-contract.md")
+    && normalizedWorkbenchSkillSource.includes("never use `read_file` on")
+    && normalizedWorkbenchSkillSource.includes("`/mnt/skills/public/workbench/SKILL.md`")
+    && !normalizedWorkbenchSkillSource.includes("configured `read_file` capability in this Workbench Runtime is a PRD-only reference reader"),
+  "Workbench skill must describe the exact Prototype reference scope without the former PRD-only contradiction",
+);
+assert(
   toolScopeMiddlewareSource.includes('READ_FILE_TOOL_NAME = "read_file"')
+    && toolScopeMiddlewareSource.includes("and not self._prototype_reference_enabled")
     && toolScopeMiddlewareSource.includes(
-      "if name == READ_FILE_TOOL_NAME and not self._prd_gate_enabled:",
+      '_REFERENCE_BLOCK_CODE = "WORKBENCH_REFERENCE_TOOL_NOT_AUTHORIZED"',
     )
-    && toolScopeMiddlewareSource.includes(
-      "elif name == READ_FILE_TOOL_NAME and not self._prd_gate_enabled:",
-    )
-    && toolScopeMiddlewareSource.includes(
-      '_PRD_REFERENCE_BLOCK_CODE = "WORKBENCH_PRD_REFERENCE_TOOL_NOT_AUTHORIZED"',
-    ),
-  "DeerFlow middleware must hide and block the PRD reference reader outside an exact PRD Run",
+    && toolScopeMiddlewareSource.includes("def _prototype_reference_preflight(")
+    && toolScopeMiddlewareSource.includes("def _prototype_reference_postflight("),
+  "DeerFlow middleware must expose only exact kind-scoped PRD and Prototype references",
 );
 const taskToolPatch = patchManifest.additionalSources.find(
   (entry) => entry.path === "deerflow/tools/builtins/task_tool.py",
