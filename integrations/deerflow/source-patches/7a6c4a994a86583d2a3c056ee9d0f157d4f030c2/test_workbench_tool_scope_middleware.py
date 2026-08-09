@@ -321,6 +321,25 @@ def prd_messages(*, stage_count: int, references: bool, draft: bool = False) -> 
     return messages
 
 
+def submitted_result_messages(message: str = "Published") -> list[dict]:
+    call_id = "final-result"
+    return [
+        {"type": "human", "content": "current Workbench turn"},
+        {"type": "ai", "content": "", "tool_calls": [
+            call("workbench_runtime_result_submit", call_id, {}),
+        ]},
+        tool_message(
+            "workbench_runtime_result_submit",
+            call_id,
+            artifact={
+                "protocol": "workbench.runtime.validated-result.v1",
+                "ok": True,
+                "result": {"message": message},
+            },
+        ),
+    ]
+
+
 def request_in_state(
     messages: list[dict],
     name: str,
@@ -540,6 +559,26 @@ class WorkbenchToolScopeMiddlewareTests(unittest.TestCase):
                         FakeModelRequest(tools),
                         lambda _scoped: AIMessage(content="done"),
                     )
+
+    def test_successful_runtime_result_short_circuits_followup_model_call(self) -> None:
+        middleware = WorkbenchToolScopeMiddleware(None, ["prd"])
+        called = False
+
+        def handler(_request):
+            nonlocal called
+            called = True
+            return AIMessage(content="model continued")
+
+        response = middleware.wrap_model_call(
+            FakeModelRequest(
+                self.all_tools,
+                state={"messages": submitted_result_messages("Done")},
+            ),
+            handler,
+        )
+        self.assertFalse(called)
+        self.assertIsInstance(response, AIMessage)
+        self.assertEqual(response.content, "Done")
 
     @unittest.skipIf(USING_IMPORT_STUBS, "requires pinned LangChain/LangGraph dependencies")
     def test_catalog_observation_survives_message_reducer_and_checkpoint(self) -> None:
@@ -1343,6 +1382,26 @@ class WorkbenchToolScopeMiddlewareTests(unittest.TestCase):
             blocked_duplicate_final.content,
         )
 
+    def test_prd_gate_blocks_prototype_stage_family_before_handler(self) -> None:
+        middleware = WorkbenchToolScopeMiddleware(None, ["prd"])
+        request = request_in_state(
+            prd_messages(stage_count=0, references=False),
+            "workbench_generation_stage_update",
+            "prototype-stage-in-prd",
+            {"stage": "design-system"},
+        )
+        called = False
+
+        def handler(_request):
+            nonlocal called
+            called = True
+            return object()
+
+        blocked = middleware.wrap_tool_call(request, handler)
+        self.assertFalse(called)
+        self.assertEqual(blocked.status, "error")
+        self.assertIn("WORKBENCH_PRD_STAGE_FAMILY_INVALID", blocked.content)
+
     def test_prd_gate_ignores_failed_attempts_but_not_previous_turn_evidence(self) -> None:
         middleware = WorkbenchToolScopeMiddleware(None, ["prd"])
         messages = prd_messages(stage_count=1, references=False)
@@ -1451,6 +1510,26 @@ class WorkbenchToolScopeMiddlewareTests(unittest.TestCase):
 
 
 class WorkbenchToolScopeMiddlewareAsyncTests(unittest.IsolatedAsyncioTestCase):
+    async def test_async_successful_runtime_result_short_circuits_followup_model_call(self) -> None:
+        middleware = WorkbenchToolScopeMiddleware(None, ["prd"])
+        called = False
+
+        async def handler(_request):
+            nonlocal called
+            called = True
+            return AIMessage(content="model continued")
+
+        response = await middleware.awrap_model_call(
+            FakeModelRequest(
+                [FakeTool(RUNTIME_RESULT_TOOL_NAME)],
+                state={"messages": submitted_result_messages("Done async")},
+            ),
+            handler,
+        )
+        self.assertFalse(called)
+        self.assertIsInstance(response, AIMessage)
+        self.assertEqual(response.content, "Done async")
+
     async def test_async_model_result_is_stamped_after_scope_filtering(self) -> None:
         middleware = WorkbenchToolScopeMiddleware(None, None, False)
         original = AIMessage(

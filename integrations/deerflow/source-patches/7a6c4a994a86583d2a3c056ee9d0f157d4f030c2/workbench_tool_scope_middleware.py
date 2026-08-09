@@ -550,6 +550,30 @@ def _successful_runtime_results(state: Any) -> tuple[int, bool]:
     return count, invalid or count > 1
 
 
+def _successful_runtime_result_message(state: Any) -> str | None:
+    """Return the validated result message once, so the graph can converge."""
+    completed, invalid = _completed_tool_calls(state)
+    if invalid:
+        return None
+    messages: list[str] = []
+    for call in completed:
+        if call["name"] != RUNTIME_RESULT_TOOL_NAME or not _tool_succeeded(call["response"]):
+            continue
+        artifact = _value(call["response"], "artifact")
+        if (
+            not isinstance(artifact, Mapping)
+            or artifact.get("protocol") != _PRD_RESULT_PROTOCOL
+            or artifact.get("ok") is not True
+        ):
+            continue
+        result = _value(artifact, "result")
+        message = _value(result, "message")
+        messages.append(message.strip() if isinstance(message, str) else "")
+    if len(messages) != 1:
+        return None
+    return messages[0] or "Workbench result submitted."
+
+
 def _current_batch_calls(request: ToolCallRequest) -> list[dict[str, Any]]:
     call_id = request.tool_call.get("id")
     messages = _state_messages(request.state)
@@ -891,6 +915,15 @@ class WorkbenchToolScopeMiddleware(AgentMiddleware[AgentState]):
         args = _tool_args(request.tool_call.get("args"))
         stage = args.get("stage")
         if stage not in PRD_STAGE_SEQUENCE:
+            # The shared stage tool schema also contains Prototype stages. Keep
+            # those calls out of a PRD Run before the handler can return a
+            # misleading request-kind error and send the model into a retry loop.
+            if stage in PROTOTYPE_STAGE_SEQUENCE:
+                return _error_tool_message(
+                    request,
+                    "WORKBENCH_PRD_STAGE_FAMILY_INVALID",
+                    "This PRD Run accepts only PRD generation stages; call the next required PRD stage instead.",
+                )
             return None
         stage_count, stage_invalid = _stage_progress(request.state)
         successful_references, reference_invalid = _reference_progress(request.state)
@@ -1137,6 +1170,12 @@ class WorkbenchToolScopeMiddleware(AgentMiddleware[AgentState]):
         handler: Callable[[ModelRequest], ModelResponse],
     ) -> ModelCallResult:
         scoped_request = self._filter_tools(request)
+        submitted_message = _successful_runtime_result_message(scoped_request.state)
+        if submitted_message is not None:
+            return _stamp_catalog_observation(
+                AIMessage(content=submitted_message),
+                self._catalog_observation(scoped_request),
+            )
         return _stamp_catalog_observation(
             handler(scoped_request),
             self._catalog_observation(scoped_request),
@@ -1171,6 +1210,12 @@ class WorkbenchToolScopeMiddleware(AgentMiddleware[AgentState]):
         handler: Callable[[ModelRequest], Awaitable[ModelResponse]],
     ) -> ModelCallResult:
         scoped_request = self._filter_tools(request)
+        submitted_message = _successful_runtime_result_message(scoped_request.state)
+        if submitted_message is not None:
+            return _stamp_catalog_observation(
+                AIMessage(content=submitted_message),
+                self._catalog_observation(scoped_request),
+            )
         return _stamp_catalog_observation(
             await handler(scoped_request),
             self._catalog_observation(scoped_request),
