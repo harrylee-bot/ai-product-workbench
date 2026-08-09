@@ -2098,7 +2098,14 @@ function assertRuntimeResultCheckpoints(
 ) {
   for (const [artifactIndex, checkpoint] of latestCheckpoints) {
     const finalDraft = result.artifacts[artifactIndex];
-    if (!finalDraft || canonicalJson(finalDraft) !== canonicalJson(checkpoint)) {
+    if (!finalDraft) {
+      throw new Error("RUNTIME_ARTIFACT_DRAFT_FINAL_MISMATCH");
+    }
+    // Prototype checkpoints are incremental previews. The validated terminal
+    // result may legitimately refine one after the last streamed checkpoint;
+    // its scope and checksum validation make the final result authoritative.
+    if (finalDraft.kind === "prototype") continue;
+    if (canonicalJson(finalDraft) !== canonicalJson(checkpoint)) {
       throw new Error("RUNTIME_ARTIFACT_DRAFT_FINAL_MISMATCH");
     }
   }

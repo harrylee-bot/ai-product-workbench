@@ -2930,7 +2930,7 @@ describe("DeerFlow runtime adapter", () => {
     }
   });
 
-  it("persists a terminal Prototype final without a streaming checkpoint but rejects a checkpoint mismatch", async () => {
+  it("uses a terminal Prototype final as authoritative with or without a streaming checkpoint", async () => {
     const checkpoint = {
       kind: "prototype" as const,
       title: "Prototype",
@@ -2995,10 +2995,19 @@ describe("DeerFlow runtime adapter", () => {
       draft: checkpoint,
     }));
 
+    const mismatchObserver = observer();
     const mismatchAdapter = new DeerFlowRuntimeAdapter(workerConfig(), { getObject: vi.fn() } as never);
     await expect(mismatchAdapter.execute(execution({
       request: { ...execution().request, requestedArtifactKinds: ["prototype"] },
-    }), observer())).rejects.toThrow("RUNTIME_ARTIFACT_DRAFT_FINAL_MISMATCH");
+    }), mismatchObserver)).resolves.toMatchObject({
+      message: "mismatched final",
+      artifacts: [mismatched],
+    });
+    expect(mismatchObserver.onEvent).toHaveBeenCalledWith(expect.objectContaining({
+      type: "artifact.draft",
+      artifactIndex: 0,
+      draft: mismatched,
+    }));
   });
 
   it("fails closed when a PRD final has no independently published checkpoint", async () => {
