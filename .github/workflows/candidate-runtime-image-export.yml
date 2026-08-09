@@ -1,0 +1,132 @@
+name: Candidate runtime image export
+
+on:
+  pull_request:
+    types: [opened, reopened, synchronize]
+
+permissions:
+  contents: read
+
+env:
+  WORKBENCH_CANDIDATE_SOURCE_COMMIT: fae891f0abb90f5dd4d3aa936b3a06af28f33e83
+
+jobs:
+  export-runtime-image:
+    if: >-
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.event.pull_request.head.ref == 'codex/functional-runtime-live-fix-20260809'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      packages: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: runtime-worker
+            dockerfile: apps/workbench-worker/Dockerfile
+            target: runner
+            tag: workbench-candidate-fae891-runtime-worker:functional-v7-stream-completion
+          - name: deerflow
+            dockerfile: integrations/deerflow/Dockerfile
+            target: runtime
+            tag: workbench-candidate-fae891-deerflow:canonical-v1
+    steps:
+      - name: Checkout verified candidate source
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          ref: ${{ env.WORKBENCH_CANDIDATE_SOURCE_COMMIT }}
+          persist-credentials: false
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+
+      - name: Build exact candidate image
+        env:
+          DEERFLOW_BASE_IMAGE: ${{ vars.WORKBENCH_DEERFLOW_BASE_IMAGE_REF }}
+          DEERFLOW_NODE_IMAGE: ${{ vars.WORKBENCH_DEERFLOW_NODE_IMAGE_REF }}
+          DEERFLOW_SOURCE_COMMIT: ${{ vars.WORKBENCH_DEERFLOW_COMMIT }}
+          NODE_IMAGE: ${{ vars.WORKBENCH_NODE_IMAGE }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$WORKBENCH_CANDIDATE_SOURCE_COMMIT"
+          args=(
+            --load
+            --file "${{ matrix.dockerfile }}"
+            --target "${{ matrix.target }}"
+            --label "org.opencontainers.image.revision=$WORKBENCH_CANDIDATE_SOURCE_COMMIT"
+            --tag "${{ matrix.tag }}"
+          )
+          case "${{ matrix.name }}" in
+            runtime-worker)
+              printf '%s' "$NODE_IMAGE" | grep -Eq '@sha256:[a-f0-9]{64}$'
+              args+=(--build-arg "NODE_IMAGE=$NODE_IMAGE")
+              ;;
+            deerflow)
+              printf '%s' "$DEERFLOW_BASE_IMAGE" | grep -Eq '@sha256:[a-f0-9]{64}$'
+              printf '%s' "$DEERFLOW_NODE_IMAGE" | grep -Eq '@sha256:[a-f0-9]{64}$'
+              printf '%s' "$DEERFLOW_SOURCE_COMMIT" | grep -Eq '^[a-f0-9]{40}$'
+              args+=(
+                --build-arg "DEERFLOW_BASE_IMAGE=$DEERFLOW_BASE_IMAGE"
+                --build-arg "DEERFLOW_NODE_IMAGE=$DEERFLOW_NODE_IMAGE"
+                --build-arg "DEERFLOW_SOURCE_COMMIT=$DEERFLOW_SOURCE_COMMIT"
+                --build-arg "WORKBENCH_SOURCE_COMMIT=$WORKBENCH_CANDIDATE_SOURCE_COMMIT"
+              )
+              ;;
+          esac
+          docker buildx build "${args[@]}" .
+          docker image inspect "${{ matrix.tag }}" \
+            --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}' \
+            | grep -Fx "$WORKBENCH_CANDIDATE_SOURCE_COMMIT"
+
+      - name: Probe image entrypoint
+        run: |
+          set -euo pipefail
+          case "${{ matrix.name }}" in
+            runtime-worker)
+              docker run --rm --network none --entrypoint node "${{ matrix.tag }}" \
+                --check apps/workbench-worker/dist/main.js
+              ;;
+            deerflow)
+              docker image inspect "${{ matrix.tag }}" --format '{{.Config.User}}' | grep -Fx '65532:65532'
+              docker run --rm --network none \
+                --read-only \
+                --cap-drop ALL \
+                --security-opt no-new-privileges:true \
+                --tmpfs /tmp:size=1073741824,uid=65532,gid=65532,mode=1770 \
+                --env UV_CACHE_DIR=/tmp/uv-cache \
+                --entrypoint /bin/sh "${{ matrix.tag }}" -ec \
+                'cd /app/backend
+                 uv run --no-sync uvicorn --help >/dev/null
+                 PYTHONPATH=/app/backend/packages/harness:/app/backend uv run --no-sync python -c "from deerflow_workbench_tools.runtime_result_validator import validate_runtime_result; assert validate_runtime_result({})[\"ok\"] is False"'
+              ;;
+          esac
+
+      - name: Export image with checksums
+        run: |
+          set -euo pipefail
+          mkdir -p output
+          docker image inspect "${{ matrix.tag }}" --format '{{.Id}}' \
+            > "output/${{ matrix.name }}.image-id"
+          docker image inspect "${{ matrix.tag }}" --format '{{json .Config.Labels}}' \
+            > "output/${{ matrix.name }}.labels.json"
+          docker save "${{ matrix.tag }}" \
+            | zstd --threads=0 --compression-level=3 \
+              --output "output/${{ matrix.name }}.docker.tar.zst"
+          sha256sum output/* > "output/${{ matrix.name }}.sha256"
+
+      - name: Upload deployable image artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: functional-runtime-image-${{ matrix.name }}-fae891
+          path: output/
+          if-no-files-found: error
+          retention-days: 1
