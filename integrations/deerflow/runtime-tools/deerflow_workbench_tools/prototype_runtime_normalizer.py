@@ -132,13 +132,13 @@ def normalize_prototype_layout_aliases(
                         })
                 normalized_nodes.append(node)
                 continue
-            if not isinstance(node, dict) or node.get("kind") not in _PROTOTYPE_NODE_KINDS:
+            node_kind = node.get("kind") if isinstance(node, dict) else None
+            if not isinstance(node_kind, str) or node_kind not in _PROTOTYPE_NODE_KINDS:
                 repairs.append({
                     "path": ["content", "nodes", node_index],
                     "action": "removed-unsupported-node",
                 })
                 continue
-            node_kind = node["kind"]
             allowed_fields = _NODE_FIELDS_BY_KIND[node_kind]
             for field in list(node):
                 if field in allowed_fields:
@@ -284,7 +284,10 @@ def _normalize_prototype_graph_references(
             if not isinstance(screen, dict):
                 continue
             initial_state_id = screen.get("initialStateId")
-            if initial_state_id is not None and initial_state_id not in state_ids:
+            if initial_state_id is not None and (
+                not isinstance(initial_state_id, str)
+                or initial_state_id not in state_ids
+            ):
                 screen["initialStateId"] = None
                 repairs.append({
                     "path": ["content", "screens", screen_index, "initialStateId"],
@@ -358,6 +361,8 @@ def _normalize_prototype_graph_references(
         if group_key is None or not isinstance(node.get("bindingIds"), list):
             continue
         for reference in node["bindingIds"]:
+            if not isinstance(reference, str):
+                continue
             binding = binding_by_id.get(reference)
             source = binding.get("source") if isinstance(binding, dict) else None
             if (
@@ -366,7 +371,8 @@ def _normalize_prototype_graph_references(
                 or binding.get("property") != "value"
                 or not isinstance(source, dict)
                 or source.get("kind") != "variable"
-                or source.get("path") not in used_variable_paths
+                or not isinstance(source.get("path"), str)
+                or source["path"] not in used_variable_paths
             ):
                 continue
             radio_group_paths.setdefault(group_key, set()).add(source["path"])
@@ -437,7 +443,8 @@ def _normalize_prototype_graph_references(
             for reference in value_binding_ids
             if isinstance(binding_by_id[reference].get("source"), dict)
             and binding_by_id[reference]["source"].get("kind") == "variable"
-            and binding_by_id[reference]["source"].get("path") in used_variable_paths
+            and isinstance(binding_by_id[reference]["source"].get("path"), str)
+            and binding_by_id[reference]["source"]["path"] in used_variable_paths
         ]
         if valid_value_binding_ids:
             canonical_binding_id = valid_value_binding_ids[0]
@@ -564,9 +571,10 @@ def _normalize_prototype_graph_references(
             submitted_radio_groups: set[tuple[str, str | None, str]] = set()
             for reference in filtered_references:
                 binding = binding_by_id.get(reference)
+                binding_node_id = binding.get("nodeId") if isinstance(binding, dict) else None
                 input_node = (
-                    node_by_id.get(binding.get("nodeId"))
-                    if isinstance(binding, dict)
+                    node_by_id.get(binding_node_id)
+                    if isinstance(binding_node_id, str)
                     else None
                 )
                 group_key = (
@@ -591,7 +599,11 @@ def _normalize_prototype_graph_references(
         bindings[:] = [
             binding
             for binding in bindings
-            if not isinstance(binding, dict) or binding.get("id") not in removed_binding_ids
+            if (
+                not isinstance(binding, dict)
+                or not isinstance(binding.get("id"), str)
+                or binding["id"] not in removed_binding_ids
+            )
         ]
 
 

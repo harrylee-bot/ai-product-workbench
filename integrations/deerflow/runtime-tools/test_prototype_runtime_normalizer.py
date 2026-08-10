@@ -160,6 +160,58 @@ class PrototypeRuntimeNormalizerTests(unittest.TestCase):
         self.assertIsNot(normalized, artifact)
         self.assertEqual(repairs, [])
 
+    def test_handles_unhashable_model_values_without_raising(self) -> None:
+        artifact = {
+            "kind": "prototype",
+            "content": {
+                "protocol": "workbench.prototype.v1",
+                "screens": [{"initialStateId": []}],
+                "nodes": [
+                    {"kind": []},
+                    {
+                        "id": "input-one",
+                        "screenId": "screen-one",
+                        "kind": "input",
+                        "inputType": "radio",
+                        "fieldName": "choice",
+                        "bindingIds": [[], "binding-one", "binding-two"],
+                    },
+                ],
+                "variables": [{"path": "choice", "initialValue": None}],
+                "bindings": [
+                    {
+                        "id": "binding-one",
+                        "nodeId": "input-one",
+                        "property": "value",
+                        "source": {"kind": "variable", "path": []},
+                    },
+                    {"id": []},
+                    {
+                        "id": "binding-two",
+                        "nodeId": "input-one",
+                        "property": "value",
+                        "source": {"kind": "variable", "path": "choice"},
+                    },
+                ],
+            },
+        }
+
+        normalized, repairs = normalize_prototype_layout_aliases(artifact)
+
+        content = normalized["content"]
+        self.assertIsNone(content["screens"][0]["initialStateId"])
+        self.assertEqual(len(content["nodes"]), 1)
+        self.assertEqual(content["nodes"][0]["kind"], "input")
+        self.assertEqual(content["nodes"][0]["bindingIds"], ["binding-two"])
+        repaired_path = next(
+            binding["source"]["path"]
+            for binding in content["bindings"]
+            if isinstance(binding.get("id"), str)
+        )
+        self.assertIsInstance(repaired_path, str)
+        self.assertIn(repaired_path, {variable["path"] for variable in content["variables"]})
+        self.assertGreaterEqual(len(repairs), 3)
+
 
 if __name__ == "__main__":
     unittest.main()
