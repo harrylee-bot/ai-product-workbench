@@ -2,6 +2,7 @@ import {
   createRuntimeFinalizationPayload,
   createRuntimeProviderProjection,
   createRuntimeProviderTextCheckpoint,
+  extractAssistantTextFrame,
   projectIncompleteVisibleAssistantText,
   reduceRuntimeProviderProjection,
   rebuildRuntimeProviderTextState,
@@ -11,6 +12,85 @@ import {
   sha256Canonical,
   type RuntimeProviderTextEvent,
 } from "../src/runtime/runtime-assistant-text.js";
+
+describe("Runtime assistant text frame extraction", () => {
+  it("ignores a prior-turn assistant when the current turn has only a human message", () => {
+    expect(extractAssistantTextFrame("values", {
+      messages: [
+        { type: "human", content: "previous turn" },
+        { type: "ai", content: "previous answer" },
+        { type: "human", content: "current turn" },
+      ],
+    })).toBeNull();
+  });
+
+  it("selects the latest assistant text from the current human turn", () => {
+    expect(extractAssistantTextFrame("values", {
+      values: {
+        messages: [
+          { role: "user", content: "previous turn" },
+          { role: "assistant", content: "previous answer" },
+          {
+            id: ["langchain", "schema", "messages", "HumanMessage"],
+            content: "current turn",
+          },
+          { type: "tool", content: "tool result" },
+          { type: "AIMessage", content: "current answer" },
+        ],
+      },
+    })).toEqual({ kind: "cumulative", text: "current answer" });
+  });
+
+  it("does not inherit prior-turn text into a fresh provider projection", () => {
+    const initial = createRuntimeProviderProjection({
+      runtimeAttemptId: "attempt-multi-turn",
+      runId: "run-multi-turn",
+    });
+    const humanOnlyPayload = {
+      messages: [
+        { type: "human", content: "previous turn" },
+        { type: "ai", content: "previous answer" },
+        { type: "human", content: "current turn" },
+      ],
+    };
+    const afterHumanOnly = reduceRuntimeProviderProjection(initial, {
+      runtimeAttemptId: initial.runtimeAttemptId,
+      runId: initial.runId,
+      attempt: 1,
+      externalEventId: "multi-turn-human-only",
+      sequence: 1,
+      event: "values",
+      payload: humanOnlyPayload,
+      payloadSha256: sha256Canonical(humanOnlyPayload),
+    });
+
+    expect(afterHumanOnly.providerTextEffect).toBeNull();
+    expect(afterHumanOnly.state.rawAssistantText).toBe("");
+
+    const currentAssistantPayload = {
+      messages: [
+        ...humanOnlyPayload.messages,
+        { type: "ai", content: "current answer" },
+      ],
+    };
+    const afterAssistant = reduceRuntimeProviderProjection(afterHumanOnly.state, {
+      runtimeAttemptId: initial.runtimeAttemptId,
+      runId: initial.runId,
+      attempt: 1,
+      externalEventId: "multi-turn-current-assistant",
+      sequence: 2,
+      event: "values",
+      payload: currentAssistantPayload,
+      payloadSha256: sha256Canonical(currentAssistantPayload),
+    });
+
+    expect(afterAssistant.providerTextEffect).toEqual({
+      type: "text.delta",
+      delta: "current answer",
+    });
+    expect(afterAssistant.state.rawAssistantText).toBe("current answer");
+  });
+});
 
 describe("durable Runtime provider text state", () => {
   it("rebuilds the raw cumulative baseline and redaction buffer from processed provider events", () => {

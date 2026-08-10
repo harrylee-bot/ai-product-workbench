@@ -111,6 +111,8 @@ describe("Runtime retry classification", () => {
       .toBe(false);
     expect(isRetryableRuntimeError(new Error("RUNTIME_PROVIDER_TEXT_EVENT_INTEGRITY_ERROR")))
       .toBe(false);
+    expect(isRetryableRuntimeError(new Error("RUNTIME_ASSISTANT_CUMULATIVE_CONFLICT")))
+      .toBe(false);
     expect(isRetryableRuntimeError(new Error("RUNTIME_PROVIDER_STATE_NOT_A_REAL_CODE")))
       .toBe(true);
     expect(isRetryableRuntimeError(new Error("socket closed before the runtime stream completed")))
