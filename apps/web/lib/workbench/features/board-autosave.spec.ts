@@ -308,53 +308,56 @@ describe("Board autosave coordinator", () => {
     await coordinator.dispose();
   });
 
-  it("resumes autosave when a refresh proves a 412 was caused only by a PRD addition", async () => {
-    const store = createBoardStore(board);
-    const snapshots: BoardSaveSnapshot[] = [];
-    const save = vi.fn(async (snapshot: BoardSaveSnapshot) => {
-      snapshots.push(snapshot);
-      if (snapshots.length === 1) {
-        throw new WorkbenchApiError({
-          type: "about:blank",
-          title: "Precondition failed",
-          status: 412,
-          code: "REVISION_CONFLICT",
-        });
-      }
-      return saved(snapshot);
-    });
-    const coordinator = createBoardAutosaveCoordinator({
-      store,
-      save,
-      debounceMs: 20,
-      visibilityTarget: null,
-      pageLifecycleTarget: null,
-    });
+  it.each(["prd", "prototype"] as const)(
+    "resumes autosave when a refresh proves a 412 was caused only by a %s addition",
+    async (artifactKind) => {
+      const store = createBoardStore(board);
+      const snapshots: BoardSaveSnapshot[] = [];
+      const save = vi.fn(async (snapshot: BoardSaveSnapshot) => {
+        snapshots.push(snapshot);
+        if (snapshots.length === 1) {
+          throw new WorkbenchApiError({
+            type: "about:blank",
+            title: "Precondition failed",
+            status: 412,
+            code: "REVISION_CONFLICT",
+          });
+        }
+        return saved(snapshot);
+      });
+      const coordinator = createBoardAutosaveCoordinator({
+        store,
+        save,
+        debounceMs: 20,
+        visibilityTarget: null,
+        pageLifecycleTarget: null,
+      });
 
-    store.getState().setViewport({ x: 40, y: 50, zoom: 0.9 });
-    await coordinator.flush();
-    expect(store.getState().saveStatus).toBe("conflict");
+      store.getState().setViewport({ x: 40, y: 50, zoom: 0.9 });
+      await coordinator.flush();
+      expect(store.getState().saveStatus).toBe("conflict");
 
-    store.getState().reconcileFromServer(boardWithPrd(2), '"2"');
-    await vi.advanceTimersByTimeAsync(20);
-    await vi.waitFor(() => expect(save).toHaveBeenCalledTimes(2));
+      store.getState().reconcileFromServer(boardWithGeneratedArtifact(2, artifactKind), '"2"');
+      await vi.advanceTimersByTimeAsync(20);
+      await vi.waitFor(() => expect(save).toHaveBeenCalledTimes(2));
 
-    expect(snapshots[1]).toMatchObject({
-      baseRevision: 2,
-      ifMatch: '"2"',
-      request: {
-        viewport: { x: 40, y: 50, zoom: 0.9 },
-        nodes: [{ id: "node-prd", data: { artifactKind: "prd" } }],
-      },
-    });
-    expect(store.getState()).toMatchObject({
-      serverRevision: 3,
-      dirty: false,
-      saveStatus: "clean",
-    });
-    expect(snapshots[1]?.idempotencyKey).not.toBe(snapshots[0]?.idempotencyKey);
-    await coordinator.dispose();
-  });
+      expect(snapshots[1]).toMatchObject({
+        baseRevision: 2,
+        ifMatch: '"2"',
+        request: {
+          viewport: { x: 40, y: 50, zoom: 0.9 },
+          nodes: [{ id: `node-${artifactKind}`, data: { artifactKind } }],
+        },
+      });
+      expect(store.getState()).toMatchObject({
+        serverRevision: 3,
+        dirty: false,
+        saveStatus: "clean",
+      });
+      expect(snapshots[1]?.idempotencyKey).not.toBe(snapshots[0]?.idempotencyKey);
+      await coordinator.dispose();
+    },
+  );
 
   it("resumes autosave when a refresh follows a retryable error with only a PRD addition", async () => {
     const store = createBoardStore(board);
@@ -542,23 +545,32 @@ function saved(snapshot: BoardSaveSnapshot): BoardAutosaveResult {
 }
 
 function boardWithPrd(revision: number): Board {
+  return boardWithGeneratedArtifact(revision, "prd");
+}
+
+function boardWithGeneratedArtifact(
+  revision: number,
+  artifactKind: "prd" | "prototype",
+): Board {
   return {
     ...board,
     revision,
     nodes: [{
-      id: "node-prd",
+      id: `node-${artifactKind}`,
       kind: "artifact",
       parentNodeId: null,
       order: 0,
       position: { x: 0, y: 0 },
-      size: { width: 1_154, height: 3_001 },
-      artifactId: "artifact-prd",
-      artifactVersionId: "version-prd-1",
+      size: artifactKind === "prd"
+        ? { width: 1_154, height: 3_001 }
+        : { width: 390, height: 844 },
+      artifactId: `artifact-${artifactKind}`,
+      artifactVersionId: `version-${artifactKind}-1`,
       data: {
         protocol: boardNodeProtocol,
         nodeType: "artifact",
-        title: "签到打卡活动需求说明书",
-        artifactKind: "prd",
+        title: artifactKind === "prd" ? "签到打卡活动需求说明书" : "产品原型",
+        artifactKind,
       },
     }],
   };
