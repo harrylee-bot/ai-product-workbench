@@ -2381,7 +2381,7 @@ export class RunProcessor {
       FOR UPDATE
     `);
     const session = locked[0];
-    if (!session || session.status !== "active") {
+    if (!session) {
       throw new Error("CANVAS_AGENT_SESSION_PUBLISH_STATE_INVALID");
     }
 
@@ -2393,6 +2393,20 @@ export class RunProcessor {
       select: { id: true },
     });
     if (pendingInvocation) throw new Error("CANVAS_TOOL_INVOCATION_PENDING");
+
+    if (session.status === "expired") {
+      const invocation = await tx.canvasToolInvocation.findFirst({
+        where: { agentSessionId: session.id },
+        select: { id: true },
+      });
+      // The short-lived Canvas capability is optional for a normal Runtime
+      // publication. Once the session row is locked, an expired session with
+      // no invocations cannot acquire one, so it has no effects to reconcile.
+      if (!invocation) return null;
+    }
+    if (session.status !== "active") {
+      throw new Error("CANVAS_AGENT_SESSION_PUBLISH_STATE_INVALID");
+    }
 
     const mutationInvocations = await tx.canvasToolInvocation.findMany({
       where: {

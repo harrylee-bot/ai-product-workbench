@@ -3381,6 +3381,69 @@ describe("Canvas Agent Run lifecycle", () => {
     expect(tx.run.updateMany).not.toHaveBeenCalled();
   });
 
+  it("publishes a normal result after an unused Canvas session expires", async () => {
+    const tx = eventTransaction();
+    tx.run.findUniqueOrThrow.mockResolvedValue(publishableRun());
+    tx.canvasAgentSession.findUnique.mockResolvedValue({ id: "canvas-session-expired" });
+    tx.$queryRaw.mockResolvedValueOnce([{
+      id: "canvas-session-expired",
+      status: "expired",
+      boardId: "board-1",
+      boardRevision: 0,
+      canvasStateRevision: 0,
+    }]);
+    Object.assign(tx, {
+      threadEntry: { update: vi.fn(async () => ({})) },
+      board: { findUniqueOrThrow: vi.fn(async () => ({ id: "board-1" })) },
+      boardNode: {
+        findMany: vi.fn(async () => []),
+        aggregate: vi.fn(async () => ({ _max: { sortOrder: null } })),
+      },
+    });
+    const { processor } = processorWithTransaction(tx);
+
+    await processor.publishResult(executionClaim, "entry-1", "", {
+      protocol: "workbench.runtime.result.v1",
+      message: "Done",
+      artifacts: [],
+    });
+
+    expect(tx.canvasToolInvocation.findFirst).toHaveBeenNthCalledWith(2, {
+      where: { agentSessionId: "canvas-session-expired" },
+      select: { id: true },
+    });
+    expect(tx.run.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ status: "succeeded" }),
+    }));
+    expect(tx.canvasAgentSession.updateMany).not.toHaveBeenCalled();
+    expect(tx.canvasToolGrant.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("rejects an expired Canvas session that has any invocation history", async () => {
+    const tx = eventTransaction();
+    tx.run.findUniqueOrThrow.mockResolvedValue(publishableRun());
+    tx.canvasAgentSession.findUnique.mockResolvedValue({ id: "canvas-session-expired" });
+    tx.$queryRaw.mockResolvedValueOnce([{
+      id: "canvas-session-expired",
+      status: "expired",
+      boardId: "board-1",
+      boardRevision: 0,
+      canvasStateRevision: 0,
+    }]);
+    tx.canvasToolInvocation.findFirst
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({ id: "invocation-settled" });
+    const { processor } = processorWithTransaction(tx);
+
+    await expect(processor.publishResult(executionClaim, "entry-1", "", {
+      protocol: "workbench.runtime.result.v1",
+      message: "Done",
+      artifacts: [],
+    })).rejects.toThrow("CANVAS_AGENT_SESSION_PUBLISH_STATE_INVALID");
+
+    expect(tx.run.updateMany).not.toHaveBeenCalled();
+  });
+
   it("rejects a succeeded quick_edit that was not bound to the Run target", async () => {
     const tx = eventTransaction();
     tx.run.findUniqueOrThrow.mockResolvedValue(publishableRun());
