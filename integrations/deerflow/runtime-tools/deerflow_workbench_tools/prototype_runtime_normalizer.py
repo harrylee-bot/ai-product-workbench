@@ -439,7 +439,7 @@ def _normalize_prototype_graph_references(
             and binding_by_id[reference]["source"].get("kind") == "variable"
             and binding_by_id[reference]["source"].get("path") in used_variable_paths
         ]
-        if len(valid_value_binding_ids) == 1:
+        if valid_value_binding_ids:
             canonical_binding_id = valid_value_binding_ids[0]
         elif value_binding_ids:
             canonical_binding_id = value_binding_ids[0]

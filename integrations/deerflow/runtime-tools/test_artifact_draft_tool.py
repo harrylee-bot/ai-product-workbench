@@ -335,6 +335,43 @@ class ArtifactDraftToolTests(unittest.TestCase):
             {variable["path"] for variable in normalized["variables"]},
         )
 
+    def test_prefers_a_valid_input_value_binding_over_an_invalid_first_binding(self) -> None:
+        draft = copy.deepcopy(self.draft)
+        document = draft["content"]
+        input_node = next(node for node in document["nodes"] if node["kind"] == "input")
+        first_binding = next(
+            binding for binding in document["bindings"]
+            if binding["id"] == input_node["bindingIds"][0]
+        )
+        first_binding["source"]["path"] = "missing.value"
+        valid_binding = copy.deepcopy(first_binding)
+        valid_binding.update({
+            "id": "binding-name-valid",
+            "source": {"kind": "variable", "path": "form.name"},
+        })
+        duplicate_valid_binding = copy.deepcopy(valid_binding)
+        duplicate_valid_binding["id"] = "binding-name-valid-duplicate"
+        document["bindings"].extend([valid_binding, duplicate_valid_binding])
+        input_node["bindingIds"].extend([
+            valid_binding["id"],
+            duplicate_valid_binding["id"],
+        ])
+
+        response_content, artifact = workbench_artifact_draft_publish.func(
+            self.runtime,
+            0,
+            draft,
+        )
+
+        self.assertTrue(json.loads(response_content)["ok"])
+        normalized = artifact["draft"]["content"]
+        normalized_input = next(node for node in normalized["nodes"] if node["kind"] == "input")
+        self.assertEqual(normalized_input["bindingIds"], [valid_binding["id"]])
+        self.assertEqual(
+            next(action for action in normalized["actions"] if action["kind"] == "submit")["bindingIds"],
+            [valid_binding["id"]],
+        )
+
     def test_returns_scoped_validation_issues_for_an_invalid_draft(self) -> None:
         invalid = copy.deepcopy(self.draft)
         del invalid["title"]
