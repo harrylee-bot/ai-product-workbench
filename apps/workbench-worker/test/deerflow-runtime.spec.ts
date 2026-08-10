@@ -646,6 +646,64 @@ describe("DeerFlow runtime adapter", () => {
     expect(runtimeObserver.onExternalFinalization).toHaveBeenCalledTimes(1);
   });
 
+  it("rejoins when an end sentinel arrives before the provider Run is terminal", async () => {
+    const requests: Array<{ url: URL; init: RequestInit }> = [];
+    const prototype = minimalPrototypeArtifact();
+    let runGetCount = 0;
+    const fetchMock = vi.fn(async (input: string | URL | Request, init: RequestInit = {}) => {
+      const url = new URL(String(input));
+      requests.push({ url, init });
+      if (url.pathname === "/api/threads/deer_thread_1/runs" && (init.method ?? "GET") === "GET") {
+        return Response.json([]);
+      }
+      if (url.pathname === "/api/threads/deer_thread_1/runs/stream" && init.method === "POST") {
+        return runtimeStreamResponse([
+          {
+            id: "event-before-premature-end",
+            event: "values",
+            data: { messages: [{ type: "human", content: "current turn" }] },
+          },
+          { event: "end", data: null },
+        ], { runId: "external_run_premature_end" });
+      }
+      if (url.pathname === "/api/threads/deer_thread_1/runs/external_run_premature_end") {
+        runGetCount += 1;
+        return Response.json(runtimeRun("external_run_premature_end"));
+      }
+      if (url.pathname === "/api/threads/deer_thread_1/runs/external_run_premature_end/stream") {
+        return successfulRuntimeResponse({
+          runId: "external_run_premature_end",
+          eventId: "event-after-premature-end",
+          includeContentLocation: false,
+          message: "Prototype recovered",
+          artifacts: [prototype],
+        });
+      }
+      throw new Error(`Unexpected request: ${init.method ?? "GET"} ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const runtimeObserver = observer();
+    const adapter = new DeerFlowRuntimeAdapter(workerConfig(), { getObject: vi.fn() } as never);
+
+    await expect(adapter.execute(execution({
+      request: { ...execution().request, requestedArtifactKinds: ["prototype"] },
+    }), runtimeObserver)).resolves.toMatchObject({
+      protocol: "workbench.runtime.result.v1",
+      message: "Prototype recovered",
+      artifacts: [{ kind: "prototype" }],
+    });
+
+    expect(runGetCount).toBe(1);
+    expect(requests.filter((request) => request.init.method === "POST")).toHaveLength(1);
+    const rejoin = requests.find((request) => (
+      request.url.pathname.endsWith("/external_run_premature_end/stream")
+    ));
+    expect(rejoin?.init.method).toBe("GET");
+    expect(new Headers(rejoin?.init.headers).get("Last-Event-ID"))
+      .toBe("event-before-premature-end");
+    expect(runtimeObserver.onExternalFinalization).toHaveBeenCalledTimes(1);
+  });
+
   it("stops consuming when the end sentinel arrives before the HTTP stream closes", async () => {
     const finalState = {
       messages: [

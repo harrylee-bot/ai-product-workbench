@@ -888,11 +888,9 @@ export class DeerFlowRuntimeAdapter implements RuntimePort {
     let lastExternalEventId = submission.mode === "join"
       ? submission.lastExternalEventId ?? null
       : null;
-    let streamEndedBySentinel = false;
     let streamBodyFailed = false;
     try {
       while (true) {
-        streamEndedBySentinel = false;
         let streamReadFailed = false;
         let streamReadFailure: unknown;
         while (true) {
@@ -917,7 +915,10 @@ export class DeerFlowRuntimeAdapter implements RuntimePort {
           // must not enter the durable business-event inbox or advance the cursor.
           if (part.event === "end") {
             if (part.data !== null) throw new Error("DEERFLOW_STREAM_END_INVALID");
-            streamEndedBySentinel = true;
+            // The sentinel closes the current retained stream segment, but it
+            // does not prove that the provider Run is terminal. The status
+            // probe below decides whether to finalize or rejoin from the
+            // durable cursor.
             break;
           }
           partEffects = [];
@@ -994,7 +995,6 @@ export class DeerFlowRuntimeAdapter implements RuntimePort {
           if (resultToolCallId !== null || inputRequired !== null) scheduleTerminalResultStreamAbort();
         }
 
-        if (streamEndedBySentinel) break;
         if (signal.aborted) throw abortError(signal);
         if (terminalProviderStatus) break;
         if (!externalRunId) throw new Error("RUNTIME_EXTERNAL_RUN_ID_MISSING");
