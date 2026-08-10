@@ -170,6 +170,171 @@ class ArtifactDraftToolTests(unittest.TestCase):
         self.assertGreaterEqual(len(json.loads(content)["normalizations"]), 9)
         self.assertNotIn("maxLines", draft["content"]["nodes"][0])
 
+    def test_accepts_a_complete_checkpoint_with_common_model_shape_drift(self) -> None:
+        draft = copy.deepcopy(self.draft)
+        content = draft["content"]
+        root = content["nodes"][0]
+        root.pop("clipContent")
+        root["childIds"].extend(["missing-child", "node-group"])
+
+        text = copy.deepcopy(root)
+        text.update({
+            "id": "node-compat-text",
+            "kind": "text",
+            "name": "compat-text",
+            "parentId": root["id"],
+            "label": "Checkpoint",
+        })
+        text.pop("childIds", None)
+        text.pop("clipContent", None)
+        text.pop("text", None)
+        text.pop("maxLines", None)
+        content["nodes"].append(text)
+        root["childIds"].append(text["id"])
+        content["nodes"].append({"id": "node-group", "name": "group"})
+        content["nodes"].append("node-noise")
+
+        content["screens"][0]["initialStateId"] = "state-missing"
+        input_node = next(node for node in content["nodes"] if node.get("kind") == "input")
+        content["bindings"] = [
+            binding for binding in content["bindings"]
+            if binding["id"] != input_node["bindingIds"][0]
+        ]
+        button = next(node for node in content["nodes"] if node.get("kind") == "button")
+        button["actionIds"].append("action-missing")
+
+        content, artifact = workbench_artifact_draft_publish.func(
+            self.runtime,
+            0,
+            draft,
+        )
+
+        response = json.loads(content)
+        self.assertTrue(response["ok"])
+        normalized = artifact["draft"]["content"]
+        self.assertIsNone(normalized["screens"][0]["initialStateId"])
+        self.assertEqual(normalized["nodes"][0]["clipContent"], False)
+        normalized_text = next(node for node in normalized["nodes"] if node["id"] == "node-compat-text")
+        self.assertEqual(normalized_text["text"], "Checkpoint")
+        self.assertNotIn("label", normalized_text)
+        self.assertEqual(len(normalized["nodes"]), 5)
+        normalized_input = next(node for node in normalized["nodes"] if node["kind"] == "input")
+        self.assertEqual(len(normalized_input["bindingIds"]), 1)
+
+    def test_repairs_missing_radio_bindings_with_one_shared_variable(self) -> None:
+        draft = copy.deepcopy(self.draft)
+        document = draft["content"]
+        form = next(node for node in document["nodes"] if node["kind"] == "form")
+        first_radio = next(node for node in document["nodes"] if node["kind"] == "input")
+        first_radio.update({
+            "inputType": "radio",
+            "fieldName": "attendance",
+            "label": "参加",
+            "optionValue": "yes",
+        })
+        first_missing_binding_id = first_radio["bindingIds"][0]
+        document["bindings"] = [
+            binding for binding in document["bindings"]
+            if binding["id"] != first_missing_binding_id
+        ]
+
+        second_radio = copy.deepcopy(first_radio)
+        second_radio.update({
+            "id": "node-attendance-no",
+            "name": "不参加",
+            "label": "不参加",
+            "optionValue": "no",
+            "bindingIds": ["binding-attendance-no-missing"],
+        })
+        submit_node_index = next(
+            index for index, node in enumerate(document["nodes"])
+            if node.get("kind") == "button"
+        )
+        document["nodes"].insert(submit_node_index, second_radio)
+        form["childIds"].insert(-1, second_radio["id"])
+        submit_action = next(
+            action for action in document["actions"]
+            if action["kind"] == "submit"
+        )
+        submit_action["bindingIds"] = [
+            first_missing_binding_id,
+            second_radio["bindingIds"][0],
+        ]
+
+        response_content, artifact = workbench_artifact_draft_publish.func(
+            self.runtime,
+            0,
+            draft,
+        )
+
+        self.assertTrue(json.loads(response_content)["ok"])
+        normalized = artifact["draft"]["content"]
+        normalized_radios = [
+            node for node in normalized["nodes"]
+            if node.get("kind") == "input" and node.get("fieldName") == "attendance"
+        ]
+        binding_by_id = {binding["id"]: binding for binding in normalized["bindings"]}
+        radio_bindings = [
+            binding_by_id[node["bindingIds"][0]]
+            for node in normalized_radios
+        ]
+        normalized_submit = next(
+            action for action in normalized["actions"]
+            if action["kind"] == "submit"
+        )
+        self.assertEqual(len(normalized_radios), 2)
+        self.assertEqual(len({binding["id"] for binding in radio_bindings}), 2)
+        self.assertEqual(
+            len({binding["source"]["path"] for binding in radio_bindings}),
+            1,
+        )
+        self.assertEqual(len(normalized_submit["bindingIds"]), 1)
+        self.assertIn(normalized_submit["bindingIds"][0], {
+            binding["id"] for binding in radio_bindings
+        })
+
+    def test_reuses_an_input_value_binding_when_its_variable_is_missing(self) -> None:
+        draft = copy.deepcopy(self.draft)
+        document = draft["content"]
+        input_node = next(node for node in document["nodes"] if node["kind"] == "input")
+        value_binding = next(
+            binding for binding in document["bindings"]
+            if binding["id"] == input_node["bindingIds"][0]
+        )
+        value_binding["source"]["path"] = "missing.value"
+        missing_binding_alias = "binding-name-missing-alias"
+        input_node["bindingIds"].append(missing_binding_alias)
+        submit_action = next(
+            action for action in document["actions"]
+            if action["kind"] == "submit"
+        )
+        submit_action["bindingIds"] = [missing_binding_alias]
+
+        response_content, artifact = workbench_artifact_draft_publish.func(
+            self.runtime,
+            0,
+            draft,
+        )
+
+        self.assertTrue(json.loads(response_content)["ok"])
+        normalized = artifact["draft"]["content"]
+        normalized_input = next(node for node in normalized["nodes"] if node["kind"] == "input")
+        input_value_bindings = [
+            binding for binding in normalized["bindings"]
+            if binding["nodeId"] == normalized_input["id"] and binding["property"] == "value"
+        ]
+        self.assertEqual(normalized_input["bindingIds"], [value_binding["id"]])
+        self.assertEqual(len(input_value_bindings), 1)
+        normalized_submit = next(
+            action for action in normalized["actions"]
+            if action["kind"] == "submit"
+        )
+        self.assertEqual(normalized_submit["bindingIds"], [value_binding["id"]])
+        self.assertIn(
+            input_value_bindings[0]["source"]["path"],
+            {variable["path"] for variable in normalized["variables"]},
+        )
+
     def test_returns_scoped_validation_issues_for_an_invalid_draft(self) -> None:
         invalid = copy.deepcopy(self.draft)
         del invalid["title"]

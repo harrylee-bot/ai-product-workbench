@@ -45,7 +45,7 @@ const prdReferenceToolTestSource = readText(prdReferenceToolTestPath);
 const prototypeNormalizerSource = readText(prototypeNormalizerPath);
 const prototypeNormalizerTestSource = readText(prototypeNormalizerTestPath);
 const patchManifestSha256 = sha256(patchManifestSource);
-const prototypeNormalizerSha256 = "c24a9bcd295e6edfc3ecfd5a986d6a6a257003f52a8beb4204e6cb3442da8022";
+const prototypeNormalizerSha256 = "f8804b9d4f0e68270d5e9627eb9d8c367b3626ab597bc24ab62f6464a9b75989";
 const expectedCommit = argumentValue("--expected-commit");
 
 assert(gateway, "production runtime Compose must define deerflow");
