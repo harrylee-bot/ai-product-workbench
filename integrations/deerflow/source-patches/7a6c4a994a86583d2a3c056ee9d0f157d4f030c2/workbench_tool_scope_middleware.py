@@ -58,6 +58,7 @@ READ_FILE_TOOL_NAME = "read_file"
 GENERATION_STAGE_TOOL_NAME = "workbench_generation_stage_update"
 ARTIFACT_DRAFT_TOOL_NAME = "workbench_artifact_draft_publish"
 RUNTIME_RESULT_TOOL_NAME = "workbench_runtime_result_submit"
+SUBAGENT_TOOL_NAME = "task"
 CLARIFICATION_TOOL_NAME = "ask_clarification"
 PRD_STAGE_SEQUENCE = (
     "collecting-prd-context",
@@ -119,6 +120,7 @@ _PROTOTYPE_BLOCK_CODE = "WORKBENCH_PROTOTYPE_TOOL_NOT_REQUESTED"
 _KNOWLEDGE_BLOCK_CODE = "WORKBENCH_KNOWLEDGE_TOOL_NOT_AUTHORIZED"
 _PRD_REFERENCE_BLOCK_CODE = "WORKBENCH_PRD_REFERENCE_TOOL_NOT_AUTHORIZED"
 _REFERENCE_BLOCK_CODE = "WORKBENCH_REFERENCE_TOOL_NOT_AUTHORIZED"
+_PROTOTYPE_SUBAGENT_BLOCK_CODE = "WORKBENCH_PROTOTYPE_SUBAGENT_NOT_AVAILABLE"
 _PRD_CLARIFICATION_BLOCK_CODE = "WORKBENCH_PRD_CLARIFICATION_NOT_SUPPORTED"
 _PRD_REFERENCE_ROOT = "/mnt/skills/public/"
 _PRD_REFERENCE_RELATIVE_PATHS = tuple(
@@ -132,6 +134,7 @@ This PRD-only Workbench Run cannot resume free-form clarification. The ask_clari
 </workbench_prd_clarification_policy>"""
 _PROTOTYPE_STAGE_SYSTEM_POLICY = """<workbench_prototype_stage_policy>
 This Prototype-only Workbench Run must call workbench_generation_stage_update exactly once for each real stage, in this order: design-system, mapping-components, creating-flows, generating-ui. Never skip, repeat, regress, batch, or substitute a PRD stage. If a stage call returns an error naming the next required stage, call that stage next and continue the Run. The scoped read_file tool may read only the complete prototype-runtime-result.example.json and runtime-result-contract.md references.
+The generic task tool is unavailable for this Prototype-only Run. Read both pinned references directly with read_file, author the typed Prototype Artifact in the lead, publish its complete draft, and submit the identical final candidate with workbench_runtime_result_submit.
 </workbench_prototype_stage_policy>"""
 _TOOL_CATALOG_PROTOCOL = "workbench.runtime.tool-catalog-observation.v1"
 _TOOL_CATALOG_METADATA_KEY = "workbench_tool_catalog_observation"
@@ -740,6 +743,11 @@ class WorkbenchToolScopeMiddleware(AgentMiddleware[AgentState]):
             name = _tool_name(tool)
             if name == CLARIFICATION_TOOL_NAME and self._prd_gate_enabled:
                 continue
+            # Prototype-only Runs keep the lead on the typed Artifact path. The
+            # generic task tool cannot read the pinned Workbench references and
+            # otherwise enables unbounded protocol-lookup delegation loops.
+            if name == SUBAGENT_TOOL_NAME and self._prototype_stage_gate_enabled:
+                continue
             if name in _CANVAS_TOOL_NAME_SET and name not in self._declared_canvas:
                 continue
             if name in _ARTIFACT_PROGRESS_TOOL_NAME_SET and not self._artifact_progress_enabled:
@@ -789,6 +797,8 @@ class WorkbenchToolScopeMiddleware(AgentMiddleware[AgentState]):
             return None
         if name == CLARIFICATION_TOOL_NAME and self._prd_gate_enabled:
             block_code = _PRD_CLARIFICATION_BLOCK_CODE
+        elif name == SUBAGENT_TOOL_NAME and self._prototype_stage_gate_enabled:
+            block_code = _PROTOTYPE_SUBAGENT_BLOCK_CODE
         elif name in _CANVAS_TOOL_NAME_SET and name not in self._declared_canvas:
             block_code = _CANVAS_BLOCK_CODE
         elif name in _ARTIFACT_PROGRESS_TOOL_NAME_SET and not self._artifact_progress_enabled:

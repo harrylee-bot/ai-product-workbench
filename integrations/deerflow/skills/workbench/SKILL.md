@@ -48,13 +48,15 @@ Classify the turn before doing work:
 - Short or one-sentence product request with ordinary missing details: use `one_sentence_completion` and infer conventional details from product architecture, business-domain knowledge, and historical cases.
 - Missing high-risk or blocking facts for a non-PRD product change: use DeerFlow's clarification interrupt before producing a result. A PRD-only Canvas Run is non-interruptible and follows the PRD rules below instead.
 - PRD drafting: whenever `requestedArtifactKinds` contains `prd`, produce a complete fixed-template `workbench.prd.v2` Artifact document. When revising an existing PRD, preserve the target Artifact's current v1 or v2 protocol.
-- Prototype/code generation: create or refine specs first, then use DeerFlow's coding/prototype execution capability and return the requested Artifact kinds.
+- Prototype/code generation: create or refine specs first, then return the requested Artifact kinds. Prototype-only typed Artifact generation stays on the lead's direct Workbench tool path; use a coding/prototype sub-agent only when the request genuinely needs sandboxed file or code execution.
 - Export request: use the dedicated 产品工作台 export workflow; do not invent an export Artifact in a generation Run.
 
-`task` delegation is available only when `requestedArtifactKinds` contains
-`prototype` or `code` and does not contain `prd`. Never delegate merely to read
-or summarize this skill, and never begin Prototype/code work while a PRD in the
-same request remains unsubmitted or unaccepted.
+`task` delegation is available only for a concrete sandboxed execution request
+when `requestedArtifactKinds` contains `code` and does not contain `prd`.
+Never use it to read or summarize the pinned Workbench references:
+Prototype-only Runs read those references directly with `read_file`, then
+author and submit the typed Artifact from the lead. Never begin Prototype/code
+work while a PRD in the same request remains unsubmitted or unaccepted.
 For PRD, document, image, and data Runs, the lead agent must work directly and
 finish with `workbench_runtime_result_submit`.
 
@@ -355,4 +357,8 @@ The only Prototype authoring references are `/mnt/skills/public/workbench/refere
 
 ## Prototype Execution
 
-Use DeerFlow's own graph, sandbox, tools, and sub-agent capabilities for concrete prototype artifacts. Do not ask NestJS to call Codex or any retired adapter.
+Use DeerFlow's own graph and Workbench tools for typed Prototype artifacts. Use
+a sub-agent only when the Run also requests `code` and concrete sandboxed
+file/code execution is actually required; do not delegate protocol lookup or
+typed result submission.
+Do not ask NestJS to call Codex or any retired adapter.

@@ -118,6 +118,7 @@ READ_FILE_TOOL_NAME = middleware_module.READ_FILE_TOOL_NAME
 ARTIFACT_PROGRESS_TOOL_NAMES = middleware_module.ARTIFACT_PROGRESS_TOOL_NAMES
 PROTOTYPE_ONLY_TOOL_NAMES = middleware_module.PROTOTYPE_ONLY_TOOL_NAMES
 RUNTIME_RESULT_TOOL_NAME = middleware_module.RUNTIME_RESULT_TOOL_NAME
+SUBAGENT_TOOL_NAME = middleware_module.SUBAGENT_TOOL_NAME
 PRD_REFERENCE_FILES = middleware_module.PRD_REFERENCE_FILES
 PROTOTYPE_REFERENCE_FILES = middleware_module.PROTOTYPE_REFERENCE_FILES
 PRD_STAGE_SEQUENCE = middleware_module.PRD_STAGE_SEQUENCE
@@ -972,6 +973,50 @@ class WorkbenchToolScopeMiddlewareTests(unittest.TestCase):
                     self.visible_names(None, requested_kinds),
                     ["workbench_runtime_result_submit"],
                 )
+
+    def test_prototype_model_binding_hides_subagent_tool(self) -> None:
+        middleware = WorkbenchToolScopeMiddleware(None, ["prototype"])
+        observed = middleware.wrap_model_call(
+            FakeModelRequest([*self.all_tools, FakeTool(SUBAGENT_TOOL_NAME)]),
+            lambda scoped: scoped,
+        )
+        self.assertNotIn(SUBAGENT_TOOL_NAME, [tool.name for tool in observed.tools])
+
+    def test_prototype_subagent_execution_is_rejected(self) -> None:
+        called = False
+
+        def handler(_request):
+            nonlocal called
+            called = True
+            return object()
+
+        result = WorkbenchToolScopeMiddleware(None, ["prototype"]).wrap_tool_call(
+            FakeToolRequest(SUBAGENT_TOOL_NAME),
+            handler,
+        )
+        self.assertFalse(called)
+        self.assertEqual(result.status, "error")
+        self.assertEqual(
+            result.content,
+            "Error: WORKBENCH_PROTOTYPE_SUBAGENT_NOT_AVAILABLE",
+        )
+
+    def test_code_run_keeps_subagent_tool_available(self) -> None:
+        middleware = WorkbenchToolScopeMiddleware(None, ["code"])
+        observed = middleware.wrap_model_call(
+            FakeModelRequest([FakeTool(SUBAGENT_TOOL_NAME)]),
+            lambda scoped: scoped,
+        )
+        self.assertEqual([tool.name for tool in observed.tools], [SUBAGENT_TOOL_NAME])
+
+        sentinel = object()
+        self.assertIs(
+            middleware.wrap_tool_call(
+                FakeToolRequest(SUBAGENT_TOOL_NAME),
+                lambda _request: sentinel,
+            ),
+            sentinel,
+        )
 
     def test_missing_or_malformed_policy_hides_all_eight_canvas_tools(self) -> None:
         malformed = [
@@ -1959,7 +2004,10 @@ class WorkbenchToolScopeMiddlewareAsyncTests(unittest.IsolatedAsyncioTestCase):
         prototype_result = await WorkbenchToolScopeMiddleware(
             None,
             ["prototype"],
-        ).awrap_model_call(FakeModelRequest(tools), handler)
+        ).awrap_model_call(
+            FakeModelRequest([*tools, FakeTool(SUBAGENT_TOOL_NAME)]),
+            handler,
+        )
         self.assertEqual(
             [tool.name for tool in prototype_result.tools],
             [
@@ -1973,6 +2021,29 @@ class WorkbenchToolScopeMiddlewareAsyncTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn(
             "<workbench_prototype_stage_policy>",
             prototype_result.system_message.text,
+        )
+        self.assertIn(
+            "The generic task tool is unavailable",
+            prototype_result.system_message.text,
+        )
+
+    async def test_async_prototype_subagent_execution_is_rejected(self) -> None:
+        called = False
+
+        async def handler(_request):
+            nonlocal called
+            called = True
+            return object()
+
+        result = await WorkbenchToolScopeMiddleware(None, ["prototype"]).awrap_tool_call(
+            FakeToolRequest(SUBAGENT_TOOL_NAME),
+            handler,
+        )
+        self.assertFalse(called)
+        self.assertEqual(result.status, "error")
+        self.assertEqual(
+            result.content,
+            "Error: WORKBENCH_PROTOTYPE_SUBAGENT_NOT_AVAILABLE",
         )
 
     async def test_async_prd_and_prototype_tool_execution_enforces_artifact_scope_matrix(

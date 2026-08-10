@@ -681,6 +681,17 @@ assert(
   "DeerFlow Prototype contract must cover recoverable stage correction, ordered sync/async execution, and policy injection",
 );
 assert(
+  toolScopeMiddlewareSource.includes('SUBAGENT_TOOL_NAME = "task"')
+    && toolScopeMiddlewareSource.includes("name == SUBAGENT_TOOL_NAME and self._prototype_stage_gate_enabled")
+    && toolScopeMiddlewareSource.includes("WORKBENCH_PROTOTYPE_SUBAGENT_NOT_AVAILABLE")
+    && toolScopeMiddlewareSource.includes("The generic task tool is unavailable")
+    && patchContractTestSource.includes("test_prototype_model_binding_hides_subagent_tool")
+    && patchContractTestSource.includes("test_prototype_subagent_execution_is_rejected")
+    && patchContractTestSource.includes("test_async_prototype_subagent_execution_is_rejected")
+    && patchContractTestSource.includes("test_code_run_keeps_subagent_tool_available"),
+  "DeerFlow Prototype-only Runs must keep generic subagent delegation out of the typed Artifact path",
+);
+assert(
   patchRequestContextTestSource.includes("test_only_an_authenticated_internal_caller_can_deliver_workbench_channels")
     && patchRequestContextTestSource.includes("test_untrusted_context_is_fail_closed_and_persistence_config_is_redacted")
     && patchRequestContextTestSource.includes("test_knowledge_visibility_requires_the_exact_true_flag_and_capability")
