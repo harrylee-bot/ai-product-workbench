@@ -863,7 +863,11 @@ class WorkbenchToolScopeMiddlewareTests(unittest.TestCase):
             handler,
         )
         self.assertTrue(called)
-        self.assertEqual(response.tool_calls, [manual_call])
+        self.assertEqual(len(response.tool_calls), 1)
+        normalized_manual_call = response.tool_calls[0]
+        self.assertEqual(normalized_manual_call["id"], manual_call["id"])
+        self.assertEqual(normalized_manual_call["name"], RUNTIME_RESULT_TOOL_NAME)
+        self.assertEqual(normalized_manual_call["args"], manual_call["args"])
 
         messages.append(response)
         sentinel = object()
