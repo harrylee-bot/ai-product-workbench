@@ -517,16 +517,18 @@ export class DeerFlowRuntimeAdapter implements RuntimePort {
       });
     };
     const streamMode = this.streamMode(execution.request.requestedArtifactKinds);
-    // A provider can keep a Run alive while a proxy leaves the SSE socket
-    // half-open. The heartbeat poll keeps the execution lease alive, but it
-    // cannot wake a blocked `stream.next()`. Use a short fixed watchdog for
-    // every stream mode so the SDK surfaces the stall and the durable cursor
-    // reconnects with Last-Event-ID. This is independent of the much longer
-    // outer provider idle timeout, which covers model/tool execution time.
-    const streamIdleReconnect = Math.min(
-      30_000,
-      Math.max(1_000, Math.floor(this.config.deerFlowIdleTimeoutMs / 2)),
-    );
+    // Values streams can legitimately stay quiet while DeerFlow is running a
+    // long model or subagent call. The provider heartbeat still keeps the
+    // outer liveness budget alive and aborts this stream once the provider
+    // reports a terminal state, so forcing the SDK's five-retry idle watchdog
+    // here would turn a healthy long-running Run into a false failure.
+    // Other stream modes retain the reconnect watchdog for half-open sockets.
+    const streamIdleReconnect = streamMode === "values"
+      ? 0
+      : Math.min(
+          30_000,
+          Math.max(1_000, Math.floor(this.config.deerFlowIdleTimeoutMs / 2)),
+        );
     if (externalRunId) {
       stream = joinExternalStream(
         submission.mode === "join" ? submission.lastExternalEventId ?? undefined : undefined,

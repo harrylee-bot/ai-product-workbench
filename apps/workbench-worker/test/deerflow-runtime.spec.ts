@@ -892,7 +892,7 @@ describe("DeerFlow runtime adapter", () => {
     }));
     const adapter = new DeerFlowRuntimeAdapter({
       ...workerConfig(),
-      deerFlowIdleTimeoutMs: 30_000,
+      deerFlowIdleTimeoutMs: 9_000,
     }, { getObject: vi.fn() } as never);
 
     await expect(adapter.execute(execution({
