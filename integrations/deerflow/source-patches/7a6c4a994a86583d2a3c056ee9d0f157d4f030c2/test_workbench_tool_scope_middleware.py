@@ -908,6 +908,44 @@ class WorkbenchToolScopeMiddlewareTests(unittest.TestCase):
         )
         self.assertIn("WORKBENCH_PROTOTYPE_PATCH_CHECKPOINT_REQUIRED", final_result.content)
 
+    def test_prototype_revise_rejects_patch_and_result_in_one_batch(self) -> None:
+        middleware = WorkbenchToolScopeMiddleware(
+            None,
+            ["prototype"],
+            None,
+            ("run-1", "attempt-1"),
+        )
+        messages = prototype_messages(draft=True, operation_kind="revise")
+        patch_call_id = "revise-patch-and-result-patch"
+        result_call_id = "revise-patch-and-result-result"
+        batch = [
+            call(PROTOTYPE_ONLY_TOOL_NAMES[0], patch_call_id, {}),
+            call(RUNTIME_RESULT_TOOL_NAME, result_call_id, {}),
+        ]
+
+        patch = middleware.wrap_tool_call(
+            request_in_state(
+                messages,
+                PROTOTYPE_ONLY_TOOL_NAMES[0],
+                patch_call_id,
+                {},
+                sibling_calls=batch,
+            ),
+            lambda _request: self.fail("mixed publication batch must not run Patch"),
+        )
+        self.assertIn("WORKBENCH_PROTOTYPE_PUBLICATION_BATCH_INVALID", patch.content)
+
+        result = middleware.wrap_tool_call(
+            FakeToolRequest(
+                RUNTIME_RESULT_TOOL_NAME,
+                result_call_id,
+                {},
+                {"messages": messages},
+            ),
+            lambda _request: self.fail("mixed publication batch must not run Result"),
+        )
+        self.assertIn("WORKBENCH_PROTOTYPE_PUBLICATION_BATCH_INVALID", result.content)
+
     def test_multiple_successful_create_drafts_remain_invalid(self) -> None:
         middleware = WorkbenchToolScopeMiddleware(
             None,

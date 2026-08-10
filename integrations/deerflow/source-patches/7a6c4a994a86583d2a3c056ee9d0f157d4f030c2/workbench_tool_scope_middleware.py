@@ -1574,7 +1574,12 @@ class WorkbenchToolScopeMiddleware(AgentMiddleware[AgentState]):
         batch_publications = [
             call
             for call in _current_batch_calls(request)
-            if call["name"] in {ARTIFACT_DRAFT_TOOL_NAME, RUNTIME_RESULT_TOOL_NAME}
+            if call["name"]
+            in {
+                ARTIFACT_DRAFT_TOOL_NAME,
+                PROTOTYPE_PATCH_TOOL_NAME,
+                RUNTIME_RESULT_TOOL_NAME,
+            }
         ]
         if len(batch_publications) != 1:
             return _error_tool_message(
