@@ -8,7 +8,7 @@ permissions:
   contents: read
 
 env:
-  WORKBENCH_CANDIDATE_SOURCE_COMMIT: 2b652d1e0dbf93a89004d484f40bb497e071e918
+  WORKBENCH_CANDIDATE_SOURCE_COMMIT: 168ee1c6c267ccc072df38525f1918e71bcac6fa
 
 jobs:
   export-runtime-image:
@@ -42,7 +42,7 @@ jobs:
           DEERFLOW_BASE_IMAGE: ${{ vars.WORKBENCH_DEERFLOW_BASE_IMAGE_REF }}
           DEERFLOW_NODE_IMAGE: ${{ vars.WORKBENCH_DEERFLOW_NODE_IMAGE_REF }}
           DEERFLOW_SOURCE_COMMIT: ${{ vars.WORKBENCH_DEERFLOW_COMMIT }}
-          IMAGE_TAG: workbench-candidate-2b652d1e-deerflow:functional-v2
+          IMAGE_TAG: workbench-candidate-168ee1c6-deerflow:functional-v3
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$WORKBENCH_CANDIDATE_SOURCE_COMMIT"
@@ -66,7 +66,7 @@ jobs:
 
       - name: Probe image entrypoint and configured tools
         env:
-          IMAGE_TAG: workbench-candidate-2b652d1e-deerflow:functional-v2
+          IMAGE_TAG: workbench-candidate-168ee1c6-deerflow:functional-v3
         run: |
           set -euo pipefail
           docker image inspect "$IMAGE_TAG" --format '{{.Config.User}}' | grep -Fx '65532:65532'
@@ -83,7 +83,7 @@ jobs:
 
       - name: Export image with checksums
         env:
-          IMAGE_TAG: workbench-candidate-2b652d1e-deerflow:functional-v2
+          IMAGE_TAG: workbench-candidate-168ee1c6-deerflow:functional-v3
         run: |
           set -euo pipefail
           mkdir -p output
@@ -95,7 +95,7 @@ jobs:
       - name: Upload deployable image artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: functional-runtime-image-deerflow-2b652d1e
+          name: functional-runtime-image-deerflow-168ee1c6
           path: output/
           if-no-files-found: error
           retention-days: 1
