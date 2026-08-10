@@ -147,9 +147,11 @@ if not USING_IMPORT_STUBS:
         DeferredToolFilterMiddleware,
     )
     from deerflow.runtime.serialization import serialize_channel_values_for_api
+    from langchain.tools import tool
     from langchain_core.messages import HumanMessage
     from langgraph.checkpoint.memory import InMemorySaver
     from langgraph.graph import END, START, MessagesState, StateGraph
+    from langgraph.prebuilt import ToolNode, tools_condition
 
 
 CATALOG_METADATA_KEY = "workbench_tool_catalog_observation"
@@ -319,6 +321,51 @@ def prd_messages(*, stage_count: int, references: bool, draft: bool = False) -> 
                     "protocol": "workbench.runtime.artifact-draft.v1",
                     "ok": True,
                     "draft": {"kind": "prd"},
+                },
+            )],
+        )
+    return messages
+
+
+def prototype_messages(
+    *,
+    draft: bool = False,
+    run_id: str = "run-1",
+    runtime_attempt_id: str = "attempt-1",
+    artifact_index: int = 0,
+    operation_kind: str = "create",
+    stages: bool = True,
+) -> list[dict]:
+    messages: list[dict] = [{"type": "human", "content": "current Prototype turn"}]
+    if stages:
+        for index, stage in enumerate(PROTOTYPE_STAGE_SEQUENCE):
+            append_stage(messages, stage, f"prototype-stage-{index}")
+    if draft:
+        prototype_draft = {
+            "kind": "prototype",
+            "schemaVersion": 1,
+            "title": "Product Workbench",
+            "operation": {"kind": operation_kind},
+            "citations": [],
+            "content": {"protocol": "workbench.prototype.v1"},
+        }
+        append_tool_batch(
+            messages,
+            [call("workbench_artifact_draft_publish", "prototype-draft-success", {
+                "artifact_index": artifact_index,
+                "draft": prototype_draft,
+            })],
+            [tool_message(
+                "workbench_artifact_draft_publish",
+                "prototype-draft-success",
+                artifact={
+                    "protocol": "workbench.runtime.artifact-draft.v1",
+                    "runId": run_id,
+                    "runtimeAttemptId": runtime_attempt_id,
+                    "toolCallId": "prototype-draft-success",
+                    "artifactIndex": artifact_index,
+                    "ok": True,
+                    "draft": prototype_draft,
                 },
             )],
         )
@@ -625,6 +672,224 @@ class WorkbenchToolScopeMiddlewareTests(unittest.TestCase):
         self.assertIsInstance(response, AIMessage)
         self.assertEqual(response.content, "Done")
 
+    def test_successful_prototype_draft_short_circuits_to_exact_runtime_result_call(self) -> None:
+        middleware = WorkbenchToolScopeMiddleware(
+            None,
+            ["prototype"],
+            None,
+            ("run-1", "attempt-1"),
+        )
+        called = False
+
+        def handler(_request):
+            nonlocal called
+            called = True
+            return AIMessage(content="model continued")
+
+        messages = prototype_messages(draft=True)
+        response = middleware.wrap_model_call(
+            FakeModelRequest(self.all_tools, state={"messages": messages}),
+            handler,
+        )
+
+        self.assertFalse(called)
+        self.assertIsInstance(response, AIMessage)
+        self.assertEqual(response.content, "")
+        self.assertEqual(len(response.tool_calls), 1)
+        result_call = response.tool_calls[0]
+        self.assertEqual(result_call["name"], RUNTIME_RESULT_TOOL_NAME)
+        self.assertTrue(result_call["id"].startswith("workbench_auto_prototype_result_"))
+        candidate = result_call["args"]["candidate"]
+        self.assertEqual(candidate["protocol"], "workbench.runtime.result.v1")
+        self.assertEqual(
+            candidate["message"],
+            "\u539f\u578b\u5df2\u751f\u6210\u5e76\u53ef\u9884\u89c8\u3002",
+        )
+        self.assertEqual(
+            candidate["artifacts"][0],
+            messages[-1]["artifact"]["draft"],
+        )
+
+        messages.append(response)
+        request = FakeToolRequest(
+            RUNTIME_RESULT_TOOL_NAME,
+            result_call["id"],
+            result_call["args"],
+            {"messages": messages},
+        )
+        sentinel = object()
+        self.assertIs(
+            middleware.wrap_tool_call(request, lambda _request: sentinel),
+            sentinel,
+        )
+
+    def test_prototype_publication_requires_one_draft_and_blocks_duplicates(self) -> None:
+        middleware = WorkbenchToolScopeMiddleware(None, ["prototype"])
+        called = False
+
+        def handler(_request):
+            nonlocal called
+            called = True
+            return object()
+
+        premature = middleware.wrap_tool_call(
+            request_in_state(
+                prototype_messages(draft=False),
+                RUNTIME_RESULT_TOOL_NAME,
+                "premature-result",
+                {},
+            ),
+            handler,
+        )
+        self.assertFalse(called)
+        self.assertIn("WORKBENCH_PROTOTYPE_DRAFT_REQUIRED", premature.content)
+
+        duplicate = request_in_state(
+            prototype_messages(draft=True),
+            "workbench_artifact_draft_publish",
+            "duplicate-prototype-draft",
+            {"artifact_index": 0, "draft": {"kind": "prototype"}},
+        )
+        blocked = middleware.wrap_tool_call(duplicate, handler)
+        self.assertFalse(called)
+        self.assertIn("WORKBENCH_PROTOTYPE_DRAFT_ALREADY_PUBLISHED", blocked.content)
+
+        before_stages = middleware.wrap_tool_call(
+            request_in_state(
+                prototype_messages(draft=False, stages=False),
+                "workbench_artifact_draft_publish",
+                "draft-before-stages",
+                {"artifact_index": 0, "draft": {"kind": "prototype"}},
+            ),
+            handler,
+        )
+        self.assertFalse(called)
+        self.assertIn("WORKBENCH_PROTOTYPE_STAGE_REQUIRED", before_stages.content)
+        self.assertIn("stage='design-system'", before_stages.content)
+
+    def test_non_prototype_run_does_not_auto_submit_prototype_draft(self) -> None:
+        middleware = WorkbenchToolScopeMiddleware(None, ["code"])
+        called = False
+
+        def handler(_request):
+            nonlocal called
+            called = True
+            return AIMessage(content="code path")
+
+        response = middleware.wrap_model_call(
+            FakeModelRequest(
+                self.all_tools,
+                state={"messages": prototype_messages(draft=True)},
+            ),
+            handler,
+        )
+        self.assertTrue(called)
+        self.assertEqual(response.content, "code path")
+
+    def test_prototype_auto_submit_fails_closed_for_unbound_retry_or_non_create_draft(self) -> None:
+        middleware = WorkbenchToolScopeMiddleware(
+            None,
+            ["prototype"],
+            None,
+            ("run-1", "attempt-1"),
+        )
+        for kwargs in (
+            {"run_id": "old-run"},
+            {"runtime_attempt_id": "old-attempt"},
+            {"artifact_index": 1},
+            {"operation_kind": "revise"},
+            {"stages": False},
+        ):
+            with self.subTest(kwargs=kwargs):
+                called = False
+
+                def handler(_request):
+                    nonlocal called
+                    called = True
+                    return AIMessage(content="model continued")
+
+                response = middleware.wrap_model_call(
+                    FakeModelRequest(
+                        self.all_tools,
+                        state={"messages": prototype_messages(draft=True, **kwargs)},
+                    ),
+                    handler,
+                )
+                self.assertTrue(called)
+                self.assertEqual(response.content, "model continued")
+
+    def test_failed_automatic_prototype_result_falls_back_without_repeating(self) -> None:
+        middleware = WorkbenchToolScopeMiddleware(
+            None,
+            ["prototype"],
+            None,
+            ("run-1", "attempt-1"),
+        )
+        messages = prototype_messages(draft=True)
+        automatic = middleware.wrap_model_call(
+            FakeModelRequest(self.all_tools, state={"messages": messages}),
+            lambda _request: self.fail("the first convergence call must be automatic"),
+        )
+        result_call = automatic.tool_calls[0]
+        messages.extend([
+            automatic,
+            tool_message(
+                RUNTIME_RESULT_TOOL_NAME,
+                result_call["id"],
+                '{"ok":false}',
+                artifact={
+                    "protocol": "workbench.runtime.validated-result.v1",
+                    "runId": "run-1",
+                    "runtimeAttemptId": "attempt-1",
+                    "ok": False,
+                    "issues": [{"path": ["artifacts", 0]}],
+                },
+            ),
+        ])
+        called = False
+
+        def handler(_request):
+            nonlocal called
+            called = True
+            return AIMessage(content="repair fallback")
+
+        response = middleware.wrap_model_call(
+            FakeModelRequest(self.all_tools, state={"messages": messages}),
+            handler,
+        )
+        self.assertTrue(called)
+        self.assertEqual(response.content, "repair fallback")
+        self.assertFalse(getattr(response, "tool_calls", []))
+
+    def test_automatic_prototype_result_call_id_is_bound_to_run_and_attempt(self) -> None:
+        call_ids = []
+        for run_id, runtime_attempt_id in (
+            ("run-1", "attempt-1"),
+            ("run-2", "attempt-1"),
+            ("run-1", "attempt-2"),
+        ):
+            middleware = WorkbenchToolScopeMiddleware(
+                None,
+                ["prototype"],
+                None,
+                (run_id, runtime_attempt_id),
+            )
+            response = middleware.wrap_model_call(
+                FakeModelRequest(
+                    self.all_tools,
+                    state={
+                        "messages": prototype_messages(
+                            draft=True,
+                            run_id=run_id,
+                            runtime_attempt_id=runtime_attempt_id,
+                        ),
+                    },
+                ),
+                lambda _request: self.fail("the bound draft must converge automatically"),
+            )
+            call_ids.append(response.tool_calls[0]["id"])
+        self.assertEqual(len(set(call_ids)), 3)
+
     def test_previous_run_runtime_result_does_not_short_circuit_new_run(self) -> None:
         middleware = WorkbenchToolScopeMiddleware(
             None,
@@ -721,6 +986,50 @@ class WorkbenchToolScopeMiddlewareTests(unittest.TestCase):
             serialized["messages"][0]["response_metadata"][CATALOG_METADATA_KEY],
             observation,
         )
+
+    @unittest.skipIf(USING_IMPORT_STUBS, "requires pinned LangChain/LangGraph dependencies")
+    def test_automatic_prototype_result_routes_through_real_tool_node_and_stops(self) -> None:
+        middleware = WorkbenchToolScopeMiddleware(
+            None,
+            ["prototype"],
+            None,
+            ("run-1", "attempt-1"),
+        )
+        tool_invocations: list[dict] = []
+
+        @tool(RUNTIME_RESULT_TOOL_NAME, response_format="content_and_artifact")
+        def submit_result(candidate: dict) -> tuple[str, dict]:
+            """Validate the complete Workbench Runtime result candidate."""
+            tool_invocations.append(candidate)
+            return "{\"ok\":true}", {
+                "protocol": "workbench.runtime.validated-result.v1",
+                "runId": "run-1",
+                "runtimeAttemptId": "attempt-1",
+                "ok": True,
+                "result": candidate,
+            }
+
+        def model_node(state):
+            result = middleware.wrap_model_call(
+                FakeModelRequest([submit_result], state=state),
+                lambda _request: self.fail("the provider must not run after a validated draft"),
+            )
+            return {"messages": [result]}
+
+        builder = StateGraph(MessagesState)
+        builder.add_node("model", model_node)
+        builder.add_node("tools", ToolNode([submit_result]))
+        builder.add_edge(START, "model")
+        builder.add_conditional_edges("model", tools_condition)
+        builder.add_edge("tools", "model")
+        graph = builder.compile()
+        result = graph.invoke({"messages": prototype_messages(draft=True)})
+
+        self.assertEqual(len(tool_invocations), 1)
+        self.assertEqual(tool_invocations[0]["protocol"], "workbench.runtime.result.v1")
+        self.assertEqual(tool_invocations[0]["artifacts"][0]["kind"], "prototype")
+        self.assertEqual(result["messages"][-1].content, "\u539f\u578b\u5df2\u751f\u6210\u5e76\u53ef\u9884\u89c8\u3002")
+        self.assertFalse(result["messages"][-1].tool_calls)
 
     @unittest.skipIf(USING_IMPORT_STUBS, "requires pinned DeerFlow dependencies")
     def test_workbench_registration_after_deferred_filter_observes_effective_catalog(self) -> None:
@@ -878,6 +1187,8 @@ class WorkbenchToolScopeMiddlewareTests(unittest.TestCase):
             "design-system, mapping-components, creating-flows, generating-ui",
             observed.system_message.text,
         )
+        self.assertIn("publish exactly one complete terminal Draft", observed.system_message.text)
+        self.assertIn("do not call a patch, Draft, or Result tool", observed.system_message.text)
         repeated = middleware.wrap_model_call(observed, lambda scoped: scoped)
         self.assertEqual(
             repeated.system_message.text.count("<workbench_prototype_stage_policy>"),
@@ -1121,9 +1432,19 @@ class WorkbenchToolScopeMiddlewareTests(unittest.TestCase):
         for name in (*ARTIFACT_PROGRESS_TOOL_NAMES, *PROTOTYPE_ONLY_TOOL_NAMES):
             with self.subTest(name=name):
                 args = {"stage": "design-system"} if name == "workbench_generation_stage_update" else None
+                request = (
+                    request_in_state(
+                        prototype_messages(draft=False),
+                        name,
+                        "publish-after-prototype-stages",
+                        args,
+                    )
+                    if name == "workbench_artifact_draft_publish"
+                    else FakeToolRequest(name, args=args)
+                )
                 self.assertIs(
                     middleware.wrap_tool_call(
-                        FakeToolRequest(name, args=args),
+                        request,
                         lambda _request: sentinel,
                     ),
                     sentinel,
@@ -1648,6 +1969,31 @@ class WorkbenchToolScopeMiddlewareTests(unittest.TestCase):
 
 
 class WorkbenchToolScopeMiddlewareAsyncTests(unittest.IsolatedAsyncioTestCase):
+    async def test_async_successful_prototype_draft_short_circuits_to_result_call(self) -> None:
+        middleware = WorkbenchToolScopeMiddleware(
+            None,
+            ["prototype"],
+            None,
+            ("run-1", "attempt-1"),
+        )
+        called = False
+
+        async def handler(_request):
+            nonlocal called
+            called = True
+            return AIMessage(content="model continued")
+
+        response = await middleware.awrap_model_call(
+            FakeModelRequest(
+                [FakeTool(RUNTIME_RESULT_TOOL_NAME)],
+                state={"messages": prototype_messages(draft=True)},
+            ),
+            handler,
+        )
+        self.assertFalse(called)
+        self.assertEqual(len(response.tool_calls), 1)
+        self.assertEqual(response.tool_calls[0]["name"], RUNTIME_RESULT_TOOL_NAME)
+
     async def test_async_successful_runtime_result_short_circuits_followup_model_call(self) -> None:
         middleware = WorkbenchToolScopeMiddleware(
             None,
@@ -2026,6 +2372,10 @@ class WorkbenchToolScopeMiddlewareAsyncTests(unittest.IsolatedAsyncioTestCase):
             "The generic task tool is unavailable",
             prototype_result.system_message.text,
         )
+        self.assertIn(
+            "publish exactly one complete terminal Draft",
+            prototype_result.system_message.text,
+        )
 
     async def test_async_prototype_subagent_execution_is_rejected(self) -> None:
         called = False
@@ -2097,9 +2447,19 @@ class WorkbenchToolScopeMiddlewareAsyncTests(unittest.IsolatedAsyncioTestCase):
         for name in (*ARTIFACT_PROGRESS_TOOL_NAMES, *PROTOTYPE_ONLY_TOOL_NAMES):
             with self.subTest(scope="prototype", name=name):
                 args = {"stage": "design-system"} if name == "workbench_generation_stage_update" else None
+                request = (
+                    request_in_state(
+                        prototype_messages(draft=False),
+                        name,
+                        "async-publish-after-prototype-stages",
+                        args,
+                    )
+                    if name == "workbench_artifact_draft_publish"
+                    else FakeToolRequest(name, args=args)
+                )
                 self.assertIs(
                     await prototype_middleware.awrap_tool_call(
-                        FakeToolRequest(name, args=args),
+                        request,
                         handler,
                     ),
                     sentinel,

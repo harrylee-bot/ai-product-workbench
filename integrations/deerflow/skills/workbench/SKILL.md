@@ -302,26 +302,23 @@ before the work begins, in this order: `design-system`, `mapping-components`,
 to announce screen readiness, summarizing, stability, or completion; 产品工作台 derives
 those states from validated artifacts, assistant output, and the publish transaction.
 
-For Prototype generation, call `workbench_artifact_draft_publish` with the stable
-zero-based final Artifact index as soon as the first complete, renderable Screen exists.
-Call it again only after that Artifact's renderable content materially changes. Each
-checkpoint must be a complete valid Runtime Artifact draft, not a DOM fragment, prose,
-placeholder, skeleton, or progress estimate. Keep `artifact_index` and the Artifact's
-operation/title stable, and make the final `workbench_runtime_result_submit` Artifact at
-that index exactly match the latest checkpoint. Do not publish a checkpoint on a timer.
+For an exact Prototype-only create Run, complete every requested Screen, state, binding,
+and interaction before publication. After all four Prototype stages succeed, call
+`workbench_artifact_draft_publish` exactly once with `artifact_index: 0` and the complete
+terminal `create` Artifact. Do not publish an early renderable checkpoint, do not call
+`workbench_prototype_patch_publish`, and do not issue another Draft or Result call after
+the Draft succeeds. The trusted Runtime immediately submits that normalized Draft as the
+single `workbench.runtime.result.v1` Artifact and stops after validation succeeds.
 
-After the first complete Prototype checkpoint, use `workbench_prototype_patch_publish`
-to expose material changes inside one Screen without waiting for another full checkpoint.
-Each call carries one stable `artifact_index` and `screen_id`, a consecutive transport
-revision (`next_revision = base_revision + 1`), no more than 128 typed operations, and the
-SHA-256 checksum of the resulting canonical `workbench.prototype-screen-projection.v1`.
-Use only stable Prototype IDs and the declared typed operations. Never send CSS selectors,
-DOM/HTML mutations, scripts, shared token/asset/variable changes, Run or Attempt IDs,
-Artifact IDs, version IDs, or a self-chosen source event ID. A batch is one atomic Screen
-change; if the tool reports validation issues, fix the whole batch rather than splitting
-around the failed operation. Publish a complete checkpoint after the streamed changes and
-make the final Runtime result exactly match it. Do not emit another patch after the final
-result submission.
+The streamed `workbench_prototype_patch_publish` and repeated-checkpoint workflow remains
+available only outside that exact Prototype-only create path, such as an explicitly scoped
+revision or mixed execution workflow. Each patch call carries one stable `artifact_index`
+and `screen_id`, a consecutive transport revision (`next_revision = base_revision + 1`),
+no more than 128 typed operations, and the SHA-256 checksum of the resulting canonical
+`workbench.prototype-screen-projection.v1`. Use only stable Prototype IDs and declared
+typed operations. Never send CSS selectors, DOM/HTML mutations, scripts, shared
+token/asset/variable changes, Run or Attempt IDs, Artifact IDs, version IDs, or a
+self-chosen source event ID. Do not emit another patch after final result submission.
 
 When `prototypePatchBaselines` is present, continue from its exact per-Screen
 `baseRevision`; never restart at zero. If a Screen has `checkpointRequired:true`, publish
@@ -329,9 +326,9 @@ one complete current checkpoint before the next patch, then use the supplied
 `baseRevision`. A checkpoint is the only recovery boundary after a degraded projection;
 do not guess missing operations or reuse an older revision.
 
-The lead agent must finish every turn by calling `workbench_runtime_result_submit` with the complete unfenced `workbench.runtime.result.v1` object in its `candidate` argument. The Worker accepts only the current turn's validated ToolMessage artifact; it does not parse Markdown fences, raw JSON, assistant state fields, or sub-agent text.
+Except for the exact Prototype-only `create` path that the trusted Runtime finalizes from its one terminal Draft, the lead agent must finish every turn by calling `workbench_runtime_result_submit` with the complete unfenced `workbench.runtime.result.v1` object in its `candidate` argument. The Worker accepts only the current turn's validated ToolMessage artifact; it does not parse Markdown fences, raw JSON, assistant state fields, or sub-agent text.
 
-If the tool returns `ok:false`, fix every reported path and submit the complete candidate again. Continue until it returns `ok:true`. After the first successful submission, do not mutate or resubmit the candidate; return only a concise user-facing completion message. Sub-agents may research or draft content, but the lead agent alone owns the final submit call.
+If a manual Result tool returns `ok:false`, fix every reported path and submit the complete candidate again. Continue until it returns `ok:true`. After the first successful submission, do not mutate or resubmit the candidate; return only a concise user-facing completion message. Sub-agents may research or draft content, but the lead agent alone owns every manual final submit call.
 
 For a PRD result, the earlier PRD section requires the canonical requirement skill and the business-neutral `references/prd-runtime-result.schema.json`; do not consult the legacy PRD business example. For a Prototype result, read `/mnt/skills/public/workbench/references/prototype-runtime-result.example.json` and `/mnt/skills/public/workbench/references/runtime-result-contract.md` completely, exactly once each, and do not read any other authoring reference. Populate the applicable transport with request-specific IDs and content while keeping every required field and every bidirectional reference. Both paths are validated by the production `runtimeResultSchema`.
 

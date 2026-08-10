@@ -555,6 +555,49 @@ assert(
     && toolScopeMiddlewareSource.includes("_successful_runtime_results(request.state)"),
   "Workbench PRD gate must enforce one draft, one final result, and publication batch protection",
 );
+assert(
+  toolScopeMiddlewareSource.includes("def _successful_prototype_draft(")
+    && toolScopeMiddlewareSource.includes("def _automatic_prototype_result_message(")
+    && toolScopeMiddlewareSource.includes(
+      '_AUTOMATIC_PROTOTYPE_RESULT_CALL_PREFIX = "workbench_auto_prototype_result_"',
+    )
+    && toolScopeMiddlewareSource.includes('"protocol": _RUNTIME_RESULT_PROTOCOL')
+    && toolScopeMiddlewareSource.includes('"artifacts": [draft]')
+    && toolScopeMiddlewareSource.includes('"runId": run_id')
+    && toolScopeMiddlewareSource.includes('"runtimeAttemptId": runtime_attempt_id')
+    && toolScopeMiddlewareSource.includes('artifact.get("runId") != run_id')
+    && toolScopeMiddlewareSource.includes(
+      'artifact.get("runtimeAttemptId") != runtime_attempt_id',
+    )
+    && toolScopeMiddlewareSource.includes('artifact.get("toolCallId") != call["id"]')
+    && toolScopeMiddlewareSource.includes('artifact_index != 0')
+    && toolScopeMiddlewareSource.includes('operation.get("kind") != "create"')
+    && toolScopeMiddlewareSource.includes(
+      'stage_count != len(PROTOTYPE_STAGE_SEQUENCE)',
+    )
+    && toolScopeMiddlewareSource.includes("def _prototype_publication_preflight(")
+    && toolScopeMiddlewareSource.includes("WORKBENCH_PROTOTYPE_DRAFT_ALREADY_PUBLISHED")
+    && toolScopeMiddlewareSource.includes("WORKBENCH_PROTOTYPE_DRAFT_REQUIRED")
+    && patchContractTestSource.includes(
+      "test_successful_prototype_draft_short_circuits_to_exact_runtime_result_call",
+    )
+    && patchContractTestSource.includes(
+      "test_async_successful_prototype_draft_short_circuits_to_result_call",
+    )
+    && patchContractTestSource.includes(
+      "test_non_prototype_run_does_not_auto_submit_prototype_draft",
+    )
+    && patchContractTestSource.includes(
+      "test_automatic_prototype_result_routes_through_real_tool_node_and_stops",
+    )
+    && patchContractTestSource.includes(
+      "test_failed_automatic_prototype_result_falls_back_without_repeating",
+    )
+    && patchContractTestSource.includes(
+      "test_automatic_prototype_result_call_id_is_bound_to_run_and_attempt",
+    ),
+  "Workbench Prototype publication must deterministically converge a validated draft to one final result",
+);
 const middlewareToolTuple = /CANVAS_TOOL_NAMES = \(\n([\s\S]*?)\n\)/u.exec(toolScopeMiddlewareSource);
 assert(middlewareToolTuple, "Workbench tool-scope middleware Canvas tuple is missing");
 assertDeepEqual(
@@ -679,6 +722,21 @@ assert(
     )
     && patchContractTestSource.includes("test_prototype_stage_policy_is_injected_once_for_exact_scope"),
   "DeerFlow Prototype contract must cover recoverable stage correction, ordered sync/async execution, and policy injection",
+);
+assert(
+  normalizedWorkbenchSkillSource.includes(
+    "For an exact Prototype-only create Run, complete every requested Screen",
+  )
+    && normalizedWorkbenchSkillSource.includes(
+      "call `workbench_artifact_draft_publish` exactly once with `artifact_index: 0`",
+    )
+    && normalizedWorkbenchSkillSource.includes(
+      "do not call `workbench_prototype_patch_publish`",
+    )
+    && normalizedWorkbenchSkillSource.includes(
+      "the trusted Runtime finalizes from its one terminal Draft",
+    ),
+  "Workbench skill must keep exact Prototype-only create Runs on the single terminal Draft path",
 );
 assert(
   toolScopeMiddlewareSource.includes('SUBAGENT_TOOL_NAME = "task"')
