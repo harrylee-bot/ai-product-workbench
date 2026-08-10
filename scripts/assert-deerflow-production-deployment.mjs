@@ -198,7 +198,7 @@ assert(
   "DeerFlow lead-agent upstream source hash drifted",
 );
 assert(
-  patchManifest.agent?.patchedSha256 === "3dce9051f0ce8248c44f7e6a9e4b8b186ef061a39bce28548cb40557dc1c255a",
+  patchManifest.agent?.patchedSha256 === "fed67066e412add45163ff86267b563ec7fb5210e0d14fbb1701d19a8a41167c",
   "DeerFlow lead-agent patched source hash drifted",
 );
 assert(
