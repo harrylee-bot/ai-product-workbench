@@ -28,12 +28,15 @@ def workbench_artifact_draft_publish(
 ) -> tuple[str, dict[str, Any]]:
     """Validate and publish one real 产品工作台 Artifact checkpoint.
 
-    Call this after an Artifact becomes complete enough to render. Publish another
-    checkpoint only after its renderable content materially changes.
+    In an exact Prototype-only create Run, call this once only after all four
+    Prototype stages and every requested Screen and interaction are complete. In
+    other Runtime paths, publish another checkpoint only after its renderable
+    content materially changes.
 
     Args:
         artifact_index: Stable zero-based index used by the final Runtime result.
-        draft: One complete Runtime Artifact draft object.
+        draft: One complete Runtime Artifact draft object, such as the Prototype
+            example envelope's artifacts[0], not the full result envelope.
     """
     if isinstance(artifact_index, bool) or not isinstance(artifact_index, int):
         raise ValueError("WORKBENCH_ARTIFACT_DRAFT_INDEX_INVALID")

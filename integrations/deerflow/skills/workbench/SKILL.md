@@ -309,6 +309,10 @@ terminal `create` Artifact. Do not publish an early renderable checkpoint, do no
 `workbench_prototype_patch_publish`, and do not issue another Draft or Result call after
 the Draft succeeds. The trusted Runtime immediately submits that normalized Draft as the
 single `workbench.runtime.result.v1` Artifact and stops after validation succeeds.
+If that automatic Result reports validation issues, keep the successful Draft immutable,
+repair only the reported paths in one complete candidate, and continue through manual
+`workbench_runtime_result_submit` validation. The Runtime does not repeat the automatic
+submission.
 
 The streamed `workbench_prototype_patch_publish` and repeated-checkpoint workflow remains
 available only outside that exact Prototype-only create path, such as an explicitly scoped

@@ -68,7 +68,7 @@ WORKBENCH_REFERENCE_FILES: Final[
         physical_path=Path(
             "/app/skills/public/workbench/references/runtime-result-contract.md",
         ),
-        sha256="a1849a25012bb9226fa5d576cdace96b1273efaf5f26e0593b6754c7dbeca206",
+        sha256="29b0843b4d1aaba8ed0c898f196ec82a2252b2f5165dbfb8c7fe8d895dc21629",
         requested_artifact_kinds=("prototype",),
     ),
 })

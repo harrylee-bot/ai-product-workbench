@@ -50,6 +50,7 @@ ARTIFACT_PROGRESS_TOOL_NAMES = (
     "workbench_generation_stage_update",
     "workbench_artifact_draft_publish",
 )
+PROTOTYPE_PATCH_TOOL_NAME = "workbench_prototype_patch_publish"
 PROTOTYPE_ONLY_TOOL_NAMES = (
     "workbench_prototype_patch_publish",
 )
@@ -97,7 +98,7 @@ PROTOTYPE_REFERENCE_FILES = (
     ),
     (
         "/mnt/skills/public/workbench/references/runtime-result-contract.md",
-        "a1849a25012bb9226fa5d576cdace96b1273efaf5f26e0593b6754c7dbeca206",
+        "29b0843b4d1aaba8ed0c898f196ec82a2252b2f5165dbfb8c7fe8d895dc21629",
     ),
 )
 RUNTIME_ARTIFACT_KINDS = (
@@ -136,7 +137,7 @@ This PRD-only Workbench Run cannot resume free-form clarification. The ask_clari
 </workbench_prd_clarification_policy>"""
 _PROTOTYPE_STAGE_SYSTEM_POLICY = """<workbench_prototype_stage_policy>
 This Prototype-only Workbench Run must call workbench_generation_stage_update exactly once for each real stage, in this order: design-system, mapping-components, creating-flows, generating-ui. Never skip, repeat, regress, batch, or substitute a PRD stage. If a stage call returns an error naming the next required stage, call that stage next and continue the Run. The scoped read_file tool may read only the complete prototype-runtime-result.example.json and runtime-result-contract.md references.
-The generic task tool is unavailable for this Prototype-only Run. Read both pinned references directly with read_file and author the typed Prototype Artifact in the lead. For a create operation, finish every requested Screen and interaction, then publish exactly one complete terminal Draft at artifact_index 0. After that Draft succeeds, do not call a patch, Draft, or Result tool; the trusted Runtime submits the normalized Draft and stops. A non-create operation continues through its explicit final Result path.
+The generic task tool is unavailable for this Prototype-only Run. Read both pinned references directly with read_file and author the typed Prototype Artifact in the lead. For a create operation, finish every requested Screen and interaction, then publish exactly one complete terminal Draft at artifact_index 0. After that Draft succeeds, do not call a patch, Draft, or Result tool; the trusted Runtime submits the normalized Draft and stops after validation succeeds. If that automatic Result reports validation issues, keep the successful Draft immutable, repair only the reported paths in one complete manual Result candidate, and continue only through manual Result validation; the Runtime does not repeat automatic submission. A non-create operation continues through its explicit final Result path.
 </workbench_prototype_stage_policy>"""
 _TOOL_CATALOG_PROTOCOL = "workbench.runtime.tool-catalog-observation.v1"
 _TOOL_CATALOG_METADATA_KEY = "workbench_tool_catalog_observation"
@@ -1333,6 +1334,38 @@ class WorkbenchToolScopeMiddleware(AgentMiddleware[AgentState]):
         if not self._prototype_stage_gate_enabled:
             return None
         name = request.tool_call.get("name")
+        if name == PROTOTYPE_PATCH_TOOL_NAME:
+            draft, _artifact_index, draft_invalid = _successful_prototype_draft(
+                request.state,
+                self._run_id,
+                self._runtime_attempt_id,
+            )
+            draft_operation = draft.get("operation") if isinstance(draft, Mapping) else None
+            if draft_invalid:
+                return _error_tool_message(
+                    request,
+                    "WORKBENCH_PROTOTYPE_PUBLICATION_HISTORY_INVALID",
+                    "The current turn contains malformed or duplicate successful Prototype publication calls; do not publish a patch from this turn.",
+                )
+            if (
+                isinstance(draft_operation, Mapping)
+                and draft_operation.get("kind") == "create"
+            ):
+                return _error_tool_message(
+                    request,
+                    "WORKBENCH_PROTOTYPE_TERMINAL_DRAFT_IMMUTABLE",
+                    "The successful terminal create Draft is immutable; repair an automatic Result rejection only through the manual complete Result path.",
+                )
+            if any(
+                call["name"] in {ARTIFACT_DRAFT_TOOL_NAME, RUNTIME_RESULT_TOOL_NAME}
+                for call in _current_batch_calls(request)
+            ):
+                return _error_tool_message(
+                    request,
+                    "WORKBENCH_PROTOTYPE_PUBLICATION_BATCH_INVALID",
+                    "Call only one Prototype publication tool in each model tool-call batch.",
+                )
+            return None
         if name not in {ARTIFACT_DRAFT_TOOL_NAME, RUNTIME_RESULT_TOOL_NAME}:
             return None
 

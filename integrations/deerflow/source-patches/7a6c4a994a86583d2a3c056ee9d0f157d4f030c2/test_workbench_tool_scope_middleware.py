@@ -818,7 +818,7 @@ class WorkbenchToolScopeMiddlewareTests(unittest.TestCase):
                 self.assertTrue(called)
                 self.assertEqual(response.content, "model continued")
 
-    def test_failed_automatic_prototype_result_falls_back_without_repeating(self) -> None:
+    def test_failed_automatic_prototype_result_uses_manual_repair_without_repeating(self) -> None:
         middleware = WorkbenchToolScopeMiddleware(
             None,
             ["prototype"],
@@ -847,19 +847,66 @@ class WorkbenchToolScopeMiddlewareTests(unittest.TestCase):
             ),
         ])
         called = False
+        manual_call = call(
+            RUNTIME_RESULT_TOOL_NAME,
+            "manual-prototype-result-repair",
+            result_call["args"],
+        )
 
         def handler(_request):
             nonlocal called
             called = True
-            return AIMessage(content="repair fallback")
+            return AIMessage(content="", tool_calls=[manual_call])
 
         response = middleware.wrap_model_call(
             FakeModelRequest(self.all_tools, state={"messages": messages}),
             handler,
         )
         self.assertTrue(called)
-        self.assertEqual(response.content, "repair fallback")
-        self.assertFalse(getattr(response, "tool_calls", []))
+        self.assertEqual(response.tool_calls, [manual_call])
+
+        messages.append(response)
+        sentinel = object()
+        manual_request = FakeToolRequest(
+            RUNTIME_RESULT_TOOL_NAME,
+            manual_call["id"],
+            manual_call["args"],
+            {"messages": messages},
+        )
+        self.assertIs(
+            middleware.wrap_tool_call(manual_request, lambda _request: sentinel),
+            sentinel,
+        )
+
+        patch_messages = list(messages)
+        patch_request = request_in_state(
+            patch_messages,
+            PROTOTYPE_ONLY_TOOL_NAMES[0],
+            "patch-after-terminal-draft",
+            {},
+        )
+        blocked_patch = middleware.wrap_tool_call(
+            patch_request,
+            lambda _request: self.fail("a terminal create Draft must remain immutable"),
+        )
+        self.assertIn("WORKBENCH_PROTOTYPE_TERMINAL_DRAFT_IMMUTABLE", blocked_patch.content)
+
+        messages.append(tool_message(
+            RUNTIME_RESULT_TOOL_NAME,
+            manual_call["id"],
+            artifact={
+                "protocol": "workbench.runtime.validated-result.v1",
+                "runId": "run-1",
+                "runtimeAttemptId": "attempt-1",
+                "ok": True,
+                "result": manual_call["args"]["candidate"],
+            },
+        ))
+        completed = middleware.wrap_model_call(
+            FakeModelRequest(self.all_tools, state={"messages": messages}),
+            lambda _request: self.fail("the successful manual Result must stop the graph"),
+        )
+        self.assertEqual(completed.content, "\u539f\u578b\u5df2\u751f\u6210\u5e76\u53ef\u9884\u89c8\u3002")
 
     def test_automatic_prototype_result_call_id_is_bound_to_run_and_attempt(self) -> None:
         call_ids = []
@@ -1189,6 +1236,11 @@ class WorkbenchToolScopeMiddlewareTests(unittest.TestCase):
         )
         self.assertIn("publish exactly one complete terminal Draft", observed.system_message.text)
         self.assertIn("do not call a patch, Draft, or Result tool", observed.system_message.text)
+        self.assertIn(
+            "If that automatic Result reports validation issues",
+            observed.system_message.text,
+        )
+        self.assertIn("the Runtime does not repeat automatic submission", observed.system_message.text)
         repeated = middleware.wrap_model_call(observed, lambda scoped: scoped)
         self.assertEqual(
             repeated.system_message.text.count("<workbench_prototype_stage_policy>"),

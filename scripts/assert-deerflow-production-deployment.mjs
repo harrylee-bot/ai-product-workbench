@@ -21,6 +21,10 @@ const fragment = readYaml("integrations/deerflow/runtime-tools/config.fragment.y
 const workbenchSkill = readYamlFrontmatter("integrations/deerflow/skills/workbench/SKILL.md");
 const workbenchSkillSource = readText("integrations/deerflow/skills/workbench/SKILL.md");
 const normalizedWorkbenchSkillSource = workbenchSkillSource.replace(/\s+/gu, " ");
+const runtimeResultContractSource = readText(
+  "integrations/deerflow/skills/workbench/references/runtime-result-contract.md",
+);
+const normalizedRuntimeResultContractSource = runtimeResultContractSource.replace(/\s+/gu, " ");
 const envExample = readText("deploy/workbench.env.example");
 const runtimeAdapter = readText("apps/workbench-worker/src/runtime/deerflow-runtime.adapter.ts");
 const preflight = readText("deploy/deerflow-production-preflight.sh");
@@ -423,7 +427,7 @@ const prototypeReferencePins = [
   ],
   [
     "/mnt/skills/public/workbench/references/runtime-result-contract.md",
-    "a1849a25012bb9226fa5d576cdace96b1273efaf5f26e0593b6754c7dbeca206",
+    "29b0843b4d1aaba8ed0c898f196ec82a2252b2f5165dbfb8c7fe8d895dc21629",
   ],
 ];
 const workbenchReferencePins = [...prdReferencePins, ...prototypeReferencePins];
@@ -591,8 +595,9 @@ assert(
       "test_automatic_prototype_result_routes_through_real_tool_node_and_stops",
     )
     && patchContractTestSource.includes(
-      "test_failed_automatic_prototype_result_falls_back_without_repeating",
+      "test_failed_automatic_prototype_result_uses_manual_repair_without_repeating",
     )
+    && toolScopeMiddlewareSource.includes("WORKBENCH_PROTOTYPE_TERMINAL_DRAFT_IMMUTABLE")
     && patchContractTestSource.includes(
       "test_automatic_prototype_result_call_id_is_bound_to_run_and_attempt",
     ),
@@ -735,8 +740,36 @@ assert(
     )
     && normalizedWorkbenchSkillSource.includes(
       "the trusted Runtime finalizes from its one terminal Draft",
+    )
+    && normalizedWorkbenchSkillSource.includes(
+      "If that automatic Result reports validation issues",
+    )
+    && normalizedWorkbenchSkillSource.includes(
+      "The Runtime does not repeat the automatic submission",
     ),
   "Workbench skill must keep exact Prototype-only create Runs on the single terminal Draft path",
+);
+assert(
+  normalizedRuntimeResultContractSource.includes(
+    "In an exact Prototype-only create Run (`requestedArtifactKinds` is exactly `[\"prototype\"]` and the Artifact operation is `create`)",
+  )
+    && normalizedRuntimeResultContractSource.includes(
+      "after the first successful Draft, do not call a patch, Draft, or Result tool while automatic validation is pending or after it succeeds",
+    )
+    && normalizedRuntimeResultContractSource.includes(
+      "If that automatic Result reports validation issues",
+    )
+    && normalizedRuntimeResultContractSource.includes(
+      "the Runtime does not repeat automatic submission",
+    )
+    && normalizedRuntimeResultContractSource.includes(
+      "For every other Prototype path, submit the complete candidate with `workbench_runtime_result_submit`",
+    )
+    && normalizedRuntimeResultContractSource.includes(
+      "do not read that schema; use only the compact example, this contract, and exact validation issue paths",
+    )
+    && !normalizedRuntimeResultContractSource.includes("Inspect only the relevant `$defs`"),
+  "Workbench Prototype reference contract must match automatic create convergence and the scoped reader",
 );
 assert(
   toolScopeMiddlewareSource.includes('SUBAGENT_TOOL_NAME = "task"')
