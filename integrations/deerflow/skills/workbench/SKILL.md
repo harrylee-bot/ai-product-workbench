@@ -322,7 +322,9 @@ no more than 128 typed operations, and the SHA-256 checksum of the resulting can
 `workbench.prototype-screen-projection.v1`. Use only stable Prototype IDs and declared
 typed operations. Never send CSS selectors, DOM/HTML mutations, scripts, shared
 token/asset/variable changes, Run or Attempt IDs, Artifact IDs, version IDs, or a
-self-chosen source event ID. Do not emit another patch after final result submission.
+self-chosen source event ID. After every revision Patch, publish a complete revised Draft
+checkpoint before the final Result or another Patch. Do not emit another patch after final
+result submission.
 
 When `prototypePatchBaselines` is present, continue from its exact per-Screen
 `baseRevision`; never restart at zero. If a Screen has `checkpointRequired:true`, publish

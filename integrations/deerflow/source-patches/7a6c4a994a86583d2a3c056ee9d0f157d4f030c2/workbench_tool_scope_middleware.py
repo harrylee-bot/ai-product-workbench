@@ -98,7 +98,7 @@ PROTOTYPE_REFERENCE_FILES = (
     ),
     (
         "/mnt/skills/public/workbench/references/runtime-result-contract.md",
-        "29b0843b4d1aaba8ed0c898f196ec82a2252b2f5165dbfb8c7fe8d895dc21629",
+        "b7a3aaf96e8e88dd0c5c7be1f91dd79711bec28626a4eec0783c8f90b4682159",
     ),
 )
 RUNTIME_ARTIFACT_KINDS = (
@@ -130,6 +130,10 @@ _PRD_REFERENCE_RELATIVE_PATHS = tuple(
 _PRD_STAGE_PROTOCOL = "workbench.runtime.generation-stage.v1"
 _PRD_DRAFT_PROTOCOL = "workbench.runtime.artifact-draft.v1"
 _PRD_RESULT_PROTOCOL = "workbench.runtime.validated-result.v1"
+_PROTOTYPE_PATCH_PROTOCOL = "workbench.runtime.prototype-patch.v1"
+_PROTOTYPE_PATCH_PUBLICATION_PROTOCOL = (
+    "workbench.runtime.prototype-patch-publication.v1"
+)
 _RUNTIME_RESULT_PROTOCOL = "workbench.runtime.result.v1"
 _AUTOMATIC_PROTOTYPE_RESULT_CALL_PREFIX = "workbench_auto_prototype_result_"
 _PRD_CLARIFICATION_SYSTEM_POLICY = """<workbench_prd_clarification_policy>
@@ -137,7 +141,7 @@ This PRD-only Workbench Run cannot resume free-form clarification. The ask_clari
 </workbench_prd_clarification_policy>"""
 _PROTOTYPE_STAGE_SYSTEM_POLICY = """<workbench_prototype_stage_policy>
 This Prototype-only Workbench Run must call workbench_generation_stage_update exactly once for each real stage, in this order: design-system, mapping-components, creating-flows, generating-ui. Never skip, repeat, regress, batch, or substitute a PRD stage. If a stage call returns an error naming the next required stage, call that stage next and continue the Run. The scoped read_file tool may read only the complete prototype-runtime-result.example.json and runtime-result-contract.md references.
-The generic task tool is unavailable for this Prototype-only Run. Read both pinned references directly with read_file and author the typed Prototype Artifact in the lead. For a create operation, finish every requested Screen and interaction, then publish exactly one complete terminal Draft at artifact_index 0. After that Draft succeeds, do not call a patch, Draft, or Result tool; the trusted Runtime submits the normalized Draft and stops after validation succeeds. If that automatic Result reports validation issues, keep the successful Draft immutable, repair only the reported paths in one complete manual Result candidate, and continue only through manual Result validation; the Runtime does not repeat automatic submission. A non-create operation continues through its explicit final Result path.
+The generic task tool is unavailable for this Prototype-only Run. Read both pinned references directly with read_file and author the typed Prototype Artifact in the lead. For a create operation, finish every requested Screen and interaction, then publish exactly one complete terminal Draft at artifact_index 0. After that Draft succeeds, do not call a patch, Draft, or Result tool; the trusted Runtime submits the normalized Draft and stops after validation succeeds. If that automatic Result reports validation issues, keep the successful Draft immutable, repair only the reported paths in one complete manual Result candidate, and continue only through manual Result validation; the Runtime does not repeat automatic submission. For a revise operation, use the explicit Result path: after every streamed Patch, publish a complete revised Draft checkpoint before the final Result. A later Patch may follow that checkpoint.
 </workbench_prototype_stage_policy>"""
 _TOOL_CATALOG_PROTOCOL = "workbench.runtime.tool-catalog-observation.v1"
 _TOOL_CATALOG_METADATA_KEY = "workbench_tool_catalog_observation"
@@ -566,45 +570,164 @@ def _successful_prd_drafts(state: Any) -> tuple[int, bool]:
     return count, invalid or count > 1
 
 
+def _prototype_call_is_bound(
+    artifact: Any,
+    call_id: str,
+    run_id: str | None,
+    runtime_attempt_id: str | None,
+) -> bool:
+    return (
+        run_id is None
+        or runtime_attempt_id is None
+        or (
+            isinstance(artifact, Mapping)
+            and artifact.get("runId") == run_id
+            and artifact.get("runtimeAttemptId") == runtime_attempt_id
+            and artifact.get("toolCallId") == call_id
+        )
+    )
+
+
+def _successful_prototype_draft_from_call(
+    call: Mapping[str, Any],
+    run_id: str | None,
+    runtime_attempt_id: str | None,
+) -> tuple[dict[str, Any], int] | None:
+    if call["name"] != ARTIFACT_DRAFT_TOOL_NAME or not _tool_succeeded(call["response"]):
+        return None
+    artifact = _value(call["response"], "artifact")
+    draft = artifact.get("draft") if isinstance(artifact, Mapping) else None
+    artifact_index = artifact.get("artifactIndex") if isinstance(artifact, Mapping) else None
+    if not _prototype_call_is_bound(artifact, call["id"], run_id, runtime_attempt_id):
+        return None
+    if (
+        isinstance(artifact, Mapping)
+        and artifact.get("protocol") == _PRD_DRAFT_PROTOCOL
+        and artifact.get("ok") is True
+        and isinstance(draft, Mapping)
+        and draft.get("kind") == "prototype"
+        and isinstance(artifact_index, int)
+        and not isinstance(artifact_index, bool)
+        and 0 <= artifact_index < 20
+    ):
+        return dict(draft), artifact_index
+    return None
+
+
+def _successful_prototype_patch_from_call(
+    call: Mapping[str, Any],
+    run_id: str | None,
+    runtime_attempt_id: str | None,
+) -> int | None:
+    if call["name"] != PROTOTYPE_PATCH_TOOL_NAME or not _tool_succeeded(call["response"]):
+        return None
+    artifact = _value(call["response"], "artifact")
+    patch = artifact.get("patch") if isinstance(artifact, Mapping) else None
+    artifact_index = patch.get("artifactIndex") if isinstance(patch, Mapping) else None
+    if not _prototype_call_is_bound(artifact, call["id"], run_id, runtime_attempt_id):
+        return None
+    if (
+        isinstance(artifact, Mapping)
+        and artifact.get("protocol") == _PROTOTYPE_PATCH_PUBLICATION_PROTOCOL
+        and artifact.get("ok") is True
+        and isinstance(patch, Mapping)
+        and patch.get("protocol") == _PROTOTYPE_PATCH_PROTOCOL
+        and isinstance(artifact_index, int)
+        and not isinstance(artifact_index, bool)
+        and 0 <= artifact_index < 20
+    ):
+        return artifact_index
+    return None
+
+
+def _successful_prototype_drafts(
+    state: Any,
+    run_id: str | None = None,
+    runtime_attempt_id: str | None = None,
+) -> tuple[list[tuple[dict[str, Any], int]], bool]:
+    """Return every bound normalized Prototype checkpoint in current-turn order."""
+    completed, invalid = _completed_tool_calls(state)
+    drafts: list[tuple[dict[str, Any], int]] = []
+    for call in completed:
+        draft = _successful_prototype_draft_from_call(
+            call,
+            run_id,
+            runtime_attempt_id,
+        )
+        if draft is not None:
+            drafts.append(draft)
+    return drafts, invalid
+
+
 def _successful_prototype_draft(
     state: Any,
     run_id: str | None = None,
     runtime_attempt_id: str | None = None,
 ) -> tuple[dict[str, Any] | None, int | None, bool]:
-    """Return the one bound normalized Prototype draft published in this turn."""
-    completed, invalid = _completed_tool_calls(state)
-    drafts: list[tuple[dict[str, Any], int]] = []
-    for call in completed:
-        if call["name"] != ARTIFACT_DRAFT_TOOL_NAME or not _tool_succeeded(call["response"]):
-            continue
-        artifact = _value(call["response"], "artifact")
-        draft = artifact.get("draft") if isinstance(artifact, Mapping) else None
-        artifact_index = artifact.get("artifactIndex") if isinstance(artifact, Mapping) else None
-        if (
-            run_id is not None
-            and runtime_attempt_id is not None
-            and (
-                not isinstance(artifact, Mapping)
-                or artifact.get("runId") != run_id
-                or artifact.get("runtimeAttemptId") != runtime_attempt_id
-                or artifact.get("toolCallId") != call["id"]
-            )
-        ):
-            continue
-        if (
-            isinstance(artifact, Mapping)
-            and artifact.get("protocol") == _PRD_DRAFT_PROTOCOL
-            and artifact.get("ok") is True
-            and isinstance(draft, Mapping)
-            and draft.get("kind") == "prototype"
-            and isinstance(artifact_index, int)
-            and not isinstance(artifact_index, bool)
-            and 0 <= artifact_index < 20
-        ):
-            drafts.append((dict(draft), artifact_index))
+    """Return the one terminal Prototype draft eligible for automatic create completion."""
+    drafts, invalid = _successful_prototype_drafts(
+        state,
+        run_id,
+        runtime_attempt_id,
+    )
     if len(drafts) != 1:
         return None, None, invalid or len(drafts) > 1
     return drafts[0][0], drafts[0][1], invalid
+
+
+def _latest_successful_prototype_draft(
+    state: Any,
+    run_id: str | None = None,
+    runtime_attempt_id: str | None = None,
+) -> tuple[dict[str, Any] | None, int | None, bool]:
+    """Return the newest bound Prototype checkpoint without rejecting revise history."""
+    drafts, invalid = _successful_prototype_drafts(
+        state,
+        run_id,
+        runtime_attempt_id,
+    )
+    if not drafts:
+        return None, None, invalid
+    if any(
+        isinstance(draft.get("operation"), Mapping)
+        and draft["operation"].get("kind") == "create"
+        for draft, _artifact_index in drafts
+    ) and len(drafts) > 1:
+        return None, None, True
+    draft, artifact_index = drafts[-1]
+    return draft, artifact_index, invalid
+
+
+def _prototype_patch_checkpoint_required(
+    state: Any,
+    run_id: str | None = None,
+    runtime_attempt_id: str | None = None,
+) -> tuple[frozenset[int], bool]:
+    """Return artifact indexes whose newest publication is an uncheckpointed Patch."""
+    completed, invalid = _completed_tool_calls(state)
+    latest_publication: dict[int, str] = {}
+    for call in completed:
+        draft = _successful_prototype_draft_from_call(
+            call,
+            run_id,
+            runtime_attempt_id,
+        )
+        if draft is not None:
+            _draft, artifact_index = draft
+            latest_publication[artifact_index] = "draft"
+            continue
+        patch_artifact_index = _successful_prototype_patch_from_call(
+            call,
+            run_id,
+            runtime_attempt_id,
+        )
+        if patch_artifact_index is not None:
+            latest_publication[patch_artifact_index] = "patch"
+    return frozenset(
+        artifact_index
+        for artifact_index, publication in latest_publication.items()
+        if publication == "patch"
+    ), invalid
 
 
 def _successful_runtime_results(state: Any) -> tuple[int, bool]:
@@ -1335,13 +1458,18 @@ class WorkbenchToolScopeMiddleware(AgentMiddleware[AgentState]):
             return None
         name = request.tool_call.get("name")
         if name == PROTOTYPE_PATCH_TOOL_NAME:
-            draft, _artifact_index, draft_invalid = _successful_prototype_draft(
+            draft, _artifact_index, draft_invalid = _latest_successful_prototype_draft(
+                request.state,
+                self._run_id,
+                self._runtime_attempt_id,
+            )
+            checkpoint_required, patch_history_invalid = _prototype_patch_checkpoint_required(
                 request.state,
                 self._run_id,
                 self._runtime_attempt_id,
             )
             draft_operation = draft.get("operation") if isinstance(draft, Mapping) else None
-            if draft_invalid:
+            if draft_invalid or patch_history_invalid:
                 return _error_tool_message(
                     request,
                     "WORKBENCH_PROTOTYPE_PUBLICATION_HISTORY_INVALID",
@@ -1355,6 +1483,12 @@ class WorkbenchToolScopeMiddleware(AgentMiddleware[AgentState]):
                     request,
                     "WORKBENCH_PROTOTYPE_TERMINAL_DRAFT_IMMUTABLE",
                     "The successful terminal create Draft is immutable; repair an automatic Result rejection only through the manual complete Result path.",
+                )
+            if checkpoint_required:
+                return _error_tool_message(
+                    request,
+                    "WORKBENCH_PROTOTYPE_PATCH_CHECKPOINT_REQUIRED",
+                    "Publish a complete revised Prototype Draft checkpoint before another Patch or final Result.",
                 )
             if any(
                 call["name"] in {ARTIFACT_DRAFT_TOOL_NAME, RUNTIME_RESULT_TOOL_NAME}
@@ -1370,13 +1504,18 @@ class WorkbenchToolScopeMiddleware(AgentMiddleware[AgentState]):
             return None
 
         stage_count, stage_invalid = _prototype_stage_progress(request.state)
-        draft, _artifact_index, draft_invalid = _successful_prototype_draft(
+        draft, _artifact_index, draft_invalid = _latest_successful_prototype_draft(
+            request.state,
+            self._run_id,
+            self._runtime_attempt_id,
+        )
+        checkpoint_required, patch_history_invalid = _prototype_patch_checkpoint_required(
             request.state,
             self._run_id,
             self._runtime_attempt_id,
         )
         result_count, result_invalid = _successful_runtime_results(request.state)
-        if stage_invalid or draft_invalid or result_invalid:
+        if stage_invalid or draft_invalid or patch_history_invalid or result_invalid:
             return _error_tool_message(
                 request,
                 "WORKBENCH_PROTOTYPE_PUBLICATION_HISTORY_INVALID",
@@ -1396,10 +1535,34 @@ class WorkbenchToolScopeMiddleware(AgentMiddleware[AgentState]):
                 "A validated Runtime result already exists for this turn; return the concise completion message without another tool call.",
             )
         if draft is not None and name == ARTIFACT_DRAFT_TOOL_NAME:
+            draft_operation = draft.get("operation") if isinstance(draft, Mapping) else None
+            if isinstance(draft_operation, Mapping) and draft_operation.get("kind") == "create":
+                return _error_tool_message(
+                    request,
+                    "WORKBENCH_PROTOTYPE_DRAFT_ALREADY_PUBLISHED",
+                    "A validated terminal create Draft already exists; the Runtime will submit that exact draft as the final result.",
+                )
+            if not checkpoint_required:
+                return _error_tool_message(
+                    request,
+                    "WORKBENCH_PROTOTYPE_DRAFT_ALREADY_PUBLISHED",
+                    "A validated revise Draft already exists; publish a Patch or submit the explicit Result before another Draft.",
+                )
+        if checkpoint_required and name == ARTIFACT_DRAFT_TOOL_NAME:
+            artifact_index = _tool_args(request.tool_call.get("args")).get("artifact_index")
+            if isinstance(artifact_index, int) and not isinstance(artifact_index, bool) and (
+                artifact_index not in checkpoint_required
+            ):
+                return _error_tool_message(
+                    request,
+                    "WORKBENCH_PROTOTYPE_PATCH_CHECKPOINT_REQUIRED",
+                    "Publish a complete revised Prototype Draft checkpoint for each patched artifact before another Patch or final Result.",
+                )
+        if checkpoint_required and name == RUNTIME_RESULT_TOOL_NAME:
             return _error_tool_message(
                 request,
-                "WORKBENCH_PROTOTYPE_DRAFT_ALREADY_PUBLISHED",
-                "A validated Prototype draft already exists; the Runtime will submit that exact draft as the final result.",
+                "WORKBENCH_PROTOTYPE_PATCH_CHECKPOINT_REQUIRED",
+                "Publish a complete revised Prototype Draft checkpoint before another Patch or final Result.",
             )
         if draft is None and name == RUNTIME_RESULT_TOOL_NAME:
             return _error_tool_message(

@@ -31,7 +31,8 @@ def workbench_artifact_draft_publish(
     In an exact Prototype-only create Run, call this once only after all four
     Prototype stages and every requested Screen and interaction are complete. In
     other Runtime paths, publish another checkpoint only after its renderable
-    content materially changes.
+    content materially changes. A revision Patch requires a later complete
+    checkpoint before final result submission or another Patch.
 
     Args:
         artifact_index: Stable zero-based index used by the final Runtime result.

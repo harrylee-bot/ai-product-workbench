@@ -427,7 +427,7 @@ const prototypeReferencePins = [
   ],
   [
     "/mnt/skills/public/workbench/references/runtime-result-contract.md",
-    "29b0843b4d1aaba8ed0c898f196ec82a2252b2f5165dbfb8c7fe8d895dc21629",
+    "b7a3aaf96e8e88dd0c5c7be1f91dd79711bec28626a4eec0783c8f90b4682159",
   ],
 ];
 const workbenchReferencePins = [...prdReferencePins, ...prototypeReferencePins];
@@ -561,6 +561,7 @@ assert(
 );
 assert(
   toolScopeMiddlewareSource.includes("def _successful_prototype_draft(")
+    && toolScopeMiddlewareSource.includes("def _latest_successful_prototype_draft(")
     && toolScopeMiddlewareSource.includes("def _automatic_prototype_result_message(")
     && toolScopeMiddlewareSource.includes(
       '_AUTOMATIC_PROTOTYPE_RESULT_CALL_PREFIX = "workbench_auto_prototype_result_"',
@@ -569,11 +570,12 @@ assert(
     && toolScopeMiddlewareSource.includes('"artifacts": [draft]')
     && toolScopeMiddlewareSource.includes('"runId": run_id')
     && toolScopeMiddlewareSource.includes('"runtimeAttemptId": runtime_attempt_id')
-    && toolScopeMiddlewareSource.includes('artifact.get("runId") != run_id')
+    && toolScopeMiddlewareSource.includes("def _prototype_call_is_bound(")
+    && toolScopeMiddlewareSource.includes('artifact.get("runId") == run_id')
     && toolScopeMiddlewareSource.includes(
-      'artifact.get("runtimeAttemptId") != runtime_attempt_id',
+      'artifact.get("runtimeAttemptId") == runtime_attempt_id',
     )
-    && toolScopeMiddlewareSource.includes('artifact.get("toolCallId") != call["id"]')
+    && toolScopeMiddlewareSource.includes('artifact.get("toolCallId") == call_id')
     && toolScopeMiddlewareSource.includes('artifact_index != 0')
     && toolScopeMiddlewareSource.includes('operation.get("kind") != "create"')
     && toolScopeMiddlewareSource.includes(
@@ -582,6 +584,8 @@ assert(
     && toolScopeMiddlewareSource.includes("def _prototype_publication_preflight(")
     && toolScopeMiddlewareSource.includes("WORKBENCH_PROTOTYPE_DRAFT_ALREADY_PUBLISHED")
     && toolScopeMiddlewareSource.includes("WORKBENCH_PROTOTYPE_DRAFT_REQUIRED")
+    && toolScopeMiddlewareSource.includes("def _prototype_patch_checkpoint_required(")
+    && toolScopeMiddlewareSource.includes("WORKBENCH_PROTOTYPE_PATCH_CHECKPOINT_REQUIRED")
     && patchContractTestSource.includes(
       "test_successful_prototype_draft_short_circuits_to_exact_runtime_result_call",
     )
@@ -598,6 +602,12 @@ assert(
       "test_failed_automatic_prototype_result_uses_manual_repair_without_repeating",
     )
     && toolScopeMiddlewareSource.includes("WORKBENCH_PROTOTYPE_TERMINAL_DRAFT_IMMUTABLE")
+    && patchContractTestSource.includes(
+      "test_prototype_revise_requires_checkpoint_after_patch",
+    )
+    && patchContractTestSource.includes(
+      "test_multiple_successful_create_drafts_remain_invalid",
+    )
     && patchContractTestSource.includes(
       "test_automatic_prototype_result_call_id_is_bound_to_run_and_attempt",
     ),
@@ -764,6 +774,9 @@ assert(
     )
     && normalizedRuntimeResultContractSource.includes(
       "For every other Prototype path, submit the complete candidate with `workbench_runtime_result_submit`",
+    )
+    && normalizedRuntimeResultContractSource.includes(
+      "After every revision Patch, first publish a complete revised Draft checkpoint",
     )
     && normalizedRuntimeResultContractSource.includes(
       "do not read that schema; use only the compact example, this contract, and exact validation issue paths",

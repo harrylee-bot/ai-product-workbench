@@ -372,6 +372,30 @@ def prototype_messages(
     return messages
 
 
+def successful_prototype_patch_message(
+    call_id: str,
+    *,
+    run_id: str = "run-1",
+    runtime_attempt_id: str = "attempt-1",
+    artifact_index: int = 0,
+) -> dict:
+    return tool_message(
+        PROTOTYPE_ONLY_TOOL_NAMES[0],
+        call_id,
+        artifact={
+            "protocol": "workbench.runtime.prototype-patch-publication.v1",
+            "runId": run_id,
+            "runtimeAttemptId": runtime_attempt_id,
+            "toolCallId": call_id,
+            "ok": True,
+            "patch": {
+                "protocol": "workbench.runtime.prototype-patch.v1",
+                "artifactIndex": artifact_index,
+            },
+        },
+    )
+
+
 def submitted_result_messages(
     message: str = "Published",
     *,
@@ -766,6 +790,170 @@ class WorkbenchToolScopeMiddlewareTests(unittest.TestCase):
         self.assertFalse(called)
         self.assertIn("WORKBENCH_PROTOTYPE_STAGE_REQUIRED", before_stages.content)
         self.assertIn("stage='design-system'", before_stages.content)
+
+    def test_prototype_revise_checkpoint_allows_followup_patch_and_result(self) -> None:
+        middleware = WorkbenchToolScopeMiddleware(
+            None,
+            ["prototype"],
+            None,
+            ("run-1", "attempt-1"),
+        )
+        messages = prototype_messages(draft=True, operation_kind="revise")
+        sentinel = object()
+
+        first_patch = request_in_state(
+            messages,
+            PROTOTYPE_ONLY_TOOL_NAMES[0],
+            "revise-patch-before-checkpoint",
+            {},
+        )
+        self.assertIs(
+            middleware.wrap_tool_call(first_patch, lambda _request: sentinel),
+            sentinel,
+        )
+        messages.append(successful_prototype_patch_message(
+            "revise-patch-before-checkpoint",
+        ))
+
+        checkpoint_call_id = "revise-checkpoint-after-patch"
+        second_draft = request_in_state(
+            messages,
+            "workbench_artifact_draft_publish",
+            checkpoint_call_id,
+            {"artifact_index": 0, "draft": {"kind": "prototype"}},
+        )
+        self.assertIs(
+            middleware.wrap_tool_call(second_draft, lambda _request: sentinel),
+            sentinel,
+        )
+        checkpoint_draft = {
+            "kind": "prototype",
+            "schemaVersion": 1,
+            "title": "Product Workbench revised",
+            "operation": {"kind": "revise"},
+            "citations": [],
+            "content": {"protocol": "workbench.prototype.v1"},
+        }
+        messages.append(tool_message(
+            "workbench_artifact_draft_publish",
+            checkpoint_call_id,
+            artifact={
+                "protocol": "workbench.runtime.artifact-draft.v1",
+                "runId": "run-1",
+                "runtimeAttemptId": "attempt-1",
+                "toolCallId": checkpoint_call_id,
+                "artifactIndex": 0,
+                "ok": True,
+                "draft": checkpoint_draft,
+            },
+        ))
+
+        followup_patch = request_in_state(
+            messages,
+            PROTOTYPE_ONLY_TOOL_NAMES[0],
+            "revise-patch-after-checkpoint",
+            {},
+        )
+        self.assertIs(
+            middleware.wrap_tool_call(followup_patch, lambda _request: sentinel),
+            sentinel,
+        )
+        final_result = request_in_state(
+            messages,
+            RUNTIME_RESULT_TOOL_NAME,
+            "revise-final-result",
+            {},
+        )
+        self.assertIs(
+            middleware.wrap_tool_call(final_result, lambda _request: sentinel),
+            sentinel,
+        )
+
+    def test_prototype_revise_requires_checkpoint_after_patch(self) -> None:
+        middleware = WorkbenchToolScopeMiddleware(
+            None,
+            ["prototype"],
+            None,
+            ("run-1", "attempt-1"),
+        )
+        messages = prototype_messages(draft=True, operation_kind="revise")
+        patch_call_id = "revise-patch-needs-checkpoint"
+        request_in_state(
+            messages,
+            PROTOTYPE_ONLY_TOOL_NAMES[0],
+            patch_call_id,
+            {},
+        )
+        messages.append(successful_prototype_patch_message(patch_call_id))
+
+        second_patch = middleware.wrap_tool_call(
+            request_in_state(
+                messages,
+                PROTOTYPE_ONLY_TOOL_NAMES[0],
+                "revise-second-patch-before-checkpoint",
+                {},
+            ),
+            lambda _request: self.fail("a checkpoint must precede another patch"),
+        )
+        self.assertIn("WORKBENCH_PROTOTYPE_PATCH_CHECKPOINT_REQUIRED", second_patch.content)
+
+        final_result = middleware.wrap_tool_call(
+            request_in_state(
+                messages,
+                RUNTIME_RESULT_TOOL_NAME,
+                "revise-result-before-checkpoint",
+                {},
+            ),
+            lambda _request: self.fail("a checkpoint must precede the final Result"),
+        )
+        self.assertIn("WORKBENCH_PROTOTYPE_PATCH_CHECKPOINT_REQUIRED", final_result.content)
+
+    def test_multiple_successful_create_drafts_remain_invalid(self) -> None:
+        middleware = WorkbenchToolScopeMiddleware(
+            None,
+            ["prototype"],
+            None,
+            ("run-1", "attempt-1"),
+        )
+        messages = prototype_messages(draft=True)
+        duplicate_call_id = "duplicate-successful-create-draft"
+        request_in_state(
+            messages,
+            "workbench_artifact_draft_publish",
+            duplicate_call_id,
+            {"artifact_index": 0, "draft": {"kind": "prototype"}},
+        )
+        duplicate_draft = {
+            "kind": "prototype",
+            "schemaVersion": 1,
+            "title": "Duplicate create",
+            "operation": {"kind": "create"},
+            "citations": [],
+            "content": {"protocol": "workbench.prototype.v1"},
+        }
+        messages.append(tool_message(
+            "workbench_artifact_draft_publish",
+            duplicate_call_id,
+            artifact={
+                "protocol": "workbench.runtime.artifact-draft.v1",
+                "runId": "run-1",
+                "runtimeAttemptId": "attempt-1",
+                "toolCallId": duplicate_call_id,
+                "artifactIndex": 0,
+                "ok": True,
+                "draft": duplicate_draft,
+            },
+        ))
+        blocked = middleware.wrap_tool_call(
+            request_in_state(
+                messages,
+                RUNTIME_RESULT_TOOL_NAME,
+                "result-after-duplicate-create-draft",
+                {},
+            ),
+            lambda _request: self.fail("multiple successful create Drafts are invalid"),
+        )
+        self.assertIn("WORKBENCH_PROTOTYPE_PUBLICATION_HISTORY_INVALID", blocked.content)
 
     def test_non_prototype_run_does_not_auto_submit_prototype_draft(self) -> None:
         middleware = WorkbenchToolScopeMiddleware(None, ["code"])
