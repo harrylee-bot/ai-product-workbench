@@ -134,6 +134,9 @@ workbench_requested_artifact_kinds_from_runnable_config = (
 workbench_knowledge_enabled_from_runnable_config = (
     middleware_module.workbench_knowledge_enabled_from_runnable_config
 )
+workbench_run_scope_from_runnable_config = (
+    middleware_module.workbench_run_scope_from_runnable_config
+)
 AIMessage = middleware_module.AIMessage
 ExtendedModelResponse = middleware_module.ExtendedModelResponse
 ModelResponse = middleware_module.ModelResponse
@@ -321,7 +324,12 @@ def prd_messages(*, stage_count: int, references: bool, draft: bool = False) -> 
     return messages
 
 
-def submitted_result_messages(message: str = "Published") -> list[dict]:
+def submitted_result_messages(
+    message: str = "Published",
+    *,
+    run_id: str = "run-1",
+    runtime_attempt_id: str = "attempt-1",
+) -> list[dict]:
     call_id = "final-result"
     return [
         {"type": "human", "content": "current Workbench turn"},
@@ -333,6 +341,8 @@ def submitted_result_messages(message: str = "Published") -> list[dict]:
             call_id,
             artifact={
                 "protocol": "workbench.runtime.validated-result.v1",
+                "runId": run_id,
+                "runtimeAttemptId": runtime_attempt_id,
                 "ok": True,
                 "result": {"message": message},
             },
@@ -432,6 +442,35 @@ class WorkbenchToolScopeMiddlewareTests(unittest.TestCase):
                 {"context": {"workbench": []}}
             )
         )
+
+    def test_run_scope_is_read_only_from_trusted_runtime_context(self) -> None:
+        expected = ("run-1", "attempt-1")
+        self.assertEqual(
+            workbench_run_scope_from_runnable_config(
+                {"context": {"workbench": {
+                    "runId": expected[0],
+                    "runtimeAttemptId": expected[1],
+                }}}
+            ),
+            expected,
+        )
+        for config in (
+            {"configurable": {"workbench": {
+                "runId": expected[0],
+                "runtimeAttemptId": expected[1],
+            }}},
+            {"context": {"workbench": {"runId": expected[0]}}},
+            {"context": {"workbench": {
+                "runId": " run-1",
+                "runtimeAttemptId": expected[1],
+            }}},
+            {"context": {"workbench": {
+                "runId": expected[0],
+                "runtimeAttemptId": "",
+            }}},
+        ):
+            with self.subTest(config=config):
+                self.assertIsNone(workbench_run_scope_from_runnable_config(config))
 
     def test_knowledge_visibility_is_read_only_from_trusted_runtime_context(self) -> None:
         self.assertIs(
@@ -561,7 +600,12 @@ class WorkbenchToolScopeMiddlewareTests(unittest.TestCase):
                     )
 
     def test_successful_runtime_result_short_circuits_followup_model_call(self) -> None:
-        middleware = WorkbenchToolScopeMiddleware(None, ["prd"])
+        middleware = WorkbenchToolScopeMiddleware(
+            None,
+            ["prd"],
+            None,
+            ("run-1", "attempt-1"),
+        )
         called = False
 
         def handler(_request):
@@ -579,6 +623,55 @@ class WorkbenchToolScopeMiddlewareTests(unittest.TestCase):
         self.assertFalse(called)
         self.assertIsInstance(response, AIMessage)
         self.assertEqual(response.content, "Done")
+
+    def test_previous_run_runtime_result_does_not_short_circuit_new_run(self) -> None:
+        middleware = WorkbenchToolScopeMiddleware(
+            None,
+            ["prd"],
+            None,
+            ("run-2", "attempt-2"),
+        )
+        called = False
+
+        def handler(_request):
+            nonlocal called
+            called = True
+            return AIMessage(content="model continued")
+
+        response = middleware.wrap_model_call(
+            FakeModelRequest(
+                self.all_tools,
+                state={
+                    "messages": submitted_result_messages(
+                        "Previous run",
+                        run_id="run-1",
+                        runtime_attempt_id="attempt-1",
+                    ),
+                },
+            ),
+            handler,
+        )
+        self.assertTrue(called)
+        self.assertEqual(response.content, "model continued")
+
+    def test_runtime_result_without_scope_does_not_short_circuit(self) -> None:
+        middleware = WorkbenchToolScopeMiddleware(None, ["prd"])
+        called = False
+
+        def handler(_request):
+            nonlocal called
+            called = True
+            return AIMessage(content="model continued")
+
+        response = middleware.wrap_model_call(
+            FakeModelRequest(
+                self.all_tools,
+                state={"messages": submitted_result_messages("No scope")},
+            ),
+            handler,
+        )
+        self.assertTrue(called)
+        self.assertEqual(response.content, "model continued")
 
     @unittest.skipIf(USING_IMPORT_STUBS, "requires pinned LangChain/LangGraph dependencies")
     def test_catalog_observation_survives_message_reducer_and_checkpoint(self) -> None:
@@ -1511,7 +1604,12 @@ class WorkbenchToolScopeMiddlewareTests(unittest.TestCase):
 
 class WorkbenchToolScopeMiddlewareAsyncTests(unittest.IsolatedAsyncioTestCase):
     async def test_async_successful_runtime_result_short_circuits_followup_model_call(self) -> None:
-        middleware = WorkbenchToolScopeMiddleware(None, ["prd"])
+        middleware = WorkbenchToolScopeMiddleware(
+            None,
+            ["prd"],
+            None,
+            ("run-1", "attempt-1"),
+        )
         called = False
 
         async def handler(_request):
@@ -1529,6 +1627,36 @@ class WorkbenchToolScopeMiddlewareAsyncTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(called)
         self.assertIsInstance(response, AIMessage)
         self.assertEqual(response.content, "Done async")
+
+    async def test_async_previous_run_runtime_result_does_not_short_circuit_new_run(self) -> None:
+        middleware = WorkbenchToolScopeMiddleware(
+            None,
+            ["prd"],
+            None,
+            ("run-2", "attempt-2"),
+        )
+        called = False
+
+        async def handler(_request):
+            nonlocal called
+            called = True
+            return AIMessage(content="model continued")
+
+        response = await middleware.awrap_model_call(
+            FakeModelRequest(
+                [FakeTool(RUNTIME_RESULT_TOOL_NAME)],
+                state={
+                    "messages": submitted_result_messages(
+                        "Previous run async",
+                        run_id="run-1",
+                        runtime_attempt_id="attempt-1",
+                    ),
+                },
+            ),
+            handler,
+        )
+        self.assertTrue(called)
+        self.assertEqual(response.content, "model continued")
 
     async def test_async_model_result_is_stamped_after_scope_filtering(self) -> None:
         middleware = WorkbenchToolScopeMiddleware(None, None, False)

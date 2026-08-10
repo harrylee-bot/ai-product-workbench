@@ -215,6 +215,32 @@ def workbench_knowledge_enabled_from_runnable_config(config: Any) -> Any:
     return scope.get("knowledgeEnabled", False)
 
 
+def workbench_run_scope_from_runnable_config(
+    config: Any,
+) -> tuple[str, str] | None:
+    """Read the server-bound Run identity used by result convergence."""
+    if not isinstance(config, Mapping):
+        return None
+    context = config.get("context")
+    if not isinstance(context, Mapping):
+        return None
+    scope = context.get("workbench")
+    if not isinstance(scope, Mapping):
+        return None
+    run_id = scope.get("runId")
+    runtime_attempt_id = scope.get("runtimeAttemptId")
+    if (
+        not isinstance(run_id, str)
+        or not run_id
+        or run_id.strip() != run_id
+        or not isinstance(runtime_attempt_id, str)
+        or not runtime_attempt_id
+        or runtime_attempt_id.strip() != runtime_attempt_id
+    ):
+        return None
+    return run_id, runtime_attempt_id
+
+
 def _tool_name(tool: Any) -> str | None:
     name = getattr(tool, "name", None)
     if isinstance(name, str):
@@ -550,8 +576,14 @@ def _successful_runtime_results(state: Any) -> tuple[int, bool]:
     return count, invalid or count > 1
 
 
-def _successful_runtime_result_message(state: Any) -> str | None:
+def _successful_runtime_result_message(
+    state: Any,
+    run_id: str | None,
+    runtime_attempt_id: str | None,
+) -> str | None:
     """Return the validated result message once, so the graph can converge."""
+    if not run_id or not runtime_attempt_id:
+        return None
     completed, invalid = _completed_tool_calls(state)
     if invalid:
         return None
@@ -564,6 +596,8 @@ def _successful_runtime_result_message(state: Any) -> str | None:
             not isinstance(artifact, Mapping)
             or artifact.get("protocol") != _PRD_RESULT_PROTOCOL
             or artifact.get("ok") is not True
+            or artifact.get("runId") != run_id
+            or artifact.get("runtimeAttemptId") != runtime_attempt_id
         ):
             continue
         result = _value(artifact, "result")
@@ -669,6 +703,7 @@ class WorkbenchToolScopeMiddleware(AgentMiddleware[AgentState]):
         canvas_policy: Any = None,
         requested_artifact_kinds: Any = None,
         knowledge_enabled: Any = None,
+        run_scope: Any = None,
     ):
         super().__init__()
         normalized_canvas = normalize_workbench_canvas_policy(canvas_policy)
@@ -685,6 +720,19 @@ class WorkbenchToolScopeMiddleware(AgentMiddleware[AgentState]):
         self._prd_gate_enabled = normalized_kinds == ["prd"]
         self._knowledge_catalog_bound = isinstance(knowledge_enabled, bool)
         self._knowledge_enabled = knowledge_enabled is True
+        self._run_id: str | None = None
+        self._runtime_attempt_id: str | None = None
+        if (
+            isinstance(run_scope, tuple)
+            and len(run_scope) == 2
+            and all(
+                isinstance(value, str)
+                and value
+                and value.strip() == value
+                for value in run_scope
+            )
+        ):
+            self._run_id, self._runtime_attempt_id = run_scope
 
     def _filter_tools(self, request: ModelRequest) -> ModelRequest:
         visible = []
@@ -1170,7 +1218,11 @@ class WorkbenchToolScopeMiddleware(AgentMiddleware[AgentState]):
         handler: Callable[[ModelRequest], ModelResponse],
     ) -> ModelCallResult:
         scoped_request = self._filter_tools(request)
-        submitted_message = _successful_runtime_result_message(scoped_request.state)
+        submitted_message = _successful_runtime_result_message(
+            scoped_request.state,
+            self._run_id,
+            self._runtime_attempt_id,
+        )
         if submitted_message is not None:
             return _stamp_catalog_observation(
                 AIMessage(content=submitted_message),
@@ -1210,7 +1262,11 @@ class WorkbenchToolScopeMiddleware(AgentMiddleware[AgentState]):
         handler: Callable[[ModelRequest], Awaitable[ModelResponse]],
     ) -> ModelCallResult:
         scoped_request = self._filter_tools(request)
-        submitted_message = _successful_runtime_result_message(scoped_request.state)
+        submitted_message = _successful_runtime_result_message(
+            scoped_request.state,
+            self._run_id,
+            self._runtime_attempt_id,
+        )
         if submitted_message is not None:
             return _stamp_catalog_observation(
                 AIMessage(content=submitted_message),

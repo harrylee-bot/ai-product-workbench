@@ -7,7 +7,7 @@
     "upstreamSha256": "9052cfadca31817a927e83ad2dff01bfe5afdf5acdae337cc8f30eb1a8d8469f",
     "patchedSha256": "3dce9051f0ce8248c44f7e6a9e4b8b186ef061a39bce28548cb40557dc1c255a",
     "anchor": "    # Coalesce every SystemMessage into a single leading one before the request\n",
-    "insertion": "    # Product Workbench tools are registered globally but scoped per Run.\n    from deerflow.agents.middlewares.workbench_tool_scope_middleware import (\n        WorkbenchToolScopeMiddleware,\n        workbench_canvas_policy_from_runnable_config,\n        workbench_knowledge_enabled_from_runnable_config,\n        workbench_requested_artifact_kinds_from_runnable_config,\n    )\n\n    middlewares.append(\n        WorkbenchToolScopeMiddleware(\n            workbench_canvas_policy_from_runnable_config(config),\n            workbench_requested_artifact_kinds_from_runnable_config(config),\n            workbench_knowledge_enabled_from_runnable_config(config),\n        )\n    )\n\n"
+    "insertion": "    # Product Workbench tools are registered globally but scoped per Run.\n    from deerflow.agents.middlewares.workbench_tool_scope_middleware import (\n        WorkbenchToolScopeMiddleware,\n        workbench_canvas_policy_from_runnable_config,\n        workbench_knowledge_enabled_from_runnable_config,\n        workbench_requested_artifact_kinds_from_runnable_config,\n        workbench_run_scope_from_runnable_config,\n    )\n\n    middlewares.append(\n        WorkbenchToolScopeMiddleware(\n            workbench_canvas_policy_from_runnable_config(config),\n            workbench_requested_artifact_kinds_from_runnable_config(config),\n            workbench_knowledge_enabled_from_runnable_config(config),\n            workbench_run_scope_from_runnable_config(config),\n        )\n    )\n\n"
   },
   "deferredMiddleware": {
     "path": "deerflow/agents/middlewares/deferred_tool_filter_middleware.py",
@@ -15,7 +15,7 @@
   },
   "toolScopeMiddleware": {
     "path": "deerflow/agents/middlewares/workbench_tool_scope_middleware.py",
-    "sha256": "2ae6c682cdcfc44ce66e24accb6be69492fbb5d149a12e03c8d598e08f4458d5"
+    "sha256": "9a6df944038da5582bebe1a238bbbb06f0bf7de6035d3a47e0cb4dea4b4c3c9b"
   },
   "additionalSources": [
     {
@@ -155,7 +155,7 @@
     "sha256": "2d18f25f77a489f17771550a32f06efc6e8e780e09ba789f2562d94a4b6bb2fb"
   },
   "contractTest": {
-    "sha256": "559c01862c34cd853a001a9c08e0899ff873e40f7cd21bbe262fbd122550f8d3"
+    "sha256": "5cb96db5076d3fde44e23e7e1b081e000df865093ae9fd432a006cb58cc8edce"
   },
   "requestContextTest": {
     "sha256": "c09af390e900a997a8631ac02fd032a96d2f1366ab653ee28b9e203ba6fbbf23"
