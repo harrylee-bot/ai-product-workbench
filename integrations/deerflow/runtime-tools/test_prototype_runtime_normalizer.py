@@ -71,6 +71,156 @@ class PrototypeRuntimeNormalizerTests(unittest.TestCase):
             "space-between",
         )
 
+    def test_prefixes_observed_compatibility_repairs_for_a_runtime_result(self) -> None:
+        candidate = {
+            "protocol": "workbench.runtime.result.v1",
+            "message": "done",
+            "artifacts": [{
+                "kind": "prototype",
+                "content": {
+                    "protocol": "workbench.prototype.v1",
+                    "nodes": [{
+                        "kind": "text",
+                        "layout": {"z": 4},
+                        "style": {
+                            "typography": {
+                                "letterSpacing": {"kind": "literal长", "value": 0},
+                            },
+                        },
+                    }],
+                },
+            }],
+        }
+
+        normalized, repairs = normalize_runtime_result_prototype_layout_aliases(candidate)
+
+        node = normalized["artifacts"][0]["content"]["nodes"][0]
+        self.assertNotIn("z", node["layout"])
+        self.assertEqual(node["style"]["typography"]["letterSpacing"]["kind"], "literal")
+        repair_paths = {tuple(repair["path"]) for repair in repairs}
+        self.assertIn(
+            ("artifacts", 0, "content", "nodes", 0, "layout", "z"),
+            repair_paths,
+        )
+        self.assertIn(
+            (
+                "artifacts",
+                0,
+                "content",
+                "nodes",
+                0,
+                "style",
+                "typography",
+                "letterSpacing",
+                "kind",
+            ),
+            repair_paths,
+        )
+        self.assertEqual(candidate["artifacts"][0]["content"]["nodes"][0]["layout"]["z"], 4)
+        self.assertEqual(
+            candidate["artifacts"][0]["content"]["nodes"][0]["style"]["typography"]
+            ["letterSpacing"]["kind"],
+            "literal长",
+        )
+
+    def test_removes_layout_z_and_repairs_observed_finite_literal_kind(self) -> None:
+        artifact = {
+            "kind": "prototype",
+            "content": {
+                "protocol": "workbench.prototype.v1",
+                "nodes": [{
+                    "kind": "text",
+                    "layout": {"z": 12},
+                    "style": {
+                        "typography": {
+                            "letterSpacing": {"kind": "literal长", "value": 1.25},
+                        },
+                    },
+                }],
+                "states": [{
+                    "overrides": [{
+                        "style": {
+                            "typography": {
+                                "letterSpacing": {"kind": "literal长", "value": -0.5},
+                            },
+                        },
+                    }],
+                }],
+            },
+        }
+        original = copy.deepcopy(artifact)
+
+        normalized, repairs = normalize_prototype_layout_aliases(artifact)
+
+        content = normalized["content"]
+        self.assertEqual(artifact, original)
+        self.assertNotIn("z", content["nodes"][0]["layout"])
+        self.assertEqual(
+            content["nodes"][0]["style"]["typography"]["letterSpacing"],
+            {"kind": "literal", "value": 1.25},
+        )
+        self.assertEqual(
+            content["states"][0]["overrides"][0]["style"]["typography"]["letterSpacing"],
+            {"kind": "literal", "value": -0.5},
+        )
+        repair_paths = {tuple(repair["path"]) for repair in repairs}
+        self.assertIn(("content", "nodes", 0, "layout", "z"), repair_paths)
+        self.assertIn(
+            ("content", "nodes", 0, "style", "typography", "letterSpacing", "kind"),
+            repair_paths,
+        )
+        self.assertIn(
+            (
+                "content",
+                "states",
+                0,
+                "overrides",
+                0,
+                "style",
+                "typography",
+                "letterSpacing",
+                "kind",
+            ),
+            repair_paths,
+        )
+
+    def test_preserves_observed_literal_alias_for_non_finite_or_non_numeric_values(self) -> None:
+        values = [float("inf"), float("-inf"), True, "0", None]
+        artifact = {
+            "kind": "prototype",
+            "content": {
+                "protocol": "workbench.prototype.v1",
+                "nodes": [],
+                "tokens": [
+                    {"kind": "literal长", "value": value}
+                    for value in values
+                ],
+            },
+        }
+
+        normalized, repairs = normalize_prototype_layout_aliases(artifact)
+
+        self.assertEqual(
+            normalized["content"]["tokens"],
+            [{"kind": "literal长", "value": value} for value in values],
+        )
+        self.assertFalse(any(repair["path"][-1] == "kind" for repair in repairs))
+
+    def test_repairs_observed_literal_alias_for_an_arbitrarily_large_integer(self) -> None:
+        artifact = {
+            "kind": "prototype",
+            "content": {
+                "protocol": "workbench.prototype.v1",
+                "nodes": [],
+                "tokens": [{"kind": "literal长", "value": 10**1000}],
+            },
+        }
+
+        normalized, repairs = normalize_prototype_layout_aliases(artifact)
+
+        self.assertEqual(normalized["content"]["tokens"][0]["kind"], "literal")
+        self.assertTrue(any(repair["path"][-1] == "kind" for repair in repairs))
+
     def test_repairs_observed_prototype_result_compatibility_gaps(self) -> None:
         artifact = {
             "kind": "prototype",

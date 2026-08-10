@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import math
 from typing import Any
 
 
@@ -32,6 +33,8 @@ _PROTOTYPE_COLLECTION_DEFAULTS = (
 _MOTION_TRIGGER_ALIASES = {
     "mount": "enter",
 }
+
+_OBSERVED_LITERAL_KIND_ALIAS = "literal长"
 
 _PROTOTYPE_NODE_KINDS = frozenset({
     "frame",
@@ -199,6 +202,12 @@ def normalize_prototype_layout_aliases(
                 })
             layout = node.get("layout")
             if isinstance(layout, dict):
+                if strict_node_shape and "z" in layout:
+                    del layout["z"]
+                    repairs.append({
+                        "path": ["content", "nodes", node_index, "layout", "z"],
+                        "action": "removed-unsupported-field",
+                    })
                 for field, aliases in _LAYOUT_ALIASES.items():
                     value = layout.get(field)
                     canonical = aliases.get(value) if isinstance(value, str) else None
@@ -248,6 +257,7 @@ def normalize_prototype_layout_aliases(
                 "action": "defaulted",
                 "to": [],
             })
+        _normalize_observed_literal_kind_aliases(content, ["content"], repairs)
         _normalize_prototype_graph_references(content, repairs)
 
     motions = content.get("motions")
@@ -266,6 +276,33 @@ def normalize_prototype_layout_aliases(
                 "to": canonical,
             })
     return normalized, repairs
+
+
+def _normalize_observed_literal_kind_aliases(
+    value: Any,
+    path: list[str | int],
+    repairs: list[dict[str, Any]],
+) -> None:
+    if isinstance(value, dict):
+        literal_value = value.get("value")
+        if (
+            value.get("kind") == _OBSERVED_LITERAL_KIND_ALIAS
+            and isinstance(literal_value, (int, float))
+            and not isinstance(literal_value, bool)
+            and (isinstance(literal_value, int) or math.isfinite(literal_value))
+        ):
+            value["kind"] = "literal"
+            repairs.append({
+                "path": [*path, "kind"],
+                "from": _OBSERVED_LITERAL_KIND_ALIAS,
+                "to": "literal",
+            })
+        for key, child in value.items():
+            _normalize_observed_literal_kind_aliases(child, [*path, key], repairs)
+        return
+    if isinstance(value, list):
+        for index, child in enumerate(value):
+            _normalize_observed_literal_kind_aliases(child, [*path, index], repairs)
 
 
 def _normalize_prototype_graph_references(

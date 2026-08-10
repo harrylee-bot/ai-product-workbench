@@ -49,7 +49,7 @@ const prdReferenceToolTestSource = readText(prdReferenceToolTestPath);
 const prototypeNormalizerSource = readText(prototypeNormalizerPath);
 const prototypeNormalizerTestSource = readText(prototypeNormalizerTestPath);
 const patchManifestSha256 = sha256(patchManifestSource);
-const prototypeNormalizerSha256 = "c5a57d4d0d556c2d2aa7f933dbc699cb642af88d877198d7553a6cecd64a1eb6";
+const prototypeNormalizerSha256 = "fc0d76078c3470fbde6c3333a059fcade24eb80aeda338c1c604c498b09edd19";
 const expectedCommit = argumentValue("--expected-commit");
 
 assert(gateway, "production runtime Compose must define deerflow");
@@ -499,9 +499,15 @@ assert(
     && prototypeNormalizerSource.includes('"mount": "enter"')
     && prototypeNormalizerSource.includes('node["maxLines"] = None')
     && prototypeNormalizerSource.includes('del node["textStyle"]')
+    && prototypeNormalizerSource.includes('del layout["z"]')
+    && prototypeNormalizerSource.includes('_OBSERVED_LITERAL_KIND_ALIAS = "literal长"')
+    && prototypeNormalizerSource.includes(
+      "isinstance(literal_value, int) or math.isfinite(literal_value)",
+    )
+    && prototypeNormalizerSource.includes("_normalize_observed_literal_kind_aliases(content")
     && prototypeNormalizerSource.includes("_PROTOTYPE_COLLECTION_DEFAULTS")
     && prototypeNormalizerSource.includes("copy.deepcopy"),
-  "the Prototype runtime normalizer must repair only the known compatibility aliases on copied values",
+  "the Prototype runtime normalizer must repair only the known compatibility aliases and observed finite literal typo on copied values",
 );
 assert(
   prototypeNormalizerTestSource.includes(
@@ -514,8 +520,20 @@ assert(
       "test_preserves_existing_invalid_values_but_removes_unsupported_text_style",
     )
     && prototypeNormalizerTestSource.includes("test_prefixes_repairs_for_a_runtime_result")
+    && prototypeNormalizerTestSource.includes(
+      "test_prefixes_observed_compatibility_repairs_for_a_runtime_result",
+    )
+    && prototypeNormalizerTestSource.includes(
+      "test_removes_layout_z_and_repairs_observed_finite_literal_kind",
+    )
+    && prototypeNormalizerTestSource.includes(
+      "test_preserves_observed_literal_alias_for_non_finite_or_non_numeric_values",
+    )
+    && prototypeNormalizerTestSource.includes(
+      "test_repairs_observed_literal_alias_for_an_arbitrarily_large_integer",
+    )
     && prototypeNormalizerTestSource.includes("test_leaves_non_prototype_artifacts_unchanged"),
-  "the Prototype runtime normalizer contract must cover aliases, result paths, and non-Prototype input",
+  "the Prototype runtime normalizer contract must cover aliases, observed repairs, result paths, finite guards, and non-Prototype input",
 );
 assert(
   toolScopeMiddlewareSource.includes('self._prd_gate_enabled = normalized_kinds == ["prd"]')
