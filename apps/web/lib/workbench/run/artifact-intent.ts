@@ -37,6 +37,18 @@ const prototypeArtifactPattern = new RegExp(prototypeArtifactTerm, "iu");
 const prototypeCoreArtifactPattern = new RegExp(prototypeCoreArtifactTerm, "iu");
 const artifactClauseBoundaryPattern = /[。！？.!?；;\r\n]+/u;
 
+// A negated output must not turn a document request into a prototype run. Keep
+// this normalization local to intent detection so the original prompt remains
+// untouched when it is persisted and sent to the runtime.
+const negatedPrototypeMentionPattern = /(?:不需要|不生成|不创建|不制作|不输出|不设计|不做|不提供|不产出|不编写|不要|无需|无须|不用|勿|禁止|拒绝)[^。！？.!?；;\r\n]{0,24}(?:原型|界面(?:设计|原型)?|页面(?:设计|原型)?|网页(?:设计|原型)?|前端(?:页面|界面)|UI|界面|\bprototypes?\b|\binterfaces?\b|\bpages?\b|\bscreens?\b|\bmockups?\b|\bwireframes?\b)/giu;
+const negatedPrototypeEnglishMentionPattern = /\b(?:do\s+not|don't|does\s+not|doesn't|without|no|never|not|exclude|excluding|skip|omit)\b[^.!?;\r\n]{0,32}\b(?:prototypes?|interfaces?|pages?|screens?|mockups?|wireframes?|ui)\b/giu;
+
+function promptForArtifactIntent(prompt: string): string {
+  return prompt
+    .replace(negatedPrototypeMentionPattern, " ")
+    .replace(negatedPrototypeEnglishMentionPattern, " ");
+}
+
 function explicitlyRequestsBothAcrossClauses(prompt: string): boolean {
   let sawExplicitPrdClause = false;
   let sawExplicitPrototypeClause = false;
@@ -61,25 +73,26 @@ export function requestedArtifactKindsForPrompt(
   prompt: string,
   options: { prdContext?: boolean } = {},
 ): StartRunRequest["requestedArtifactKinds"] {
-  const mentionsPrd = prdArtifactPattern.test(prompt);
-  const mentionsPrototype = prototypeArtifactPattern.test(prompt);
-  const explicitlyRequestsPrototype = explicitPrototypeOutputPattern.test(prompt);
+  const intentPrompt = promptForArtifactIntent(prompt);
+  const mentionsPrd = prdArtifactPattern.test(intentPrompt);
+  const mentionsPrototype = prototypeArtifactPattern.test(intentPrompt);
+  const explicitlyRequestsPrototype = explicitPrototypeOutputPattern.test(intentPrompt);
   const explicitlyRequestsBoth = mentionsPrd
     && mentionsPrototype
     && (
       (
-        pairedArtifactsPattern.test(prompt)
+        pairedArtifactsPattern.test(intentPrompt)
         && (
-          explicitPairedArtifactsPattern.test(prompt)
-          || (explicitPrdOutputPattern.test(prompt) && explicitPrototypeOutputPattern.test(prompt))
-          || barePairedArtifactsPattern.test(prompt)
-          || /先[^。！？;\n]{0,24}(?:再|然后)/u.test(prompt)
+          explicitPairedArtifactsPattern.test(intentPrompt)
+          || (explicitPrdOutputPattern.test(intentPrompt) && explicitPrototypeOutputPattern.test(intentPrompt))
+          || barePairedArtifactsPattern.test(intentPrompt)
+          || /先[^。！？;\n]{0,24}(?:再|然后)/u.test(intentPrompt)
         )
       )
-      || explicitlyRequestsBothAcrossClauses(prompt)
+      || explicitlyRequestsBothAcrossClauses(intentPrompt)
     );
   if (explicitlyRequestsBoth) return ["prd", "prototype"];
-  const requestsPrototype = prototypeCoreArtifactPattern.test(prompt)
+  const requestsPrototype = prototypeCoreArtifactPattern.test(intentPrompt)
     || explicitlyRequestsPrototype
     || (mentionsPrototype && !mentionsPrd);
   return !requestsPrototype && (mentionsPrd || options.prdContext)

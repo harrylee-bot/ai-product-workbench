@@ -25,6 +25,24 @@ describe("requestedArtifactKindsForPrompt", () => {
     })).toEqual(["prd"]);
   });
 
+  it("ignores explicitly negated prototype output when routing a PRD", () => {
+    const productionAcceptancePrompt = [
+      "这是隔离的生产验收 smoke，无需追问。",
+      "请仅生成一份完整中文需求说明书，不生成原型、图片、代码或其他产物。",
+      "主题：电商订单状态通知设置。",
+    ].join("\n");
+
+    expect(requestedArtifactKindsForPrompt(productionAcceptancePrompt))
+      .toEqual(["prd"]);
+    expect(requestedArtifactKindsForPrompt("生成需求文档，不要原型"))
+      .toEqual(["prd"]);
+    expect(requestedArtifactKindsForPrompt("Write a requirements document; do not generate a prototype"))
+      .toEqual(["prd"]);
+    expect(requestedArtifactKindsForPrompt("Create a PRD without a prototype", {
+      prdContext: true,
+    })).toEqual(["prd"]);
+  });
+
   it("routes an explicit UI request to Prototype even with PRD context", () => {
     expect(requestedArtifactKindsForPrompt("基于此 PRD 生成 UI 界面设计", {
       prdContext: true,
