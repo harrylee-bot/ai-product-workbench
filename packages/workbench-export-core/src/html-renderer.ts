@@ -6,6 +6,7 @@ import {
   orderBoardNodesByHierarchy,
   prototypeDocumentSchema,
   resolveExportBoardNodeSelection,
+  workbenchExportRendererRevision,
   type DesignSystemDocument,
   type ExportSelection,
   type JsonValue,
@@ -110,8 +111,8 @@ export function renderExportHtml(request: ExportBuildRequest): RenderedHtml {
   const previewPresentation = request.presentation === "preview";
   const styles = `${baseStyles}\n${previewViewportStyles}\n${fontFaces.join("\n")}`;
   const runtimeData = { protocol: "workbench.export-runtime.v1", prototypes: runtimePrototypes } satisfies JsonValue;
-  const bodyMarkup = `<main class="wb-export${previewPresentation ? " wb-export--preview" : ""}" data-wb-presentation="${previewPresentation ? "preview" : "standalone"}"><header class="wb-export__header"><h1 class="wb-export__title">${escapeHtml(title)}</h1><div class="wb-export__meta">Release ${request.source.releaseVersion} · ${selected.length} artifact${selected.length === 1 ? "" : "s"}</div></header><div class="wb-export__content">${boardMarkup}<div class="wb-artifacts">${artifactMarkup || '<div class="wb-empty">This selection contains no exportable artifacts.</div>'}</div></div></main>`;
-  const document = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light"><title>${escapeHtml(title)}</title><style>${styles}</style></head><body><div id="workbench-export-root">${bodyMarkup}</div><script id="workbench-export-data" type="application/json">${safeScriptJson(runtimeData)}</script><script>${browserRuntimeSource}</script></body></html>`;
+  const bodyMarkup = `<main class="wb-export${previewPresentation ? " wb-export--preview" : ""}" data-wb-presentation="${previewPresentation ? "preview" : "standalone"}" data-wb-renderer-revision="${workbenchExportRendererRevision}"><header class="wb-export__header"><h1 class="wb-export__title">${escapeHtml(title)}</h1><div class="wb-export__meta">Release ${request.source.releaseVersion} · ${selected.length} artifact${selected.length === 1 ? "" : "s"}</div></header><div class="wb-export__content">${boardMarkup}<div class="wb-artifacts">${artifactMarkup || '<div class="wb-empty">This selection contains no exportable artifacts.</div>'}</div></div></main>`;
+  const document = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light"><meta name="workbench-export-renderer" content="${workbenchExportRendererRevision}"><title>${escapeHtml(title)}</title><style>${styles}</style></head><body><div id="workbench-export-root">${bodyMarkup}</div><script id="workbench-export-data" type="application/json">${safeScriptJson(runtimeData)}</script><script>${browserRuntimeSource}</script></body></html>`;
   return { document, bodyMarkup, styles, runtimeSource: browserRuntimeSource, runtimeData, fontAssets, title };
 }
 

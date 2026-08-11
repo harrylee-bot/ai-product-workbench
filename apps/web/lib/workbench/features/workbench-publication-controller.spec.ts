@@ -1,4 +1,7 @@
-import type { ExternalExportDelivery } from "@workbench/workbench-contracts";
+import {
+  workbenchExportRendererRevision,
+  type ExternalExportDelivery,
+} from "@workbench/workbench-contracts";
 import { describe, expect, it, vi } from "vitest";
 
 import { createBoardStore } from "./board";
@@ -8,6 +11,7 @@ import {
   exportFormatForTarget,
   exportTargetForExternalDelivery,
   flushWorkbenchBoard,
+  previewSelectionKey,
   selectLatestRestorableExternalDelivery,
   validateIsolatedPreviewCapability,
   waitForProjectPreview,
@@ -74,6 +78,15 @@ describe("Workbench publication controller", () => {
     const success = { ...home, screenId: "screen-success" };
     expect(exportSelectionsEqual(home, success)).toBe(false);
     expect(exportSelectionIdentityKey(home)).not.toBe(exportSelectionIdentityKey(success));
+  });
+
+  it("includes the renderer revision in Preview cache identity", () => {
+    const request = {
+      initialScreenId: null,
+      selection: { kind: "board" as const },
+    };
+    const cacheKey = JSON.parse(previewSelectionKey("board-1:3", request)) as unknown[];
+    expect(cacheKey[0]).toBe(workbenchExportRendererRevision);
   });
 
   it("fails Figma closed until the server capability is available", () => {

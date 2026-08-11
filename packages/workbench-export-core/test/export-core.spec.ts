@@ -1,7 +1,11 @@
 import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { unzipSync } from "fflate";
-import { boardNodeProtocol, type PrototypeDocument } from "@workbench/workbench-contracts";
+import {
+  boardNodeProtocol,
+  workbenchExportRendererRevision,
+  type PrototypeDocument,
+} from "@workbench/workbench-contracts";
 import {
   buildExport,
   renderExportHtml,
@@ -18,6 +22,8 @@ describe("Workbench export core", () => {
     const html = new TextDecoder().decode(first.bytes);
     expect(first.mediaType).toBe("text/html; charset=utf-8");
     expect(html).toContain("workbench.export-runtime.v1");
+    expect(html).toContain(`name="workbench-export-renderer" content="${workbenchExportRendererRevision}"`);
+    expect(html).toContain(`data-wb-renderer-revision="${workbenchExportRendererRevision}"`);
     expect(html).toContain("action-next");
     expect(html).toContain('data-wb-screen="screen-success"');
     expect(html).not.toContain("https://");

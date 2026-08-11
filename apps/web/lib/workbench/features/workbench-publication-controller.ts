@@ -1,18 +1,19 @@
 "use client";
 
-import type {
-  Board,
-  CreateProjectPreviewRequest,
-  ExternalExportDelivery,
-  ExternalExportTarget,
-  ExportCapabilities,
-  ExportFormat,
-  ExportJob,
-  ExportPackaging,
-  ExportPreviewTokenResponse,
-  ExportSelection,
-  ProjectRelease,
-  ProjectPreview,
+import {
+  workbenchExportRendererRevision,
+  type Board,
+  type CreateProjectPreviewRequest,
+  type ExternalExportDelivery,
+  type ExternalExportTarget,
+  type ExportCapabilities,
+  type ExportFormat,
+  type ExportJob,
+  type ExportPackaging,
+  type ExportPreviewTokenResponse,
+  type ExportSelection,
+  type ProjectRelease,
+  type ProjectPreview,
 } from "@workbench/workbench-contracts";
 import { useCallback, useEffect } from "react";
 
@@ -1160,11 +1161,12 @@ function waitForBoardSave(store: BoardStore): Promise<void> {
   });
 }
 
-function previewSelectionKey(
+export function previewSelectionKey(
   snapshotId: string,
   request: Pick<CreateProjectPreviewRequest, "initialScreenId" | "selection">,
 ): string {
   return JSON.stringify([
+    workbenchExportRendererRevision,
     snapshotId,
     exportSelectionIdentityKey(request.selection),
     request.initialScreenId,

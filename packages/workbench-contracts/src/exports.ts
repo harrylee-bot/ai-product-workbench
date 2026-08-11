@@ -36,6 +36,9 @@ export const exportStatusSchema = z.enum([
   "cancelled",
 ]);
 
+/** Bump when Export Core renderer semantics change. */
+export const workbenchExportRendererRevision = "workbench.export-renderer.v1" as const;
+
 export const maximumExportBoardNodeSelectionCount = 512;
 
 export const exportBoardNodeIdsSchema = z.array(opaqueIdSchema)

@@ -1787,6 +1787,8 @@ function nodeStyle(
 ): CSSProperties {
   const layout = node.layout;
   const visual = override ?? node.style;
+  const fillColor = visual.fill ? stringValue(visual.fill, tokens) : null;
+  const foregroundFill = node.kind === "text" || node.kind === "icon" || node.kind === "vector";
   const style: CSSProperties = {
     boxSizing: "border-box",
     opacity: visual.opacity,
@@ -1806,7 +1808,17 @@ function nodeStyle(
     alignItems: layout.align === "start" ? "flex-start" : layout.align === "end" ? "flex-end" : layout.align,
     justifyContent: layout.justify === "spaceBetween" ? "space-between" : layout.justify === "spaceAround" ? "space-around" : layout.justify === "start" ? "flex-start" : layout.justify === "end" ? "flex-end" : layout.justify,
     gridTemplateColumns: layout.display === "grid" && layout.gridColumns ? `repeat(${layout.gridColumns}, minmax(0, 1fr))` : undefined,
-    backgroundColor: visual.fill ? stringValue(visual.fill, tokens) : undefined,
+    ...(fillColor
+      ? foregroundFill
+        ? {
+            color: fillColor,
+            ...(node.kind === "vector" ? { fill: "currentColor" } : {}),
+          }
+        : {
+            backgroundColor: fillColor,
+            color: prototypeContrastTextColor(fillColor),
+          }
+      : {}),
     borderColor: visual.stroke ? stringValue(visual.stroke.color, tokens) : undefined,
     borderStyle: visual.stroke?.style,
     borderWidth: visual.stroke ? numberValue(visual.stroke.width, tokens) : undefined,
@@ -1821,6 +1833,22 @@ function nodeStyle(
     textDecoration: visual.typography?.decoration === "lineThrough" ? "line-through" : visual.typography?.decoration,
   };
   return style;
+}
+
+/** Keep labels readable when a filled node does not provide an explicit foreground token. */
+function prototypeContrastTextColor(hex: string): string {
+  const normalized = hex.slice(1);
+  const red = Number.parseInt(normalized.slice(0, 2), 16);
+  const green = Number.parseInt(normalized.slice(2, 4), 16);
+  const blue = Number.parseInt(normalized.slice(4, 6), 16);
+  const luminance = [red, green, blue]
+    .map((channel) => channel / 255)
+    .map((channel) => channel <= 0.03928 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4)
+    .reduce((sum, channel, index) => sum + channel * [0.2126, 0.7152, 0.0722][index]!, 0);
+  const lightContrast = 1.05 / (luminance + 0.05);
+  const darkLuminance = 0.010329823029626936;
+  const darkContrast = (luminance + 0.05) / (darkLuminance + 0.05);
+  return lightContrast >= darkContrast ? "#fff" : "#17191d";
 }
 
 function numberValue(value: { kind: "literal"; value: number } | { kind: "token"; tokenId: string }, tokens: TokenMap): number {

@@ -746,6 +746,91 @@ describe("Workbench Artifact content", () => {
     expect(rendered.style.transformOrigin).toBe("25% 80%");
   });
 
+  it("uses text, icon, and vector Prototype fills as foreground colors", () => {
+    const document = interactivePrototypeDocument();
+    const form = document.nodes.find((node) => node.id === "form-main");
+    const text = document.nodes.find((node) => node.id === "text-email-preview");
+    const icon = document.nodes.find((node) => node.id === "icon-success");
+    const idle = document.states.find((state) => state.id === "state-idle");
+    if (form?.kind !== "form" || text?.kind !== "text" || icon?.kind !== "icon" || !idle) {
+      throw new Error("foreground fill fixtures are missing");
+    }
+    text.style = { ...text.style, fill: { kind: "literal", value: "#111827" } };
+    text.bindingIds = [];
+    icon.style = { ...icon.style, fill: { kind: "literal", value: "#2563eb" } };
+    idle.overrides.push({
+      nodeId: text.id,
+      style: { ...text.style, fill: { kind: "literal", value: "#f1f3f4" } },
+    });
+    const vector: PrototypeNode = {
+      ...nodeBase("vector-status", "screen-form", form.id),
+      kind: "vector",
+      viewBox: { minX: 0, minY: 0, width: 10, height: 10 },
+      paths: [{
+        id: "vector-status-path",
+        commands: [
+          { command: "moveTo", x: 0, y: 0 },
+          { command: "lineTo", x: 10, y: 0 },
+          { command: "lineTo", x: 10, y: 10 },
+          { command: "close" },
+        ],
+        fillRule: "nonzero",
+      }],
+    };
+    vector.style = { ...vector.style, fill: { kind: "literal", value: "#dc2626" } };
+    form.childIds.push(vector.id);
+    document.nodes.push(vector);
+    mocks.useArtifactVersion.mockReturnValue(artifactQuery("prototype", document));
+
+    const rendered = render(
+      <WorkbenchArtifactContent reference={{ ...reference(), screenId: "screen-form" }} />,
+    );
+
+    const renderedText = screen.getByText("No email");
+    expect(renderedText.style.color).toBe("rgb(241, 243, 244)");
+    expect(renderedText.style.backgroundColor).toBe("");
+    const renderedIcon = screen.getByLabelText("Success icon");
+    expect(renderedIcon.style.color).toBe("rgb(37, 99, 235)");
+    expect(renderedIcon.style.backgroundColor).toBe("");
+    const renderedVector = rendered.container.querySelector<SVGSVGElement>('svg[viewBox="0 0 10 10"]');
+    expect(renderedVector?.style.color).toBe("rgb(220, 38, 38)");
+    expect(renderedVector?.style.fill).toBe("currentColor");
+    expect(renderedVector?.style.backgroundColor).toBe("");
+  });
+
+  it("derives contrasting foreground colors for filled Prototype containers and state overrides", () => {
+    const document = prototypeDocument();
+    const root = document.nodes.find((node) => node.id === "frame-home");
+    const button = document.nodes.find((node) => node.id === "button-open");
+    if (root?.kind !== "frame" || button?.kind !== "button") {
+      throw new Error("container fill fixtures are missing");
+    }
+    root.style = { ...root.style, fill: { kind: "literal", value: "#111827" } };
+    button.style = { ...button.style, fill: { kind: "literal", value: "#111827" } };
+    document.screens[0]!.initialStateId = "state-light-button";
+    document.states = [{
+      id: "state-light-button",
+      screenId: "screen-home",
+      name: "Light button",
+      values: {},
+      overrides: [{
+        nodeId: button.id,
+        style: { ...button.style, fill: { kind: "literal", value: "#ffffff" } },
+      }],
+    }];
+    mocks.useArtifactVersion.mockReturnValue(artifactQuery("prototype", document));
+
+    const rendered = render(<WorkbenchArtifactContent reference={reference()} />);
+
+    const canvas = rendered.container.querySelector("[data-canvas-visual-screen]");
+    const renderedRoot = canvas?.firstElementChild as HTMLElement | undefined;
+    expect(renderedRoot?.style.backgroundColor).toBe("rgb(17, 24, 39)");
+    expect(renderedRoot?.style.color).toBe("rgb(255, 255, 255)");
+    const renderedButton = screen.getByRole("button", { name: "Open success" });
+    expect(renderedButton.style.backgroundColor).toBe("rgb(255, 255, 255)");
+    expect(renderedButton.style.color).toBe("rgb(23, 25, 29)");
+  });
+
   it.each([
     "https://example.com/prototype",
     "mailto:designer@example.com?subject=Prototype%20review",
