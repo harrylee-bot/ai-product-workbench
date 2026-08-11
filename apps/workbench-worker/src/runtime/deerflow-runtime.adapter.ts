@@ -91,6 +91,8 @@ const PRD_GENERATION_STAGE_SEQUENCE = [
 const RUN_PAGE_SIZE = 100;
 const MAX_RUN_RECOVERY_PAGES = 100;
 const TERMINAL_RESULT_STREAM_GRACE_MS = 1_000;
+const TERMINAL_RESULT_STATE_SETTLE_MS = 10_000;
+const TERMINAL_RESULT_STATE_POLL_MS = 250;
 const KNOWLEDGE_GRANT_TOKEN = /wbkg1\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]{43}/u;
 const CANVAS_GRANT_TOKEN = /wbct1\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]{43}/u;
 const TERMINAL_EXTERNAL_RUN_STATUSES = new Set<Run["status"]>(["error", "success", "timeout", "interrupted"]);
@@ -1103,7 +1105,24 @@ export class DeerFlowRuntimeAdapter implements RuntimePort {
     if (!externalRunId || !externalRunPersistence) throw new Error("RUNTIME_EXTERNAL_RUN_ID_MISSING");
     await externalRunPersistence;
     if (finalState === undefined || terminalProviderStatus !== null) {
-      finalState = await client.threads.getState(execution.externalThreadId, undefined, { signal });
+      const settleDeadline = performance.now() + TERMINAL_RESULT_STATE_SETTLE_MS;
+      while (true) {
+        finalState = await client.threads.getState(execution.externalThreadId, undefined, { signal });
+        if (
+          terminalProviderStatus !== "success"
+          || inputRequired !== null
+          || extractRuntimeInputRequired(finalState) !== null
+        ) break;
+        try {
+          resolveRuntimeResult(finalState, execution.request.requestedArtifactKinds, execution);
+          break;
+        } catch (error) {
+          if (!isRuntimeResultSubmissionMissing(error)) throw error;
+        }
+        const remainingMs = settleDeadline - performance.now();
+        if (remainingMs <= 0) break;
+        await delayWithAbort(Math.min(TERMINAL_RESULT_STATE_POLL_MS, remainingMs), signal);
+      }
     }
 
     inputRequired ??= extractRuntimeInputRequired(finalState);
@@ -1861,6 +1880,33 @@ function byteChunk(value: unknown): Uint8Array {
 
 function abortError(signal?: AbortSignal) {
   return signal?.reason instanceof Error ? signal.reason : new Error("RUNTIME_ABORTED");
+}
+
+function isRuntimeResultSubmissionMissing(error: unknown) {
+  return error instanceof Error && error.message === "RUNTIME_RESULT_SUBMISSION_MISSING";
+}
+
+function delayWithAbort(delayMs: number, signal: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    let timer: NodeJS.Timeout | null = null;
+    const cleanup = () => {
+      if (timer) clearTimeout(timer);
+      signal.removeEventListener("abort", abort);
+    };
+    const abort = () => {
+      cleanup();
+      reject(abortError(signal));
+    };
+    if (signal.aborted) {
+      abort();
+      return;
+    }
+    signal.addEventListener("abort", abort, { once: true });
+    timer = setTimeout(() => {
+      cleanup();
+      resolve();
+    }, delayMs);
+  });
 }
 
 function isNamedAbortError(error: unknown) {
