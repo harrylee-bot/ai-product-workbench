@@ -7,7 +7,7 @@ import {
   renderExportHtml,
   TerminalExportError,
 } from "../src/index.js";
-import { designSystemExportRequest, exportRequest } from "./fixtures.js";
+import { designSystemExportRequest, exportRequest, interactiveExportRequest } from "./fixtures.js";
 
 describe("Workbench export core", () => {
   it("renders a deterministic interactive standalone HTML document", async () => {
@@ -94,6 +94,37 @@ describe("Workbench export core", () => {
       kind: "navigate",
       targetScreenId: "screen-success",
     }));
+  });
+
+  it("derives a contrasting foreground for filled Prototype nodes", () => {
+    const request = exportRequest("html");
+    const prototype = request.source.artifacts[0]!.content as PrototypeDocument;
+    const root = prototype.nodes.find((node) => node.id === "root-home");
+    if (!root) throw new Error("fixture root is missing");
+    root.style = { ...root.style, fill: { kind: "literal", value: "#111827" } };
+
+    const darkHtml = renderExportHtml(request).document;
+    expect(darkHtml).toMatch(/data-wb-node="root-home"[^>]*background-color:#111827;color:#fff/);
+
+    root.style = { ...root.style, fill: { kind: "literal", value: "#ffffff" } };
+    const lightHtml = renderExportHtml(request).document;
+    expect(lightHtml).toMatch(/data-wb-node="root-home"[^>]*background-color:#ffffff;color:#17191d/);
+  });
+
+  it("treats text and icon fills as foreground colors", () => {
+    const request = interactiveExportRequest();
+    const prototype = request.source.artifacts[0]!.content as PrototypeDocument;
+    const text = prototype.nodes.find((node) => node.id === "text-state");
+    const icon = prototype.nodes.find((node) => node.id === "icon-heart");
+    if (!text || !icon) throw new Error("interactive fixture nodes are missing");
+    text.style = { ...text.style, fill: { kind: "literal", value: "#f1f3f4" } };
+    icon.style = { ...icon.style, fill: { kind: "literal", value: "#2563eb" } };
+
+    const html = renderExportHtml(request).document;
+    expect(html).toMatch(/data-wb-node="text-state"[^>]*color:#f1f3f4/);
+    expect(html).not.toMatch(/data-wb-node="text-state"[^>]*background-color:#f1f3f4/);
+    expect(html).toMatch(/data-wb-node="icon-heart"[^>]*color:#2563eb/);
+    expect(html).not.toMatch(/data-wb-node="icon-heart"[^>]*background-color:#2563eb/);
   });
 
   it("fails closed when screenId is missing or targets a non-Prototype Artifact", () => {

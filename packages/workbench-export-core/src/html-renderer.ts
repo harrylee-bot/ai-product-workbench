@@ -616,23 +616,33 @@ function nodeStyle(
     `justify-content:${justifyValue(layout.justify)}`,
     ...(layout.display === "grid" && layout.gridColumns ? [`grid-template-columns:repeat(${layout.gridColumns},minmax(0,1fr))`] : []),
     `overflow:${layout.overflow}`,
-    ...styleDeclarations(style, tokens),
+    ...styleDeclarations(style, tokens, node.kind),
   ];
   return declarations.join(";");
 }
 
-function styleDeclarations(style: PrototypeStyle, tokens: Map<string, PrototypeToken>) {
+function styleDeclarations(
+  style: PrototypeStyle,
+  tokens: Map<string, PrototypeToken>,
+  nodeKind: PrototypeNode["kind"],
+) {
   const shadows = style.shadowTokenIds.map((id) => {
     const token = tokens.get(id);
     if (!token || token.type !== "shadow") throw invalidToken(id);
     return `${token.value.offsetX}px ${token.value.offsetY}px ${token.value.blur}px ${token.value.spread}px ${token.value.color}`;
   });
+  const fillColor = style.fill ? color(style.fill, tokens) : null;
+  const foregroundFill = nodeKind === "text" || nodeKind === "icon" || nodeKind === "vector";
   const declarations = [
     `opacity:${style.opacity}`,
     `transform:rotate(${style.rotation}deg)`,
     "transform-box:border-box",
     `transform-origin:${style.transformOrigin.x * 100}% ${style.transformOrigin.y * 100}%`,
-    ...(style.fill ? [`background-color:${color(style.fill, tokens)}`] : []),
+    ...(fillColor
+      ? foregroundFill
+        ? [`color:${fillColor}`, ...(nodeKind === "vector" ? ["fill:currentColor"] : [])]
+        : [`background-color:${fillColor}`, `color:${contrastTextColor(fillColor)}`]
+      : []),
     ...(style.stroke ? [
       `border:${numeric(style.stroke.width, tokens)}px ${style.stroke.style} ${color(style.stroke.color, tokens)}`,
     ] : ["border:none"]),
@@ -652,6 +662,25 @@ function styleDeclarations(style: PrototypeStyle, tokens: Map<string, PrototypeT
     );
   }
   return declarations;
+}
+
+/** Keep generated labels readable when a node uses a dark fill without an
+ * explicit foreground token. Prototype IR currently models fill as the
+ * node background, so this derived color is the stable fallback for text,
+ * buttons, inputs, and descendants that inherit the node color. */
+function contrastTextColor(hex: string) {
+  const normalized = hex.slice(1);
+  const red = Number.parseInt(normalized.slice(0, 2), 16);
+  const green = Number.parseInt(normalized.slice(2, 4), 16);
+  const blue = Number.parseInt(normalized.slice(4, 6), 16);
+  const luminance = [red, green, blue]
+    .map((channel) => channel / 255)
+    .map((channel) => channel <= 0.03928 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4)
+    .reduce((sum, channel, index) => sum + channel * [0.2126, 0.7152, 0.0722][index]!, 0);
+  const lightContrast = 1.05 / (luminance + 0.05);
+  const darkLuminance = 0.010329823029626936;
+  const darkContrast = (luminance + 0.05) / (darkLuminance + 0.05);
+  return lightContrast >= darkContrast ? "#fff" : "#17191d";
 }
 
 function runtimeModel(
