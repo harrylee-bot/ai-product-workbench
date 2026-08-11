@@ -65,7 +65,13 @@ def workbench_artifact_draft_publish(
     ):
         raise ValueError("WORKBENCH_REQUESTED_ARTIFACT_KINDS_INVALID")
     draft_kind = draft.get("kind") if isinstance(draft, dict) else None
-    if not isinstance(draft_kind, str) or draft_kind not in requested_artifact_kinds:
+    # Keep malformed provider arguments on the normal schema-validation path.
+    # Gemini occasionally emits a compressed placeholder object (for example
+    # ``{"kind": 1}``) while repairing a large PRD. Treating that as an
+    # authorization mismatch hides the actionable ``kind`` issue and causes a
+    # retry loop. Only a well-formed, explicitly unrequested string is a scope
+    # violation.
+    if isinstance(draft_kind, str) and draft_kind not in requested_artifact_kinds:
         raise ValueError("WORKBENCH_ARTIFACT_DRAFT_KIND_NOT_REQUESTED")
 
     normalized_draft, normalizations = normalize_prd_bidirectional_references(draft)

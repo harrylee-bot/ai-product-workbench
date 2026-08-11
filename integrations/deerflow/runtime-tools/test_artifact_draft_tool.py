@@ -495,6 +495,28 @@ class ArtifactDraftToolTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "WORKBENCH_ARTIFACT_DRAFT_KIND_NOT_REQUESTED"):
             workbench_artifact_draft_publish.func(self.runtime, 0, self.prd_draft)
 
+    def test_routes_malformed_kind_to_schema_validation_instead_of_scope_rejection(self) -> None:
+        malformed = {
+            "kind": 1,
+            "title": 1,
+            "content": {"protocol": 1},
+            "operation": 1,
+            "citations": [],
+            "schemaVersion": 2,
+        }
+
+        content, artifact = workbench_artifact_draft_publish.func(
+            self.prd_runtime,
+            0,
+            malformed,
+        )
+
+        response = json.loads(content)
+        self.assertFalse(response["ok"])
+        self.assertFalse(artifact["ok"])
+        self.assertTrue(any(issue["path"] == ["kind"] for issue in response["issues"]))
+        self.assertNotIn("WORKBENCH_ARTIFACT_DRAFT_KIND_NOT_REQUESTED", response["issues"])
+
 
 if __name__ == "__main__":
     unittest.main()

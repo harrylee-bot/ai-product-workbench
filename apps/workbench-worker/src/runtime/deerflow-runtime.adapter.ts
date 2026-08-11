@@ -2190,10 +2190,14 @@ function assertRuntimeResultCheckpoints(
     if (!finalDraft) {
       throw new Error("RUNTIME_ARTIFACT_DRAFT_FINAL_MISMATCH");
     }
-    // Prototype checkpoints are incremental previews. The validated terminal
-    // result may legitimately refine one after the last streamed checkpoint;
-    // its scope and checksum validation make the final result authoritative.
-    if (finalDraft.kind === "prototype") continue;
+    // Prototype and PRD checkpoints are renderable previews. The validated
+    // terminal result may legitimately refine either one after the last
+    // streamed checkpoint (Gemini can re-emit equivalent nested IR with a
+    // different segmentation while repairing a schema issue). Its scope,
+    // checksum, and final contract validation make the terminal result
+    // authoritative; an independently published checkpoint is still required
+    // below for PRD runs.
+    if (finalDraft.kind === "prototype" || finalDraft.kind === "prd") continue;
     if (canonicalJson(finalDraft) !== canonicalJson(checkpoint)) {
       throw new Error("RUNTIME_ARTIFACT_DRAFT_FINAL_MISMATCH");
     }

@@ -2220,6 +2220,62 @@ describe("DeerFlow runtime adapter", () => {
       ]);
   });
 
+  it("uses a validated terminal PRD refinement as authoritative after a published checkpoint", async () => {
+    const checkpoint = structuredClone(runtimePrdResultFixture.artifacts[0]!);
+    const refined = structuredClone(checkpoint);
+    refined.content.revision.summary = "完成最终合同校验后的需求说明书";
+    const messages = [
+      { type: "human", content: "current turn" },
+      ...generationStageToolMessages("collecting-prd-context", {
+        toolCallId: "refined-prd-collecting",
+      }),
+      ...prdReferenceReadToolMessages("refined-prd-reference"),
+      ...generationStageToolMessages("structuring-prd", {
+        toolCallId: "refined-prd-structuring",
+      }),
+      ...generationStageToolMessages("drafting-prd", {
+        toolCallId: "refined-prd-drafting",
+      }),
+      ...generationStageToolMessages("validating-prd", {
+        toolCallId: "refined-prd-validating",
+      }),
+      ...artifactDraftToolMessages(checkpoint, 0, "refined-prd-checkpoint"),
+      ...validatedResultToolMessages({
+        protocol: "workbench.runtime.result.v1",
+        message: "final PRD",
+        artifacts: [refined],
+      }, "refined-prd-result"),
+    ];
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request, init: RequestInit = {}) => {
+      const url = new URL(String(input));
+      if (url.pathname === "/api/threads/deer_thread_1/runs" && (init.method ?? "GET") === "GET") {
+        return Response.json([]);
+      }
+      if (url.pathname === "/api/threads/deer_thread_1/runs/stream" && init.method === "POST") {
+        return runtimeStreamResponse([{
+          id: "refined-prd-event",
+          event: "values",
+          data: { messages },
+        }], { runId: "external_run_refined_prd" });
+      }
+      throw new Error(`Unexpected request: ${init.method ?? "GET"} ${url}`);
+    }));
+    const runtimeObserver = observer();
+    const adapter = new DeerFlowRuntimeAdapter(workerConfig(), { getObject: vi.fn() } as never);
+
+    await expect(adapter.execute(execution({
+      request: { ...execution().request, requestedArtifactKinds: ["prd"] },
+    }), runtimeObserver)).resolves.toMatchObject({
+      message: "final PRD",
+      artifacts: [refined],
+    });
+    expect(runtimeObserver.onEvent).toHaveBeenCalledWith(expect.objectContaining({
+      type: "artifact.draft",
+      artifactIndex: 0,
+      draft: refined,
+    }));
+  });
+
   it("derives the same generation-stage source after an adapter restart and full values replay", async () => {
     const messages = [
       { type: "human", content: "current turn" },
