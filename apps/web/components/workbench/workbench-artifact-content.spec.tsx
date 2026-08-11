@@ -205,7 +205,10 @@ describe("Workbench Artifact content", () => {
   });
 
   it("keeps the generation placeholder while the first checkpoint is loading", () => {
-    mocks.useArtifactVersion.mockReturnValue(artifactQuery("prototype", prototypeDocument()));
+    mocks.useArtifactVersion.mockReturnValue(readyPrototypeQuery(
+      prototypeDocument(),
+      "a".repeat(64),
+    ));
     mocks.usePrototypePatchProjection.mockReturnValue(prototypeProjection(
       null,
       "checkpoint_loading",
@@ -217,38 +220,55 @@ describe("Workbench Artifact content", () => {
     expect(screen.queryByRole("button", { name: "Open success" })).toBeNull();
   });
 
-  it("hands a finalized projection to Query only after the ready checksum matches", () => {
+  it("keeps a live projection active, then hands a finalizing projection to the ready Query", () => {
     const checkpointDocument = prototypeDocument();
     const checkpointButton = checkpointDocument.nodes.find((node) => node.id === "button-open");
     if (!checkpointButton || checkpointButton.kind !== "button") {
       throw new Error("checkpoint button fixture missing");
     }
-    checkpointButton.label = "Checkpoint ready";
+    checkpointButton.label = "Live checkpoint";
     const queryDocument = prototypeDocument();
     const queryButton = queryDocument.nodes.find((node) => node.id === "button-open");
     if (!queryButton || queryButton.kind !== "button") throw new Error("query button fixture missing");
-    queryButton.label = "Query ready";
-    const documentChecksum = "a".repeat(64);
+    queryButton.label = "Canonical ready";
     const releaseFinalized = vi.fn();
     mocks.usePrototypePatchProjector.mockReturnValue({ releaseFinalized });
     mocks.usePrototypePatchProjection.mockReturnValue(prototypeProjection(
       checkpointDocument,
-      "finalized",
-      documentChecksum,
+      "live",
     ));
-    mocks.useArtifactVersion.mockReturnValue(readyPrototypeQuery(queryDocument, "b".repeat(64)));
+    mocks.useArtifactVersion.mockReturnValue(readyPrototypeQuery(queryDocument, "a".repeat(64)));
     const rendered = render(
       <WorkbenchArtifactContent reference={{ ...reference(), screenId: "screen-home" }} />,
     );
-    expect(screen.getByRole("button", { name: "Checkpoint ready" })).not.toBeNull();
+    expect(screen.getByRole("button", { name: "Live checkpoint" })).not.toBeNull();
+    expect(screen.queryByRole("button", { name: "Canonical ready" })).toBeNull();
+    expect(releaseFinalized).not.toHaveBeenCalled();
 
-    mocks.useArtifactVersion.mockReturnValue(readyPrototypeQuery(queryDocument, documentChecksum));
+    mocks.usePrototypePatchProjection.mockReturnValue(prototypeProjection(
+      null,
+      "finalizing",
+    ));
     rendered.rerender(
       <WorkbenchArtifactContent reference={{ ...reference(), screenId: "screen-home" }} />,
     );
 
-    expect(screen.getByRole("button", { name: "Query ready" })).not.toBeNull();
+    expect(screen.getByRole("button", { name: "Canonical ready" })).not.toBeNull();
+    expect(screen.queryByText("Generating artifact...")).toBeNull();
     expect(screen.queryByText("Loading artifact...")).toBeNull();
+    expect(mocks.queryClientSetData).not.toHaveBeenCalled();
+    expect(releaseFinalized).not.toHaveBeenCalled();
+
+    mocks.usePrototypePatchProjection.mockReturnValue(prototypeProjection(
+      checkpointDocument,
+      "finalized",
+      "b".repeat(64),
+    ));
+    rendered.rerender(
+      <WorkbenchArtifactContent reference={{ ...reference(), screenId: "screen-home" }} />,
+    );
+
+    expect(screen.getByRole("button", { name: "Canonical ready" })).not.toBeNull();
     expect(mocks.queryClientSetData).toHaveBeenCalledWith(
       [
         "workbench",
@@ -261,7 +281,7 @@ describe("Workbench Artifact content", () => {
         "versions",
         "version-1",
       ],
-      expect.objectContaining({ value: expect.objectContaining({ checksum: documentChecksum }) }),
+      expect.objectContaining({ value: expect.objectContaining({ checksum: "a".repeat(64) }) }),
     );
     expect(releaseFinalized).toHaveBeenCalledWith("version-1");
     expect(mocks.queryClientSetData.mock.invocationCallOrder[0])
@@ -981,6 +1001,8 @@ function readyPrototypeQuery(content: PrototypeDocument, checksum: string) {
   return {
     data: {
       value: {
+        artifactId: "artifact-1",
+        artifactVersionId: "version-1",
         checksum,
         content,
         contentMode: "inline" as const,
@@ -995,7 +1017,7 @@ function readyPrototypeQuery(content: PrototypeDocument, checksum: string) {
 
 function prototypeProjection(
   document: PrototypeDocument | null,
-  phase: "checkpoint_loading" | "live" | "finalized",
+  phase: "checkpoint_loading" | "live" | "finalizing" | "finalized",
   documentChecksum: string | null = null,
   screenId = "screen-home",
 ) {

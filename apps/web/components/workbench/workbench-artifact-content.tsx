@@ -153,12 +153,17 @@ export function WorkbenchArtifactContent({
     : query.isError || !version
       ? "error"
       : "ready";
-  const readyQueryOwnsProjection = activePrototypeProjection?.phase === "finalized"
-    && activePrototypeProjection.documentChecksum !== null
+  const readyQueryOwnsProjection = (
+    activePrototypeProjection?.phase === "finalizing"
+    || activePrototypeProjection?.phase === "finalized"
+  )
     && version?.status === "ready"
     && version.kind === "prototype"
     && version.contentMode === "inline"
-    && version.checksum === activePrototypeProjection.documentChecksum;
+    && version.artifactId === reference.artifactId
+    && version.artifactVersionId === reference.artifactVersionId;
+  const finalizedProjectionCanBeReleased = readyQueryOwnsProjection
+    && activePrototypeProjection?.phase === "finalized";
 
   useEffect(() => {
     onArtifactVersionStateChange?.(artifactVersionState);
@@ -175,7 +180,7 @@ export function WorkbenchArtifactContent({
 
   useEffect(() => {
     if (
-      !readyQueryOwnsProjection
+      !finalizedProjectionCanBeReleased
       || !privateQuery.data
       || !prototypePatchProjector
     ) return;
@@ -192,7 +197,7 @@ export function WorkbenchArtifactContent({
     privateQuery.data,
     prototypePatchProjector,
     queryClient,
-    readyQueryOwnsProjection,
+    finalizedProjectionCanBeReleased,
     reference.artifactId,
     reference.artifactVersionId,
     reference.projectId,

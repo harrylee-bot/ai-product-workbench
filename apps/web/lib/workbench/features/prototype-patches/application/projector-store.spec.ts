@@ -155,6 +155,27 @@ describe("Prototype patch projector store", () => {
     expect(store.releaseFinalized("version-1")).toBe(false);
   });
 
+  it("finalizes from an authoritative terminal Run when the version-created event was missed", async () => {
+    const staging = prototypeEditorDocumentFixture();
+    const ready = structuredClone(staging);
+    const readyCheckpoint = deferred<RunPrototypePatchCheckpoint>();
+    const transport = queuedTransport([
+      await checkpoint(staging, 0, 1),
+      readyCheckpoint.promise,
+    ]);
+    const store = new PrototypePatchProjectorStore({ transport });
+    store.setScope(scope);
+    store.ingest(await draftEvent(staging, 1));
+    await waitForProjection(store, (projection) => projection.phase === "live");
+
+    store.settleTerminal("succeeded");
+
+    expect(selectedProjection(store)).toMatchObject({ phase: "finalizing" });
+    readyCheckpoint.resolve(await checkpoint(ready, 1, 2, "ready"));
+    await waitForProjection(store, (projection) => projection.phase === "finalized");
+    expect(transport.getCheckpoint).toHaveBeenCalledTimes(2);
+  });
+
   it("lets an in-flight staging checkpoint finish before requesting the ready checkpoint", async () => {
     const staging = prototypeEditorDocumentFixture();
     const ready = structuredClone(staging);

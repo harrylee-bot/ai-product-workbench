@@ -14,6 +14,7 @@ const mocks = vi.hoisted(() => ({
   dispose: vi.fn(),
   ingest: vi.fn(),
   setScope: vi.fn(),
+  settleTerminal: vi.fn(),
   subscribeRunEvents: vi.fn(),
   useWorkbenchRun: vi.fn(),
 }));
@@ -43,6 +44,7 @@ beforeEach(() => {
     dispose: mocks.dispose,
     ingest: mocks.ingest,
     setScope: mocks.setScope,
+    settleTerminal: mocks.settleTerminal,
   });
   mocks.useWorkbenchRun.mockImplementation(() => ({ data: authoritativeRun }));
   mocks.subscribeRunEvents.mockImplementation(() => new Promise(() => undefined));
@@ -132,6 +134,7 @@ describe("useWorkbenchRunController recovery", () => {
     }));
     expect(rendered.result.current.connectionState).toBe("closed");
     expect(streamSignal.aborted).toBe(true);
+    expect(mocks.settleTerminal).toHaveBeenCalledWith("succeeded");
     expect(queryClient.getQueryData<Run>(workbenchQueryKeys.run(submittedRun.id))?.status)
       .toBe("succeeded");
     expect(invalidations).toHaveBeenCalledWith({

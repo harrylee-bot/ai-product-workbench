@@ -18,6 +18,7 @@ import {
 import { useWorkbenchRun } from "./runs";
 
 type RunControllerConnectionState = "idle" | RunStreamState;
+type TerminalRunStatus = Extract<Run["status"], "succeeded" | "failed" | "cancelled">;
 
 const RUN_RECONCILIATION_INTERVAL_MS = 3_000;
 const RUN_STREAM_RECOVERY_DELAY_MS = 3_000;
@@ -78,7 +79,8 @@ export function useWorkbenchRunController({
       return;
     }
 
-    const terminal = isTerminalStatus(observedRun.status);
+    const observedStatus = observedRun.status;
+    const terminal = isTerminalStatus(observedStatus);
     const reconciled = reconcileProjectionWithRun(current, observedRun, terminal);
     if (reconciled !== current) {
       projectionRef.current = reconciled;
@@ -93,6 +95,7 @@ export function useWorkbenchRunController({
     setConnectionState("closed");
     setError(null);
     queryClient.setQueryData<Run>(workbenchQueryKeys.run(observedRun.id), observedRun);
+    prototypePatchProjector.settleTerminal(observedStatus);
 
     const terminalRefreshKey = [
       observedRun.id,
@@ -103,7 +106,7 @@ export function useWorkbenchRunController({
     if (terminalRefreshRef.current === terminalRefreshKey) return;
     terminalRefreshRef.current = terminalRefreshKey;
     invalidateForTerminalRun(queryClient, observedRun);
-  }, [observedRun, queryClient, runIdentity]);
+  }, [observedRun, prototypePatchProjector, queryClient, runIdentity]);
 
   const observedRunIsTerminal = observedRun ? isTerminalStatus(observedRun.status) : false;
 
@@ -386,7 +389,7 @@ function invalidateForRunEvent(
   void Promise.all(invalidations);
 }
 
-function isTerminalStatus(status: Run["status"]): boolean {
+function isTerminalStatus(status: Run["status"]): status is TerminalRunStatus {
   return status === "succeeded" || status === "failed" || status === "cancelled";
 }
 
