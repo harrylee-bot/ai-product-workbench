@@ -14,6 +14,9 @@ from .runtime_result_validator import validate_runtime_artifact_draft
 
 
 ARTIFACT_DRAFT_PROTOCOL = "workbench.runtime.artifact-draft.v1"
+REQUESTED_ARTIFACT_KINDS = frozenset(
+    {"prd", "prototype", "image", "code", "document", "data"},
+)
 
 
 @tool(
@@ -71,7 +74,11 @@ def workbench_artifact_draft_publish(
     # authorization mismatch hides the actionable ``kind`` issue and causes a
     # retry loop. Only a well-formed, explicitly unrequested string is a scope
     # violation.
-    if isinstance(draft_kind, str) and draft_kind not in requested_artifact_kinds:
+    if (
+        isinstance(draft_kind, str)
+        and draft_kind in REQUESTED_ARTIFACT_KINDS
+        and draft_kind not in requested_artifact_kinds
+    ):
         raise ValueError("WORKBENCH_ARTIFACT_DRAFT_KIND_NOT_REQUESTED")
 
     normalized_draft, normalizations = normalize_prd_bidirectional_references(draft)

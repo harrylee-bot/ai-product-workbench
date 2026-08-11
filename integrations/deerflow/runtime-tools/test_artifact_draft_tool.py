@@ -517,6 +517,18 @@ class ArtifactDraftToolTests(unittest.TestCase):
         self.assertTrue(any(issue["path"] == ["kind"] for issue in response["issues"]))
         self.assertNotIn("WORKBENCH_ARTIFACT_DRAFT_KIND_NOT_REQUESTED", response["issues"])
 
+        malformed["kind"] = "1"
+        content, artifact = workbench_artifact_draft_publish.func(
+            self.prd_runtime,
+            0,
+            malformed,
+        )
+        response = json.loads(content)
+        self.assertFalse(response["ok"])
+        self.assertFalse(artifact["ok"])
+        self.assertTrue(any(issue["path"] == ["kind"] for issue in response["issues"]))
+        self.assertNotIn("WORKBENCH_ARTIFACT_DRAFT_KIND_NOT_REQUESTED", response["issues"])
+
 
 if __name__ == "__main__":
     unittest.main()
