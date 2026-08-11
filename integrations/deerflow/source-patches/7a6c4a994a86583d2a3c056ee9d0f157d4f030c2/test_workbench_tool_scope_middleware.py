@@ -56,6 +56,11 @@ def install_import_stubs() -> bool:
         def __init__(self, **values):
             self.__dict__.update(values)
 
+        def model_copy(self, *, update):
+            values = dict(self.__dict__)
+            values.update(update)
+            return ToolMessage(**values)
+
     class Command:
         pass
 
@@ -164,16 +169,28 @@ class FakeTool:
 
 
 class FakeModelRequest:
-    def __init__(self, tools, system_message=None, state=None):
+    def __init__(
+        self,
+        tools,
+        system_message=None,
+        state=None,
+        *,
+        messages=None,
+        model=None,
+    ):
         self.tools = list(tools)
         self.system_message = system_message
         self.state = dict(state or {})
+        self.messages = list(messages or [])
+        self.model = model or SimpleNamespace(model_name="gpt-5.5")
 
     def override(self, **overrides):
         return FakeModelRequest(
             overrides.get("tools", self.tools),
             overrides.get("system_message", self.system_message),
             overrides.get("state", self.state),
+            messages=overrides.get("messages", self.messages),
+            model=overrides.get("model", self.model),
         )
 
 
@@ -464,6 +481,105 @@ class WorkbenchToolScopeMiddlewareTests(unittest.TestCase):
         self.assertEqual(
             self.visible_names(policy("get_visible_screens", "view_screen")),
             ["workbench_runtime_result_submit", "get_visible_screens", "view_screen"],
+        )
+
+    def test_gemini_provider_receives_schema_tool_results_as_plain_text(self) -> None:
+        schema = '{"$defs":{"PrdInlineContent":{"type":"string"}},"value":{"$ref":"#/$defs/PrdInlineContent"}}'
+        messages = [
+            {"type": "human", "content": "Read the schema"},
+            {
+                "type": "tool",
+                "name": READ_FILE_TOOL_NAME,
+                "tool_call_id": "schema-read",
+                "content": schema,
+            },
+            {
+                "type": "tool",
+                "name": "safe_tool",
+                "tool_call_id": "safe-json",
+                "content": '{"ok":true}',
+            },
+        ]
+        state = {"messages": messages}
+        observed = WorkbenchToolScopeMiddleware(None, ["prd"]).wrap_model_call(
+            FakeModelRequest(
+                self.all_tools,
+                state=state,
+                messages=messages,
+                model=SimpleNamespace(model_name="gemini-3-flash"),
+            ),
+            lambda scoped: scoped,
+        )
+
+        self.assertEqual(
+            observed.messages[1]["content"],
+            f"{middleware_module._GEMINI_SCHEMA_TOOL_MESSAGE_PREFIX}{schema}",
+        )
+        self.assertEqual(observed.messages[2]["content"], '{"ok":true}')
+        self.assertEqual(messages[1]["content"], schema)
+        self.assertEqual(observed.state["messages"][1]["content"], schema)
+
+    def test_non_gemini_provider_keeps_schema_tool_results_byte_exact(self) -> None:
+        schema = '{"$defs":{"PrdInlineContent":{"type":"string"}}}'
+        messages = [{
+            "type": "tool",
+            "name": READ_FILE_TOOL_NAME,
+            "tool_call_id": "schema-read",
+            "content": schema,
+        }]
+        observed = WorkbenchToolScopeMiddleware(None, ["prd"]).wrap_model_call(
+            FakeModelRequest(
+                self.all_tools,
+                messages=messages,
+                model=SimpleNamespace(model_name="gpt-5.5"),
+            ),
+            lambda scoped: scoped,
+        )
+        self.assertEqual(observed.messages[0]["content"], schema)
+
+    def test_gemini_provider_copies_tool_message_objects_before_prefixing(self) -> None:
+        schema = '{"$defs":{"RuntimeArtifactDraftPrdV2":{"type":"object"}},"artifact":{"$ref":"#/$defs/RuntimeArtifactDraftPrdV2"}}'
+        message = middleware_module.ToolMessage(
+            name=READ_FILE_TOOL_NAME,
+            tool_call_id="schema-object-read",
+            content=schema,
+        )
+        observed = WorkbenchToolScopeMiddleware(None, ["prd"]).wrap_model_call(
+            FakeModelRequest(
+                self.all_tools,
+                messages=[message],
+                model=SimpleNamespace(model_name="gemini-3-flash"),
+            ),
+            lambda scoped: scoped,
+        )
+
+        self.assertIsNot(observed.messages[0], message)
+        self.assertEqual(message.content, schema)
+        self.assertEqual(
+            observed.messages[0].content,
+            f"{middleware_module._GEMINI_SCHEMA_TOOL_MESSAGE_PREFIX}{schema}",
+        )
+
+    def test_gemini_provider_prefixes_schema_tool_results_with_array_root(self) -> None:
+        schema = '[{"$ref":"#/$defs/PrdListItem"},{"$defs":{"PrdListItem":{"type":"object"}}}]'
+        messages = [{
+            "type": "tool",
+            "name": "tool_search",
+            "tool_call_id": "schema-array-read",
+            "content": schema,
+        }]
+        observed = WorkbenchToolScopeMiddleware(None, ["prd"]).wrap_model_call(
+            FakeModelRequest(
+                self.all_tools,
+                messages=messages,
+                model=SimpleNamespace(model_name="gemini-3-flash"),
+            ),
+            lambda scoped: scoped,
+        )
+
+        self.assertEqual(
+            observed.messages[0]["content"],
+            f"{middleware_module._GEMINI_SCHEMA_TOOL_MESSAGE_PREFIX}{schema}",
         )
 
     def test_policy_normalization_returns_an_isolated_canonical_copy(self) -> None:
