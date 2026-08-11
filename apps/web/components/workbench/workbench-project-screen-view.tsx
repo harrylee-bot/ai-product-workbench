@@ -41,6 +41,7 @@ import type {
   WorkbenchRunMotionKind,
 } from "@/lib/workbench/features";
 import { ProjectLoadStatus } from "@/lib/workbench/features/projects";
+import { workbenchRunIsVisuallyGenerating } from "@/lib/workbench/run";
 import {
   PrototypePatchProjectionProvider,
   type PrototypePatchProjectorStore,
@@ -273,7 +274,8 @@ export function ProjectScreenView({
 }: {
   controller: ProjectScreenViewContract;
 }) {
-  const showTransientPendingArtifact = canvas.activeRun
+  const visualGenerationActive = workbenchRunIsVisuallyGenerating(runPanels.runStatus);
+  const showTransientPendingArtifact = visualGenerationActive
     && (
       (runPanels.motionKind === "prd"
         && !canvas.nodes.some((node) => node.type === "documentCanvas"))
@@ -300,6 +302,8 @@ export function ProjectScreenView({
         isOverview={root.isGeneratedOverview}
         motionKind={runPanels.motionKind}
         phase={root.phase}
+        prompt={runPanels.prompt}
+        runStatus={runPanels.runStatus}
         showPendingArtifact={showTransientPendingArtifact}
       />
       <ProjectChromeVignette isOverview={root.isGeneratedOverview} />

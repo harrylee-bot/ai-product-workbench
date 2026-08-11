@@ -43,6 +43,8 @@ export type ExportReleaseSource = {
 export type ExportBuildRequest = {
   format: ExportFormat;
   packaging: ExportPackaging;
+  /** Preview jobs use a constrained, viewport-fitted presentation inside the isolated iframe. */
+  presentation?: "standalone" | "preview";
   selection: ExportSelection;
   initialScreenId?: string;
   options: Record<string, JsonValue>;

@@ -1,5 +1,6 @@
 import { chromium } from "playwright";
 import { readFile } from "node:fs/promises";
+import sharp from "sharp";
 import { injectWorkbenchPreviewBridge } from "../../apps/workbench-preview/dist/preview-bridge.js";
 
 const webOrigin = normalizedOrigin(
@@ -18,6 +19,31 @@ const consoleErrors = [];
 const previewRequests = [];
 const requestFailures = [];
 const projectPreviews = new Map();
+const previewViewportMatrix = [
+  { id: "mobile", width: 375, height: 812 },
+  { id: "tablet", width: 768, height: 1_024 },
+  { id: "desktop", width: 1_440, height: 900 },
+];
+const previewRegionSelectors = {
+  overlay: "[data-project-preview]",
+  header: "[data-preview-header]",
+  project: "[data-preview-project]",
+  navigation: "[data-preview-screen-navigation]",
+  actions: "[data-preview-actions]",
+  body: "[data-preview-body]",
+  deviceControls: "[data-preview-device-controls]",
+  stage: "[data-preview-stage]",
+  device: "[data-preview-device]",
+  iframe: "iframe[data-preview-capability]",
+};
+const previewPixelRegions = [
+  "header",
+  "navigation",
+  "actions",
+  "deviceControls",
+  "stage",
+  "iframe",
+];
 const previewHtml = await readFile(
   new URL("./fixtures/preview-origin/preview/capability.html", import.meta.url),
   "utf8",
@@ -408,7 +434,7 @@ await topLevelPreview.getByText("交互已执行").waitFor();
 assert(topLevelConsoleErrors.length === 0, `Top-level Preview console errors: ${topLevelConsoleErrors.join(" | ")}`);
 await topLevelPreview.close();
 
-await overlay.getByRole("button", { name: "Second Screen" }).click();
+await overlay.getByRole("tab", { name: "Second Screen" }).click();
 await expectAttribute(frame, "src", "preview-2");
 await overlay.getByRole("button", { name: "刷新预览" }).click();
 await expectAttribute(frame, "src", "generation-3");
@@ -420,17 +446,13 @@ const overlayBox = await overlay.boundingBox();
 const frameBox = await frame.boundingBox();
 assert(overlayBox && overlayBox.width === 1501 && overlayBox.height === 855, "Preview Overlay must retain the full Workbench viewport");
 assert(frameBox && frameBox.width > 200 && frameBox.height > 300, "Preview iframe must be visibly framed and non-empty");
-await page.screenshot({
-  path: "output/playwright/workbench-isolated-preview-desktop-1501x855.png",
-  fullPage: true,
-});
 
-await page.setViewportSize({ width: 390, height: 844 });
-await page.waitForTimeout(250);
-await page.screenshot({
-  path: "output/playwright/workbench-isolated-preview-mobile-390x844.png",
-  fullPage: true,
-});
+await overlay.getByRole("button", { name: "响应式" }).click();
+const visualMatrix = [];
+for (const viewport of previewViewportMatrix) {
+  visualMatrix.push(await verifyPreviewViewportMatrixEntry(viewport, activePreviewFrame));
+}
+await page.emulateMedia({ reducedMotion: "no-preference" });
 
 assert(unknownRequests.length === 0, `Unhandled API fixture requests: ${unknownRequests.join(", ")}`);
 assert(consoleErrors.length === 0, `Browser console errors: ${consoleErrors.join(" | ")}`);
@@ -458,8 +480,9 @@ console.log(JSON.stringify({
   projectPreviewCount,
   previewTokenCount,
   sandbox,
-  desktopScreenshot: "output/playwright/workbench-isolated-preview-desktop-1501x855.png",
-  mobileScreenshot: "output/playwright/workbench-isolated-preview-mobile-390x844.png",
+  desktopScreenshot: "output/playwright/workbench-isolated-preview-1440x900-normal.png",
+  mobileScreenshot: "output/playwright/workbench-isolated-preview-375x812-normal.png",
+  visualMatrix,
 }, null, 2));
 
 await browser.close();
@@ -618,6 +641,274 @@ async function expectResponsiveViewport(previewFrame) {
   }));
   assert(dimensions.width > 300 && dimensions.height > 300, "Responsive Preview viewport must fill the available stage");
   await expectFrameViewport(previewFrame, dimensions.width, dimensions.height);
+}
+
+async function verifyPreviewViewportMatrixEntry(viewport, previewFrame) {
+  await page.emulateMedia({ reducedMotion: "no-preference" });
+  await page.setViewportSize({ width: viewport.width, height: viewport.height });
+  await overlay.getByRole("button", { name: "响应式" }).click();
+  await waitForResponsivePreviewViewport(previewFrame);
+
+  const normalLayout = await readAndAssertPreviewLayout(viewport, `${viewport.id}/normal`);
+  const normalScreenshot = `output/playwright/workbench-isolated-preview-${viewport.width}x${viewport.height}-normal.png`;
+  const normalPixels = await captureAndAssertPreviewPixels(
+    normalScreenshot,
+    normalLayout,
+    `${viewport.id}/normal`,
+  );
+
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await page.waitForFunction(() => matchMedia("(prefers-reduced-motion: reduce)").matches);
+  const reducedLayoutBeforeInteraction = await readAndAssertPreviewLayout(
+    viewport,
+    `${viewport.id}/reduced-motion`,
+  );
+  assertEquivalentPreviewLayout(
+    normalLayout,
+    reducedLayoutBeforeInteraction,
+    `${viewport.id} reduced-motion preference`,
+  );
+
+  await expectSelectedDeviceViewport("手机", "mobile", 390, 844, previewFrame);
+  await overlay.getByRole("button", { name: "响应式" }).click();
+  await waitForResponsivePreviewViewport(previewFrame);
+  await resetPreviewInteraction(previewFrame);
+  await verifyPreviewInteraction();
+
+  const reducedLayout = await readAndAssertPreviewLayout(
+    viewport,
+    `${viewport.id}/reduced-motion-after-interaction`,
+  );
+  assertEquivalentPreviewLayout(
+    normalLayout,
+    reducedLayout,
+    `${viewport.id} reduced-motion interaction`,
+  );
+  const reducedScreenshot = `output/playwright/workbench-isolated-preview-${viewport.width}x${viewport.height}-reduced-motion.png`;
+  const reducedPixels = await captureAndAssertPreviewPixels(
+    reducedScreenshot,
+    reducedLayout,
+    `${viewport.id}/reduced-motion`,
+  );
+
+  return {
+    viewport,
+    screenshots: {
+      normal: normalScreenshot,
+      reducedMotion: reducedScreenshot,
+    },
+    pixels: {
+      normal: normalPixels,
+      reducedMotion: reducedPixels,
+    },
+  };
+}
+
+async function waitForResponsivePreviewViewport(previewFrame) {
+  await page.waitForFunction(({ selectors }) => {
+    const stage = document.querySelector(selectors.stage);
+    const device = document.querySelector(selectors.device);
+    const iframe = document.querySelector(selectors.iframe);
+    if (!(stage instanceof HTMLElement) || !(device instanceof HTMLElement) || !(iframe instanceof HTMLIFrameElement)) {
+      return false;
+    }
+    const stageBounds = stage.getBoundingClientRect();
+    const expectedWidth = Math.max(1, Math.floor(stageBounds.width - 24));
+    const expectedHeight = Math.max(1, Math.floor(stageBounds.height - 24));
+    return device.dataset.previewDevice === "responsive"
+      && device.dataset.previewWidth === String(expectedWidth)
+      && device.dataset.previewHeight === String(expectedHeight)
+      && iframe.getBoundingClientRect().width > 0
+      && iframe.getBoundingClientRect().height > 0;
+  }, { selectors: previewRegionSelectors });
+  await expectResponsiveViewport(previewFrame);
+}
+
+async function readAndAssertPreviewLayout(viewport, label) {
+  const layout = await page.evaluate(({ selectors }) => {
+    const regions = Object.fromEntries(Object.entries(selectors).map(([name, selector]) => {
+      const element = document.querySelector(selector);
+      if (!(element instanceof HTMLElement)) return [name, null];
+      const bounds = element.getBoundingClientRect();
+      const style = getComputedStyle(element);
+      return [name, {
+        x: bounds.x,
+        y: bounds.y,
+        width: bounds.width,
+        height: bounds.height,
+        right: bounds.right,
+        bottom: bounds.bottom,
+        opacity: Number(style.opacity),
+        visibility: style.visibility,
+      }];
+    }));
+    return {
+      viewport: { width: window.innerWidth, height: window.innerHeight },
+      document: {
+        scrollWidth: document.documentElement.scrollWidth,
+        scrollHeight: document.documentElement.scrollHeight,
+      },
+      regions,
+    };
+  }, { selectors: previewRegionSelectors });
+
+  assert(
+    layout.viewport.width === viewport.width && layout.viewport.height === viewport.height,
+    `${label} viewport mismatch: ${JSON.stringify(layout.viewport)}`,
+  );
+  assert(
+    layout.document.scrollWidth <= viewport.width,
+    `${label} must not create document-level horizontal overflow`,
+  );
+
+  for (const [name, bounds] of Object.entries(layout.regions)) {
+    assert(bounds, `${label} is missing ${name}`);
+    assert(
+      bounds.width >= 1 && bounds.height >= 1 && bounds.opacity > 0 && bounds.visibility === "visible",
+      `${label} ${name} must be visibly non-empty: ${JSON.stringify(bounds)}`,
+    );
+    assertRectWithin(
+      bounds,
+      { x: 0, y: 0, right: viewport.width, bottom: viewport.height },
+      `${label} ${name} must stay within the browser viewport`,
+    );
+  }
+
+  const { regions } = layout;
+  assertRectWithin(regions.header, regions.overlay, `${label} header must stay inside the Overlay`);
+  assertRectWithin(regions.navigation, regions.header, `${label} navigation must stay inside the header`);
+  assertRectWithin(regions.actions, regions.header, `${label} actions must stay inside the header`);
+  assertRectWithin(regions.deviceControls, regions.body, `${label} device controls must stay inside the Preview body`);
+  assertRectWithin(regions.stage, regions.body, `${label} stage must stay inside the Preview body`);
+  assertRectWithin(regions.device, regions.stage, `${label} device must stay inside the stage`);
+  assertRectWithin(regions.iframe, regions.device, `${label} iframe must stay inside the device`);
+  assertRectWithin(regions.iframe, regions.stage, `${label} iframe must stay inside the stage`);
+
+  assertRectsDoNotOverlap(regions.header, regions.body, `${label} header and body must not overlap`);
+  assertRectsDoNotOverlap(regions.project, regions.navigation, `${label} project identity and navigation must not overlap`);
+  assertRectsDoNotOverlap(regions.project, regions.actions, `${label} project identity and actions must not overlap`);
+  assertRectsDoNotOverlap(regions.navigation, regions.actions, `${label} navigation and actions must not overlap`);
+  assertRectsDoNotOverlap(regions.deviceControls, regions.stage, `${label} device controls and stage must not overlap`);
+
+  return layout;
+}
+
+async function captureAndAssertPreviewPixels(path, layout, label) {
+  const screenshot = await page.screenshot({ path, fullPage: false });
+  const metadata = await sharp(screenshot).metadata();
+  assert(
+    metadata.width === layout.viewport.width && metadata.height === layout.viewport.height,
+    `${label} screenshot must match the Playwright viewport`,
+  );
+  const evidence = {};
+  for (const region of previewPixelRegions) {
+    evidence[region] = await assertNonEmptyScreenshotRegion(
+      screenshot,
+      layout.regions[region],
+      `${label} ${region}`,
+      metadata,
+    );
+  }
+  return evidence;
+}
+
+async function assertNonEmptyScreenshotRegion(screenshot, bounds, label, metadata) {
+  const crop = integerScreenshotCrop(bounds, metadata.width, metadata.height);
+  const { data, info } = await sharp(screenshot)
+    .extract(crop)
+    .ensureAlpha()
+    .raw()
+    .toBuffer({ resolveWithObject: true });
+  const pixelCount = info.width * info.height;
+  const sampleStep = Math.max(1, Math.floor(pixelCount / 25_000));
+  let sampledPixels = 0;
+  let opaquePixels = 0;
+  let minimumLuminance = 255;
+  let maximumLuminance = 0;
+  const colorBuckets = new Set();
+
+  for (let pixel = 0; pixel < pixelCount; pixel += sampleStep) {
+    const offset = pixel * info.channels;
+    const red = data[offset];
+    const green = data[offset + 1];
+    const blue = data[offset + 2];
+    const alpha = data[offset + 3];
+    sampledPixels += 1;
+    if (alpha === 0) continue;
+    opaquePixels += 1;
+    const luminance = Math.round((red * 299 + green * 587 + blue * 114) / 1_000);
+    minimumLuminance = Math.min(minimumLuminance, luminance);
+    maximumLuminance = Math.max(maximumLuminance, luminance);
+    colorBuckets.add(`${red >> 3}:${green >> 3}:${blue >> 3}`);
+  }
+
+  const opaqueRatio = opaquePixels / sampledPixels;
+  const luminanceRange = maximumLuminance - minimumLuminance;
+  assert(opaqueRatio >= 0.99, `${label} screenshot crop must contain opaque rendered pixels`);
+  assert(
+    colorBuckets.size >= 3 && luminanceRange >= 8,
+    `${label} screenshot crop must contain non-blank UI pixels: ${JSON.stringify({
+      colorBuckets: colorBuckets.size,
+      luminanceRange,
+    })}`,
+  );
+  return {
+    width: info.width,
+    height: info.height,
+    colorBuckets: colorBuckets.size,
+    luminanceRange,
+    opaqueRatio: Number(opaqueRatio.toFixed(4)),
+  };
+}
+
+async function resetPreviewInteraction(previewFrame) {
+  await previewFrame.locator("#result").evaluate((element) => {
+    element.textContent = "等待操作";
+  });
+  await previewFrame.getByText("等待操作").waitFor();
+}
+
+function assertEquivalentPreviewLayout(expected, actual, label) {
+  for (const name of Object.keys(previewRegionSelectors)) {
+    const expectedBounds = expected.regions[name];
+    const actualBounds = actual.regions[name];
+    for (const dimension of ["x", "y", "width", "height"]) {
+      assert(
+        Math.abs(expectedBounds[dimension] - actualBounds[dimension]) <= 1,
+        `${label} changed ${name}.${dimension}: expected ${expectedBounds[dimension]}, received ${actualBounds[dimension]}`,
+      );
+    }
+  }
+}
+
+function assertRectWithin(inner, outer, message) {
+  const tolerance = 1;
+  assert(
+    inner.x >= outer.x - tolerance
+      && inner.y >= outer.y - tolerance
+      && inner.right <= outer.right + tolerance
+      && inner.bottom <= outer.bottom + tolerance,
+    `${message}: ${JSON.stringify({ inner, outer })}`,
+  );
+}
+
+function assertRectsDoNotOverlap(left, right, message) {
+  const overlapWidth = Math.min(left.right, right.right) - Math.max(left.x, right.x);
+  const overlapHeight = Math.min(left.bottom, right.bottom) - Math.max(left.y, right.y);
+  assert(overlapWidth <= 1 || overlapHeight <= 1, `${message}: ${JSON.stringify({ left, right })}`);
+}
+
+function integerScreenshotCrop(bounds, imageWidth, imageHeight) {
+  const left = Math.max(0, Math.floor(bounds.x));
+  const top = Math.max(0, Math.floor(bounds.y));
+  const right = Math.min(imageWidth, Math.ceil(bounds.right));
+  const bottom = Math.min(imageHeight, Math.ceil(bounds.bottom));
+  return {
+    left,
+    top,
+    width: Math.max(1, right - left),
+    height: Math.max(1, bottom - top),
+  };
 }
 
 async function expectFrameViewport(previewFrame, width, height) {

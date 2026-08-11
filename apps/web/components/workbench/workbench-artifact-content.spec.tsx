@@ -216,7 +216,7 @@ describe("Workbench Artifact content", () => {
 
     render(<WorkbenchArtifactContent reference={{ ...reference(), screenId: "screen-home" }} />);
 
-    expect(screen.getByText("Generating artifact...")).not.toBeNull();
+    expect(screen.getByText("正在生成产物...")).not.toBeNull();
     expect(screen.queryByRole("button", { name: "Open success" })).toBeNull();
   });
 
@@ -254,8 +254,8 @@ describe("Workbench Artifact content", () => {
     );
 
     expect(screen.getByRole("button", { name: "Canonical ready" })).not.toBeNull();
-    expect(screen.queryByText("Generating artifact...")).toBeNull();
-    expect(screen.queryByText("Loading artifact...")).toBeNull();
+    expect(screen.queryByText("正在生成产物...")).toBeNull();
+    expect(screen.queryByText("正在加载产物...")).toBeNull();
     expect(mocks.queryClientSetData).not.toHaveBeenCalled();
     expect(releaseFinalized).not.toHaveBeenCalled();
 
@@ -684,7 +684,7 @@ describe("Workbench Artifact content", () => {
 
     render(<WorkbenchArtifactContent reference={{ ...reference(), screenId: "screen-missing" }} />);
 
-    expect(screen.getByText("Artifact screen unavailable")).not.toBeNull();
+    expect(screen.getByText("该界面暂不可用")).not.toBeNull();
     expect(screen.queryByRole("button", { name: "Open success" })).toBeNull();
   });
 
@@ -698,7 +698,7 @@ describe("Workbench Artifact content", () => {
       shareToken: "wbs_public",
     }} />);
 
-    expect(screen.getByText("Artifact screen unavailable")).not.toBeNull();
+    expect(screen.getByText("该界面暂不可用")).not.toBeNull();
     expect(screen.queryByRole("button", { name: "Open success" })).toBeNull();
   });
 

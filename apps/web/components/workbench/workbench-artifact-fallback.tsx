@@ -22,12 +22,14 @@ export function workbenchPendingArtifactTitle(
 export function WorkbenchDocumentLoading({
   mode = "blocking",
   phase = "generating",
+  title = "需求文档",
 }: {
   mode?: "blocking" | "refresh";
   phase?: Extract<WorkbenchArtifactFallbackPhase, "generating" | "refining">;
+  title?: string;
 }) {
   if (mode === "refresh") {
-    const label = phase === "refining" ? "正在细化：需求文档" : "正在刷新：需求文档";
+    const label = phase === "refining" ? `正在细化：${title}` : `正在刷新：${title}`;
     return (
       <div
         aria-atomic="true"
@@ -46,7 +48,7 @@ export function WorkbenchDocumentLoading({
 
   return <WorkbenchArtifactFallback
     phase={phase}
-    title="需求文档"
+    title={title}
     variant="document"
   />;
 }
@@ -69,7 +71,7 @@ export function WorkbenchArtifactFallback({
       >
         <div className="max-w-[430px]">
           <div className="text-[20px] font-semibold text-[#f1f3f4]">产物不可用</div>
-          <p className="mt-[10px] text-[14px] leading-[22px] text-[#aeb2b9]">
+          <p className="mt-[10px] whitespace-normal break-words text-[14px] leading-[22px] text-[#aeb2b9]">
             {title} 尚无可用的持久化版本，请重新运行生成。
           </p>
         </div>
@@ -81,10 +83,12 @@ export function WorkbenchArtifactFallback({
 
   return (
     <div
+      aria-atomic="true"
       aria-live="polite"
       className="relative h-full w-full overflow-hidden"
       data-workbench-artifact-state="pending"
       data-workbench-artifact-variant={variant}
+      role="status"
     >
       <WorkbenchArtifactSkeleton variant={variant} />
       <div className="absolute inset-0 z-10 grid place-items-center px-[24px]">
@@ -95,7 +99,7 @@ export function WorkbenchArtifactFallback({
             : "bg-[#2a2b2e]/88 text-[#f1f3f4]",
         )}>
           <span className="workbench-artifact-spinner size-[15px] shrink-0 rounded-full border-2 border-current border-t-transparent" />
-          <span className="min-w-0 truncate">{label}</span>
+          <span className="min-w-0 truncate" title={label}>{label}</span>
         </div>
       </div>
     </div>

@@ -94,7 +94,17 @@ export function ProjectPreviewOverlay({
     session,
     () => null,
   );
+  const screenTabRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const selectedArtifact = artifacts[screenIndex] ?? artifacts[0];
+
+  const selectScreenFromKeyboard = (index: number) => {
+    if (artifacts.length === 0) return;
+    const nextIndex = (index + artifacts.length) % artifacts.length;
+    setScreenIndex(nextIndex);
+    const tab = screenTabRefs.current[nextIndex];
+    tab?.focus();
+    tab?.scrollIntoView?.({ block: "nearest", inline: "nearest" });
+  };
 
   useEffect(() => {
     setScreenIndex((current) => Math.min(current, Math.max(artifacts.length - 1, 0)));
@@ -124,14 +134,18 @@ export function ProjectPreviewOverlay({
     >
       <motion.header
         animate={{ opacity: 1, y: 0 }}
-        className="absolute inset-x-0 top-0 z-20 flex h-[58px] items-center justify-between border-b border-white/[0.08] bg-[#18191b]/96 px-[18px] shadow-[0_10px_34px_-28px_rgba(0,0,0,0.95)] backdrop-blur-xl max-sm:h-[104px] max-sm:items-start max-sm:px-[12px] max-sm:pt-[12px]"
+        className="absolute inset-x-0 top-0 z-20 grid h-[58px] grid-cols-[minmax(0,1fr)_minmax(240px,42vw)_minmax(0,1fr)] items-center gap-x-[16px] border-b border-white/[0.08] bg-[#18191b]/96 px-[18px] shadow-[0_10px_34px_-28px_rgba(0,0,0,0.95)] backdrop-blur-xl max-lg:h-[104px] max-lg:grid-cols-[minmax(0,1fr)_auto] max-lg:grid-rows-[46px_46px] max-lg:gap-x-[12px] max-lg:px-[12px] max-lg:py-[6px]"
+        data-preview-header
         initial={{ opacity: 0, y: -8 }}
         transition={{ ...popoverTransition, delay: 0.05 }}
       >
-        <div className="flex min-w-0 items-center gap-[12px]">
+        <div
+          className="flex min-w-0 items-center gap-[12px] max-lg:col-start-1 max-lg:row-start-1"
+          data-preview-project
+        >
           <button
             aria-label="退出预览"
-            className="grid size-[34px] shrink-0 place-items-center rounded-full text-[#d8dce2] transition-colors hover:bg-white/[0.07] hover:text-white active:scale-95"
+            className="grid size-[34px] shrink-0 place-items-center rounded-full text-[#d8dce2] transition-colors hover:bg-white/[0.07] hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#8ab4f8] active:scale-95"
             onClick={onClose}
             title="退出预览"
             type="button"
@@ -147,30 +161,63 @@ export function ProjectPreviewOverlay({
           </div>
         </div>
 
-        <div className="absolute left-1/2 flex max-w-[42vw] -translate-x-1/2 items-center gap-[3px] overflow-x-auto rounded-[6px] border border-white/[0.09] bg-[#222326] p-[3px] max-sm:bottom-[9px] max-sm:max-w-[calc(100%-24px)]">
-          {artifacts.map((artifact, index) => (
-            <button
-              aria-pressed={screenIndex === index}
-              className={cn(
-                "h-[30px] shrink-0 rounded-[4px] px-[12px] text-[12px] font-semibold transition-colors",
-                screenIndex === index
-                  ? "bg-[#4b4d52] text-white"
-                  : "text-[#aeb3bb] hover:bg-white/[0.05] hover:text-[#e8eaed]",
-              )}
-              key={`${artifact.reference.artifactId}:${artifact.reference.artifactVersionId}:${artifact.reference.screenId ?? index}`}
-              onClick={() => setScreenIndex(index)}
-              type="button"
-            >
-              {artifact.title}
-            </button>
-          ))}
-        </div>
+        <nav
+          aria-label="预览页面"
+          className="min-w-0 max-w-full overflow-x-auto rounded-[6px] border border-white/[0.09] bg-[#222326] [scrollbar-width:thin] max-lg:col-span-2 max-lg:col-start-1 max-lg:row-start-2 max-lg:w-full"
+          data-preview-screen-navigation
+        >
+          <div
+            aria-label="预览页面"
+            aria-orientation="horizontal"
+            className="mx-auto flex w-max min-w-full items-center justify-center gap-[3px] p-[3px]"
+            data-preview-screen-tabs
+            role="tablist"
+          >
+            {artifacts.map((artifact, index) => (
+              <button
+                aria-selected={screenIndex === index}
+                className={cn(
+                  "h-[30px] max-w-[220px] shrink-0 rounded-[4px] px-[12px] text-[12px] font-semibold transition-colors focus-visible:z-10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-[#8ab4f8]",
+                  screenIndex === index
+                    ? "bg-[#4b4d52] text-white"
+                    : "text-[#aeb3bb] hover:bg-white/[0.05] hover:text-[#e8eaed]",
+                )}
+                key={`${artifact.reference.artifactId}:${artifact.reference.artifactVersionId}:${artifact.reference.screenId ?? index}`}
+                onClick={() => setScreenIndex(index)}
+                onKeyDown={(event) => {
+                  let targetIndex: number | null = null;
+                  if (event.key === "ArrowRight") targetIndex = index + 1;
+                  if (event.key === "ArrowLeft") targetIndex = index - 1;
+                  if (event.key === "Home") targetIndex = 0;
+                  if (event.key === "End") targetIndex = artifacts.length - 1;
+                  if (targetIndex === null) return;
+                  event.preventDefault();
+                  selectScreenFromKeyboard(targetIndex);
+                }}
+                ref={(element) => {
+                  screenTabRefs.current[index] = element;
+                }}
+                role="tab"
+                tabIndex={screenIndex === index ? 0 : -1}
+                title={artifact.title}
+                type="button"
+              >
+                <span className="block truncate">{artifact.title}</span>
+              </button>
+            ))}
+          </div>
+        </nav>
 
-        <div className="flex items-center gap-[8px]">
+        <div
+          aria-label="预览操作"
+          className="flex items-center justify-self-end gap-[8px] max-lg:col-start-2 max-lg:row-start-1"
+          data-preview-actions
+          role="group"
+        >
           <PreviewQrPopover capability={previewCapability} />
           <button
             aria-label="刷新预览"
-            className="grid size-[34px] place-items-center rounded-[6px] border border-white/[0.09] bg-[#222326] text-[#d8dce2] transition hover:bg-[#303136] active:scale-95"
+            className="grid size-[34px] place-items-center rounded-[6px] border border-white/[0.09] bg-[#222326] text-[#d8dce2] transition hover:bg-[#303136] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#8ab4f8] active:scale-95"
             onClick={() => setRefreshKey((key) => key + 1)}
             title="刷新预览"
             type="button"
@@ -180,7 +227,7 @@ export function ProjectPreviewOverlay({
             </motion.span>
           </button>
           <button
-            className="h-[34px] rounded-[6px] bg-[#e8eaed] px-[15px] text-[13px] font-semibold text-[#202124] transition hover:bg-white active:scale-[0.98] max-md:hidden"
+            className="h-[34px] rounded-[6px] bg-[#e8eaed] px-[15px] text-[13px] font-semibold text-[#202124] transition hover:bg-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#8ab4f8] active:scale-[0.98] max-md:hidden"
             onClick={onClose}
             type="button"
           >
@@ -189,7 +236,10 @@ export function ProjectPreviewOverlay({
         </div>
       </motion.header>
 
-      <div className="absolute inset-x-0 bottom-0 top-[58px] overflow-hidden bg-[#202124] max-sm:top-[104px]">
+      <div
+        className="absolute inset-x-0 bottom-0 top-[58px] overflow-hidden bg-[#202124] max-lg:top-[104px]"
+        data-preview-body
+      >
         <div className="absolute inset-0 opacity-40 [background-image:radial-gradient(circle,#4a4d52_1px,transparent_1px)] [background-size:14px_14px]" />
         <PreviewDeviceControls
           customViewport={customViewport}
@@ -223,56 +273,62 @@ function PreviewDeviceControls({
   onModeChange: (mode: PreviewDeviceMode) => void;
 }) {
   return (
-    <div className="absolute inset-x-[12px] top-[12px] z-10 flex min-h-[40px] items-center justify-center gap-[10px] overflow-x-auto">
-      <div
-        aria-label="预览设备"
-        className="flex shrink-0 items-center gap-[2px] rounded-[6px] border border-white/[0.10] bg-[#18191b]/95 p-[3px] shadow-[0_16px_44px_-28px_rgba(0,0,0,0.95)] backdrop-blur-xl"
-        role="group"
-      >
-        {previewDeviceOptions.map((option) => {
-          const Icon = option.icon;
-          return (
-            <button
-              aria-label={option.label}
-              aria-pressed={mode === option.mode}
-              className={cn(
-                "flex h-[32px] shrink-0 items-center gap-[6px] rounded-[4px] px-[9px] text-[11px] font-medium transition-colors",
-                mode === option.mode
-                  ? "bg-[#4b4d52] text-white"
-                  : "text-[#aeb3bb] hover:bg-white/[0.06] hover:text-white",
-              )}
-              key={option.mode}
-              onClick={() => onModeChange(option.mode)}
-              title={option.label}
-              type="button"
-            >
-              <Icon className="size-[15px]" />
-              <span className="max-md:hidden">{option.label}</span>
-            </button>
-          );
-        })}
-      </div>
-      {mode === "custom" && (
-        <div className="flex shrink-0 items-center gap-[6px] rounded-[6px] border border-white/[0.10] bg-[#18191b]/95 px-[8px] py-[4px]">
-          <PreviewDimensionInput
-            ariaLabel="自定义预览宽度"
-            onChange={(width) => onCustomViewportChange(normalizePreviewCustomViewport({
-              ...customViewport,
-              width,
-            }))}
-            value={customViewport.width}
-          />
-          <span className="text-[11px] text-[#747982]">x</span>
-          <PreviewDimensionInput
-            ariaLabel="自定义预览高度"
-            onChange={(height) => onCustomViewportChange(normalizePreviewCustomViewport({
-              ...customViewport,
-              height,
-            }))}
-            value={customViewport.height}
-          />
+    <div
+      className="absolute inset-x-[12px] top-[12px] z-10 min-h-[40px] overflow-x-auto [scrollbar-width:thin]"
+      data-preview-device-controls
+    >
+      <div className="mx-auto flex w-max min-w-full items-center justify-center gap-[10px]">
+        <div
+          aria-label="预览设备"
+          aria-orientation="horizontal"
+          className="flex shrink-0 items-center gap-[2px] rounded-[6px] border border-white/[0.10] bg-[#18191b]/95 p-[3px] shadow-[0_16px_44px_-28px_rgba(0,0,0,0.95)] backdrop-blur-xl"
+          role="toolbar"
+        >
+          {previewDeviceOptions.map((option) => {
+            const Icon = option.icon;
+            return (
+              <button
+                aria-label={option.label}
+                aria-pressed={mode === option.mode}
+                className={cn(
+                  "flex h-[32px] shrink-0 items-center gap-[6px] rounded-[4px] px-[9px] text-[11px] font-medium transition-colors focus-visible:z-10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-[#8ab4f8]",
+                  mode === option.mode
+                    ? "bg-[#4b4d52] text-white"
+                    : "text-[#aeb3bb] hover:bg-white/[0.06] hover:text-white",
+                )}
+                key={option.mode}
+                onClick={() => onModeChange(option.mode)}
+                title={option.label}
+                type="button"
+              >
+                <Icon className="size-[15px]" />
+                <span className="max-md:hidden">{option.label}</span>
+              </button>
+            );
+          })}
         </div>
-      )}
+        {mode === "custom" && (
+          <div className="flex shrink-0 items-center gap-[6px] rounded-[6px] border border-white/[0.10] bg-[#18191b]/95 px-[8px] py-[4px]">
+            <PreviewDimensionInput
+              ariaLabel="自定义预览宽度"
+              onChange={(width) => onCustomViewportChange(normalizePreviewCustomViewport({
+                ...customViewport,
+                width,
+              }))}
+              value={customViewport.width}
+            />
+            <span className="text-[11px] text-[#747982]">x</span>
+            <PreviewDimensionInput
+              ariaLabel="自定义预览高度"
+              onChange={(height) => onCustomViewportChange(normalizePreviewCustomViewport({
+                ...customViewport,
+                height,
+              }))}
+              value={customViewport.height}
+            />
+          </div>
+        )}
+      </div>
     </div>
   );
 }
@@ -289,7 +345,7 @@ function PreviewDimensionInput({
   return (
     <input
       aria-label={ariaLabel}
-      className="h-[28px] w-[64px] rounded-[4px] border border-white/[0.09] bg-[#24262a] px-[7px] text-right text-[11px] text-white outline-none focus:border-[#8ab4f8]"
+      className="h-[28px] w-[64px] rounded-[4px] border border-white/[0.09] bg-[#24262a] px-[7px] text-right text-[11px] text-white outline-none focus:border-[#8ab4f8] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[#8ab4f8]"
       inputMode="numeric"
       onChange={(event) => onChange(Number(event.currentTarget.value))}
       type="number"
@@ -406,7 +462,7 @@ function PreviewQrPopover({
       <Popover.Trigger asChild>
         <button
           aria-label="二维码预览"
-          className="grid size-[34px] place-items-center rounded-[6px] border border-white/[0.09] bg-[#222326] text-[#d8dce2] transition enabled:hover:bg-[#303136] enabled:active:scale-95 disabled:cursor-not-allowed disabled:opacity-40"
+          className="grid size-[34px] place-items-center rounded-[6px] border border-white/[0.09] bg-[#222326] text-[#d8dce2] transition enabled:hover:bg-[#303136] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#8ab4f8] enabled:active:scale-95 disabled:cursor-not-allowed disabled:opacity-40"
           disabled={!available}
           title={available ? "二维码预览" : "预览准备完成后可用"}
           type="button"

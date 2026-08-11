@@ -34,6 +34,7 @@ export class ExportProcessor {
       const request: ExportBuildRequest = {
         format: started.command.format,
         packaging: started.command.packaging,
+        presentation: started.command.purpose === "preview" ? "preview" : "standalone",
         selection: started.command.selection,
         options: started.command.options as ExportBuildRequest["options"],
         source,

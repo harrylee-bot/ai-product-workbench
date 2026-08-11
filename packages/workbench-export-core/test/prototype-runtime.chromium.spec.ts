@@ -2,6 +2,7 @@ import { existsSync } from "node:fs";
 import { unzipSync } from "fflate";
 import { chromium } from "playwright-core";
 import { describe, expect, it } from "vitest";
+import type { PrototypeDocument } from "@workbench/workbench-contracts";
 
 import { buildExport, renderExportHtml } from "../src/index.js";
 import { interactiveExportRequest } from "./fixtures.js";
@@ -204,6 +205,71 @@ describe("Prototype HTML export runtime", () => {
       expect(calls.some((call) => call.nodeId === "button-click" && call.keyframes[1]?.transform === "rotate(5deg)" && call.keyframes[1]?.composite === "add")).toBe(true);
       expect(network).toEqual([]);
       expect(errors).toEqual([]);
+    } finally {
+      await context.close();
+      await browser.close();
+    }
+  }, 30_000);
+
+  it.runIf(chromiumAvailable)("fits a fixed Prototype canvas inside a narrow Preview viewport", async () => {
+    const previewRequest = interactiveExportRequest();
+    previewRequest.selection = {
+      kind: "artifact",
+      artifactId: "artifact-1",
+      artifactVersionId: "version-1",
+    };
+    previewRequest.initialScreenId = "screen-home";
+    previewRequest.presentation = "preview";
+    const prototypeDocument = previewRequest.source.artifacts[0]!.content as PrototypeDocument;
+    for (const screen of prototypeDocument.screens) screen.viewport = { width: 1_440, height: 900 };
+    for (const node of prototypeDocument.nodes) {
+      if (node.kind !== "frame" || node.parentId !== null) continue;
+      node.layout.width = { kind: "literal", value: 1_440 };
+      node.layout.height = { kind: "literal", value: 900 };
+    }
+
+    const browser = await chromium.launch({
+      executablePath,
+      headless: true,
+      chromiumSandbox: false,
+      args: ["--disable-background-networking", "--no-sandbox"],
+    });
+    const context = await browser.newContext({
+      javaScriptEnabled: true,
+      serviceWorkers: "block",
+      viewport: { width: 390, height: 844 },
+    });
+    const page = await context.newPage();
+    try {
+      await page.setContent(renderExportHtml(previewRequest).document, { waitUntil: "load" });
+      await expect.poll(() => page.locator('[data-wb-screen="screen-home"]').isVisible()).toBe(true);
+      const metrics = await page.locator('[data-wb-screen="screen-home"]').evaluate((element) => {
+        const rect = element.getBoundingClientRect();
+        const stage = element.closest(".wb-prototype__stage");
+        const stageRect = stage?.getBoundingClientRect();
+        return {
+          bodyWidth: globalThis.document.body.scrollWidth,
+          screenWidth: rect.width,
+          screenHeight: rect.height,
+          screenLeft: rect.left,
+          screenTop: rect.top,
+          stageWidth: stageRect?.width ?? 0,
+          stageHeight: stageRect?.height ?? 0,
+          scale: element.getAttribute("data-preview-scale"),
+          headerDisplay: getComputedStyle(document.querySelector(".wb-export__header")!).display,
+          tabsDisplay: getComputedStyle(document.querySelector(".wb-prototype__tabs")!).display,
+        };
+      });
+      expect(metrics.bodyWidth).toBe(390);
+      expect(metrics.stageWidth).toBe(390);
+      expect(metrics.stageHeight).toBe(844);
+      expect(metrics.screenWidth).toBeCloseTo(390, 1);
+      expect(metrics.screenHeight).toBeCloseTo(243.75, 1);
+      expect(metrics.screenLeft).toBeCloseTo(0, 1);
+      expect(metrics.screenTop).toBeCloseTo(300.125, 1);
+      expect(metrics.scale).toBe("0.2708333333333333");
+      expect(metrics.headerDisplay).toBe("none");
+      expect(metrics.tabsDisplay).toBe("none");
     } finally {
       await context.close();
       await browser.close();

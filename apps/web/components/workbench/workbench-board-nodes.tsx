@@ -113,6 +113,7 @@ export type GeneratedScreenData = {
   artifact?: WorkbenchArtifactReference;
   index: number;
   phase: Phase;
+  requestTitle?: string;
   suppressEntrance?: boolean;
   title: string;
 };
@@ -121,6 +122,7 @@ export type DocumentCanvasData = {
   artifact?: WorkbenchArtifactReference;
   phase: Phase;
   previousArtifact?: WorkbenchArtifactReference;
+  requestTitle?: string;
   suppressEntrance?: boolean;
   title: string;
 };
@@ -834,7 +836,10 @@ function DocumentCanvasNode({ data, selected }: NodeProps<DocumentCanvasNode>) {
               key="document-loading"
               transition={{ duration: 0.22, ease: workbenchEase }}
             >
-              <WorkbenchDocumentLoading phase={data.phase === "refining" ? "refining" : "generating"} />
+              <WorkbenchDocumentLoading
+                phase={data.phase === "refining" ? "refining" : "generating"}
+                title={data.requestTitle ?? data.title}
+              />
             </motion.div>
           )}
           {showRefreshLoading && (
@@ -846,7 +851,11 @@ function DocumentCanvasNode({ data, selected }: NodeProps<DocumentCanvasNode>) {
               key="document-refreshing"
               transition={{ duration: 0.22, ease: workbenchEase }}
             >
-              <WorkbenchDocumentLoading mode="refresh" phase="refining" />
+              <WorkbenchDocumentLoading
+                mode="refresh"
+                phase="refining"
+                title={data.requestTitle ?? data.title}
+              />
             </motion.div>
           )}
         </AnimatePresence>
@@ -937,10 +946,10 @@ function GeneratedScreenNode({ data, id, selected }: NodeProps<GeneratedScreenNo
               <>
                 <WorkbenchArtifactFallback
                   phase="generating"
-                  title={data.title}
-                  variant="document"
+                  title={data.requestTitle ?? data.title}
+                  variant="prototype"
                 />
-                <GeneratingWash mode="document" />
+                <GeneratingWash mode="light" />
               </>
             ) : isRefining && data.artifact ? (
               <>
@@ -953,7 +962,7 @@ function GeneratedScreenNode({ data, id, selected }: NodeProps<GeneratedScreenNo
               <>
                 <WorkbenchArtifactFallback
                   phase="refining"
-                  title={data.title}
+                  title={data.requestTitle ?? data.title}
                   variant="prototype"
                 />
                 <WorkbenchArtifactSkeleton variant="prototype" />

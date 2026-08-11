@@ -99,6 +99,7 @@ describe("ExportProcessor", () => {
     expect(identity.mediaType).toBe("text/html; charset=utf-8");
     expect(identity.byteSize).toBe(bytes.byteLength);
     expect(identity.sha256).toBe(createHash("sha256").update(bytes).digest("hex"));
+    expect(new TextDecoder().decode(bytes)).toContain('data-wb-presentation="standalone"');
     expect(test.store.publishSucceeded).toHaveBeenCalledWith("export-1", expect.objectContaining({ blobId: "blob-1" }));
   });
 
@@ -144,6 +145,33 @@ describe("ExportProcessor", () => {
     expect(test.browser.validateHtml).toHaveBeenCalledOnce();
     const document = new TextDecoder().decode(test.browser.validateHtml.mock.calls[0]![0]);
     expect(document).toContain('"initialScreenId":"screen-success"');
+    expect(document).toContain('data-wb-presentation="preview"');
+  });
+
+  it("uses the fitted Preview presentation even without an explicit initial screen", async () => {
+    const test = harness();
+    const fixture = exportRequest();
+    test.store.start.mockResolvedValueOnce({
+      kind: "run",
+      command: {
+        ...command(),
+        purpose: "preview",
+        release: null,
+        preview: { initialScreenId: null },
+        selection: {
+          kind: "artifact",
+          artifactId: "artifact-1",
+          artifactVersionId: "version-1",
+        },
+      },
+    } as never);
+    test.loader.load.mockResolvedValueOnce(fixture.source as never);
+
+    await test.processor.process("export-1", undefined, { retryCount: 0, retryLimit: 5 });
+
+    const document = new TextDecoder().decode(test.browser.validateHtml.mock.calls[0]![0]);
+    expect(document).toContain('data-wb-presentation="preview"');
+    expect(document).not.toContain('"initialScreenId":null');
   });
 
   it("does no work when replay observes a terminal job", async () => {

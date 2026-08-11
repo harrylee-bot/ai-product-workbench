@@ -71,6 +71,7 @@ describe("Workbench export core", () => {
       artifactVersionId: "version-1",
     };
     request.initialScreenId = "screen-success";
+    request.presentation = "preview";
 
     const rendered = renderExportHtml(request);
     const runtime = rendered.runtimeData as unknown as {
@@ -82,6 +83,8 @@ describe("Workbench export core", () => {
     };
     expect(rendered.document).toContain('data-wb-screen="screen-home"');
     expect(rendered.document).toContain('data-wb-screen="screen-success"');
+    expect(rendered.bodyMarkup).toContain('data-wb-presentation="preview"');
+    expect(rendered.bodyMarkup).toContain('class="wb-export wb-export--preview"');
     expect(runtime.prototypes[0]).toMatchObject({
       initialScreenId: "screen-success",
       screens: [{ id: "screen-home" }, { id: "screen-success" }],

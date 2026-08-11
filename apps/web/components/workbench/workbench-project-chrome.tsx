@@ -1,6 +1,6 @@
 "use client";
 
-import type { RunGenerationStage } from "@workbench/workbench-contracts";
+import type { Run, RunGenerationStage } from "@workbench/workbench-contracts";
 import { AnimatePresence, motion } from "framer-motion";
 import {
   CopyIcon,
@@ -26,6 +26,7 @@ import type {
   WorkbenchProjectPhase,
   WorkbenchRunMotionKind,
 } from "@/lib/workbench/features";
+import { workbenchRunIsVisuallyGenerating } from "@/lib/workbench/run";
 import {
   openWorkbenchKnowledgePage,
   openWorkbenchProductLink,
@@ -36,7 +37,10 @@ import {
   viewTransition,
   workbenchEase,
 } from "./workbench-motion";
-import { WorkbenchArtifactFallback } from "./workbench-artifact-fallback";
+import {
+  WorkbenchArtifactFallback,
+  workbenchPendingArtifactTitle,
+} from "./workbench-artifact-fallback";
 
 type Phase = WorkbenchProjectPhase;
 type ProjectMode = WorkbenchProjectMode;
@@ -130,20 +134,26 @@ export function ProjectStageMotionFX({
   isOverview,
   motionKind,
   phase,
+  prompt = "",
+  runStatus = "running",
   showPendingArtifact = false,
 }: {
   generationStage: RunGenerationStage | null;
   isOverview: boolean;
   motionKind: WorkbenchRunMotionKind;
   phase: Phase;
+  prompt?: string;
+  runStatus?: Run["status"] | null;
   showPendingArtifact?: boolean;
 }) {
-  const generationMotionKind = getProjectStageMotionKind({
-    generationStage,
-    isOverview,
-    motionKind,
-    phase,
-  });
+  const generationMotionKind = workbenchRunIsVisuallyGenerating(runStatus)
+    ? getProjectStageMotionKind({
+      generationStage,
+      isOverview,
+      motionKind,
+      phase,
+    })
+    : null;
   const showPrdGenerationWash = generationMotionKind === "prd";
 
   return (
@@ -185,7 +195,10 @@ export function ProjectStageMotionFX({
             >
               <WorkbenchArtifactFallback
                 phase={phase === "refining" ? "refining" : "generating"}
-                title={generationMotionKind === "prd" ? "需求文档" : "原型界面"}
+                title={workbenchPendingArtifactTitle(
+                  prompt,
+                  generationMotionKind === "prd" ? "document" : "prototype",
+                )}
                 variant={generationMotionKind === "prd" ? "document" : "prototype"}
               />
             </div>

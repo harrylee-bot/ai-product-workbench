@@ -61,6 +61,7 @@ import {
 } from "@/lib/workbench/run";
 import type { RunArtifactDraftProjection } from "@/lib/workbench/run/reducer";
 import type { WorkbenchArtifactReference } from "./workbench-artifact-content";
+import { workbenchPendingArtifactTitle } from "./workbench-artifact-fallback";
 import {
   ArtifactPreferenceToggleCoordinator,
   useWorkbenchProjectActionsController,
@@ -552,6 +553,7 @@ export function runtimeDraftsToWorkbench(
   drafts: readonly RunArtifactDraftProjection[],
   projectId: string,
   startX = 0,
+  requestPrompt = "",
 ): WorkbenchNode[] {
   let screenIndex = 0;
   let nextX = startX;
@@ -571,6 +573,7 @@ export function runtimeDraftsToWorkbench(
             artifact: { ...reference, screenId: screen.id },
             index,
             phase: "refining",
+            requestTitle: workbenchPendingArtifactTitle(requestPrompt, "prototype", index),
             title: screen.name,
           },
           draggable: false,
@@ -594,6 +597,7 @@ export function runtimeDraftsToWorkbench(
         data: {
           artifact: reference,
           phase: "refining",
+          requestTitle: workbenchPendingArtifactTitle(requestPrompt, "document"),
           title: runtimeDraftTitle(draft.kind),
         },
         draggable: false,
@@ -641,11 +645,13 @@ export function projectRunBoardNodes({
   drafts,
   persistedBoardNodes,
   projectId,
+  prompt = "",
   runStatus,
 }: {
   drafts: readonly RunArtifactDraftProjection[];
   persistedBoardNodes: readonly BoardFlowNode[];
   projectId: string;
+  prompt?: string;
   runStatus: Run["status"] | null;
 }): WorkbenchNode[] {
   const persisted = persistedBoardNodesToWorkbench(persistedBoardNodes, projectId);
@@ -653,6 +659,7 @@ export function projectRunBoardNodes({
     drafts,
     projectId,
     nextAvailableDraftX(persisted),
+    prompt,
   );
   if (draftNodes.length === 0) return persisted;
 
@@ -2334,6 +2341,7 @@ function ProjectScreen({
       drafts: draftArtifacts,
       persistedBoardNodes,
       projectId,
+      prompt,
       runStatus,
     });
     const matchesCurrentProject = readWorkbenchProjectId() === projectId;
@@ -2388,6 +2396,7 @@ function ProjectScreen({
     loadStatus,
     persistedBoardNodes,
     phase,
+    prompt,
     projectId,
     projectMode,
     requestedArtifactKinds,

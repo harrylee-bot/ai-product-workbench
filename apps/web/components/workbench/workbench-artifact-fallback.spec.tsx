@@ -53,9 +53,9 @@ describe("Workbench artifact fallback", () => {
   });
 
   it("distinguishes a refining document from first-generation loading", () => {
-    render(<WorkbenchDocumentLoading phase="refining" />);
+    render(<WorkbenchDocumentLoading phase="refining" title="会员中心 · 需求文档" />);
 
-    expect(screen.getByText("正在细化：需求文档")).toBeTruthy();
+    expect(screen.getByText("正在细化：会员中心 · 需求文档")).toBeTruthy();
     expect(screen.queryByText("正在生成：需求文档")).toBeNull();
   });
 
@@ -79,6 +79,8 @@ describe("Workbench artifact fallback", () => {
 
     expect(screen.getByText("产物不可用")).toBeTruthy();
     expect(screen.getByText("结算流程 · 需求文档 尚无可用的持久化版本，请重新运行生成。")).toBeTruthy();
+    expect(screen.getByText("结算流程 · 需求文档 尚无可用的持久化版本，请重新运行生成。").classList)
+      .toContain("whitespace-normal");
     expect(rendered.container.querySelector('[data-workbench-artifact-state="unavailable"]')).toBeTruthy();
     expect(rendered.container.querySelector("[data-workbench-artifact-skeleton]")).toBeNull();
   });

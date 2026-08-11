@@ -2020,6 +2020,15 @@ textarea:focus-visible {
   white-space: nowrap;
 }
 
+/* Document content is a reading surface, not a chrome label. Keep prose and
+ * inline citations wrap-safe even while compact workbench labels truncate. */
+.workbench-shell .workbench-prd-surface :where(p, li, td, th, h1, h2, h3, h4, h5, a, span, strong) {
+  overflow: visible;
+  overflow-wrap: anywhere;
+  text-overflow: clip;
+  white-space: normal;
+}
+
 .workbench-shell .workbench-tool-button {
   overflow: visible !important;
 }

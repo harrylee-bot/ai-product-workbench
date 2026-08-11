@@ -2,7 +2,7 @@
 
 import "@testing-library/jest-dom/vitest";
 import type { ExportPreviewTokenResponse } from "@workbench/workbench-contracts";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const previewHarness = vi.hoisted(() => ({
@@ -68,6 +68,75 @@ afterEach(() => {
 });
 
 describe("Project Preview overlay", () => {
+  it.each([375, 768, 1_440])(
+    "keeps screen navigation, actions, and device controls in non-overlapping regions at %ipx",
+    (viewportWidth) => {
+      Object.defineProperty(window, "innerWidth", {
+        configurable: true,
+        value: viewportWidth,
+      });
+      renderOverlay(vi.fn(), {
+        artifactTitles: Array.from(
+          { length: 9 },
+          (_, index) => `第 ${index + 1} 个较长的项目页面名称`,
+        ),
+        projectId: `project-layout-${viewportWidth}`,
+        screenId: "screen-home",
+      });
+
+      const header = requiredElement("[data-preview-header]");
+      const project = requiredElement("[data-preview-project]");
+      const navigation = screen.getByRole("navigation", { name: "预览页面" });
+      const tabs = screen.getByRole("tablist", { name: "预览页面" });
+      const actions = screen.getByRole("group", { name: "预览操作" });
+      const body = requiredElement("[data-preview-body]");
+      const deviceControls = requiredElement("[data-preview-device-controls]");
+
+      expect(header.classList.contains("grid")).toBe(true);
+      expect(header.className).toContain("max-lg:grid-rows-[46px_46px]");
+      expect(header.contains(project)).toBe(true);
+      expect(header.contains(navigation)).toBe(true);
+      expect(header.contains(actions)).toBe(true);
+      expect(navigation.classList.contains("min-w-0")).toBe(true);
+      expect(navigation.classList.contains("overflow-x-auto")).toBe(true);
+      expect(navigation.classList.contains("absolute")).toBe(false);
+      expect(tabs.classList.contains("w-max")).toBe(true);
+      expect(tabs.classList.contains("min-w-full")).toBe(true);
+      expect(screen.getAllByRole("tab")).toHaveLength(9);
+      expect(within(actions).getByRole("button", { name: "二维码预览" })).toBeTruthy();
+      expect(within(actions).getByRole("button", { name: "刷新预览" })).toBeTruthy();
+      expect(body.className).toContain("max-lg:top-[104px]");
+      expect(deviceControls.classList.contains("overflow-x-auto")).toBe(true);
+      expect(screen.getByRole("toolbar", { name: "预览设备" })).toBeTruthy();
+    },
+  );
+
+  it("supports roving keyboard navigation across an overflowing screen tab list", () => {
+    const titles = Array.from({ length: 8 }, (_, index) => `页面 ${index + 1}`);
+    renderOverlay(vi.fn(), {
+      artifactTitles: titles,
+      projectId: "project-keyboard-tabs",
+      screenId: "screen-home",
+    });
+    const tabs = screen.getAllByRole("tab");
+
+    expect(tabs[0]?.getAttribute("aria-selected")).toBe("true");
+    expect(tabs[0]?.getAttribute("tabindex")).toBe("0");
+    expect(tabs[1]?.getAttribute("tabindex")).toBe("-1");
+
+    fireEvent.keyDown(tabs[0]!, { key: "End" });
+    const lastTab = tabs.at(-1);
+    expect(lastTab?.getAttribute("aria-selected")).toBe("true");
+    expect(document.activeElement).toBe(lastTab);
+    expect(JSON.parse(
+      screen.getByRole("button", { name: "Preview ready" }).dataset.previewRequest!,
+    ).initialScreenId).toBe("screen-8");
+
+    fireEvent.keyDown(lastTab!, { key: "ArrowRight" });
+    expect(tabs[0]?.getAttribute("aria-selected")).toBe("true");
+    expect(document.activeElement).toBe(tabs[0]);
+  });
+
   it("switches real iframe viewport presets without remounting the Preview capability", async () => {
     renderOverlay();
     const preview = screen.getByRole("button", { name: "Preview ready" });
@@ -154,24 +223,33 @@ describe("Project Preview overlay", () => {
 
 function renderOverlay(
   onClose = vi.fn(),
-  options: { screenId?: string } = { screenId: "screen-home" },
+  options: {
+    artifactTitles?: string[];
+    projectId?: string;
+    screenId?: string;
+  } = { screenId: "screen-home" },
 ) {
-  const reference = {
-    projectId: "project-1",
-    artifactId: "artifact-1",
-    artifactVersionId: "version-1",
-    ...(options.screenId ? { screenId: options.screenId } : {}),
-  };
+  const projectId = options.projectId ?? "project-1";
+  const artifactTitles = options.artifactTitles ?? ["Home"];
+  const artifacts = artifactTitles.map((title, index) => ({
+    reference: {
+      projectId,
+      artifactId: `artifact-${index + 1}`,
+      artifactVersionId: `version-${index + 1}`,
+      ...(index === 0
+        ? options.screenId ? { screenId: options.screenId } : {}
+        : { screenId: `screen-${index + 1}` }),
+    },
+    title,
+  }));
+  const reference = artifacts[0]!.reference;
   return render(
     <ProjectPreviewOverlay
-      artifacts={[{
-        reference,
-        title: "Home",
-      }]}
+      artifacts={artifacts}
       createPreview={vi.fn()}
       initialReference={reference}
       onClose={onClose}
-      projectId="project-1"
+      projectId={projectId}
       projectTitle="产品工作台"
     />,
   );
@@ -181,4 +259,10 @@ function deviceFrame() {
   const frame = document.querySelector("[data-preview-device]");
   if (!(frame instanceof HTMLElement)) throw new Error("Preview device frame missing");
   return frame;
+}
+
+function requiredElement(selector: string) {
+  const element = document.querySelector(selector);
+  if (!(element instanceof HTMLElement)) throw new Error(`Element missing: ${selector}`);
+  return element;
 }

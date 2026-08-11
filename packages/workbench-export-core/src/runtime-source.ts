@@ -8,19 +8,46 @@ export const browserRuntimeSource = String.raw`(() => {
   const root = document.getElementById("workbench-export-root");
   if (!dataNode || !root) return;
   const data = JSON.parse(dataNode.textContent || "{}");
-  install(root, data);
+  install(root, data, root.querySelector(".wb-export--preview") !== null);
 
-  function install(scope, runtime) {
-    for (const model of runtime.prototypes || []) installPrototype(scope, model);
+  function install(scope, runtime, preview) {
+    for (const model of runtime.prototypes || []) installPrototype(scope, model, preview);
   }
 
-  function installPrototype(scope, model) {
+  function installPrototype(scope, model, preview) {
     const host = scope.querySelector('[data-wb-prototype="' + cssEscape(model.id) + '"]');
     if (!host) return;
     if (host.dataset.wbRuntimeInstalled === "true") return;
     host.dataset.wbRuntimeInstalled = "true";
     const byNode = (nodeId) => host.querySelector('[data-wb-node="' + cssEscape(nodeId) + '"]');
     const screens = new Map((model.screens || []).map((screen) => [screen.id, screen]));
+    let activeScreenId = null;
+    const previewStage = preview ? host.querySelector(".wb-prototype__stage") : null;
+    const fitPreviewScreens = () => {
+      if (!previewStage) return;
+      const stageWidth = previewStage.clientWidth;
+      const stageHeight = previewStage.clientHeight;
+      if (stageWidth <= 0 || stageHeight <= 0) return;
+      for (const element of host.querySelectorAll("[data-wb-screen]")) {
+        const screen = screens.get(element.dataset.wbScreen);
+        if (!screen) continue;
+        const scale = Math.min(
+          1,
+          stageWidth / screen.viewport.width,
+          stageHeight / screen.viewport.height,
+        );
+        element.style.transform = "translate(-50%, -50%) scale(" + String(scale) + ")";
+        element.dataset.previewScale = String(scale);
+      }
+      const active = activeScreenId ? screens.get(activeScreenId) : null;
+      const activeScale = active ? Math.min(1, stageWidth / active.viewport.width, stageHeight / active.viewport.height) : 1;
+      previewStage.dataset.previewScale = String(activeScale);
+    };
+    const previewResizeObserver = preview && typeof ResizeObserver !== "undefined"
+      ? new ResizeObserver(() => fitPreviewScreens())
+      : null;
+    if (previewStage && previewResizeObserver) previewResizeObserver.observe(previewStage);
+    if (preview) window.addEventListener("resize", fitPreviewScreens);
     const states = new Map((model.states || []).map((state) => [state.id, state]));
     const bindings = new Map((model.bindings || []).map((binding) => [binding.id, binding]));
     const initialVariables = new Map((model.variables || []).map((variable) => [variable.path, variable.initialValue]));
@@ -29,7 +56,6 @@ export const browserRuntimeSource = String.raw`(() => {
     const activeStates = new Map();
     const base = new Map();
     const animations = new Map();
-    let activeScreenId = null;
     let transition = Promise.resolve();
     let actionQueue = Promise.resolve();
     const pendingSubmitActions = new Set();
@@ -152,6 +178,7 @@ export const browserRuntimeSource = String.raw`(() => {
         button.setAttribute("aria-selected", String(button.dataset.wbScreenTarget === screenId));
       }
       activeScreenId = screenId;
+      fitPreviewScreens();
       if (next.initialStateId) await applyState(next.initialStateId);
       else clearState(screenId);
       await runMotions("enter", { screenId });
@@ -321,6 +348,13 @@ export const browserRuntimeSource = String.raw`(() => {
       }
     }
     void showScreen(model.initialScreenId);
+    fitPreviewScreens();
+    if (preview) {
+      window.addEventListener("pagehide", () => {
+        previewResizeObserver?.disconnect();
+        window.removeEventListener("resize", fitPreviewScreens);
+      }, { once: true });
+    }
 
     function hasStateValueBinding(nodeId) {
       return (model.bindings || []).some((binding) => (
@@ -409,8 +443,10 @@ export function reactRuntimeModuleSource() {
   const body = browserRuntimeSource
     .replace(/^\(\(\) => \{\n/, "")
     .replace(/\n\}\)\(\);$/, "")
-    .replace(/  const dataNode[\s\S]*?  install\(root, data\);\n\n/, "")
-    .replace("  function install(scope, runtime) {", "export function installWorkbenchRuntime(scope, runtime) {")
-    .replace("for (const model of runtime.prototypes || []) installPrototype(scope, model);", "for (const model of runtime.prototypes || []) installPrototype(scope, model);");
+    .replace(/  const dataNode[\s\S]*?  install\(root, data, root\.querySelector\("\.wb-export--preview"\) !== null\);\n\n/, "")
+    .replace(
+      "  function install(scope, runtime, preview) {",
+      "export function installWorkbenchRuntime(scope, runtime, preview = false) {",
+    );
   return body.trimStart();
 }

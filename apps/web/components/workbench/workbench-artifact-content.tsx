@@ -206,13 +206,13 @@ export function WorkbenchArtifactContent({
   if (activePrototypeProjection && !readyQueryOwnsProjection) {
     const projectedDocument = activePrototypeProjection.document;
     if (!projectedDocument) {
-      return <ArtifactStatus>Generating artifact...</ArtifactStatus>;
+      return <ArtifactStatus>正在生成产物...</ArtifactStatus>;
     }
     if (
       reference.screenId !== undefined
       && !projectedDocument.screens.some((screen) => screen.id === reference.screenId)
     ) {
-      return <ArtifactStatus>Artifact screen unavailable</ArtifactStatus>;
+      return <ArtifactStatus>该界面暂不可用</ArtifactStatus>;
     }
     return (
       <PrototypeArtifact
@@ -228,13 +228,13 @@ export function WorkbenchArtifactContent({
 
   if (query.isPending) {
     return pendingContent === undefined
-      ? <ArtifactStatus>Loading artifact...</ArtifactStatus>
+      ? <ArtifactStatus>正在加载产物...</ArtifactStatus>
       : pendingContent;
   }
   if (query.isError || !version) {
     return (
       <ArtifactStatus onRetry={() => void query.refetch()}>
-        Artifact unavailable
+        产物暂不可用
       </ArtifactStatus>
     );
   }
@@ -246,7 +246,7 @@ export function WorkbenchArtifactContent({
       || !version.content.screens.some((screen) => screen.id === reference.screenId)
     )
   ) {
-    return <ArtifactStatus>Artifact screen unavailable</ArtifactStatus>;
+    return <ArtifactStatus>该界面暂不可用</ArtifactStatus>;
   }
   if (version.contentMode === "blob") {
     return isPublic ? (
@@ -307,7 +307,13 @@ function ArtifactStatus({
   onRetry?: () => void;
 }) {
   return (
-    <div className="flex h-full w-full items-center justify-center gap-[10px] bg-[#1d1d1f] text-[16px] font-medium text-[#c7cad0]">
+    <div
+      aria-atomic="true"
+      aria-live="polite"
+      className="flex h-full w-full items-center justify-center gap-[10px] bg-[#1d1d1f] px-[20px] text-center text-[16px] font-medium text-[#c7cad0]"
+      data-workbench-artifact-status
+      role="status"
+    >
       <span>{children}</span>
       {onRetry && (
         <button
@@ -336,11 +342,11 @@ function PrivateBlobArtifact({
     reference.artifactId,
     reference.artifactVersionId,
   );
-  if (contentQuery.isPending) return <ArtifactStatus>Loading artifact...</ArtifactStatus>;
+  if (contentQuery.isPending) return <ArtifactStatus>正在加载产物...</ArtifactStatus>;
   if (contentQuery.isError || !contentQuery.data) {
     return (
       <ArtifactStatus onRetry={() => void contentQuery.refetch()}>
-        Artifact content unavailable
+        产物内容暂不可用
       </ArtifactStatus>
     );
   }
@@ -359,11 +365,11 @@ function PublicBlobArtifact({
     reference.artifactId,
     reference.artifactVersionId,
   );
-  if (contentQuery.isPending) return <ArtifactStatus>Loading artifact...</ArtifactStatus>;
+  if (contentQuery.isPending) return <ArtifactStatus>正在加载产物...</ArtifactStatus>;
   if (contentQuery.isError || !contentQuery.data) {
     return (
       <ArtifactStatus onRetry={() => void contentQuery.refetch()}>
-        Artifact content unavailable
+        产物内容暂不可用
       </ArtifactStatus>
     );
   }
@@ -383,7 +389,7 @@ function BlobArtifact({
   if (kind === "code" || kind === "document" || kind === "data") {
     return <BlobTextArtifact blob={blob} />;
   }
-  return <ArtifactStatus>Binary artifact preview</ArtifactStatus>;
+  return <ArtifactStatus>暂不支持预览此二进制产物</ArtifactStatus>;
 }
 
 function BlobImageArtifact({ blob }: { blob: Blob }) {
@@ -395,7 +401,7 @@ function BlobImageArtifact({ blob }: { blob: Blob }) {
     setUrl(nextUrl);
     return () => URL.revokeObjectURL(nextUrl);
   }, [blob]);
-  if (failed) return <ArtifactStatus>Image preview unavailable</ArtifactStatus>;
+  if (failed) return <ArtifactStatus>图片预览暂不可用</ArtifactStatus>;
   return url ? (
     <div className="grid h-full w-full place-items-center overflow-hidden bg-[#111214]">
       <img
@@ -405,7 +411,7 @@ function BlobImageArtifact({ blob }: { blob: Blob }) {
         src={url}
       />
     </div>
-  ) : <ArtifactStatus>Loading artifact...</ArtifactStatus>;
+  ) : <ArtifactStatus>正在加载产物...</ArtifactStatus>;
 }
 
 function BlobTextArtifact({ blob }: { blob: Blob }) {
@@ -424,8 +430,8 @@ function BlobTextArtifact({ blob }: { blob: Blob }) {
       active = false;
     };
   }, [blob]);
-  if (failed) return <ArtifactStatus>Text preview unavailable</ArtifactStatus>;
-  if (text === null) return <ArtifactStatus>Loading artifact...</ArtifactStatus>;
+  if (failed) return <ArtifactStatus>文本预览暂不可用</ArtifactStatus>;
+  if (text === null) return <ArtifactStatus>正在加载产物...</ArtifactStatus>;
   return (
     <pre className="h-full w-full overflow-auto whitespace-pre-wrap bg-[#111214] p-[24px] text-[13px] leading-[20px] text-[#e8eaed]">
       {text}
@@ -456,7 +462,7 @@ function PrdArtifact({ document }: { document: PrdDocument }) {
 
 function PrdArtifactV1({ document }: { document: PrdDocumentV1 }) {
   return (
-    <article className="nowheel h-full w-full overflow-auto bg-[#1d1d1f] px-[38px] py-[34px] text-[#e8eaed]">
+    <article className="workbench-prd-surface nowheel h-full w-full overflow-auto bg-[#1d1d1f] px-[38px] py-[34px] text-[#e8eaed]">
       <h2 className="mb-[42px] text-[50px] font-semibold leading-none tracking-normal text-[#f1f3f4]">
         {document.title}
       </h2>
@@ -481,7 +487,7 @@ function PrdArtifactV2({ document }: { document: PrdDocumentV2 }) {
   const { businessRequirements, degradation, introduction, safetyBaseline } = document.sections;
   return (
     <article
-      className="nowheel h-full w-full overflow-auto bg-[#1d1d1f] px-[20px] py-[28px] text-[16px] leading-[27px] text-[#e8eaed] sm:px-[38px] sm:py-[34px]"
+      className="workbench-prd-surface nowheel h-full w-full overflow-auto bg-[#1d1d1f] px-[20px] py-[28px] text-[16px] leading-[27px] text-[#e8eaed] sm:px-[38px] sm:py-[34px]"
       data-prd-protocol={document.protocol}
     >
       <div className="mx-auto w-full max-w-[1120px]">

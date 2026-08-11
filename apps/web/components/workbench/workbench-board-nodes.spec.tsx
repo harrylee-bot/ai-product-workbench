@@ -69,6 +69,7 @@ describe("Workbench generated screen node", () => {
     const rendered = render(<DocumentCanvas {...({
       data: {
         phase: "generating",
+        requestTitle: "创建会员中心 · 需求文档",
         title: "需求文档",
       },
       deletable: false,
@@ -84,7 +85,7 @@ describe("Workbench generated screen node", () => {
       zIndex: 0,
     } satisfies ComponentProps<typeof DocumentCanvas>)} />);
 
-    expect(screen.getByText("正在生成：需求文档")).not.toBeNull();
+    expect(screen.getByText("正在生成：创建会员中心 · 需求文档")).not.toBeNull();
     expect(rendered.container.querySelector('[data-workbench-artifact-state="pending"]'))
       .not.toBeNull();
     expect(rendered.container.querySelector("[data-workbench-artifact-skeleton]"))
@@ -99,6 +100,36 @@ describe("Workbench generated screen node", () => {
       minHeight: 500,
       minWidth: 500,
     });
+  });
+
+  it("uses a Prototype loading composition while the first generated screen is pending", () => {
+    const GeneratedScreen = artboardNodeTypes.generatedScreen;
+    const rendered = render(<GeneratedScreen {...({
+      data: {
+        index: 0,
+        phase: "generating",
+        requestTitle: "创建会员中心 · 界面 1",
+        title: "界面草稿",
+      },
+      deletable: false,
+      draggable: false,
+      dragging: false,
+      id: "run-pending:project-real:prototype:screen-1",
+      isConnectable: false,
+      positionAbsoluteX: 0,
+      positionAbsoluteY: 0,
+      selectable: false,
+      selected: false,
+      type: "generatedScreen",
+      zIndex: 0,
+    } satisfies ComponentProps<typeof GeneratedScreen>)} />);
+
+    expect(screen.getByText("正在生成：创建会员中心 · 界面 1")).not.toBeNull();
+    expect(rendered.container.querySelector(
+      '[data-workbench-artifact-variant="prototype"]',
+    )).not.toBeNull();
+    expect(rendered.container.querySelector('[data-motion="generation-beam"]')).not.toBeNull();
+    expect(rendered.container.querySelector('[data-motion="document-wash"]')).toBeNull();
   });
 
   it("preloads a real PRD Draft behind the reference loading copy until its query resolves", async () => {

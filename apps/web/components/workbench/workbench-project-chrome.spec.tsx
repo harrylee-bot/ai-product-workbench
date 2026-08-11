@@ -192,8 +192,8 @@ describe("workbench project chrome", () => {
   });
 
   it.each([
-    ["prd", "document", "正在生成：需求文档"],
-    ["prototype", "prototype", "正在生成：原型界面"],
+    ["prd", "document", "正在生成：创建会员中心 · 需求文档"],
+    ["prototype", "prototype", "正在生成：创建会员中心 · 界面 1"],
   ] as const)(
     "renders a transient %s pending surface before the first real artifact node exists",
     (motionKind, variant, label) => {
@@ -203,6 +203,7 @@ describe("workbench project chrome", () => {
           isOverview={false}
           motionKind={motionKind}
           phase="generating"
+          prompt="创建会员中心"
           showPendingArtifact
         />,
       );
@@ -216,6 +217,42 @@ describe("workbench project chrome", () => {
       expect(screen.getByText(label)).not.toBeNull();
       expect(container.querySelector(".react-flow__node")).toBeNull();
       expect(container.querySelector("[data-workbench-generated-node]")).toBeNull();
+    },
+  );
+
+  it.each([
+    ["queued", true],
+    ["running", true],
+    ["waiting_input", false],
+    ["cancelling", false],
+    ["failed", false],
+    ["cancelled", false],
+  ] as const)(
+    "mounts generation motion and pending skeleton only while Run status is %s",
+    (runStatus, expectedVisible) => {
+      const { container } = render(
+        <ProjectStageMotionFX
+          generationStage="generating-ui"
+          isOverview={false}
+          motionKind="prototype"
+          phase="generating"
+          runStatus={runStatus}
+          showPendingArtifact
+        />,
+      );
+
+      const motion = container.querySelector('[data-canvas-generation-motion="prototype"]');
+      const transientArtifact = container.querySelector('[data-workbench-transient-artifact="prototype"]');
+      const pendingArtifact = container.querySelector('[data-workbench-artifact-state="pending"]');
+      if (expectedVisible) {
+        expect(motion).not.toBeNull();
+        expect(transientArtifact).not.toBeNull();
+        expect(pendingArtifact).not.toBeNull();
+      } else {
+        expect(motion).toBeNull();
+        expect(transientArtifact).toBeNull();
+        expect(pendingArtifact).toBeNull();
+      }
     },
   );
 
