@@ -57,8 +57,10 @@ Never use it to read or summarize the pinned Workbench references:
 Prototype-only Runs read those references directly with `read_file`, then
 author and submit the typed Artifact from the lead. Never begin Prototype/code
 work while a PRD in the same request remains unsubmitted or unaccepted.
-For PRD, document, image, and data Runs, the lead agent must work directly and
-finish with `workbench_runtime_result_submit`.
+For PRD, document, image, and data Runs, the lead agent must work directly. An
+exact PRD-only Run finishes its model-authored work with one successful complete
+Draft at `artifact_index: 0`; the trusted Runtime submits that normalized Draft
+as the Result. Document, image, and data Runs use the explicit Result tool.
 
 ## Requirement Modes
 
@@ -195,13 +197,13 @@ of a result. When a missing fact changes business scope, compliance, money or
 inventory, permissions, production data, irreversible publication, or
 acceptance meaning, keep unsupported behavior out of committed scope, record a
 conservative typed assumption or acceptance boundary, and still complete the
-PRD through draft publication and Runtime result submission.
+PRD through complete Draft publication and trusted Runtime Result submission.
 
 A request for both PRD and Prototype/code is sequential, not parallel. The
 Runtime contract rejects a Run whose `requestedArtifactKinds` mixes `prd` with
 `prototype` or `code`; callers must submit two Runs instead. The PRD-only Run
-must complete with `workbench_runtime_result_submit` returning `ok:true` before
-a later Prototype/code Run may use that persisted PRD. If invalid mixed input
+must complete with one successful Draft and the trusted Runtime's successful
+Result submission before a later Prototype/code Run may use that persisted PRD. If invalid mixed input
 somehow reaches this skill, fail fast without clarification, delegation,
 Prototype Canvas tools, stage tools, draft publication, or result submission.
 
@@ -246,9 +248,10 @@ Writing requirements:
 - Use the required `/mnt/skills/public/workbench/references/prd-runtime-result.schema.json` as the business-neutral transport shape. Populate it from current request facts and authorized sources while preserving every required field and bidirectional reference.
 - Preserve the exact PRD v2 transport paths: `content.sections.introduction`, `content.sections.businessRequirements.acceptanceCriteria`, `content.sections.businessRequirements.additionalSections`, `content.sections.degradation`, and `content.sections.safetyBaseline`. `content.sections.businessRequirements` also owns `pageLinks`, `coreRules`, and `flowAndPages`. Never put `acceptanceCriteria` or `additionalSections` directly under `content.sections`, and never put `degradation` or `safetyBaseline` directly under `content`.
 - Keep IDs globally unique across the document and every nested IR entity. Resolve every table, diagram, citation, assumption, goal, requirement, criterion, and flow reference, and keep requirement/criterion references bidirectional.
-- The draft and final-result tools deterministically close a reciprocal requirement/acceptance-criterion link when either side already declares that relation and both referenced IDs uniquely exist. This is structural normalization only: unknown IDs, duplicate IDs, missing content, and every other schema issue remain errors. On a failed call, modify only the returned issue paths in the immediately preceding complete candidate and preserve all unrelated fields.
+- The draft and final-result tools deterministically close a reciprocal requirement/acceptance-criterion link when either side already declares that relation and both referenced IDs uniquely exist. `acceptanceCriterionIds` may reference only typed `acceptanceCriterion` blocks, never a row from the normative acceptance table. When one unique `ac-row-v-*` table-row ID accompanies one already bidirectional unique typed criterion on the same unique requirement, the tools remove only that row ID; they never infer a business relation from the table. Unknown IDs, duplicate IDs, row-only candidates, missing content, and every other schema issue remain errors. On a failed call, modify only the returned issue paths in the immediately preceding complete candidate and preserve all unrelated fields.
+- Each `PrdTextInline.text` value is limited to 10,000 characters. Split long prose into meaningful blocks or inline entries. During validation repair, never paste the complete PRD or Runtime JSON into a text field.
 - Never use a filled PRD example as an authoring source. A business example can silently inject unrelated pages, roles, permissions, states, retry behavior, or acceptance rules into a short request.
-- When a complete schema-valid PRD candidate exists, call `workbench_artifact_draft_publish` with that complete candidate so the 500 x 500 document appears on the Canvas. Then submit an identical final Artifact through `workbench_runtime_result_submit`. A placeholder, prose outline, partial section, or progress estimate is not a publishable draft.
+- When a complete schema-valid PRD candidate exists, call `workbench_artifact_draft_publish` exactly once with `artifact_index: 0` and that complete candidate so the 500 x 500 document appears on the Canvas. After the Draft succeeds, do not call a Draft or Result tool; the trusted Runtime submits the exact normalized Draft as the single `workbench.runtime.result.v1` Artifact and stops after validation succeeds. If that automatic Result reports validation issues, keep the successful Draft immutable, repair only the reported paths in one complete manual Result candidate, and continue only through manual `workbench_runtime_result_submit` validation; the Runtime does not repeat automatic submission. A placeholder, prose outline, partial section, or progress estimate is not a publishable draft.
 
 ## Runtime Inputs
 
@@ -332,7 +335,7 @@ one complete current checkpoint before the next patch, then use the supplied
 `baseRevision`. A checkpoint is the only recovery boundary after a degraded projection;
 do not guess missing operations or reuse an older revision.
 
-Except for the exact Prototype-only `create` path that the trusted Runtime finalizes from its one terminal Draft, the lead agent must finish every turn by calling `workbench_runtime_result_submit` with the complete unfenced `workbench.runtime.result.v1` object in its `candidate` argument. The Worker accepts only the current turn's validated ToolMessage artifact; it does not parse Markdown fences, raw JSON, assistant state fields, or sub-agent text.
+Except for an exact PRD-only path or exact Prototype-only `create` path that the trusted Runtime finalizes from its one terminal Draft, the lead agent must finish every turn by calling `workbench_runtime_result_submit` with the complete unfenced `workbench.runtime.result.v1` object in its `candidate` argument. The Worker accepts only the current turn's validated ToolMessage artifact; it does not parse Markdown fences, raw JSON, assistant state fields, or sub-agent text.
 
 If a manual Result tool returns `ok:false`, fix every reported path and submit the complete candidate again. Continue until it returns `ok:true`. After the first successful submission, do not mutate or resubmit the candidate; return only a concise user-facing completion message. Sub-agents may research or draft content, but the lead agent alone owns every manual final submit call.
 

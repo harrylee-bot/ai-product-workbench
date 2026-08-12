@@ -589,6 +589,7 @@ const prdV2StandaloneApiHeadingPattern = /(?:接口|API)/iu;
 type PrdV2EvidenceRule = {
   positive: RegExp;
   negative?: RegExp;
+  isNegative?: (segment: string) => boolean;
   isAffirmative?: (segment: string) => boolean;
 };
 
@@ -801,18 +802,87 @@ const prdV2AcceptanceDimensions = [
   },
 ] as const;
 
+const prdChannelEvidenceClauseDelimiterPattern = /(?:[，,；;]|但(?:是)?|同时|并且|且|而(?:是)?)/u;
+const prdChannelNegativePredicatePattern = /(?:不涉及|不启用|未启用|不投放|未投放|排除|禁用|不支持|未支持|不包含|未包含|不覆盖|未覆盖|不开放|未开放|不提供|未提供|不在|不属于)/iu;
+const prdChannelFalseConfigurationPattern = /(?:\benabled\b|启用(?:状态|配置)?|是否启用)[^。！？；;\n]{0,24}(?:配置|设置)?\s*(?:为|=|:)?\s*(?:false|否|关闭|禁用)|(?:false|否|关闭|禁用)[^。！？；;\n]{0,24}(?:\benabled\b|启用(?:状态|配置)?|是否启用)/iu;
+const prdChannelDoubleNegativePrefixPattern = /(?:不是|并非|没有|未曾|不得|不能|不会|不应|不可|不宜|不建议|不予|禁止|避免|无需|无须|不必)\s*$/u;
+
+const prdChannelEvidencePositivePatterns: Record<typeof prdChannelKinds[number], RegExp> = {
+  inApp: /(?:端内渠道|端内入口|APP\s*端内|客户端内|应用内)/iu,
+  wapH5: /(?:WAP\s*\/?\s*H5|WAP|H5|端外渠道|Web\s*页面|网页端)/iu,
+  miniProgram: /(?:微信)?小程序/u,
+};
+
+function prdChannelEvidenceClauses(segment: string): string[] {
+  return segment
+    .normalize("NFKC")
+    .split(prdChannelEvidenceClauseDelimiterPattern)
+    .map((clause) => clause.trim())
+    .filter(Boolean);
+}
+
+function hasPrdChannelNegativeClause(
+  clause: string,
+  channel: typeof prdChannelKinds[number],
+): boolean {
+  const aliasPattern = prdChannelEvidencePositivePatterns[channel];
+  if (!aliasPattern.test(clause)) return false;
+  if (prdChannelFalseConfigurationPattern.test(clause)) return true;
+
+  for (const match of clause.matchAll(new RegExp(aliasPattern.source, `${aliasPattern.flags.replace("g", "")}g`))) {
+    const start = match.index ?? 0;
+    const end = start + match[0].length;
+    const before = clause.slice(Math.max(0, start - 64), start);
+    const after = clause.slice(end, end + 64);
+    const negativeBefore = [...before.matchAll(new RegExp(
+      prdChannelNegativePredicatePattern.source,
+      `${prdChannelNegativePredicatePattern.flags.replace("g", "")}g`,
+    ))].at(-1);
+    const negativeAfter = prdChannelNegativePredicatePattern.exec(after);
+    if (negativeBefore && !prdChannelDoubleNegativePrefixPattern.test(before.slice(0, negativeBefore.index))) return true;
+    if (negativeAfter && !prdChannelDoubleNegativePrefixPattern.test(after.slice(0, negativeAfter.index))) return true;
+  }
+  return false;
+}
+
+function hasPrdChannelNegativeEvidence(
+  segment: string,
+  channel: typeof prdChannelKinds[number],
+): boolean {
+  return prdChannelEvidenceClauses(segment).some((clause) => (
+    hasPrdChannelNegativeClause(clause, channel)
+  ));
+}
+
+function hasPrdChannelAffirmativeEvidence(
+  segment: string,
+  channel: typeof prdChannelKinds[number],
+): boolean {
+  const positive = prdChannelEvidencePositivePatterns[channel];
+  return prdChannelEvidenceClauses(segment).some((clause) => (
+    positive.test(clause)
+    && !hasPrdChannelNegativeClause(clause, channel)
+  ));
+}
+
 const prdChannelEvidenceRules: Record<typeof prdChannelKinds[number], PrdV2EvidenceRule> = {
   inApp: {
-    positive: /(?:端内渠道|端内入口|APP\s*端内|客户端内|应用内)/iu,
+    positive: prdChannelEvidencePositivePatterns.inApp,
     negative: /(?:不涉及|不启用|未启用|不投放|未投放|排除).{0,8}(?:端内|应用内)|(?:端内|应用内).{0,8}(?:不涉及|不启用|未启用|不投放|未投放|排除)/u,
+    isNegative: (segment) => hasPrdChannelNegativeEvidence(segment, "inApp"),
+    isAffirmative: (segment) => hasPrdChannelAffirmativeEvidence(segment, "inApp"),
   },
   wapH5: {
-    positive: /(?:WAP|H5|端外渠道|Web\s*页面|网页端)/iu,
+    positive: prdChannelEvidencePositivePatterns.wapH5,
     negative: /(?:不涉及|不启用|未启用|不投放|未投放|排除).{0,8}(?:WAP|H5|端外|网页端)|(?:WAP|H5|端外|网页端).{0,8}(?:不涉及|不启用|未启用|不投放|未投放|排除)/iu,
+    isNegative: (segment) => hasPrdChannelNegativeEvidence(segment, "wapH5"),
+    isAffirmative: (segment) => hasPrdChannelAffirmativeEvidence(segment, "wapH5"),
   },
   miniProgram: {
-    positive: /小程序/u,
+    positive: prdChannelEvidencePositivePatterns.miniProgram,
     negative: /(?:不涉及|不启用|未启用|不投放|未投放|排除).{0,8}小程序|小程序.{0,8}(?:不涉及|不启用|未启用|不投放|未投放|排除)/u,
+    isNegative: (segment) => hasPrdChannelNegativeEvidence(segment, "miniProgram"),
+    isAffirmative: (segment) => hasPrdChannelAffirmativeEvidence(segment, "miniProgram"),
   },
 };
 
@@ -931,9 +1001,9 @@ function refinePrdDocumentV2(
   for (const [index, row] of document.sections.introduction.usageScenarios.channelTable.rows.entries()) {
     const rule = prdChannelEvidenceRules[row.channel];
     const hasPositiveFact = hasAffirmativeEvidence(usageScenarioEvidence, rule);
-    const hasNegativeFact = rule.negative
-      ? usageScenarioEvidence.some((segment) => rule.negative?.test(segment))
-      : false;
+    const hasNegativeFact = usageScenarioEvidence.some((segment) => (
+      isNegativeEvidenceSegment(segment, rule)
+    ));
     if (row.enabled && !hasPositiveFact) {
       addIssue(context, ["sections", "introduction", "usageScenarios", "channelTable", "rows", index, "enabled"], `enabled channel ${prdChannelLabels[row.channel]} requires an affirmative fact in the usage-scenario body`);
     }
@@ -1396,8 +1466,12 @@ function isAffirmativeEvidenceSegment(segment: string, rule: PrdV2EvidenceRule):
   if (rule.isAffirmative) return rule.isAffirmative(segment);
   return (
     rule.positive.test(segment)
-    && !(rule.negative?.test(segment) ?? false)
+    && !isNegativeEvidenceSegment(segment, rule)
   );
+}
+
+function isNegativeEvidenceSegment(segment: string, rule: PrdV2EvidenceRule): boolean {
+  return rule.isNegative?.(segment) ?? (rule.negative?.test(segment) ?? false);
 }
 
 function normalizeSemanticText(value: string): string {

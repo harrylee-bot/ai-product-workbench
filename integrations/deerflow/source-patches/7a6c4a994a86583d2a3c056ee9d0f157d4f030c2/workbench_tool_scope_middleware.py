@@ -135,9 +135,10 @@ _PROTOTYPE_PATCH_PUBLICATION_PROTOCOL = (
     "workbench.runtime.prototype-patch-publication.v1"
 )
 _RUNTIME_RESULT_PROTOCOL = "workbench.runtime.result.v1"
+_AUTOMATIC_PRD_RESULT_CALL_PREFIX = "workbench_auto_prd_result_"
 _AUTOMATIC_PROTOTYPE_RESULT_CALL_PREFIX = "workbench_auto_prototype_result_"
 _PRD_CLARIFICATION_SYSTEM_POLICY = """<workbench_prd_clarification_policy>
-This PRD-only Workbench Run cannot resume free-form clarification. The ask_clarification tool is unavailable. Ignore any general instruction that requires clarification for this Run. Do not ask a question or end early. Keep unsupported high-risk behavior out of committed scope, record conservative typed assumptions or acceptance boundaries, then publish the complete PRD draft and submit the Runtime result.
+This PRD-only Workbench Run cannot resume free-form clarification. The ask_clarification tool is unavailable. Ignore any general instruction that requires clarification for this Run. Do not ask a question or end early. Keep unsupported high-risk behavior out of committed scope, record conservative typed assumptions or acceptance boundaries, then publish exactly one complete PRD Draft at artifact_index 0. After that Draft succeeds, do not call a Draft or Result tool; the trusted Runtime submits the exact normalized Draft and stops after validation succeeds. If that automatic Result reports validation issues, keep the successful Draft immutable, repair only the reported paths in one complete manual Result candidate, and continue only through manual Result validation; the Runtime does not repeat automatic submission.
 </workbench_prd_clarification_policy>"""
 _PROTOTYPE_STAGE_SYSTEM_POLICY = """<workbench_prototype_stage_policy>
 This Prototype-only Workbench Run must call workbench_generation_stage_update exactly once for each real stage, in this order: design-system, mapping-components, creating-flows, generating-ui. Never skip, repeat, regress, batch, or substitute a PRD stage. If a stage call returns an error naming the next required stage, call that stage next and continue the Run. The scoped read_file tool may read only the complete prototype-runtime-result.example.json and runtime-result-contract.md references.
@@ -466,6 +467,22 @@ def _full_reference_read(args: Mapping[str, Any]) -> bool:
     return args.get("start_line") is None and args.get("end_line") is None
 
 
+def _workbench_call_is_bound(
+    artifact: Any,
+    call_id: str,
+    run_id: str | None,
+    runtime_attempt_id: str | None,
+) -> bool:
+    if run_id is None or runtime_attempt_id is None:
+        return True
+    return (
+        isinstance(artifact, Mapping)
+        and artifact.get("runId") == run_id
+        and artifact.get("runtimeAttemptId") == runtime_attempt_id
+        and artifact.get("toolCallId") == call_id
+    )
+
+
 def _reference_index(path: Any) -> int | None:
     if not isinstance(path, str):
         return None
@@ -499,11 +516,51 @@ def _reference_like_path(path: Any) -> bool:
     )
 
 
-def _reference_progress(state: Any) -> tuple[frozenset[int], bool]:
+def _reference_progress(
+    state: Any,
+    run_id: str | None = None,
+    runtime_attempt_id: str | None = None,
+) -> tuple[frozenset[int], bool]:
     completed, invalid = _completed_tool_calls(state)
+    collecting_response_index = -1
+    if run_id is not None and runtime_attempt_id is not None:
+        collecting_calls = []
+        for call in completed:
+            if (
+                call["name"] != GENERATION_STAGE_TOOL_NAME
+                or not _tool_succeeded(call["response"])
+                or call["args"].get("stage") != PRD_STAGE_SEQUENCE[0]
+            ):
+                continue
+            artifact = _value(call["response"], "artifact")
+            if (
+                _workbench_call_is_bound(
+                    artifact,
+                    call["id"],
+                    run_id,
+                    runtime_attempt_id,
+                )
+                and isinstance(artifact, Mapping)
+                and artifact.get("protocol") == _PRD_STAGE_PROTOCOL
+                and artifact.get("stage") == PRD_STAGE_SEQUENCE[0]
+            ):
+                collecting_calls.append(call)
+        if len(collecting_calls) != 1:
+            return frozenset(), invalid or len(collecting_calls) > 1
+        collecting_response_index = collecting_calls[0]["response_index"]
+
     reference_batches: dict[int, list[dict[str, Any]]] = {}
     for call in completed:
         if call["name"] != READ_FILE_TOOL_NAME:
+            continue
+        if call["message_index"] <= collecting_response_index:
+            continue
+        if not _workbench_call_is_bound(
+            _value(call["response"], "artifact"),
+            call["id"],
+            run_id,
+            runtime_attempt_id,
+        ):
             continue
         path = call["args"].get("path")
         reference_index = _reference_index(path)
@@ -557,7 +614,11 @@ def _missing_reference_indexes(successful_indexes: frozenset[int]) -> list[int]:
     ]
 
 
-def _stage_progress(state: Any) -> tuple[int, bool]:
+def _stage_progress(
+    state: Any,
+    run_id: str | None = None,
+    runtime_attempt_id: str | None = None,
+) -> tuple[int, bool]:
     completed, invalid = _completed_tool_calls(state)
     successful_stages: list[str] = []
     for call in completed:
@@ -571,6 +632,12 @@ def _stage_progress(state: Any) -> tuple[int, bool]:
             not isinstance(artifact, Mapping)
             or artifact.get("protocol") != _PRD_STAGE_PROTOCOL
             or artifact.get("stage") != stage
+            or not _workbench_call_is_bound(
+                artifact,
+                call["id"],
+                run_id,
+                runtime_attempt_id,
+            )
         ):
             continue
         successful_stages.append(stage)
@@ -605,7 +672,11 @@ def _prototype_stage_progress(state: Any) -> tuple[int, bool]:
     return len(successful_stages), invalid
 
 
-def _successful_prd_drafts(state: Any) -> tuple[int, bool]:
+def _successful_prd_drafts(
+    state: Any,
+    run_id: str | None = None,
+    runtime_attempt_id: str | None = None,
+) -> tuple[int, bool]:
     completed, invalid = _completed_tool_calls(state)
     count = 0
     for call in completed:
@@ -614,7 +685,13 @@ def _successful_prd_drafts(state: Any) -> tuple[int, bool]:
         artifact = _value(call["response"], "artifact")
         draft = artifact.get("draft") if isinstance(artifact, Mapping) else None
         if (
-            isinstance(artifact, Mapping)
+            _workbench_call_is_bound(
+                artifact,
+                call["id"],
+                run_id,
+                runtime_attempt_id,
+            )
+            and isinstance(artifact, Mapping)
             and artifact.get("protocol") == _PRD_DRAFT_PROTOCOL
             and artifact.get("ok") is True
             and isinstance(draft, Mapping)
@@ -624,21 +701,69 @@ def _successful_prd_drafts(state: Any) -> tuple[int, bool]:
     return count, invalid or count > 1
 
 
+def _successful_prd_draft_from_call(
+    call: Mapping[str, Any],
+    run_id: str | None,
+    runtime_attempt_id: str | None,
+) -> tuple[dict[str, Any], int] | None:
+    if call["name"] != ARTIFACT_DRAFT_TOOL_NAME or not _tool_succeeded(call["response"]):
+        return None
+    artifact = _value(call["response"], "artifact")
+    draft = artifact.get("draft") if isinstance(artifact, Mapping) else None
+    artifact_index = artifact.get("artifactIndex") if isinstance(artifact, Mapping) else None
+    if (
+        run_id is None
+        or runtime_attempt_id is None
+        or not isinstance(artifact, Mapping)
+        or artifact.get("runId") != run_id
+        or artifact.get("runtimeAttemptId") != runtime_attempt_id
+        or artifact.get("toolCallId") != call["id"]
+    ):
+        return None
+    if (
+        artifact.get("protocol") == _PRD_DRAFT_PROTOCOL
+        and artifact.get("ok") is True
+        and isinstance(draft, Mapping)
+        and draft.get("kind") == "prd"
+        and isinstance(artifact_index, int)
+        and not isinstance(artifact_index, bool)
+        and 0 <= artifact_index < 20
+    ):
+        return dict(draft), artifact_index
+    return None
+
+
+def _successful_prd_draft(
+    state: Any,
+    run_id: str | None,
+    runtime_attempt_id: str | None,
+) -> tuple[dict[str, Any] | None, int | None, bool]:
+    completed, invalid = _completed_tool_calls(state)
+    drafts = [
+        draft
+        for call in completed
+        if (draft := _successful_prd_draft_from_call(
+            call,
+            run_id,
+            runtime_attempt_id,
+        )) is not None
+    ]
+    if len(drafts) != 1:
+        return None, None, invalid or len(drafts) > 1
+    return drafts[0][0], drafts[0][1], invalid
+
+
 def _prototype_call_is_bound(
     artifact: Any,
     call_id: str,
     run_id: str | None,
     runtime_attempt_id: str | None,
 ) -> bool:
-    return (
-        run_id is None
-        or runtime_attempt_id is None
-        or (
-            isinstance(artifact, Mapping)
-            and artifact.get("runId") == run_id
-            and artifact.get("runtimeAttemptId") == runtime_attempt_id
-            and artifact.get("toolCallId") == call_id
-        )
+    return _workbench_call_is_bound(
+        artifact,
+        call_id,
+        run_id,
+        runtime_attempt_id,
     )
 
 
@@ -784,7 +909,11 @@ def _prototype_patch_checkpoint_required(
     ), invalid
 
 
-def _successful_runtime_results(state: Any) -> tuple[int, bool]:
+def _successful_runtime_results(
+    state: Any,
+    run_id: str | None = None,
+    runtime_attempt_id: str | None = None,
+) -> tuple[int, bool]:
     completed, invalid = _completed_tool_calls(state)
     count = 0
     for call in completed:
@@ -792,7 +921,13 @@ def _successful_runtime_results(state: Any) -> tuple[int, bool]:
             continue
         artifact = _value(call["response"], "artifact")
         if (
-            isinstance(artifact, Mapping)
+            _workbench_call_is_bound(
+                artifact,
+                call["id"],
+                run_id,
+                runtime_attempt_id,
+            )
+            and isinstance(artifact, Mapping)
             and artifact.get("protocol") == _PRD_RESULT_PROTOCOL
             and artifact.get("ok") is True
         ):
@@ -822,6 +957,7 @@ def _successful_runtime_result_message(
             or artifact.get("ok") is not True
             or artifact.get("runId") != run_id
             or artifact.get("runtimeAttemptId") != runtime_attempt_id
+            or artifact.get("toolCallId") != call["id"]
         ):
             continue
         result = _value(artifact, "result")
@@ -830,6 +966,81 @@ def _successful_runtime_result_message(
     if len(messages) != 1:
         return None
     return messages[0] or "Workbench result submitted."
+
+
+def _automatic_prd_result_message(
+    state: Any,
+    run_id: str | None,
+    runtime_attempt_id: str | None,
+) -> AIMessage | None:
+    """Turn one validated PRD draft into the final result without re-emitting it."""
+    if run_id is None or runtime_attempt_id is None:
+        return None
+    draft, artifact_index, draft_invalid = _successful_prd_draft(
+        state,
+        run_id,
+        runtime_attempt_id,
+    )
+    successful_references, reference_invalid = _reference_progress(
+        state,
+        run_id,
+        runtime_attempt_id,
+    )
+    stage_count, stage_invalid = _stage_progress(
+        state,
+        run_id,
+        runtime_attempt_id,
+    )
+    result_count, result_invalid = _successful_runtime_results(
+        state,
+        run_id,
+        runtime_attempt_id,
+    )
+    completed, completed_invalid = _completed_tool_calls(state)
+    if (
+        draft is None
+        or artifact_index != 0
+        or draft_invalid
+        or reference_invalid
+        or _missing_reference_indexes(successful_references)
+        or stage_invalid
+        or stage_count != len(PRD_STAGE_SEQUENCE)
+        or result_invalid
+        or completed_invalid
+        or result_count > 0
+    ):
+        return None
+
+    candidate = {
+        "protocol": _RUNTIME_RESULT_PROTOCOL,
+        "message": "\u9700\u6c42\u8bf4\u660e\u4e66\u5df2\u751f\u6210\u3002",
+        "artifacts": [draft],
+    }
+    call_identity = {
+        "runId": run_id,
+        "runtimeAttemptId": runtime_attempt_id,
+        "candidate": candidate,
+    }
+    digest = hashlib.sha256(
+        json.dumps(call_identity, ensure_ascii=False, separators=(",", ":"), sort_keys=True).encode(
+            "utf-8"
+        )
+    ).hexdigest()[:24]
+    call_id = f"{_AUTOMATIC_PRD_RESULT_CALL_PREFIX}{digest}"
+    if any(
+        call["name"] == RUNTIME_RESULT_TOOL_NAME and call["id"] == call_id
+        for call in completed
+    ):
+        return None
+    return AIMessage(
+        content="",
+        tool_calls=[{
+            "id": call_id,
+            "name": RUNTIME_RESULT_TOOL_NAME,
+            "args": {"candidate": candidate},
+            "type": "tool_call",
+        }],
+    )
 
 
 def _automatic_prototype_result_message(
@@ -846,7 +1057,11 @@ def _automatic_prototype_result_message(
         runtime_attempt_id,
     )
     stage_count, stage_invalid = _prototype_stage_progress(state)
-    result_count, result_invalid = _successful_runtime_results(state)
+    result_count, result_invalid = _successful_runtime_results(
+        state,
+        run_id,
+        runtime_attempt_id,
+    )
     completed, completed_invalid = _completed_tool_calls(state)
     operation = draft.get("operation") if isinstance(draft, Mapping) else None
     if (
@@ -860,11 +1075,6 @@ def _automatic_prototype_result_message(
         or result_invalid
         or completed_invalid
         or result_count > 0
-        or any(
-            call["name"] == RUNTIME_RESULT_TOOL_NAME
-            and call["id"].startswith(_AUTOMATIC_PROTOTYPE_RESULT_CALL_PREFIX)
-            for call in completed
-        )
     ):
         return None
 
@@ -883,10 +1093,16 @@ def _automatic_prototype_result_message(
             "utf-8"
         )
     ).hexdigest()[:24]
+    call_id = f"{_AUTOMATIC_PROTOTYPE_RESULT_CALL_PREFIX}{digest}"
+    if any(
+        call["name"] == RUNTIME_RESULT_TOOL_NAME and call["id"] == call_id
+        for call in completed
+    ):
+        return None
     return AIMessage(
         content="",
         tool_calls=[{
-            "id": f"{_AUTOMATIC_PROTOTYPE_RESULT_CALL_PREFIX}{digest}",
+            "id": call_id,
             "name": RUNTIME_RESULT_TOOL_NAME,
             "args": {"candidate": candidate},
             "type": "tool_call",
@@ -1108,10 +1324,26 @@ class WorkbenchToolScopeMiddleware(AgentMiddleware[AgentState]):
         )
 
     def _prd_history_error(self, request: ToolCallRequest) -> ToolMessage | None:
-        successful_references, reference_invalid = _reference_progress(request.state)
-        stage_count, stage_invalid = _stage_progress(request.state)
-        draft_count, draft_invalid = _successful_prd_drafts(request.state)
-        result_count, result_invalid = _successful_runtime_results(request.state)
+        successful_references, reference_invalid = _reference_progress(
+            request.state,
+            self._run_id,
+            self._runtime_attempt_id,
+        )
+        stage_count, stage_invalid = _stage_progress(
+            request.state,
+            self._run_id,
+            self._runtime_attempt_id,
+        )
+        draft_count, draft_invalid = _successful_prd_drafts(
+            request.state,
+            self._run_id,
+            self._runtime_attempt_id,
+        )
+        result_count, result_invalid = _successful_runtime_results(
+            request.state,
+            self._run_id,
+            self._runtime_attempt_id,
+        )
         if reference_invalid:
             return _error_tool_message(
                 request,
@@ -1140,7 +1372,7 @@ class WorkbenchToolScopeMiddleware(AgentMiddleware[AgentState]):
             return _error_tool_message(
                 request,
                 "WORKBENCH_PRD_DRAFT_ALREADY_PUBLISHED",
-                "A validated PRD draft already exists for this turn; submit the identical candidate with workbench_runtime_result_submit.",
+                "A validated PRD draft already exists for this turn; do not publish or submit it again because the trusted Runtime submits the exact normalized Draft.",
             )
         if stage_count == 0:
             return _error_tool_message(
@@ -1178,7 +1410,11 @@ class WorkbenchToolScopeMiddleware(AgentMiddleware[AgentState]):
         args = _tool_args(request.tool_call.get("args"))
         path = args.get("path")
         if not _reference_like_path(path):
-            successful_references, _reference_invalid = _reference_progress(request.state)
+            successful_references, _reference_invalid = _reference_progress(
+                request.state,
+                self._run_id,
+                self._runtime_attempt_id,
+            )
             missing_references = _missing_reference_indexes(successful_references)
             expected_index = missing_references[0] if missing_references else len(PRD_REFERENCE_FILES) - 1
             expected_path = PRD_REFERENCE_FILES[expected_index][0]
@@ -1188,8 +1424,16 @@ class WorkbenchToolScopeMiddleware(AgentMiddleware[AgentState]):
                 f"Use the exact absolute Runtime path '{expected_path}'.",
             )
         reference_index = _reference_index(path)
-        successful_references, reference_invalid = _reference_progress(request.state)
-        stage_count, stage_invalid = _stage_progress(request.state)
+        successful_references, reference_invalid = _reference_progress(
+            request.state,
+            self._run_id,
+            self._runtime_attempt_id,
+        )
+        stage_count, stage_invalid = _stage_progress(
+            request.state,
+            self._run_id,
+            self._runtime_attempt_id,
+        )
         if reference_index is None:
             missing_references = _missing_reference_indexes(successful_references)
             expected_index = missing_references[0] if missing_references else len(PRD_REFERENCE_FILES) - 1
@@ -1267,8 +1511,16 @@ class WorkbenchToolScopeMiddleware(AgentMiddleware[AgentState]):
                     "This PRD Run accepts only PRD generation stages; call the next required PRD stage instead.",
                 )
             return None
-        stage_count, stage_invalid = _stage_progress(request.state)
-        successful_references, reference_invalid = _reference_progress(request.state)
+        stage_count, stage_invalid = _stage_progress(
+            request.state,
+            self._run_id,
+            self._runtime_attempt_id,
+        )
+        successful_references, reference_invalid = _reference_progress(
+            request.state,
+            self._run_id,
+            self._runtime_attempt_id,
+        )
         if stage_invalid or reference_invalid:
             return self._prd_history_error(request)
         batch_stages = [
@@ -1383,7 +1635,18 @@ class WorkbenchToolScopeMiddleware(AgentMiddleware[AgentState]):
                 "WORKBENCH_PRD_REFERENCE_CONTENT_MISMATCH",
                 f"The installed file '{path}' does not match pinned SHA-256 '{expected_digest}'; do not publish until the Runtime image is corrected.",
             )
-        return result
+        if self._run_id is None or self._runtime_attempt_id is None:
+            return result
+        return result.model_copy(update={
+            "artifact": {
+                "protocol": "workbench.runtime.prd-reference-read.v1",
+                "runId": self._run_id,
+                "runtimeAttemptId": self._runtime_attempt_id,
+                "toolCallId": request.tool_call.get("id"),
+                "path": path,
+                "sha256": expected_digest,
+            },
+        })
 
     def _prototype_reference_preflight(
         self,
@@ -1569,7 +1832,11 @@ class WorkbenchToolScopeMiddleware(AgentMiddleware[AgentState]):
             self._run_id,
             self._runtime_attempt_id,
         )
-        result_count, result_invalid = _successful_runtime_results(request.state)
+        result_count, result_invalid = _successful_runtime_results(
+            request.state,
+            self._run_id,
+            self._runtime_attempt_id,
+        )
         if stage_invalid or draft_invalid or patch_history_invalid or result_invalid:
             return _error_tool_message(
                 request,
@@ -1661,6 +1928,20 @@ class WorkbenchToolScopeMiddleware(AgentMiddleware[AgentState]):
                 AIMessage(content=submitted_message),
                 self._catalog_observation(scoped_request),
             )
+        automatic_prd_result = (
+            _automatic_prd_result_message(
+                scoped_request.state,
+                self._run_id,
+                self._runtime_attempt_id,
+            )
+            if self._prd_gate_enabled
+            else None
+        )
+        if automatic_prd_result is not None:
+            return _stamp_catalog_observation(
+                automatic_prd_result,
+                self._catalog_observation(scoped_request),
+            )
         automatic_result = (
             _automatic_prototype_result_message(
                 scoped_request.state,
@@ -1720,6 +2001,20 @@ class WorkbenchToolScopeMiddleware(AgentMiddleware[AgentState]):
         if submitted_message is not None:
             return _stamp_catalog_observation(
                 AIMessage(content=submitted_message),
+                self._catalog_observation(scoped_request),
+            )
+        automatic_prd_result = (
+            _automatic_prd_result_message(
+                scoped_request.state,
+                self._run_id,
+                self._runtime_attempt_id,
+            )
+            if self._prd_gate_enabled
+            else None
+        )
+        if automatic_prd_result is not None:
+            return _stamp_catalog_observation(
+                automatic_prd_result,
                 self._catalog_observation(scoped_request),
             )
         automatic_result = (

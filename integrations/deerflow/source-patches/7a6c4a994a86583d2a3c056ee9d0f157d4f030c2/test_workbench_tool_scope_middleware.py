@@ -120,6 +120,7 @@ CANVAS_TOOL_NAMES = middleware_module.CANVAS_TOOL_NAMES
 CLARIFICATION_TOOL_NAME = middleware_module.CLARIFICATION_TOOL_NAME
 KNOWLEDGE_TOOL_NAME = middleware_module.KNOWLEDGE_TOOL_NAME
 READ_FILE_TOOL_NAME = middleware_module.READ_FILE_TOOL_NAME
+ARTIFACT_DRAFT_TOOL_NAME = middleware_module.ARTIFACT_DRAFT_TOOL_NAME
 ARTIFACT_PROGRESS_TOOL_NAMES = middleware_module.ARTIFACT_PROGRESS_TOOL_NAMES
 PROTOTYPE_ONLY_TOOL_NAMES = middleware_module.PROTOTYPE_ONLY_TOOL_NAMES
 RUNTIME_RESULT_TOOL_NAME = middleware_module.RUNTIME_RESULT_TOOL_NAME
@@ -247,6 +248,27 @@ def call(name: str, call_id: str, args: dict | None = None) -> dict:
     return {"id": call_id, "name": name, "args": dict(args or {})}
 
 
+def automatic_result_call_id(
+    prefix: str,
+    candidate: dict,
+    *,
+    run_id: str = "run-1",
+    runtime_attempt_id: str = "attempt-1",
+) -> str:
+    call_identity = {
+        "runId": run_id,
+        "runtimeAttemptId": runtime_attempt_id,
+        "candidate": candidate,
+    }
+    digest = hashlib.sha256(json.dumps(
+        call_identity,
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("utf-8")).hexdigest()[:24]
+    return f"{prefix}{digest}"
+
+
 def tool_message(
     name: str,
     call_id: str,
@@ -267,7 +289,13 @@ def tool_message(
     return message
 
 
-def successful_stage_message(stage: str, call_id: str):
+def successful_stage_message(
+    stage: str,
+    call_id: str,
+    *,
+    run_id: str = "run-1",
+    runtime_attempt_id: str = "attempt-1",
+):
     return middleware_module.ToolMessage(
         content="ok",
         tool_call_id=call_id,
@@ -275,6 +303,9 @@ def successful_stage_message(stage: str, call_id: str):
         status="success",
         artifact={
             "protocol": "workbench.runtime.generation-stage.v1",
+            "runId": run_id,
+            "runtimeAttemptId": runtime_attempt_id,
+            "toolCallId": call_id,
             "stage": stage,
         },
     )
@@ -285,7 +316,14 @@ def append_tool_batch(messages: list[dict], calls: list[dict], responses: list[d
     messages.extend(responses)
 
 
-def append_stage(messages: list[dict], stage: str, call_id: str) -> None:
+def append_stage(
+    messages: list[dict],
+    stage: str,
+    call_id: str,
+    *,
+    run_id: str = "run-1",
+    runtime_attempt_id: str = "attempt-1",
+) -> None:
     append_tool_batch(
         messages,
         [call("workbench_generation_stage_update", call_id, {"stage": stage})],
@@ -294,13 +332,22 @@ def append_stage(messages: list[dict], stage: str, call_id: str) -> None:
             call_id,
             artifact={
                 "protocol": "workbench.runtime.generation-stage.v1",
+                "runId": run_id,
+                "runtimeAttemptId": runtime_attempt_id,
+                "toolCallId": call_id,
                 "stage": stage,
             },
         )],
     )
 
 
-def append_references(messages: list[dict], *, status_by_index: dict[int, str] | None = None) -> None:
+def append_references(
+    messages: list[dict],
+    *,
+    status_by_index: dict[int, str] | None = None,
+    run_id: str = "run-1",
+    runtime_attempt_id: str = "attempt-1",
+) -> None:
     calls = []
     responses = []
     for index, (path, _digest) in enumerate(PRD_REFERENCE_FILES):
@@ -312,18 +359,49 @@ def append_references(messages: list[dict], *, status_by_index: dict[int, str] |
             call_id,
             REFERENCE_CONTENT[path] if status == "success" else "Error: read failed",
             status=status,
+            artifact={
+                "protocol": "workbench.runtime.prd-reference-read.v1",
+                "runId": run_id,
+                "runtimeAttemptId": runtime_attempt_id,
+                "toolCallId": call_id,
+                "path": path,
+                "sha256": PRD_REFERENCE_FILES[index][1],
+            } if status == "success" else None,
         ))
     append_tool_batch(messages, calls, responses)
 
 
-def prd_messages(*, stage_count: int, references: bool, draft: bool = False) -> list[dict]:
+def prd_messages(
+    *,
+    stage_count: int,
+    references: bool,
+    draft: bool = False,
+    run_id: str = "run-1",
+    runtime_attempt_id: str = "attempt-1",
+) -> list[dict]:
     messages: list[dict] = [{"type": "human", "content": "current PRD turn"}]
     if stage_count > 0:
-        append_stage(messages, PRD_STAGE_SEQUENCE[0], "stage-0")
+        append_stage(
+            messages,
+            PRD_STAGE_SEQUENCE[0],
+            "stage-0",
+            run_id=run_id,
+            runtime_attempt_id=runtime_attempt_id,
+        )
     if references:
-        append_references(messages)
+        append_references(
+            messages,
+            run_id=run_id,
+            runtime_attempt_id=runtime_attempt_id,
+        )
     for index, stage in enumerate(PRD_STAGE_SEQUENCE[1:stage_count], start=1):
-        append_stage(messages, stage, f"stage-{index}")
+        append_stage(
+            messages,
+            stage,
+            f"stage-{index}",
+            run_id=run_id,
+            runtime_attempt_id=runtime_attempt_id,
+        )
     if draft:
         append_tool_batch(
             messages,
@@ -336,6 +414,10 @@ def prd_messages(*, stage_count: int, references: bool, draft: bool = False) -> 
                 "draft-success",
                 artifact={
                     "protocol": "workbench.runtime.artifact-draft.v1",
+                    "runId": run_id,
+                    "runtimeAttemptId": runtime_attempt_id,
+                    "toolCallId": "draft-success",
+                    "artifactIndex": 0,
                     "ok": True,
                     "draft": {"kind": "prd"},
                 },
@@ -356,7 +438,13 @@ def prototype_messages(
     messages: list[dict] = [{"type": "human", "content": "current Prototype turn"}]
     if stages:
         for index, stage in enumerate(PROTOTYPE_STAGE_SEQUENCE):
-            append_stage(messages, stage, f"prototype-stage-{index}")
+            append_stage(
+                messages,
+                stage,
+                f"prototype-stage-{index}",
+                run_id=run_id,
+                runtime_attempt_id=runtime_attempt_id,
+            )
     if draft:
         prototype_draft = {
             "kind": "prototype",
@@ -432,6 +520,7 @@ def submitted_result_messages(
                 "protocol": "workbench.runtime.validated-result.v1",
                 "runId": run_id,
                 "runtimeAttemptId": runtime_attempt_id,
+                "toolCallId": call_id,
                 "ok": True,
                 "result": {"message": message},
             },
@@ -812,6 +901,233 @@ class WorkbenchToolScopeMiddlewareTests(unittest.TestCase):
         self.assertIsInstance(response, AIMessage)
         self.assertEqual(response.content, "Done")
 
+    def test_runtime_result_with_a_mismatched_tool_call_id_does_not_short_circuit(self) -> None:
+        middleware = WorkbenchToolScopeMiddleware(
+            None,
+            ["prd"],
+            None,
+            ("run-1", "attempt-1"),
+        )
+        messages = submitted_result_messages("Wrong call binding")
+        messages[-1]["artifact"]["toolCallId"] = "different-call"
+        called = False
+
+        def handler(_request):
+            nonlocal called
+            called = True
+            return AIMessage(content="model continued")
+
+        response = middleware.wrap_model_call(
+            FakeModelRequest(self.all_tools, state={"messages": messages}),
+            handler,
+        )
+
+        self.assertTrue(called)
+        self.assertEqual(response.content, "model continued")
+
+    def test_successful_prd_draft_short_circuits_to_exact_runtime_result_call(self) -> None:
+        middleware = WorkbenchToolScopeMiddleware(
+            None,
+            ["prd"],
+            None,
+            ("run-1", "attempt-1"),
+        )
+        called = False
+
+        def handler(_request):
+            nonlocal called
+            called = True
+            return AIMessage(content="model continued")
+
+        messages = prd_messages(stage_count=4, references=True, draft=True)
+        response = middleware.wrap_model_call(
+            FakeModelRequest(self.all_tools, state={"messages": messages}),
+            handler,
+        )
+
+        self.assertFalse(called)
+        self.assertIsInstance(response, AIMessage)
+        self.assertEqual(response.content, "")
+        self.assertEqual(len(response.tool_calls), 1)
+        result_call = response.tool_calls[0]
+        self.assertEqual(result_call["name"], RUNTIME_RESULT_TOOL_NAME)
+        self.assertTrue(result_call["id"].startswith("workbench_auto_prd_result_"))
+        candidate = result_call["args"]["candidate"]
+        self.assertEqual(candidate["protocol"], "workbench.runtime.result.v1")
+        self.assertEqual(candidate["message"], "\u9700\u6c42\u8bf4\u660e\u4e66\u5df2\u751f\u6210\u3002")
+        self.assertEqual(
+            candidate["artifacts"][0],
+            messages[-1]["artifact"]["draft"],
+        )
+
+        messages.append(response)
+        request = FakeToolRequest(
+            RUNTIME_RESULT_TOOL_NAME,
+            result_call["id"],
+            result_call["args"],
+            {"messages": messages},
+        )
+        sentinel = object()
+        self.assertIs(
+            middleware.wrap_tool_call(request, lambda _request: sentinel),
+            sentinel,
+        )
+
+    def test_automatic_prd_result_fails_closed_for_an_unbound_draft(self) -> None:
+        middleware = WorkbenchToolScopeMiddleware(
+            None,
+            ["prd"],
+            None,
+            ("run-1", "attempt-1"),
+        )
+        messages = prd_messages(
+            stage_count=4,
+            references=True,
+            draft=True,
+            run_id="other-run",
+        )
+        response = middleware.wrap_model_call(
+            FakeModelRequest(self.all_tools, state={"messages": messages}),
+            lambda _request: AIMessage(content="model continued"),
+        )
+
+        self.assertEqual(response.content, "model continued")
+        self.assertFalse(getattr(response, "tool_calls", []))
+
+    def test_automatic_prd_result_fails_closed_for_old_attempt_stage_and_reference_history(
+        self,
+    ) -> None:
+        middleware = WorkbenchToolScopeMiddleware(
+            None,
+            ["prd"],
+            None,
+            ("run-1", "attempt-2"),
+        )
+        messages = prd_messages(
+            stage_count=4,
+            references=True,
+            draft=True,
+            runtime_attempt_id="attempt-1",
+        )
+        current_draft_call = "draft-current-attempt"
+        current_draft = {"kind": "prd"}
+        append_tool_batch(
+            messages,
+            [call(ARTIFACT_DRAFT_TOOL_NAME, current_draft_call, {
+                "artifact_index": 0,
+                "draft": current_draft,
+            })],
+            [tool_message(
+                ARTIFACT_DRAFT_TOOL_NAME,
+                current_draft_call,
+                artifact={
+                    "protocol": "workbench.runtime.artifact-draft.v1",
+                    "runId": "run-1",
+                    "runtimeAttemptId": "attempt-2",
+                    "toolCallId": current_draft_call,
+                    "artifactIndex": 0,
+                    "ok": True,
+                    "draft": current_draft,
+                },
+            )],
+        )
+
+        response = middleware.wrap_model_call(
+            FakeModelRequest(self.all_tools, state={"messages": messages}),
+            lambda _request: AIMessage(content="model continued"),
+        )
+
+        self.assertEqual(response.content, "model continued")
+        self.assertFalse(getattr(response, "tool_calls", []))
+
+    def test_failed_automatic_prd_result_uses_manual_repair_without_repeating(self) -> None:
+        middleware = WorkbenchToolScopeMiddleware(
+            None,
+            ["prd"],
+            None,
+            ("run-1", "attempt-1"),
+        )
+        messages = prd_messages(stage_count=4, references=True, draft=True)
+        automatic = middleware.wrap_model_call(
+            FakeModelRequest(self.all_tools, state={"messages": messages}),
+            lambda _request: self.fail("the first convergence call must be automatic"),
+        )
+        result_call = automatic.tool_calls[0]
+        messages.extend([
+            automatic,
+            tool_message(
+                RUNTIME_RESULT_TOOL_NAME,
+                result_call["id"],
+                '{"ok":false}',
+                artifact={
+                    "protocol": "workbench.runtime.validated-result.v1",
+                    "runId": "run-1",
+                    "runtimeAttemptId": "attempt-1",
+                    "toolCallId": result_call["id"],
+                    "ok": False,
+                    "issues": [{"path": ["artifacts", 0]}],
+                },
+            ),
+        ])
+        manual_call = call(
+            RUNTIME_RESULT_TOOL_NAME,
+            "manual-prd-result-repair",
+            result_call["args"],
+        )
+
+        response = middleware.wrap_model_call(
+            FakeModelRequest(self.all_tools, state={"messages": messages}),
+            lambda _request: AIMessage(content="", tool_calls=[manual_call]),
+        )
+        self.assertEqual(len(response.tool_calls), 1)
+        self.assertEqual(response.tool_calls[0]["id"], manual_call["id"])
+        self.assertEqual(response.tool_calls[0]["name"], manual_call["name"])
+        self.assertEqual(response.tool_calls[0]["args"], manual_call["args"])
+
+        messages.append(response)
+        sentinel = object()
+        request = FakeToolRequest(
+            RUNTIME_RESULT_TOOL_NAME,
+            manual_call["id"],
+            manual_call["args"],
+            {"messages": messages},
+        )
+        self.assertIs(
+            middleware.wrap_tool_call(request, lambda _request: sentinel),
+            sentinel,
+        )
+
+    def test_automatic_prd_result_call_id_is_bound_to_run_and_attempt(self) -> None:
+        call_ids = []
+        for run_id, runtime_attempt_id in (
+            ("run-1", "attempt-1"),
+            ("run-2", "attempt-1"),
+            ("run-1", "attempt-2"),
+        ):
+            middleware = WorkbenchToolScopeMiddleware(
+                None,
+                ["prd"],
+                None,
+                (run_id, runtime_attempt_id),
+            )
+            response = middleware.wrap_model_call(
+                FakeModelRequest(
+                    self.all_tools,
+                    state={
+                        "messages": prd_messages(
+                            stage_count=4,
+                            references=True,
+                            draft=True,
+                            run_id=run_id,
+                            runtime_attempt_id=runtime_attempt_id,
+                        ),
+                    },
+                ),
+                lambda _request: self.fail("the bound Draft must converge automatically"),
+            )
+            call_ids.append(response.tool_calls[0]["id"])
+        self.assertEqual(len(set(call_ids)), 3)
+
     def test_successful_prototype_draft_short_circuits_to_exact_runtime_result_call(self) -> None:
         middleware = WorkbenchToolScopeMiddleware(
             None,
@@ -1183,6 +1499,7 @@ class WorkbenchToolScopeMiddlewareTests(unittest.TestCase):
                     "protocol": "workbench.runtime.validated-result.v1",
                     "runId": "run-1",
                     "runtimeAttemptId": "attempt-1",
+                    "toolCallId": result_call["id"],
                     "ok": False,
                     "issues": [{"path": ["artifacts", 0]}],
                 },
@@ -1244,6 +1561,7 @@ class WorkbenchToolScopeMiddlewareTests(unittest.TestCase):
                 "protocol": "workbench.runtime.validated-result.v1",
                 "runId": "run-1",
                 "runtimeAttemptId": "attempt-1",
+                "toolCallId": manual_call["id"],
                 "ok": True,
                 "result": manual_call["args"]["candidate"],
             },
@@ -1381,6 +1699,56 @@ class WorkbenchToolScopeMiddlewareTests(unittest.TestCase):
         )
 
     @unittest.skipIf(USING_IMPORT_STUBS, "requires pinned LangChain/LangGraph dependencies")
+    def test_automatic_prd_result_routes_through_real_tool_node_and_stops(self) -> None:
+        middleware = WorkbenchToolScopeMiddleware(
+            None,
+            ["prd"],
+            None,
+            ("run-1", "attempt-1"),
+        )
+        tool_invocations: list[dict] = []
+
+        @tool(RUNTIME_RESULT_TOOL_NAME, response_format="content_and_artifact")
+        def submit_result(candidate: dict) -> tuple[str, dict]:
+            """Validate the complete Workbench Runtime result candidate."""
+            tool_invocations.append(candidate)
+            return "{\"ok\":true}", {
+                "protocol": "workbench.runtime.validated-result.v1",
+                "runId": "run-1",
+                "runtimeAttemptId": "attempt-1",
+                "toolCallId": automatic_result_call_id(
+                    "workbench_auto_prd_result_",
+                    candidate,
+                ),
+                "ok": True,
+                "result": candidate,
+            }
+
+        def model_node(state):
+            result = middleware.wrap_model_call(
+                FakeModelRequest([submit_result], state=state),
+                lambda _request: self.fail("the provider must not run after a validated PRD draft"),
+            )
+            return {"messages": [result]}
+
+        builder = StateGraph(MessagesState)
+        builder.add_node("model", model_node)
+        builder.add_node("tools", ToolNode([submit_result]))
+        builder.add_edge(START, "model")
+        builder.add_conditional_edges("model", tools_condition)
+        builder.add_edge("tools", "model")
+        graph = builder.compile()
+        result = graph.invoke({
+            "messages": prd_messages(stage_count=4, references=True, draft=True),
+        })
+
+        self.assertEqual(len(tool_invocations), 1)
+        self.assertEqual(tool_invocations[0]["protocol"], "workbench.runtime.result.v1")
+        self.assertEqual(tool_invocations[0]["artifacts"][0]["kind"], "prd")
+        self.assertEqual(result["messages"][-1].content, "\u9700\u6c42\u8bf4\u660e\u4e66\u5df2\u751f\u6210\u3002")
+        self.assertFalse(result["messages"][-1].tool_calls)
+
+    @unittest.skipIf(USING_IMPORT_STUBS, "requires pinned LangChain/LangGraph dependencies")
     def test_automatic_prototype_result_routes_through_real_tool_node_and_stops(self) -> None:
         middleware = WorkbenchToolScopeMiddleware(
             None,
@@ -1398,6 +1766,10 @@ class WorkbenchToolScopeMiddlewareTests(unittest.TestCase):
                 "protocol": "workbench.runtime.validated-result.v1",
                 "runId": "run-1",
                 "runtimeAttemptId": "attempt-1",
+                "toolCallId": automatic_result_call_id(
+                    "workbench_auto_prototype_result_",
+                    candidate,
+                ),
                 "ok": True,
                 "result": candidate,
             }
@@ -1531,6 +1903,10 @@ class WorkbenchToolScopeMiddlewareTests(unittest.TestCase):
             observed.system_message.text,
         )
         self.assertIn("Ignore any general instruction that requires clarification", observed.system_message.text)
+        self.assertIn("publish exactly one complete PRD Draft at artifact_index 0", observed.system_message.text)
+        self.assertIn("do not call a Draft or Result tool", observed.system_message.text)
+        self.assertIn("trusted Runtime submits the exact normalized Draft", observed.system_message.text)
+        self.assertIn("the Runtime does not repeat automatic submission", observed.system_message.text)
         self.assertTrue(observed.system_message.text.startswith(base_system_text))
         self.assertEqual(observed.system_message.text.count(base_system_text), 1)
         repeated = prd.wrap_model_call(observed, lambda scoped: scoped)
@@ -2305,11 +2681,7 @@ class WorkbenchToolScopeMiddlewareTests(unittest.TestCase):
             ),
         )
         self.assertEqual(recovered.status, "success")
-        partial_batch.append(tool_message(
-            "read_file",
-            retry_id,
-            REFERENCE_CONTENT[structure_path],
-        ))
+        partial_batch.append(recovered)
 
         recovered_structuring = request_in_state(
             list(partial_batch),

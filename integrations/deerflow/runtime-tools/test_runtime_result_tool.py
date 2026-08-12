@@ -196,6 +196,76 @@ class RuntimeResultToolTests(unittest.TestCase):
             [],
         )
 
+    def test_removes_an_acceptance_table_row_id_from_the_final_typed_relation(self) -> None:
+        candidate = {
+            "protocol": "workbench.runtime.result.v1",
+            "message": "done",
+            "artifacts": [{
+                "kind": "prd",
+                "schemaVersion": 2,
+                "content": {
+                    "protocol": "workbench.prd.v2",
+                    "sections": {
+                        "businessRequirements": {
+                            "coreRules": {"blocks": [{
+                                "id": "requirement-1",
+                                "type": "requirement",
+                                "acceptanceCriterionIds": [
+                                    "criterion-1",
+                                    "ac-row-v-visible",
+                                ],
+                            }]},
+                            "acceptanceCriteria": {"blocks": [{
+                                "id": "criterion-1",
+                                "type": "acceptanceCriterion",
+                                "requirementIds": ["requirement-1"],
+                            }, {
+                                "id": "acceptance-table",
+                                "type": "table",
+                                "columns": [
+                                    {"id": "sequence", "label": "序号"},
+                                    {"id": "item", "label": "验收项"},
+                                    {"id": "standard", "label": "验收标准"},
+                                ],
+                                "rows": [{"id": "ac-row-v-visible", "cells": []}],
+                            }]},
+                        },
+                    },
+                },
+            }],
+        }
+        validation = {
+            "protocol": "workbench.runtime.validation.v1",
+            "ok": True,
+            "issues": [],
+            "candidateChecksum": "c" * 64,
+            "artifactChecksums": ["a" * 64],
+        }
+
+        with patch(
+            "deerflow_workbench_tools.runtime_result_tool.validate_runtime_result",
+            return_value=validation,
+        ) as validate:
+            content, artifact = workbench_runtime_result_submit.func(
+                _runtime(),
+                candidate,
+            )
+
+        normalized = validate.call_args.args[0]
+        requirement = normalized["artifacts"][0]["content"]["sections"][
+            "businessRequirements"
+        ]["coreRules"]["blocks"][0]
+        self.assertEqual(requirement["acceptanceCriterionIds"], ["criterion-1"])
+        response = json.loads(content)
+        self.assertEqual(response["normalizations"][0]["removedId"], "ac-row-v-visible")
+        self.assertEqual(artifact["result"], normalized)
+        self.assertEqual(
+            candidate["artifacts"][0]["content"]["sections"]["businessRequirements"][
+                "coreRules"
+            ]["blocks"][0]["acceptanceCriterionIds"],
+            ["criterion-1", "ac-row-v-visible"],
+        )
+
     def test_normalizes_prototype_layout_aliases_before_final_validation(self) -> None:
         candidate = {
             "protocol": "workbench.runtime.result.v1",

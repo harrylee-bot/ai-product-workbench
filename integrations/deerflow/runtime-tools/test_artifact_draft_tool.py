@@ -485,6 +485,93 @@ class ArtifactDraftToolTests(unittest.TestCase):
         ))
         self.assertNotIn("draft", artifact)
 
+    def test_removes_one_acceptance_table_row_id_from_an_existing_typed_relation(self) -> None:
+        candidate = copy.deepcopy(self.prd_draft)
+        business = candidate["content"]["sections"]["businessRequirements"]
+        requirement = business["coreRules"]["blocks"][1]
+        table = next(
+            block for block in business["acceptanceCriteria"]["blocks"]
+            if block.get("type") == "table"
+        )
+        table["rows"][0]["id"] = "ac-row-v-visible"
+        requirement["acceptanceCriterionIds"].append("ac-row-v-visible")
+
+        content, artifact = workbench_artifact_draft_publish.func(
+            self.prd_runtime,
+            0,
+            candidate,
+        )
+
+        response = json.loads(content)
+        normalized_requirement = artifact["draft"]["content"]["sections"][
+            "businessRequirements"
+        ]["coreRules"]["blocks"][1]
+        self.assertTrue(response["ok"])
+        self.assertEqual(
+            normalized_requirement["acceptanceCriterionIds"],
+            ["criterion-main"],
+        )
+        self.assertEqual(
+            next(
+                normalization for normalization in response["normalizations"]
+                if normalization.get("removedId")
+            ),
+            {
+                "path": [
+                    "content", "sections", "businessRequirements", "coreRules",
+                    "blocks", 1, "acceptanceCriterionIds",
+                ],
+                "removedId": "ac-row-v-visible",
+                "sourcePath": [
+                    "content", "sections", "businessRequirements", "acceptanceCriteria",
+                    "blocks", 1, "rows", 0, "id",
+                ],
+                "reason": "acceptance_table_row_reference",
+            },
+        )
+        self.assertEqual(
+            requirement["acceptanceCriterionIds"],
+            ["criterion-main", "ac-row-v-visible"],
+        )
+
+    def test_acceptance_table_rows_do_not_invent_typed_prd_relations(self) -> None:
+        for mutation in ("row-only", "unknown", "duplicate"):
+            candidate = copy.deepcopy(self.prd_draft)
+            business = candidate["content"]["sections"]["businessRequirements"]
+            requirement = business["coreRules"]["blocks"][1]
+            table = next(
+                block for block in business["acceptanceCriteria"]["blocks"]
+                if block.get("type") == "table"
+            )
+            table["rows"][0]["id"] = "ac-row-v-visible"
+            if mutation == "row-only":
+                requirement["acceptanceCriterionIds"] = ["ac-row-v-visible"]
+            elif mutation == "unknown":
+                requirement["acceptanceCriterionIds"] = [
+                    "criterion-main",
+                    "ac-row-v-missing",
+                ]
+            else:
+                requirement["acceptanceCriterionIds"] = [
+                    "criterion-main",
+                    "ac-row-v-visible",
+                    "ac-row-v-visible",
+                ]
+
+            content, artifact = workbench_artifact_draft_publish.func(
+                self.prd_runtime,
+                0,
+                candidate,
+            )
+
+            response = json.loads(content)
+            self.assertFalse(response["ok"], mutation)
+            self.assertFalse(any(
+                normalization.get("removedId")
+                for normalization in response["normalizations"]
+            ), mutation)
+            self.assertNotIn("draft", artifact)
+
     def test_rejects_an_unstable_artifact_index(self) -> None:
         with self.assertRaisesRegex(ValueError, "WORKBENCH_ARTIFACT_DRAFT_INDEX_INVALID"):
             workbench_artifact_draft_publish.func(self.runtime, 20, self.draft)
