@@ -648,7 +648,11 @@ def _stage_progress(
     return len(successful_stages), invalid
 
 
-def _prototype_stage_progress(state: Any) -> tuple[int, bool]:
+def _prototype_stage_progress(
+    state: Any,
+    run_id: str | None = None,
+    runtime_attempt_id: str | None = None,
+) -> tuple[int, bool]:
     completed, invalid = _completed_tool_calls(state)
     successful_stages: list[str] = []
     for call in completed:
@@ -656,6 +660,13 @@ def _prototype_stage_progress(state: Any) -> tuple[int, bool]:
             continue
         stage = call["args"].get("stage")
         artifact = _value(call["response"], "artifact")
+        if not _workbench_call_is_bound(
+            artifact,
+            call["id"],
+            run_id,
+            runtime_attempt_id,
+        ):
+            continue
         if (
             stage not in PROTOTYPE_STAGE_SEQUENCE
             or not isinstance(artifact, Mapping)
@@ -1056,7 +1067,11 @@ def _automatic_prototype_result_message(
         run_id,
         runtime_attempt_id,
     )
-    stage_count, stage_invalid = _prototype_stage_progress(state)
+    stage_count, stage_invalid = _prototype_stage_progress(
+        state,
+        run_id,
+        runtime_attempt_id,
+    )
     result_count, result_invalid = _successful_runtime_results(
         state,
         run_id,
@@ -1714,7 +1729,11 @@ class WorkbenchToolScopeMiddleware(AgentMiddleware[AgentState]):
             or request.tool_call.get("name") != GENERATION_STAGE_TOOL_NAME
         ):
             return None
-        stage_count, stage_invalid = _prototype_stage_progress(request.state)
+        stage_count, stage_invalid = _prototype_stage_progress(
+            request.state,
+            self._run_id,
+            self._runtime_attempt_id,
+        )
         expected_stage = (
             PROTOTYPE_STAGE_SEQUENCE[stage_count]
             if stage_count < len(PROTOTYPE_STAGE_SEQUENCE)
@@ -1821,7 +1840,11 @@ class WorkbenchToolScopeMiddleware(AgentMiddleware[AgentState]):
         if name not in {ARTIFACT_DRAFT_TOOL_NAME, RUNTIME_RESULT_TOOL_NAME}:
             return None
 
-        stage_count, stage_invalid = _prototype_stage_progress(request.state)
+        stage_count, stage_invalid = _prototype_stage_progress(
+            request.state,
+            self._run_id,
+            self._runtime_attempt_id,
+        )
         draft, _artifact_index, draft_invalid = _latest_successful_prototype_draft(
             request.state,
             self._run_id,

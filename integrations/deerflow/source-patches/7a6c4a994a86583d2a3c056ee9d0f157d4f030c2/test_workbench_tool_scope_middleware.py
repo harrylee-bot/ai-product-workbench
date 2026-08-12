@@ -1476,6 +1476,103 @@ class WorkbenchToolScopeMiddlewareTests(unittest.TestCase):
                 self.assertTrue(called)
                 self.assertEqual(response.content, "model continued")
 
+    def test_automatic_prototype_result_ignores_old_attempt_stages(self) -> None:
+        middleware = WorkbenchToolScopeMiddleware(
+            None,
+            ["prototype"],
+            None,
+            ("run-1", "attempt-2"),
+        )
+        messages = prototype_messages(
+            draft=False,
+            runtime_attempt_id="attempt-1",
+        )
+        current_draft_call = "prototype-draft-current-attempt"
+        current_draft = {
+            "kind": "prototype",
+            "schemaVersion": 1,
+            "title": "Current attempt",
+            "operation": {"kind": "create"},
+            "citations": [],
+            "content": {"protocol": "workbench.prototype.v1"},
+        }
+        append_tool_batch(
+            messages,
+            [call(ARTIFACT_DRAFT_TOOL_NAME, current_draft_call, {
+                "artifact_index": 0,
+                "draft": current_draft,
+            })],
+            [tool_message(
+                ARTIFACT_DRAFT_TOOL_NAME,
+                current_draft_call,
+                artifact={
+                    "protocol": "workbench.runtime.artifact-draft.v1",
+                    "runId": "run-1",
+                    "runtimeAttemptId": "attempt-2",
+                    "toolCallId": current_draft_call,
+                    "artifactIndex": 0,
+                    "ok": True,
+                    "draft": current_draft,
+                },
+            )],
+        )
+
+        response = middleware.wrap_model_call(
+            FakeModelRequest(self.all_tools, state={"messages": messages}),
+            lambda _request: AIMessage(content="model continued"),
+        )
+
+        self.assertEqual(response.content, "model continued")
+        self.assertFalse(getattr(response, "tool_calls", []))
+
+    def test_prototype_stage_gate_ignores_old_attempt_stages(self) -> None:
+        middleware = WorkbenchToolScopeMiddleware(
+            None,
+            ["prototype"],
+            None,
+            ("run-1", "attempt-2"),
+        )
+        messages = prototype_messages(
+            draft=False,
+            runtime_attempt_id="attempt-1",
+        )
+        request = request_in_state(
+            messages,
+            "workbench_generation_stage_update",
+            "current-attempt-design-system",
+            {"stage": PROTOTYPE_STAGE_SEQUENCE[0]},
+        )
+        sentinel = object()
+
+        self.assertIs(
+            middleware.wrap_tool_call(request, lambda _request: sentinel),
+            sentinel,
+        )
+
+    def test_prototype_publication_gate_ignores_old_attempt_stages(self) -> None:
+        middleware = WorkbenchToolScopeMiddleware(
+            None,
+            ["prototype"],
+            None,
+            ("run-1", "attempt-2"),
+        )
+        messages = prototype_messages(
+            draft=False,
+            runtime_attempt_id="attempt-1",
+        )
+        blocked = middleware.wrap_tool_call(
+            request_in_state(
+                messages,
+                ARTIFACT_DRAFT_TOOL_NAME,
+                "current-attempt-draft-before-stages",
+                {"artifact_index": 0, "draft": {"kind": "prototype"}},
+            ),
+            lambda _request: self.fail("old Attempt stages must not unlock publication"),
+        )
+
+        self.assertIn("WORKBENCH_PROTOTYPE_STAGE_REQUIRED", blocked.content)
+        self.assertIn("stage='design-system'", blocked.content)
+
     def test_failed_automatic_prototype_result_uses_manual_repair_without_repeating(self) -> None:
         middleware = WorkbenchToolScopeMiddleware(
             None,
