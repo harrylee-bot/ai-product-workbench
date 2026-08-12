@@ -80,7 +80,8 @@ describe("DeerFlow PRD Runtime Result reference", () => {
     expect(normalizedWorkbenchSkillSource).not.toContain("or use clarification where");
     expect(normalizedWorkbenchSkillSource).toContain("Runtime contract rejects a Run");
     expect(normalizedWorkbenchSkillSource).toContain("PRD-only Run must complete");
-    expect(normalizedWorkbenchSkillSource).toContain("returning `ok:true`");
+    expect(normalizedWorkbenchSkillSource).toContain("one successful Draft");
+    expect(normalizedWorkbenchSkillSource).toContain("trusted Runtime's successful Result submission");
   });
 
   it("vendors the complete canonical requirement-document skill byte for byte", () => {

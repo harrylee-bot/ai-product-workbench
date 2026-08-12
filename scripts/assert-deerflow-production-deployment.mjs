@@ -573,8 +573,17 @@ assert(
   )
     && toolScopeMiddlewareSource.includes("WORKBENCH_PRD_PUBLICATION_BATCH_INVALID")
     && toolScopeMiddlewareSource.includes("WORKBENCH_PRD_DRAFT_REQUIRED")
-    && toolScopeMiddlewareSource.includes("_successful_prd_drafts(request.state)")
-    && toolScopeMiddlewareSource.includes("_successful_runtime_results(request.state)"),
+    && toolScopeMiddlewareSource.includes("_successful_prd_drafts(")
+    && toolScopeMiddlewareSource.includes("_successful_runtime_results(")
+    && toolScopeMiddlewareSource.includes("self._run_id")
+    && toolScopeMiddlewareSource.includes("self._runtime_attempt_id")
+    && toolScopeMiddlewareSource.includes("def _automatic_prd_result_message(")
+    && toolScopeMiddlewareSource.includes(
+      '_AUTOMATIC_PRD_RESULT_CALL_PREFIX = "workbench_auto_prd_result_"',
+    )
+    && toolScopeMiddlewareSource.includes(
+      'artifact.get("toolCallId") == call_id',
+    ),
   "Workbench PRD gate must enforce one draft, one final result, and publication batch protection",
 );
 assert(

@@ -1364,6 +1364,41 @@ describe("workbench.prd.v2", () => {
     expect(prdDocumentV2Schema.safeParse(miniProgram).success).toBe(true);
   });
 
+  it("keeps coordinated channel exclusions negative while preserving mixed positive facts", () => {
+    const productionSentence = cloneExample();
+    productionSentence.sections.introduction.usageScenarios.blocks[0] = {
+      id: "usage-main",
+      type: "paragraph",
+      content: text("已登录消费者在端内渠道（仅限客户端 App 渠道，不投放 WAP/H5 渠道和微信小程序端）进入设置页面修改接收偏好。由于本次不投放 WAP/H5 与小程序，WAP/H5 渠道与小程序在渠道表中 enabled 配置为 false。"),
+    };
+    expect(prdDocumentV2Schema.safeParse(productionSentence).success).toBe(true);
+
+    const miniProgramPositive = cloneExample();
+    miniProgramPositive.sections.introduction.usageScenarios.blocks[0] = {
+      id: "usage-main",
+      type: "paragraph",
+      content: text("端内渠道保持启用。WAP/H5 不投放，但小程序正常运行并提供页面入口。"),
+    };
+    miniProgramPositive.sections.introduction.usageScenarios.channelTable.rows[1]!.enabled = false;
+    miniProgramPositive.sections.introduction.usageScenarios.channelTable.rows[2]!.enabled = true;
+    miniProgramPositive.sections.safetyBaseline.rows[11] = {
+      sequence: 12,
+      applicability: "是",
+      remarks: "小程序页面已按正文完成安全自查。",
+    };
+    expect(prdDocumentV2Schema.safeParse(miniProgramPositive).success).toBe(true);
+
+    const wapPositive = cloneExample();
+    wapPositive.sections.introduction.usageScenarios.blocks[0] = {
+      id: "usage-main",
+      type: "paragraph",
+      content: text("端内渠道保持启用。小程序不投放，但 WAP/H5 页面继续开放并提供设置入口。"),
+    };
+    wapPositive.sections.introduction.usageScenarios.channelTable.rows[1]!.enabled = true;
+    wapPositive.sections.introduction.usageScenarios.channelTable.rows[2]!.enabled = false;
+    expect(prdDocumentV2Schema.safeParse(wapPositive).success).toBe(true);
+  });
+
   it("rejects template reminders, standalone weak wording, and standalone API chapters", () => {
     const reminder = cloneExample();
     reminder.sections.introduction.background.blocks[0] = {

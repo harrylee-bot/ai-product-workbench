@@ -69,6 +69,10 @@ describe("runtimePrdResultGuidance", () => {
     expect(guidance).toContain("端内渠道, 客户端, 消费者端, and 前端 do not prove APP or mini-program loading");
     expect(guidance).toContain("IDs globally unique across the document and every nested IR entity");
     expect(guidance).toContain("requirement/criterion references bidirectional");
+    expect(guidance).toContain("acceptanceCriterionIds entry must be the ID of a typed acceptanceCriterion block");
+    expect(guidance).toContain("Never put an acceptance-table row ID such as ac-row-v-*");
+    expect(guidance).toContain("PrdTextInline.text value is limited to 10,000 characters");
+    expect(guidance).toContain("never paste the complete PRD or Runtime JSON into any text field");
     expect(guidance).toContain("content.sections.businessRequirements.acceptanceCriteria");
     expect(guidance).toContain("content.sections.businessRequirements.additionalSections");
     expect(guidance).toContain("content.sections.degradation");
@@ -76,6 +80,8 @@ describe("runtimePrdResultGuidance", () => {
     expect(guidance).toContain("content.sections.businessRequirements also owns pageLinks, coreRules, and flowAndPages");
     expect(guidance).toContain("Never put acceptanceCriteria or additionalSections directly under content.sections");
     expect(guidance).toContain("never put degradation or safetyBaseline directly under content");
+    expect(guidance).toContain("trusted Runtime submits the exact normalized Draft");
+    expect(guidance).toContain("the Runtime does not repeat automatic submission");
     expect(workbenchSkillSource).toContain("content.sections.businessRequirements.acceptanceCriteria");
     expect(workbenchSkillSource).toContain("content.sections.businessRequirements.additionalSections");
     expect(workbenchSkillSource).toContain("content.sections.degradation");
