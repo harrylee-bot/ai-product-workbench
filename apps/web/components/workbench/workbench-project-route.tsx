@@ -109,6 +109,7 @@ import {
   ProjectScreenView,
   type ProjectScreenViewContract,
 } from "./workbench-project-screen-view";
+import type { ProjectPreviewArtifact } from "./workbench-project-preview-overlay";
 import type { WorkbenchScreenContextToolbarModel } from "./workbench-screen-context-toolbar";
 import {
   projectScreenArtifactReferenceFromNode,
@@ -177,6 +178,25 @@ type ProjectPrototypePreviewTarget = {
   title: string;
 };
 
+export function projectReadyPrdPreviewArtifacts(
+  nodes: readonly WorkbenchNode[],
+  persistedBoardNodeIds: ReadonlySet<string>,
+): ProjectPreviewArtifact[] {
+  return nodes.flatMap((node) => {
+    if (
+      node.type !== "documentCanvas"
+      || node.data.phase !== "complete"
+      || !persistedBoardNodeIds.has(node.id)
+      || !node.data.artifact
+    ) return [];
+    return [{
+      kind: "prd" as const,
+      reference: node.data.artifact,
+      title: node.data.title,
+    }];
+  });
+}
+
 export function workbenchAgentTaskSelectionBoundary(input: {
   projectMode: ProjectMode;
   prompt: string;
@@ -240,9 +260,10 @@ export function createPrdVersionEditRequest(
 
 const boardZoomDisplayRatio = 63 / 34;
 const generatedOverviewActualZoom = 0.155;
-const prdCanvasSize = 500;
-// The source renders its 500px PRD at about 563 CSS px while displaying 93% zoom.
-const prdViewportZoomAt93Percent = 563 / prdCanvasSize;
+const prdCanvasWidth = 794;
+const prdCanvasHeight = 1123;
+// A4 at 96dpi, displayed at about 563 CSS px while the document mode reads as 93%.
+const prdViewportZoomAt93Percent = 563 / prdCanvasWidth;
 const prdZoomDisplayRatio = 0.93 / prdViewportZoomAt93Percent;
 
 const selectedArtboardBounds = {
@@ -391,7 +412,7 @@ export function getPersistedPrdViewport(
 ): Viewport {
   return getPrdNodeViewport(
     node.position,
-    prdCanvasSize,
+    node.workbench.size?.width ?? node.width ?? prdCanvasWidth,
     containerWidth,
     containerHeight,
   );
@@ -409,9 +430,10 @@ function getPrdNodeViewport(
     : Math.max(320, documentViewport.x);
   const rightInset = containerWidth >= 768 && containerWidth < 1024 ? 80 : 40;
   const availableWidth = Math.max(1, containerWidth - targetLeft - rightInset);
+  const preferredZoom = documentViewport.zoom * (prdCanvasWidth / nodeWidth);
   const zoom = Math.max(
     0.04,
-    Math.min(documentViewport.zoom, availableWidth / nodeWidth),
+    Math.min(preferredZoom, availableWidth / nodeWidth),
   );
 
   return {
@@ -507,11 +529,13 @@ function persistedBoardNodesToWorkbench(
       : false;
 
     if (artifactKind === "prd") {
+      const width = node.workbench.size?.width ?? node.width ?? prdCanvasWidth;
+      const height = node.workbench.size?.height ?? node.height ?? prdCanvasHeight;
       return {
         ...common,
-        height: prdCanvasSize,
-        style: { ...common.style, height: prdCanvasSize, width: prdCanvasSize },
-        width: prdCanvasSize,
+        height,
+        style: { ...common.style, height, width },
+        width,
         data: {
           artifact,
           phase: "complete",
@@ -588,8 +612,8 @@ export function runtimeDraftsToWorkbench(
       continue;
     }
     if (draft.kind === "prd") {
-      const height = prdCanvasSize;
-      const width = prdCanvasSize;
+      const height = prdCanvasHeight;
+      const width = prdCanvasWidth;
       nodes.push({
         data: {
           artifact: reference,
@@ -1306,7 +1330,7 @@ function WorkbenchProjectRouteInner() {
               runStatus: workbench.runStatus,
               submissionError: workbench.submissionError,
               submitting: workbench.submitting,
-              targetSurface: workbench.currentRun?.targetSurface ?? "app",
+              targetSurface: workbench.currentRun?.targetSurface ?? "web",
             }}
       />
       <WorkbenchBoardConflictDialog
@@ -1871,6 +1895,10 @@ function ProjectScreen({
     previewPrototypeVersionReferences,
     capabilities.canPreview && previewPrototypeVersionReferences.length > 0,
   );
+  const previewPrdArtifacts = useMemo(
+    () => projectReadyPrdPreviewArtifacts(nodes, persistedBoardNodeIds),
+    [nodes, persistedBoardNodeIds],
+  );
   const createPrototypeVersion = useCreateWorkbenchArtifactVersion(
     projectId,
     artifactSelection.styleTargetArtifactId,
@@ -2313,11 +2341,14 @@ function ProjectScreen({
     projectId,
   });
 
-  const previewArtifacts = capabilities.canPreview
-    ? projectReadyPrototypePreviewArtifacts(
-        previewPrototypeTargets,
-        previewPrototypeVersionQueries.flatMap((query) => query.data?.value ? [query.data.value] : []),
-      )
+  const previewArtifacts: ProjectPreviewArtifact[] = capabilities.canPreview
+    ? [
+        ...previewPrdArtifacts,
+        ...projectReadyPrototypePreviewArtifacts(
+          previewPrototypeTargets,
+          previewPrototypeVersionQueries.flatMap((query) => query.data?.value ? [query.data.value] : []),
+        ).map((artifact) => ({ ...artifact, kind: "prototype" as const })),
+      ]
     : [];
 
   useEffect(() => {
@@ -2459,7 +2490,7 @@ function ProjectScreen({
         const nextViewport = activePrdNode
           ? getPrdNodeViewport(
               activePrdNode.position,
-              activePrdSize?.width || prdCanvasSize,
+              activePrdSize?.width || prdCanvasWidth,
               rect.width,
               rect.height,
             )
@@ -2586,7 +2617,7 @@ function ProjectScreen({
       const size = workbenchNodeCanvasSize(target);
       const nextViewport = getPrdNodeViewport(
         target.position,
-        size.width || prdCanvasSize,
+        size.width || prdCanvasWidth,
         stage.width,
         stage.height,
       );
@@ -4070,7 +4101,11 @@ function ProjectScreen({
         setProjectMembersOpen(true);
       },
       onMembersOpenChange: (open) => setProjectMembersOpen(open),
-      onOpenPreview: openPreview,
+      onOpenPreview: () => {
+        if (previewArtifacts.length > 0) {
+          openPreview(previewArtifacts.map(({ reference }) => reference));
+        }
+      },
       onRenameProject: projectActions.renameProject,
       onRequestArchive: () => {
         setProjectMenuOpen(false);
@@ -4150,6 +4185,11 @@ function ProjectScreen({
           ? composerIntent.artifactTargets
           : artifactSelection.editArtifactTargets,
         onClearContext: clearComposerIntent,
+        onCloseModel: () => {
+          closeModelMenu();
+          setProjectMenuOpen(false);
+          setZoomMenuOpen(false);
+        },
         onSelectModel: (choiceKey) => {
           selectModel(choiceKey);
         },

@@ -60,7 +60,7 @@
     "g5:postgres-recovery": "node scripts/workbench-postgres-recovery-drill.mjs",
     "g5:postgres-recovery:test": "node --test scripts/workbench-postgres-recovery-drill.test.mjs scripts/workbench-postgres-recovery-drill.postgres.test.mjs",
     "production:acceptance:test": "node --test scripts/production-acceptance/production-acceptance.test.mjs",
-    "remediation:r0:test": "node --test scripts/release-candidate-manifest.test.mjs scripts/evidence-ledger.test.mjs scripts/verify-workbench-reproducibility.test.mjs scripts/g0-scope-approval.test.mjs scripts/workbench-hard-cut-manifest.test.mjs scripts/workbench-web-typegen.test.mjs scripts/e2e/workbench-route-frame-contract.test.mjs scripts/production-acceptance/production-acceptance.test.mjs",
+    "remediation:r0:test": "node --test scripts/release-candidate-manifest.test.mjs scripts/evidence-ledger.test.mjs scripts/verify-workbench-reproducibility.test.mjs scripts/g0-scope-approval.test.mjs scripts/workbench-hard-cut-manifest.test.mjs scripts/workbench-web-typegen.test.mjs scripts/knowledge-vault-audit.test.mjs scripts/workbench-postgres-http-e2e-diagnostics.test.mjs scripts/e2e/workbench-route-frame-contract.test.mjs scripts/production-acceptance/production-acceptance.test.mjs",
     "remediation:runtime:baseline:test": "node --test scripts/runtime-execution-timeline.test.mjs scripts/workbench-launch-config.test.mjs scripts/assert-runtime-provider-state-test-database.test.mjs scripts/workbench-runtime-observability.test.mjs",
     "runtime:provider-state:backfill": "tsx scripts/backfill-workbench-runtime-provider-state.mts",
     "runtime:provider-state:backfill:test": "node --import tsx --test scripts/backfill-workbench-runtime-provider-state.test.mts",
@@ -98,8 +98,6 @@
     "knowledge:conformance": "npm run workbench:prepare && npm --workspace @workbench/workbench-file-worker run build && npm --workspace @workbench/workbench-api run build && node scripts/workbench-knowledge-conformance.mjs",
     "knowledge:conformance:test": "npm run workbench:prepare && npm --workspace @workbench/workbench-file-worker run build && npm --workspace @workbench/workbench-api run build && node --test scripts/workbench-knowledge-conformance.test.mjs",
     "knowledge:retrieval:eval": "npm --workspace @workbench/workbench-knowledge run build && node scripts/workbench-knowledge-retrieval-eval.mjs",
-    "knowledge:migrate:legacy": "node scripts/migrate-workbench-legacy-knowledge.mjs",
-    "knowledge:migrate:legacy:test": "node --test scripts/migrate-workbench-legacy-knowledge.test.mjs",
     "audit:knowledge-vault": "node scripts/knowledge-vault-audit.mjs",
     "axure:export": "node scripts/axure-rp-export-html.mjs",
     "deerflow:bootstrap": "node scripts/deerflow-bootstrap.mjs",
@@ -111,22 +109,34 @@
     "deerflow:tools:test": "PYTHONPATH=integrations/deerflow/runtime-tools /usr/bin/python3 -S -m unittest integrations/deerflow/runtime-tools/test_artifact_draft_tool.py integrations/deerflow/runtime-tools/test_generation_stage_tool.py integrations/deerflow/runtime-tools/test_prototype_patch_tool.py integrations/deerflow/runtime-tools/test_knowledge_client.py integrations/deerflow/runtime-tools/test_prd_reference_tool.py integrations/deerflow/runtime-tools/test_runtime_result_tool.py integrations/deerflow/runtime-tools/test_runtime_result_validator.py integrations/deerflow/runtime-tools/test_canvas_client.py integrations/deerflow/runtime-tools/test_canvas_tool.py integrations/deerflow/runtime-tools/test_runtime_tool_architecture.py integrations/deerflow/source-patches/7a6c4a994a86583d2a3c056ee9d0f157d4f030c2/test_workbench_tool_scope_middleware.py"
   },
   "overrides": {
+    "brace-expansion": "5.0.8",
     "esbuild": "0.28.1",
     "fast-uri": "3.1.4",
     "fast-xml-parser": "5.10.1",
     "glob": "10.5.0",
     "js-yaml": "4.3.0",
     "multer": "2.2.0",
-    "postcss": "8.5.16",
+    "postcss": "8.5.18",
     "sharp": "0.35.0",
-    "vite": "8.1.3"
+    "vite": "8.1.3",
+    "@asteasolutions/zod-to-openapi": {
+      "zod": "3.25.76"
+    }
   },
   "devDependencies": {
+    "@aws-sdk/client-s3": "3.896.0",
+    "@aws-sdk/s3-request-presigner": "3.896.0",
+    "@langchain/langgraph-sdk": "1.9.25",
     "@prisma/client": "^6.16.0",
     "@redocly/ajv": "8.11.2",
     "@types/node": "^22.10.0",
+    "@workbench/workbench-content-security": "0.1.0",
+    "@workbench/workbench-telemetry": "0.1.0",
+    "canonicalize": "2.1.0",
     "dependency-cruiser": "^18.1.0",
+    "esbuild": "0.28.1",
     "pg": "8.22.0",
+    "playwright": "1.61.1",
     "prisma": "^6.16.0",
     "tsx": "^4.20.5",
     "typescript": "^5.9.2",
@@ -134,7 +144,7 @@
   },
   "optionalDependencies": {
     "@esbuild/linux-x64": "0.28.1",
-    "@next/swc-linux-x64-musl": "16.2.10",
+    "@next/swc-linux-x64-musl": "16.2.12",
     "@rolldown/binding-linux-x64-gnu": "1.1.4",
     "@rolldown/binding-linux-x64-musl": "1.1.4",
     "@tailwindcss/oxide-linux-x64-gnu": "4.3.1",
@@ -146,8 +156,6 @@
     "@workbench/workbench-contracts": "0.1.0",
     "@workbench/workbench-db": "0.1.0",
     "@workbench/workbench-knowledge": "0.1.0",
-    "fast-uri": "3.1.4",
-    "jose": "6.2.3",
     "pg-boss": "12.26.0",
     "sharp": "0.35.0"
   },

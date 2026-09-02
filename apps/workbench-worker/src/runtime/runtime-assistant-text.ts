@@ -171,7 +171,12 @@ export function extractAssistantTextFrame(
   }
   if (event !== "values") return null;
   const messages = runtimeMessages(data);
-  const message = [...messages].reverse().map(asRecord).find((candidate) => candidate && isAssistant(candidate));
+  const currentTurnStart = currentTurnStartIndex(messages);
+  const message = messages
+    .slice(currentTurnStart + 1)
+    .reverse()
+    .map(asRecord)
+    .find((candidate) => candidate && isAssistant(candidate));
   if (!message) return null;
   const text = contentText(message.content);
   return text ? { kind: "cumulative", text } : null;
@@ -647,11 +652,31 @@ function runtimeMessages(finalState: unknown) {
   return Array.isArray(nested?.messages) ? nested.messages : [];
 }
 
+function currentTurnStartIndex(messages: unknown[]) {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = asRecord(messages[index]);
+    if (message && isHuman(message)) return index;
+  }
+  return -1;
+}
+
 function isAssistant(message: Record<string, unknown>) {
   const role = messageField(message, "role")?.toLowerCase();
   const type = messageField(message, "type")?.toLowerCase();
   if (asRecord(message.additional_kwargs)?.hide_from_ui === true) return false;
   return role === "assistant" || role === "ai" || ["ai", "assistant", "aimessage", "aimessagechunk"].includes(type ?? "");
+}
+
+function isHuman(message: Record<string, unknown>) {
+  const role = messageField(message, "role")?.toLowerCase();
+  const type = messageField(message, "type")?.toLowerCase();
+  const constructor = Array.isArray(message.id)
+    ? message.id.filter((item): item is string => typeof item === "string").at(-1)?.toLowerCase()
+    : undefined;
+  return role === "user"
+    || role === "human"
+    || ["human", "user", "humanmessage", "usermessage"].includes(type ?? "")
+    || constructor === "humanmessage";
 }
 
 function messageField(message: Record<string, unknown>, field: string) {

@@ -12,7 +12,7 @@ import { PrismaClient } from "@workbench/workbench-db";
 import { fromPrisma, PgBoss } from "pg-boss";
 
 const databaseUrl = required("WORKBENCH_DATABASE_URL");
-const modelId = process.env.DEERFLOW_SMOKE_MODEL_ID?.trim() || "gpt-5.5";
+const modelId = process.env.DEERFLOW_SMOKE_MODEL_ID?.trim() || "gemini-3.6-flash";
 const timeoutMs = positiveInteger(process.env.WORKBENCH_DEPLOYED_WORKER_SMOKE_TIMEOUT_MS || "360000");
 const suffix = randomUUID().replaceAll("-", "");
 const ids = {

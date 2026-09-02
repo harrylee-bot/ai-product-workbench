@@ -1,6 +1,6 @@
 # 产品工作台知识检索与不可变 Profile 方案
 
-更新日期：2026-07-15
+更新日期：2026-07-28
 状态：仓库内主链已实现；生产模型采用仍取决于固定中文评测集
 
 ## 结论
@@ -22,8 +22,8 @@
 
 ## 当前事实
 
-- Vault 当前有 85 个 Markdown：34 个 production、43 个 source lookup、6 个 excluded、2 个 quarantine。
-- 历史 800-token 配置下约 542 chunks、105,065 个 `o200k_base` token；该数字仅用于迁移规模估算，不是生产切分事实。
+- 当前 Vault 由 `npm run audit:knowledge-vault` 维护可校验闭包。本次清理后共有 40 个 Markdown（34 个发布条目、4 个来源索引、1 个收件箱说明、1 个模板），不再保留旧版镜像和导入记录。
+- 当前 `storage/` 只保留 62 个由 Vault 明确引用的原始来源资产，路径、byte size 和 SHA-256 全部校验通过；未引用文件、旧对话、烟测数据和临时派生物均不属于知识发布候选。
 - 当前已完成 EmbeddingProfile、独立向量表、release profile pin、持久化 embedding batch、TEI adapter 和数据库完整性 finalizer；这些能力已通过模拟 provider 故障与真实 PostgreSQL 崩溃重放，但尚未用最终候选模型完成评测和生产验收。
 - `KnowledgeRelease` 通过五列复合外键同时固定 RetrievalProfile ID/spec SHA-256 与 embedding profile ID/spec SHA-256/dimension；manifest 固定同一身份，Run 和 ArtifactVersion 经不可变 release 保留传递 pin。
 - `EmbeddingProfile v1` 严格合同与 RFC 8785 `specSha256` 已实现；数据库已删除 `KnowledgeChunk.embeddingModel` 与临时 `vector(1536)`，改为独立、无 typmod 的 `KnowledgeChunkEmbedding`。
@@ -31,11 +31,11 @@
 - 当前尚未登记任何通过中文评测后进入 `adopted` 的生产 profile，也没有部署固定权重、revision 和镜像 digest 的生产 TEI；因此代码链路完成不等于 dense 检索已可用。
 - File Worker 已改为启动时加载本地 Hugging Face `tokenizer.json` + `tokenizer_config.json`，用两份文件的 canonical artifact SHA-256 与 EmbeddingProfile pin 做 fail-closed 校验；切分上限直接取 profile 的 `chunkMaximumTokens`，不再存在独立 token ceiling。TEI adapter 仍会调用 `/tokenize` 精确复核单条与整批 token 上限。
 - 产品工作台已有 citation-ready 检索 service、参数化 PostgreSQL lexical/dense candidate store、profile 驱动 RRF、TEI query embedding/reranker adapter、capability ledger 与 DeerFlow trusted citation tool。生产 adopted 模型、可达部署和质量评测未完成，因此仍不能宣称生产 dense 检索已验收。
-- 本地 `storage/` 约 5.2 GiB，包含旧对话与烟测数据，不能整体视为知识资产迁移。
+- `storage/` 是本地原始资产归档，不同步到外部知识库，也不整体发布；只有通过 Markdown 引用闭包的文件进入 KnowledgeRelease 构建输入。
 
 ## 已落地基础与验证
 
-截至 2026-07-15，以下基础切片已落地：
+当前仓库已落地以下基础切片：
 
 1. `packages/workbench-knowledge` 提供 `parseEmbeddingProfileV1`，严格拒绝未知字段、可变 revision 别名、未固定镜像 digest、非法 token/batch 上限和非 v1 输出语义；返回冻结的 canonical spec、维度和 RFC 8785 SHA-256。
 2. 迁移 `20260714174500_knowledge_embedding_profiles` 新建 `EmbeddingProfile` 与 `KnowledgeChunkEmbedding`，并物理移除 chunk 上的供应商模型列和 1536 维向量列。
@@ -186,7 +186,7 @@ CREATE TABLE knowledge_chunk_embeddings (
 
 Prisma 继续把 `vector` 作为 `Unsupported("vector")`，相似度查询和约束迁移使用参数化 SQL。`KnowledgeChunk` 已使用非空 `release_id`，并以 `(document_id, release_id)` 复合外键引用 `KnowledgeDocument(id, release_id)`；embedding 表以 `(id, release_id)` 唯一键引用 chunk。这样 chunk、document、release 的归属由数据库证明，不能只靠应用代码相信 join 路径。
 
-当前 542 个向量先在 `release_id + profile_id` 过滤后做精确 cosine 排序。单 release 达到约 50,000 chunks，或实际 p95/CPU 压测证明必要后，才为 adopted profile 增加 partial expression HNSW：
+当前先在 `release_id + profile_id` 过滤后做精确 cosine 排序。单 release 达到约 50,000 chunks，或实际 p95/CPU 压测证明必要后，才为 adopted profile 增加 partial expression HNSW：
 
 ```sql
 CREATE INDEX knowledge_embedding_qwen3_1024_hnsw
@@ -233,7 +233,7 @@ building -> chunks_ready -> embedding -> finalizing -> ready
 
 ## 评测门禁
 
-用当前 34 个 production 文档建立至少 100 条人工标注中文查询，覆盖产品术语、缩写、精确字段、自然语言、多义词、表格、中文夹英文和 source lookup。固定比较：
+用当前发布层语料建立至少 100 条人工标注中文查询，覆盖产品术语、缩写、精确字段、自然语言、多义词、表格、中文夹英文和 source lookup。固定比较：
 
 1. Jieba FTS。
 2. BGE-M3 dense。
@@ -286,11 +286,9 @@ R0 候选捕获必须提供可读但不纳入 Git 的 `storage/` 外部闭包（
 
 `assetClosure.unreferencedStorage.byTopLevel` 按 storage 顶层分类输出文件数、字节数、闭包引用数和未引用摘要，只作为清理决策证据，不执行删除。删除动作必须使用另行批准的 allowlist，不能从报告中的示例路径反推批量删除命令。定向回归测试使用 `node --test scripts/knowledge-vault-audit.test.mjs`，覆盖成功闭包、缺失文件、路径穿越、绝对路径、非允许分类、symlink escape、SHA-256 与 byteSize 不匹配。
 
-## 费用与工作量
+## 资源与费用
 
 Qwen3 Embedding、BGE-M3、bge reranker、TEI、pgvector 和 Jieba 的推荐核心均可免费自托管。开发和一次性小规模构建可使用约 8 vCPU / 16 GiB CPU；低并发生产建议至少 16 GiB 显存，embedding 与 reranker 同卡并保留动态 batch 余量时优先 24 GiB L4/A10 级别。当前语料很小，不值得只为一次构建常驻专用 GPU，可复用受资源隔离的推理节点。
-
-完整实现约 13-22 人日，已包含在绿地总预算的 Knowledge 范围内：合同/迁移 2-3，TEI adapter 与可恢复 embedding 3-5，检索 API/tool 3-5，人工评测与 benchmark 3-5，部署/观测/故障验收 2-4。第三方托管调用费和新增语料的持续重建成本按供应商另计。
 
 ## 官方来源
 

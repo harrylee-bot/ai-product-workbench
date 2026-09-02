@@ -1,0 +1,15 @@
+#!/bin/sh
+set -eu
+
+[ "$#" -eq 3 ]
+[ "$1" = "-qr" ]
+
+exec python3 -c 'import os, sys, zipfile
+archive, root = sys.argv[1:]
+with zipfile.ZipFile(archive, "w", compression=zipfile.ZIP_DEFLATED) as target:
+    for directory, names, files in os.walk(root):
+        names.sort()
+        files.sort()
+        for name in files:
+            path = os.path.join(directory, name)
+            target.write(path, os.path.relpath(path, root))' "$2" "$3"

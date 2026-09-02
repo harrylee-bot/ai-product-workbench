@@ -95,9 +95,11 @@ describe("Workbench generated screen node", () => {
     expect(rendered.container.querySelector(".animate-spin")).toBeNull();
     expect(mocks.artifactContent).not.toHaveBeenCalled();
     expect(mocks.nodeResizer.mock.calls.at(-1)?.[0]).toMatchObject({
+      handleClassName: expect.stringContaining("!z-50"),
       keepAspectRatio: true,
-      minHeight: 500,
-      minWidth: 500,
+      lineClassName: expect.stringContaining("!z-40"),
+      minHeight: 450,
+      minWidth: 320,
     });
   });
 

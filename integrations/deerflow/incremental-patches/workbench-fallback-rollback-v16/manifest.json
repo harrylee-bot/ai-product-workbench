@@ -1,0 +1,22 @@
+{
+  "protocol": "workbench.deerflow-incremental-source-patch.v1",
+  "parentImage": "workbench-candidate-f63eaebd-deerflow:functional-v15",
+  "parentImageId": "sha256:382e33c10d639d14bad38b75e9c45cbe959a97ff670aac78ca7e6ab2efd5dfec",
+  "worker": {
+    "path": "deerflow/runtime/runs/worker.py",
+    "upstreamSha256": "a1049fca004fce2fe643318e303a9001315b122257aa3d2ea1f7b12058797bc9",
+    "patchedSha256": "9424a47369bd557b7dcdd7688ec6e2310ee8aba8f240bde7d0597e1ca2a50d9d",
+    "replacements": [
+      {
+        "anchor": "    llm_error_fallback_message: str | None = None\n\n    journal = None\n",
+        "replacement": "    llm_error_fallback_message: str | None = None\n    caller_context = config.get(\"context\")\n    is_workbench_run = (\n        isinstance(caller_context, dict)\n        and isinstance(caller_context.get(\"workbench\"), dict)\n    )\n\n    journal = None\n"
+      },
+      {
+        "anchor": "            error_msg = error_msg or \"LLM provider failed after retries\"\n            await run_manager.set_status(run_id, RunStatus.error, error=error_msg)\n",
+        "replacement": "            error_msg = error_msg or \"LLM provider failed after retries\"\n            if is_workbench_run:\n                if checkpointer is None or snapshot_capture_failed:\n                    logger.warning(\n                        \"Run %s could not restore its pre-run checkpoint after terminal LLM fallback\",\n                        run_id,\n                    )\n                else:\n                    try:\n                        await _rollback_to_pre_run_checkpoint(\n                            checkpointer=checkpointer,\n                            thread_id=thread_id,\n                            run_id=run_id,\n                            pre_run_checkpoint_id=pre_run_checkpoint_id,\n                            pre_run_snapshot=pre_run_snapshot,\n                            snapshot_capture_failed=snapshot_capture_failed,\n                        )\n                        logger.info(\n                            \"Run %s restored pre-run checkpoint %s after terminal LLM fallback\",\n                            run_id,\n                            pre_run_checkpoint_id,\n                        )\n                    except Exception:\n                        logger.warning(\n                            \"Run %s failed to restore its pre-run checkpoint after terminal LLM fallback\",\n                            run_id,\n                            exc_info=True,\n                        )\n            await run_manager.set_status(run_id, RunStatus.error, error=error_msg)\n"
+      }
+    ]
+  },
+  "patchApplierSha256": "cfc8c51ff54579fe0063cfc78681bd37054b19b62f480c607a16cb13a44eee17",
+  "contractTestSha256": "d922fcd8c6c00c44dc0a83241a181f780789b83e36cad8842aba225e5f90450b"
+}

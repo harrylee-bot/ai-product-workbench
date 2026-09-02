@@ -1,3 +1,0 @@
-{
-  "ignoreBinaries": ["osascript", "pbcopy", "which"]
-}

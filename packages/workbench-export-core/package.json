@@ -17,9 +17,9 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@modelcontextprotocol/sdk": "1.30.0",
     "@workbench/workbench-contracts": "0.1.0",
-    "@modelcontextprotocol/sdk": "1.29.0",
-    "archiver": "7.0.1",
+    "archiver": "8.0.0",
     "esbuild": "0.28.1",
     "html-to-jsx-transform": "1.2.1",
     "lucide-react": "0.446.0",
@@ -30,7 +30,7 @@
     "zod": "^3.25.76"
   },
   "devDependencies": {
-    "@types/archiver": "7.0.0",
+    "@types/archiver": "8.0.0",
     "@types/node": "^22.10.0",
     "@types/react": "19.2.14",
     "@types/react-dom": "19.2.3",

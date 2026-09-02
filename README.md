@@ -2,7 +2,7 @@
 
 产品工作台是一套以 DeerFlow 为唯一生产 Runtime 的产品需求、知识、原型和交付工作台。新系统采用独立合同、数据库、API、Worker、预览与导出链路，不兼容、不转发、不双写旧业务接口和旧对话数据。
 
-当前施工与验收以 [绿地实施方案](docs/workbench-greenfield-implementation-plan.md)、[前端保真基线](docs/workbench-visual-baseline.md)、[开源复用策略](docs/workbench-open-source-reuse-strategy.md) 和 [硬切删除清单](docs/workbench-hard-cut-deletion-manifest.json) 为准。新链路通过生产门禁并切流后，旧应用与旧业务表将被物理删除。
+当前整改只以 [功能与视觉整改规格](docs/CODEX-WORKBENCH-FUNCTIONAL-VISUAL-REMEDIATION-SPEC-20260727.md) 和 [Runtime 数据库整改规格](docs/CODEX-RUNTIME-DATABASE-REMEDIATION-SPEC-20260723.md) 为执行入口。现行架构与验收合同见 [绿地实施方案](docs/workbench-greenfield-implementation-plan.md)、[前端保真基线](docs/workbench-visual-baseline.md)、[开源复用策略](docs/workbench-open-source-reuse-strategy.md) 和 [硬切删除清单](docs/workbench-hard-cut-deletion-manifest.json)。新链路通过生产门禁并切流后，旧应用与旧业务表将被物理删除。
 
 ## 当前边界
 
@@ -164,7 +164,9 @@ npm run test
 npm --workspace @workbench/web run test
 npm run lint:workbench
 npm run architecture:workbench
-npm run build
+WORKBENCH_S3_BROWSER_UPLOAD_BUCKET_URL=https://uploads.example.invalid \
+WORKBENCH_PREVIEW_ORIGIN=https://preview.example.invalid \
+  npm run build
 ```
 
 ## 部署

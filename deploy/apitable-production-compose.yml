@@ -1,0 +1,229 @@
+name: workbench-apitable
+
+services:
+  web-server:
+    image: ${WEB_IMAGE:-${IMAGE_REGISTRY}/${IMAGE_WEB_SERVER}}
+    pull_policy: ${WEB_PULL_POLICY:-always}
+    restart: unless-stopped
+    env_file: .env
+    expose:
+      - "8080"
+    networks:
+      - apitable
+
+  imageproxy-server:
+    image: ${IMAGE_REGISTRY}/${IMAGE_IMAGEPROXY_SERVER}
+    pull_policy: always
+    restart: unless-stopped
+    expose:
+      - "8080"
+    environment:
+      TZ: ${TIMEZONE}
+      BASEURL: ${AWS_ENDPOINT}
+    networks:
+      - apitable
+
+  backend-server:
+    image: ${BACKEND_IMAGE:-${IMAGE_REGISTRY}/${IMAGE_BACKEND_SERVER}}
+    pull_policy: ${BACKEND_PULL_POLICY:-always}
+    restart: unless-stopped
+    env_file: .env
+    expose:
+      - "8081"
+    environment:
+      TZ: ${TIMEZONE}
+      DEFAULT_TIME_ZONE: ${TIMEZONE}
+      DEFAULT_LOCALE: ${DEFAULT_LOCALE:-zh-CN}
+    depends_on:
+      init-db:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sS http://localhost:8081 >/dev/null || exit 1"]
+      interval: 10s
+      timeout: 5s
+      start_period: 60s
+      retries: 30
+    networks:
+      - apitable
+
+  room-server:
+    image: ${IMAGE_REGISTRY}/${IMAGE_ROOM_SERVER}
+    pull_policy: always
+    restart: unless-stopped
+    env_file: .env
+    expose:
+      - "3333"
+      - "3334"
+      - "3001"
+      - "3002"
+      - "3005"
+      - "3006"
+      - "3007"
+    environment:
+      TZ: ${TIMEZONE}
+      NODE_ENV: ${ENV}
+      NODE_OPTIONS: --max-old-space-size=2048 --max-http-header-size=80000
+      API_MAX_MODIFY_RECORD_COUNTS: ${API_MAX_MODIFY_RECORD_COUNTS:-30}
+      INSTANCE_MAX_MEMORY: 4096M
+      ENABLE_SOCKET: "true"
+    depends_on:
+      mysql:
+        condition: service_healthy
+    networks:
+      - apitable
+
+  databus-server:
+    image: ${IMAGE_REGISTRY}/${IMAGE_DATABUS_SERVER}
+    pull_policy: always
+    restart: unless-stopped
+    env_file: .env
+    expose:
+      - "8625"
+    environment:
+      TZ: ${TIMEZONE}
+    depends_on:
+      mysql:
+        condition: service_healthy
+    networks:
+      - apitable
+
+  gateway:
+    image: ${IMAGE_REGISTRY}/${IMAGE_GATEWAY}
+    pull_policy: always
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:4290:80"
+    environment:
+      TZ: ${TIMEZONE}
+    depends_on:
+      web-server:
+        condition: service_started
+      imageproxy-server:
+        condition: service_started
+      backend-server:
+        condition: service_healthy
+      room-server:
+        condition: service_started
+      init-appdata:
+        condition: service_completed_successfully
+    networks:
+      - apitable
+
+  minio:
+    image: ${IMAGE_MINIO}
+    pull_policy: if_not_present
+    restart: unless-stopped
+    command: server --console-address ":9001" /data
+    expose:
+      - "9000"
+      - "9001"
+    volumes:
+      - ${DATA_PATH}/minio/data:/data
+      - ${DATA_PATH}/minio/config:/root/.minio
+    environment:
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY}
+      MINIO_ROOT_USER: ${MINIO_ACCESS_KEY}
+      MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY}
+      TZ: ${TIMEZONE}
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:9000/minio/health/live >/dev/null || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+    networks:
+      - apitable
+
+  redis:
+    image: ${IMAGE_REDIS}
+    pull_policy: if_not_present
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes", "--requirepass", "${REDIS_PASSWORD}"]
+    expose:
+      - "6379"
+    volumes:
+      - ${DATA_PATH}/redis:/data
+    environment:
+      TZ: ${TIMEZONE}
+    networks:
+      - apitable
+
+  mysql:
+    image: ${IMAGE_MYSQL}
+    pull_policy: if_not_present
+    restart: unless-stopped
+    command:
+      - --default-authentication-plugin=mysql_native_password
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_general_ci
+      - --sql_mode=IGNORE_SPACE,NO_ENGINE_SUBSTITUTION
+      - --lower_case_table_names=2
+    expose:
+      - "3306"
+    volumes:
+      - ${DATA_PATH}/mysql:/var/lib/mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_DATABASE: ${MYSQL_DATABASE}
+      TZ: ${TIMEZONE}
+    healthcheck:
+      test: ["CMD-SHELL", "mysql ${MYSQL_DATABASE} -u${MYSQL_USERNAME} -p${MYSQL_PASSWORD} -e 'SELECT 1;' >/dev/null 2>&1"]
+      interval: 10s
+      timeout: 5s
+      start_period: 30s
+      retries: 30
+    networks:
+      - apitable
+
+  rabbitmq:
+    image: ${IMAGE_RABBITMQ}
+    pull_policy: if_not_present
+    restart: unless-stopped
+    expose:
+      - "5671"
+      - "5672"
+      - "15672"
+    volumes:
+      - ${DATA_PATH}/rabbitmq:/var/lib/rabbitmq
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USERNAME}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD}
+      TZ: ${TIMEZONE}
+    networks:
+      - apitable
+
+  init-db:
+    image: ${IMAGE_REGISTRY}/${IMAGE_INIT_DB}
+    pull_policy: always
+    restart: "no"
+    environment:
+      TZ: ${TIMEZONE}
+      DB_HOST: ${MYSQL_HOST}
+      DB_PORT: ${MYSQL_PORT}
+      DB_NAME: ${MYSQL_DATABASE}
+      DB_USERNAME: ${MYSQL_USERNAME}
+      DB_PASSWORD: ${MYSQL_PASSWORD}
+      DATABASE_TABLE_PREFIX: ${DATABASE_TABLE_PREFIX}
+      ACTION: update
+    depends_on:
+      mysql:
+        condition: service_healthy
+    networks:
+      - apitable
+
+  init-appdata:
+    image: ${IMAGE_REGISTRY}/${IMAGE_INIT_APPDATA}
+    pull_policy: always
+    restart: "no"
+    env_file: .env
+    depends_on:
+      mysql:
+        condition: service_healthy
+      init-db:
+        condition: service_completed_successfully
+    networks:
+      - apitable
+
+networks:
+  apitable:
+    driver: bridge

@@ -1,10 +1,12 @@
 # 产品工作台 Export Worker 与 Preview Origin
 
+更新日期：2026-07-28
+
 ## 1. 结论
 
 产品工作台导出链只消费已经冻结为 `ready` 的 `ProjectRelease`、其 `ReleaseArtifactVersion` pins，以及 pins 指向的 `ready ArtifactVersion/Blob`。它不读取当前 Board、当前 ArtifactVersion 或旧 Conversation，因此同一 ExportJob 的输入在重试期间不会漂移。
 
-截至 2026-07-15，仓库内已完成 ExportJob 刷新恢复、轮询、CAS 取消、下载和终态优先排序回归，较旧 `running` job 不会遮挡同一导出目标较新的 `succeeded` job；`workbench.figma-export.v1` 和产品工作台 Importer 1.0.0 也已落盘。这里的“完成”仅指合同、代码、单元/集成测试和受控 Chromium 证据；真实 S3/IAM、PostgreSQL、双 HTTPS origin、生产网络、Docker 容器镜像及 Figma Desktop 验收仍是硬切门禁。
+仓库内已实现 ExportJob 刷新恢复、轮询、CAS 取消、下载和终态优先排序，较旧 `running` job 不会遮挡同一导出目标较新的 `succeeded` job；`workbench.figma-export.v1` 和产品工作台 Importer 1.0.0 也已落盘。这里的“已实现”只描述当前合同与代码，不替代实际门禁结果；真实 S3/IAM、PostgreSQL、双 HTTPS origin、生产网络、Docker 容器镜像及 Figma Desktop 验收仍是硬切门禁。
 
 生产链为：
 
@@ -27,9 +29,9 @@ Authorized API
 | 对象存储 | AWS SDK S3 | Blob 内容寻址、身份校验和数据库引用 |
 | HTML 浏览器验收 | `playwright-core@1.61.1` + system Chromium | 阻断网络、错误收集、固定验收条件 |
 | React 转换 | Babel AST/generator、Prettier、esbuild；当前静态叶片过渡使用 `html-to-jsx-transform@1.2.1` | 长期由 Prototype IR 生成共享 RenderPlan，再直出 React AST/runtime data；HTML 不成为语义事实源 |
-| MCP | `@modelcontextprotocol/sdk@1.29.0`、esbuild | 冻结 release 的只读 resources/tools |
+| MCP | `@modelcontextprotocol/sdk@1.30.0`、`@hono/node-server@2.0.12`、esbuild | 冻结 release 的只读 resources/tools 与 Node HTTP host |
 | Figma 稳定导入 | `create-figma-plugin@4.0.3` + `@figma/plugin-typings@1.130.0` + `fflate@0.8.3` | 固定产品工作台 Importer 用官方 Plugin API 读取内部 `FigmaExportDocument`，校验归档、资产长度与 SHA-256 |
-| ZIP | `archiver@7.0.1` | 固定 entry 顺序、时间戳和大小上限 |
+| ZIP | `archiver@8.0.0` | 固定 entry 顺序、时间戳和大小上限 |
 | Preview CSP | `parse5@8.0.0` | 对实际 inline script/style 计算 CSP SHA-256 |
 
 内部 `PrototypeDocument`、Release pins、权限、状态机、checksum 和 adapter 输入仍由项目维护；不会把第三方编辑器或导出器的数据模型当数据库事实源。

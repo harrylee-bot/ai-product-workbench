@@ -206,7 +206,7 @@ test("creates byte-identical manifest and inventory for the same repository snap
   assert.equal(first.manifest.criticalArtifacts.migrations.status, "complete");
   assert.equal(first.manifest.criticalArtifacts.generatedContracts.entryCount, 5);
   assert.equal(first.manifest.criticalArtifacts.knowledgeVaultConfiguration.entryCount, 4);
-  assert.equal(first.manifest.criticalArtifacts.remediationControl.entryCount, 2);
+  assert.equal(first.manifest.criticalArtifacts.remediationControl.entryCount, 3);
   assert.ok(first.manifest.criticalArtifacts.evidenceContracts.entryCount >= 2);
   assert.ok(first.manifest.sourceScopes.every((scope) => scope.status === "complete"));
   assert.equal(first.manifest.sourceScopes.find((scope) => scope.name === "runbooks")?.entryCount, 1);
@@ -377,7 +377,8 @@ async function createRepositoryFixture({ referencedAsset = null, orphanAsset = n
     ["integrations/deerflow/runtime-tools/deerflow_workbench_tools/runtime_result_validator.bundle.mjs", "export {};\n"],
     ["scripts/workbench-hard-cut-manifest.mjs", "export {};\n"],
     ["docs/workbench-hard-cut-deletion-manifest.json", "{}\n"],
-    ["docs/CODEX-WORKBENCH-COMPREHENSIVE-AUDIT-REMEDIATION.md", "# Remediation control\n"],
+    ["docs/CODEX-RUNTIME-DATABASE-REMEDIATION-SPEC-20260723.md", "# Runtime remediation control\n"],
+    ["docs/CODEX-WORKBENCH-FUNCTIONAL-VISUAL-REMEDIATION-SPEC-20260727.md", "# Functional and visual remediation control\n"],
     ["schemas/release-candidate-manifest.schema.json", "{}\n"],
     ["knowledge-vault/.obsidian/app.json", "{}\n"],
     ["knowledge-vault/.obsidian/core-plugins.json", "[]\n"],

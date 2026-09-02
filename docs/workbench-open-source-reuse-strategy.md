@@ -1,6 +1,6 @@
 # 产品工作台开源复用与自研边界
 
-更新日期：2026-07-16
+更新日期：2026-07-28
 状态：绿地接入方案的强制选型约束
 
 ## 结论
@@ -93,11 +93,11 @@ MPL、GPL、AGPL、source-available 以及运行时商业条款依赖必须有�
 
 - 页面运行时已经收口为持久 `(workbench)` layout -> `WorkbenchRuntimeProvider` -> `WorkbenchScene`。Next Home/Project pages 只承担 URL 并返回 `null`；Scene 内唯一的页面级 `AnimatePresence mode="sync"` 拥有 Home/Project 过渡。Project 通过 fulfilled-module cache 动态拆包，P1 -> P2 固定 `key="project"` 并以 project-scoped session generation 隔离状态，Project root、header 和 React Flow DOM identity 保持；禁止 `key={projectId}`。16 个 feature 已进入强制分层，聚合 `WorkbenchService`、`features/service.ts` 与 `transport.service` 均不存在。准确结论是“前端按运行时、页面场景、feature 和 adapter 模块化”，不是完整一坨代码。
 - `@xyflow/react` 已承担画布、选择、缩放、平移和节点缩放。
-- Radix、cmdk、Sonner、Lucide、CodeMirror、ProseMirror、React Data Grid、Streamdown、Shiki、Mermaid 和 Motion 已在仓库中。
-- 仍有至少 11 组菜单、弹层、outside-click、Escape 和焦点行为由工作台手写。
+- Radix、Sonner、Lucide、CodeMirror、Tiptap 和 framer-motion 已在当前前端依赖树中；`cmdk`、独立 `motion`、React Data Grid、Streamdown、Shiki 和 Mermaid 未安装，不得再写成已采用能力。
+- 部分菜单、弹层、outside-click、Escape 和焦点行为仍由工作台视觉组件承担；替换行为内核时必须保持现有 DOM、样式和交互合同。
 - Project/ProjectMember 搜索、权限、duplicate/archive、邀请、Thread/Run SSE、取消、审批、精确重试、Board CAS/autosave、Artifact renderer、不可变 Release、公开分享/撤销/重混、Export job/cancel/download 和 Prototype 图片/字体内容已接真实合同；autosave 导航屏障、完整 URL 恢复、错误隔离、viewer 只读选择以及 P1 -> P2 DOM identity 已通过仓库与浏览器门禁。Figma 已固定为 `workbench.figma-export.v1` + 产品工作台 Importer 1.0.0，真实 Figma Desktop 验收尚未完成。
-- Uppy multipart、页面级上传 registry、逐文件 hash/upload/verify/extract 状态和 pause/resume/cancel/retry 已真实实现；SubmissionIntent 进一步持久化完整 typed request 与有序 upload slot，使用 `intentId + position` 的确定性 create/complete/extract 幂等键，支持刷新轮询、原文件重选、同一 Run 重放和整单取消。真实 S3/IAM 上的断网、浏览器崩溃、过期 session 与取消失败恢复仍是生产门禁；Frame、Draw、Media、Board Style、Special、Undo/Redo 与屏内元素 Moveable/Selecto command 已接真实 Board/Artifact 合同，Web 144 files / 616 tests 与统一 `e2e:web` 均通过，完整生产环境视觉矩阵仍须在真实外部依赖上复验。
-- 旧页面仍依赖 AI SDK 与 SWR；它们不进入新 Workbench feature，并在新系统生产 E2E 通过后随旧页面一起物理删除，不保留运行时兼容。
+- Uppy multipart、页面级上传 registry、逐文件 hash/upload/verify/extract 状态和 pause/resume/cancel/retry 已真实实现；SubmissionIntent 进一步持久化完整 typed request 与有序 upload slot，使用 `intentId + position` 的确定性 create/complete/extract 幂等键，支持刷新轮询、原文件重选、同一 Run 重放和整单取消。真实 S3/IAM 上的断网、浏览器崩溃、过期 session 与取消失败恢复仍是生产门禁；Frame、Draw、Media、Board Style、Special、Undo/Redo 与屏内元素 Moveable/Selecto command 已接真实 Board/Artifact 合同，完整生产环境视觉矩阵仍须在真实外部依赖上复验。
+- 旧页面、Vercel AI SDK 与 SWR 已从当前主树删除；架构门禁持续禁止运行时兼容链重新进入产品工作台。
 
 因此后续继续保留现有视觉叶组件、CSS、DOM 和 Motion 参数，通用交互内核仍优先使用成熟 headless primitive。持久 Scene、Project 动态边、16 个 feature 和各自 command/query/UI owner 已形成，不得为了“进一步拆分”复制节点组件、重建页面 owner、恢复聚合 service 或按 `projectId` remount。任何依赖替换仍必须通过 `docs/workbench-visual-baseline.md` 的截图、手势和动效回归，不能借“换组件”改变页面。
 
@@ -112,15 +112,15 @@ MPL、GPL、AGPL、source-available 以及运行时商业条款依赖必须有�
 
 ## 前端选型矩阵
 
-以下许可证和版本状态按 2026-07-12 的官方包信息核验。落地时锁定精确版本，并由 lockfile 和依赖更新 PR 管理。
+以下已安装包版本以 2026-07-28 的 lockfile 为准；外部服务与条件候选仍按其注明的核验日期复审。落地时锁定精确版本，并由 lockfile 和依赖更新 PR 管理。
 
 | 能力 | 首选开源项目 | 许可证 | 当前状态 | 接入方式与边界 |
 |---|---|---|---|---|
 | UI primitive | shadcn/ui + Radix Primitives | MIT | 依赖已有，产品工作台待继续收口 | shadcn 可复制修改；Dialog、Popover、Dropdown、Tooltip、Tabs 等行为直接用 Radix，保留现有样式 |
 | 图标 | Lucide React | ISC | 已有 | 直接依赖，不复制 SVG 集 |
-| 命令菜单 | cmdk | MIT | 已有 | 用于命令检索和键盘导航，视觉层沿用产品工作台样式 |
+| 命令菜单 | cmdk | MIT | 未安装，按需候选 | 当前固定短列表继续使用现有产品工作台菜单组件；只有出现可搜索命令目录时才接入，并保留产品工作台视觉层 |
 | 通知 | Sonner | MIT | 已有 | 统一成功、失败和后台任务通知；业务错误码先映射再展示 |
-| 动效 | Motion/现有 framer-motion | MIT | 已有 | 保真阶段不强制迁包；新 feature 只选一个入口，切流后再消除重复依赖 |
+| 动效 | `framer-motion@11.18.2` | MIT | 已有 | 当前唯一动效入口；保留既有 DOM、Motion props 和时序，不引入独立 `motion` 包 |
 | 无限画布 | `@xyflow/react` | MIT | 已有 | 直接使用节点、边、viewport、selection、NodeResizer；项目只实现 Artifact 映射和 Board 持久化，不持久化原始 React Flow Node/Edge |
 | Canvas 视觉捕获 | `html-to-image@1.11.13` | MIT | 已接 `view_screen` Web wire path | 只克隆精确 screen viewport；产品代码负责 capability 绑定、同源资源、尺寸/字节/SHA-256 和 fail-closed，API 重新解码并转 WebP，库输出不成为持久事实源 |
 | 屏内元素选择与变换 | `react-selecto@1.26.3` + `react-moveable@0.56.0` | MIT | 固定版本已通过 adapter 接入生产 Artifact renderer；采用状态仍为 `poc` | Selecto 负责框选，Moveable 负责拖动、缩放与旋转，第三方事件先转为内部 snapshot/command，不能进入 Prototype IR。React 19 挂载和模型合同已通过，但真实触控、吸附、React Flow 嵌套、滚动与移动端仍未过 browser gate；失败时只评估 interact.js，不并行堆两套 |
@@ -128,8 +128,8 @@ MPL、GPL、AGPL、source-available 以及运行时商业条款依赖必须有�
 | PRD 富文本 | Tiptap Core + StarterKit + 官方 Table/Link 扩展 | MIT | 已接入（2026-07-14） | headless 使用并复刻现有视觉；`lib/workbench/prd-editor` 以 projection/adapter 映射 12 类 block、citation/reference、UniqueID，round-trip/undo 测试通过，持久化只写内部 PrdDocument，不写 Tiptap JSON；不用 Tiptap Cloud |
 | 代码与 Diff | CodeMirror 6 + `@codemirror/merge` | MIT | 基础包已有；新 Artifact adapter/merge 待接 | 不手写编辑器、选择、撤销栈或 diff 对齐；项目只提供语言配置与保存策略 |
 | 普通数据表 | TanStack Table | MIT | 按需引入 | 适合项目/版本/文件列表；视觉完全自定义 |
-| 表格式产物 | React Data Grid | MIT | 已有 beta | 仅在真实表格式 Artifact 中使用并置于 adapter 后；不把 beta API 扩散到领域层 |
-| 流式 Markdown | Streamdown + Shiki + Mermaid | Apache-2.0/MIT | 已有 | RunEvent envelope 可验证，但其中的模型 Markdown、链接、HTML 和 Mermaid 一律是不可信内容；执行协议/标签白名单、URL 校验与隔离渲染 |
+| 表格式产物 | React Data Grid | MIT | 未安装，条件候选 | 仅在真实表格式 Artifact 中使用并置于 adapter 后；不把 beta API 扩散到领域层 |
+| 流式 Markdown | Streamdown + Shiki + Mermaid | Apache-2.0/MIT | 未安装，条件候选 | 只有产品界面需要该能力时才接入；RunEvent 中的模型 Markdown、链接、HTML 和 Mermaid 一律按不可信内容执行协议/标签白名单、URL 校验与隔离渲染 |
 | 文件上传 | `@uppy/core` + `@uppy/aws-s3` multipart | MIT | 非视觉底座、页面级 registry、逐文件状态与生命周期控制已接；真实目标 S3 浏览器恢复待生产验收 | 浏览器直传预签名地址；暂停、取消、分片重试、listParts 恢复由 Uppy 负责，所有权与最终状态由 File API 决定；不同时混用 tus |
 | 上传崩溃恢复 | `@uppy/golden-retriever` | MIT | 仅限小文件可选 PoC，不进入大文件主链 | 官方 IndexedDB 默认单文件 10 MiB、总量 300 MiB，文档还提示常见可靠范围约 5 MiB；Service Worker 的大 Blob 只临时驻留且不能跨浏览器崩溃。因此它可改善小文件体验，但不能替代服务端 UploadSession、ETag、幂等和 digest proof |
 | 上传摘要 | hash-wasm + Web Worker；可用 Comlink 简化 RPC | MIT/Apache-2.0 | 已接独立 digest Worker 和 fallback，已有恢复/取消回归测试 | 浏览器增量 SHA-256 用于早期身份和进度；创建上传会话前冻结 payload，服务端仍从可信对象字节复核；S3 multipart ETag 不能当内容 SHA-256 |
@@ -170,7 +170,7 @@ BlockNote、tldraw 和 WebContainers 不作为上述首选的“更省事替代�
 | 多组菜单的 open state、全局 Escape 和 outside-click | Radix DropdownMenu/Popover/Select | 现有触发器、尺寸、颜色、动效和菜单内容 |
 | 分享、导出、预览弹层的焦点与背景隔离 | Radix Dialog/AlertDialog | 现有面板布局、业务步骤和动画 |
 | 手写 `role="switch"` 与 ready toast 浮层 | Radix Switch + Sonner | 现有开关外观、Toast 内容和位置合同 |
-| 命令面板搜索与键盘选择 | cmdk | 命令目录、权限和执行逻辑 |
+| 固定短命令列表 | 现有产品工作台菜单组件；规模增长后评估 cmdk | 命令目录、权限和执行逻辑 |
 | 附件 chip 与假选择 | Uppy | FileAsset、上传会话、解析状态和权限 |
 | 画布拖拽、缩放、框选、节点 resize | React Flow | Board revision、ArtifactVersion 钉住和冲突处理 |
 | 屏幕内部元素的框选、拖动、缩放、旋转和吸附 | react-selecto + react-moveable | 内部节点 ID、布局约束、变更 command、版本和导出语义 |
@@ -181,11 +181,11 @@ BlockNote、tldraw 和 WebContainers 不作为上述首选的“更省事替代�
 | SSE 文本拆帧 | eventsource-parser，声明为直接依赖 | sequence 去重、跳号恢复、BFF session 续期和状态机 |
 | 灵感卡片轮播 | 仅在要求触摸拖拽和完整无障碍时评估 Embla Carousel | 当前仅按钮翻页时保留简单状态更小，不为了“使用开源”强加依赖 |
 
-当前旧 PRD 编辑器直接操作底层 ProseMirror，并自行维护 table schema 与 Markdown 序列化。新 PRD feature 已迁移至 Tiptap Core/StarterKit/Table/Link/UniqueID；旧编辑器仅供旧应用残留清理时参考，不再作为新 Workbench 事实源。`eventsource-parser` 和 Zustand 已是新 Workbench 的直接依赖；后续依赖也必须在实际消费它的 workspace 中显式声明，不能依赖传递引入。
+当前 PRD feature 使用 Tiptap Core/StarterKit/Table/Link/UniqueID，并通过项目 adapter 映射内部 PRD schema；不得恢复直接操作底层 ProseMirror 并自行维护 table schema 的旧实现。`eventsource-parser` 和 Zustand 已是产品工作台的直接依赖；后续依赖也必须在实际消费它的 workspace 中显式声明，不能依赖传递引入。
 
 ### 仓库采用状态快照
 
-截至 2026-07-15，新绿地底座已经直接声明并真实消费 React Flow 12.11.2、TanStack Query 5.101.2、openapi-fetch 0.17.0/openapi-typescript 7.13.0、eventsource-parser 3.1.0、Zustand 5.0.14、Uppy Core 5.2.0/AWS S3 5.1.0、hash-wasm 4.12.0、perfect-freehand 1.2.2、react-colorful 5.7.0、React Hook Form 7.81.0、pg-boss 12.26.0、canonicalize 2.1.0、`@langchain/langgraph-sdk` 1.9.25、`@langchain/core` 1.1.48、`uuid` 14.0.1、`form-data` 4.0.6、Playwright、archiver、MCP SDK、OpenTelemetry 和固定 Figma Importer 工具链。`react-selecto@1.26.3` 与 `react-moveable@0.56.0` 已通过内部 adapter 进入 Prototype 编辑主链。产品工作台通过 feature controller 消费 Project/Thread/Run/Board/Artifact/DesignSystem/Share/Export 状态，第三方类型没有进入领域合同。
+截至 2026-07-28，当前底座已经直接声明并真实消费 Next 16.2.12、PostCSS 8.5.18、next-themes 0.4.6、React Flow 12.11.2、TanStack Query 5.101.2、openapi-fetch 0.17.0/openapi-typescript 7.13.0、eventsource-parser 3.1.0、Zustand 5.0.14、Uppy Core 5.2.0/AWS S3 5.1.0、hash-wasm 4.12.0、perfect-freehand 1.2.2、react-colorful 5.7.0、React Hook Form 7.81.0、pg-boss 12.26.0、canonicalize 2.1.0、`@langchain/langgraph-sdk` 1.9.25、`@langchain/core` 1.1.48、`uuid` 14.0.1、`form-data` 4.0.6、Archiver 8.0.0、MCP SDK 1.30.0、Hono Node Server 2.0.12、Playwright、OpenTelemetry 和固定 Figma Importer 工具链。`react-selecto@1.26.3` 与 `react-moveable@0.56.0` 已通过内部 adapter 进入 Prototype 编辑主链。产品工作台通过 feature controller 消费 Project/Thread/Run/Board/Artifact/DesignSystem/Share/Export 状态，第三方类型没有进入领域合同。
 
 Uppy Golden Retriever、Pragmatic Drag and Drop 和 CodeMirror merge 尚未接入新主链；Tiptap、react-easy-crop、Docling、Moveable/Selecto、perfect-freehand、react-colorful/React Hook Form、MCP SDK 与 OpenTelemetry SDK 已分别进入对应主链。Redocly 和固定版本 oasdiff 已进入 CI。`uppy-multipart.ts` 已使用 Uppy/hash-wasm 并拆出 digest Worker/lifecycle helper，页面级上传 registry 与可见控制也已完成；剩余上传工作只计入真实目标 S3/IAM 的生产恢复验收。OpenTelemetry 现在由直接依赖的 `packages/workbench-telemetry` 统一初始化，覆盖 BFF/API HTTP、pg-boss producer/consumer 与 DeerFlow/Docling/TEI 请求；仅在 lockfile 中传递出现的其他库仍不能算产品工作台已采用。
 
@@ -217,7 +217,7 @@ Uppy Golden Retriever、Pragmatic Drag and Drop 和 CodeMirror merge 尚未接�
 | DOCX | docx | MIT | 从结构化 PRD 生成，不通过脆弱的 HTML 字符串替换 |
 | React AST 生成 | Babel AST/generator + Prettier | MIT | 长期路径为 `PrototypeDocument -> RenderPlan -> React AST`；state/action/binding/motion 必须从 IR/runtime data 生成，不能从 HTML 反推。`html-to-jsx-transform@1.2.1` 只允许作为已生成静态叶片的过渡转换器 |
 | React/HTML 构建验收 | Babel generator + Prettier + esbuild | MIT | 使用无外网、只读预装 allowlist 依赖且禁用 lifecycle script 的隔离 Worker 真构建；作业执行时不下载任意 npm 包，“生成了字符串”不算导出成功 |
-| 导出归档 | `archiver@7.0.1` | MIT | 作为 Export Worker 的直接依赖生成 ZIP；项目只定义固定目录、文件名、大小上限、manifest 与摘要，不手写 ZIP writer，也不接受用户控制的归档路径 |
+| 导出归档 | `archiver@8.0.0` | MIT | 作为 Export Worker 的直接依赖生成 ZIP；项目只定义固定目录、文件名、大小上限、manifest 与摘要，不手写 ZIP writer，也不接受用户控制的归档路径 |
 | Figma 稳定导入 | `create-figma-plugin@4.0.3` + `@figma/plugin-typings@1.130.0` + `fflate@0.8.3` | MIT/官方 typings | 固定产品工作台 Importer 1.0.0 只调用官方 Plugin API 并读取版本化 `FigmaExportDocument`；导出数据与插件实现独立升级，不依赖非公开 `.fig`、Kiwi 或剪贴板编码 |
 | Design token 投影 | Style Dictionary | Apache-2.0 | 从 `workbench.design-system.v1` 生成 CSS/React/Figma/Runtime 目标投影；内部 token schema、alias 约束、资产引用和版本仍是事实源，Style Dictionary config 与 transform 名称不得入库 |
 | 颜色解析与运算 | Color.js | MIT | 复用 CSS Color 解析、色域转换、混色和对比度计算；内部 token 类型、语义命名、可访问性门槛和序列化格式由项目定义，不保存 Color.js 实例 |
@@ -234,7 +234,7 @@ Uppy Golden Retriever、Pragmatic Drag and Drop 和 CodeMirror merge 尚未接�
 | 知识展示站 | Quartz | MIT | 独立、只读地消费 immutable `knowledge-vault` 并产出可重建静态站；锁定 commit 和插件清单，不成为 KnowledgeRelease 或检索事实源，不长期 fork 上游 |
 | 单元/组件/浏览器测试 | Vitest + Testing Library/user-event + MSW + Playwright + axe-core | MIT/Apache-2.0/MPL-2.0 | 契约、组件键盘交互、E2E、视觉和无障碍回归；axe-core 只作测试依赖 |
 
-Contracts 已收口为 Zod/route registry 唯一人工源。当前 current 与已刷新 baseline 同为 79-path / 97-operation，上一批准基线为 71/89。Design preset catalog、thread-scoped SubmissionIntent、三元 preset 引用和可选上传 slot binding 已通过绿地破坏性变更审查；旧 preset shape、project-scoped current、Workspace-scoped Project GET 和合同双写均不保留。Generator consistency、Redocly、Nest route coverage、oasdiff、Web types 和 baseline 已同步；不得恢复手写 YAML 字段副本。
+Contracts 已收口为 Zod/route registry 唯一人工源。生成的 current OpenAPI、批准 baseline、Web types 与 Nest route coverage 必须同步；Design preset catalog、thread-scoped SubmissionIntent、三元 preset 引用和可选上传 slot binding 已通过绿地破坏性变更审查，旧 preset shape、project-scoped current、Workspace-scoped Project GET 和合同双写均不保留。Generator consistency、Redocly、Nest route coverage、oasdiff、Web types 和 baseline 必须共同通过；不得恢复手写 YAML 字段副本。
 
 Docling 接入必须使用异步、可恢复的外部任务：Workbench 从已验证 Blob 读取并以内网 multipart 调用 `POST /v1/convert/file/async`，立即持久化 `task_id`，之后只轮询状态并读取结果；Worker 重放只能继续已有任务，不能再次提交同一个解析。禁用 `/source`、remote services、external plugins 和 custom model config，容器无公网出口；限制单来源、25 MiB、明确页数、5-10 分钟文档超时、CPU/内存/临时盘。`FileExtraction.parserVersion` 记录实际 Serve 镜像及内部 Docling 版本组合，不能用外部最新版本代替；输出至少保留 `docling_json` 和规范化 `markdown`，前者供页码/表格/布局 citation，后者供统一知识分块。
 
@@ -247,11 +247,11 @@ Docling 接入必须使用异步、可恢复的外部任务：Workbench 从已�
 | `apps/web/lib/workbench/files/uppy-multipart.ts` 1,296 行 | 已调用 Uppy/hash-wasm，digest Worker 与 lifecycle helper 已拆出，创建、恢复、取消、ETag、错误分片和状态映射竞态已修；SubmissionIntent binding 与确定性命令键已进入同一持久 checkpoint，但主 controller 仍混合 transport、session 和 extraction 编排 | 不再增加通用传输分支。继续把 Uppy transport adapter、File lifecycle 和持久 session 分开；普通上传的暂停/取消/listParts/retry 归 Uppy，Intent 绑定附件由整单取消维护槽位一致性，服务端 session/ETag/幂等保留。Golden Retriever 仅作小文件增强 |
 | `apps/workbench-worker/src/runtime/deerflow-runtime.adapter.ts` | 已采用 `@langchain/langgraph-sdk@1.9.25` 负责 thread/run stream/list recovery/`joinStream`/cancel；RuntimeAttempt、externalRunId checkpoint、metadata recovery 和本地 commit fence 已完成，multipart 已改用 `form-data@4.0.6` | 继续保留 Workbench 自有事件归一化、附件可信摘要、Gateway handle、结果 schema 和提交资格；真实 pinned DeerFlow 部署 E2E 通过前不升级 SDK transport 合同 |
 | 持久 Workbench 页面运行时 | `(workbench)` layout -> `WorkbenchRuntimeProvider` -> `WorkbenchScene` 已唯一拥有页面；Next pages 只保留 URL，Project 使用 fulfilled-module cache 动态边，P1 -> P2 固定 `key="project"` 并保持 Project/header/React Flow DOM identity | 维持单一页面级 `AnimatePresence mode="sync"`；禁止第二 route owner、`key={projectId}`、聚合 service 或把 Project UI 重新塞回 Home 静态模块图 |
-| `packages/workbench-contracts` 生成链 | Zod/route registry -> current/baseline 79-path / 97-operation OpenAPI -> Web types 已完成；上一批准基线 71/89 | 保持生成物、Redocly、route coverage、oasdiff 和 baseline 同步；Design preset 与 SubmissionIntent 是批准的直接改造，不恢复旧 shape/route 或合同双写 |
+| `packages/workbench-contracts` 生成链 | Zod/route registry -> current/baseline OpenAPI -> Web types | 保持生成物、Redocly、route coverage、oasdiff 和 baseline 同步；Design preset 与 SubmissionIntent 是批准的直接改造，不恢复旧 shape/route 或合同双写 |
 
 “使用开源”不能只看 package.json。一个 1000 行 wrapper 如果重新实现了上游状态机，仍然是重复造轮子；相反，ProjectRelease、权限矩阵或 Run commit fence 即使代码很多，也属于必须由产品掌控的领域实现。
 
-当前 Web 144 files / 616 tests 全部通过，Testing Library、user-event、MSW 与统一 Playwright `e2e:web` 已覆盖核心组件和浏览器链；NavigationGuard 还在 Chromium、Firefox、WebKit 验证了页面过渡非空和 P1 -> P2 DOM identity。仓库门禁不替代目标域、真实 API/DB/S3/Worker、触控设备、reduced-motion 和完整生产截图矩阵；Playwright golden 仍应按 `viewport/state` 版本化入库，任何基线更新都必须显式评审。
+Testing Library、user-event 与 Playwright 门禁覆盖核心组件和浏览器链，NavigationGuard 还必须在 Chromium、Firefox、WebKit 验证页面过渡非空和 P1 -> P2 DOM identity。具体文件数、测试数和 PASS 状态只以当前命令输出为准。仓库门禁不替代目标域、真实 API/DB/S3/Worker、触控设备、reduced-motion 和完整生产截图矩阵；Playwright golden 仍应按 `viewport/state` 版本化入库，任何基线更新都必须显式评审。
 
 对象存储需特别注意许可证：MinIO 当前采用 AGPL-3.0，官方 GitHub 仓库也已归档，不应成为新项目默认生产发行物。默认优先使用已有 S3 兼容云存储；必须自托管时，可单独评估 Apache-2.0 的 SeaweedFS，且业务代码仍只依赖 S3 适配器。
 
@@ -288,9 +288,9 @@ DeerFlow 2.0 Core 本身为 MIT，无代码许可费；“免费”不包含模�
 
 | 可见能力 | 复用的开源内核 | 仍需实现的产品能力 |
 |---|---|---|
-| 模型、Redesign/Ideate、App/Web 与 Style 选择 | Radix/cmdk + DeerFlow RuntimePort | `modelId` 只表示真实运行模型；Redesign/Ideate 必须是 typed workflow/intent，App/Web 是 target surface，Style/设计系统引用是独立 Run option，并进入幂等摘要与审计 |
+| 模型、Redesign/Ideate、App/Web 与 Style 选择 | Radix/现有产品工作台菜单 + DeerFlow RuntimePort | `modelId` 只表示真实运行模型；Redesign/Ideate 必须是 typed workflow/intent，App/Web 是 target surface，Style/设计系统引用是独立 Run option，并进入幂等摘要与审计 |
 | Home“以您的设计为基础” | OpenAPI + TanStack Query | 选择同 Workspace 可读的 ready `design_system` 版本；目标 Project 创建后调用 import command，以 receipt 的目标 ArtifactVersion 提交 Run，不能让 Run 跨 Project 引用来源版本 |
-| Home“自定义设计”与 Project Style | Radix/cmdk + React Hook Form + Color.js/react-colorful | v1 是 `workbench.design-system.v1` 的结构化表单编辑器，不承诺另造一套 Figma；Project 菜单只展示 automatic、preset 和本 Project ready 版本，跨 Project 选择先 import |
+| Home“自定义设计”与 Project Style | Radix/现有产品工作台菜单 + React Hook Form + Color.js/react-colorful | v1 是 `workbench.design-system.v1` 的结构化表单编辑器，不承诺另造一套 Figma；Project 菜单只展示 automatic、preset 和本 Project ready 版本，跨 Project 选择先 import |
 | Board 上的屏幕放置/分组/缩放 | React Flow group/sub-flow、selection | ArtifactVersion 引用、Board revision、位置尺寸和权限 |
 | 屏幕内部元素编辑 | react-selecto + react-moveable | PrototypeDocument 节点、布局约束、command、版本和跨格式导出 |
 | Draw | perfect-freehand + Moveable/Selecto adapter | stroke schema、选择/变换、样式、持久化和导出 |
@@ -306,7 +306,7 @@ DeerFlow 2.0 Core 本身为 MIT，无代码许可费；“免费”不包含模�
 | HTML/CSS 导出 | Playwright + Prettier + archiver | 从内部 IR 生成独立资源包、安全校验和下载任务 |
 | React 导出 | Babel AST/generator + Prettier + esbuild；`html-to-jsx-transform` 仅用于静态叶片 | 从内部 RenderPlan 直接生成组件、props、路由、state/action/binding/motion runtime、资源引用和隔离构建；不能把 HTML 中转当语义事实源 |
 | Figma 导出 | `create-figma-plugin` + `@figma/plugin-typings` + `fflate` | ExportJob 产出版本化 `FigmaExportDocument`，由固定产品工作台 Importer 通过官方 Plugin API 导入；不自写 `.fig`/Kiwi/剪贴板编码 |
-| MCP 导出 | `@modelcontextprotocol/sdk@1.29.0` | Artifact resource/tool、授权、版本固定、审计和传输策略 |
+| MCP 导出 | `@modelcontextprotocol/sdk@1.30.0` + `@hono/node-server@2.0.12` | Artifact resource/tool、Node HTTP host、授权、版本固定、审计和传输策略 |
 | “与我共享” | OIDC/OpenAPI + TanStack Query | 已采用跨 Workspace `GET /projects`，按当前 Principal 的显式 ProjectMember 区分 owned/shared；邀请 create/list/preview/accept/revoke 与公开 token 分享保持独立语义 |
 | 公开分享与重混 | OIDC/OpenAPI/preview sandbox | ShareGrant 已固定不可变 ProjectRelease/manifest；剩余是生产策略、限流和真实 preview/S3 链路验收 |
 | Special/AI 操作 | DeerFlow RuntimePort | 工具目录、输入 schema、审批、权限、RunEvent 和产物提交 |
@@ -427,24 +427,9 @@ Dify 的修改版 Apache 条款、Open WebUI 的品牌/用户规模条款、tldr
 
 所有 Pro/Cloud/Enterprise 能力必须有独立采购决策，不能悄悄进入核心接口或数据格式。
 
-## 对工作量的影响
+## 执行状态边界
 
-开源复用主要节省的是通用引擎开发，不会消除领域建模、真实数据接入、异常恢复、安全和验收工作。
-
-| 通用能力 | 从头开发 | 开源接入与定制 | 预计节省 |
-|---|---:|---:|---:|
-| UI primitive、焦点与键盘行为 | 12-18 人日 | 4-6 人日 | 8-12 人日 |
-| 无限画布与节点交互 | 20-30 人日 | 5-8 人日 | 15-22 人日 |
-| 屏内框选、变换、吸附和图层拖拽 | 12-20 人日 | 4-7 人日 | 8-13 人日 |
-| 富文本、代码和 Diff | 18-28 人日 | 6-10 人日 | 12-18 人日 |
-| 上传、重试和进度 | 10-15 人日 | 4-6 人日 | 6-9 人日 |
-| REST/SSE/cache/OIDC 客户端 | 12-18 人日 | 5-8 人日 | 7-10 人日 |
-| 文档解析、导出和测试底座 | 25-40 人日 | 12-18 人日 | 13-22 人日 |
-| 设计系统 import、投影与 Home/Project 接线 | 12-18 人日 | 7-10 人日 | 5-8 人日 |
-
-表中工作存在重叠，不能简单纵向相加；去重后，相比全手写方案约节省 45-70 人日。设计系统的 7-10 人日是完整范围中的子集，不是在总预算之外追加。也不能从总工期再次机械相减，因为绿地实施估算已经假定采用成熟开源组件。权威规划仍以 `docs/workbench-greenfield-implementation-plan.md` 为准：从零累计基线仍为生产级基础平台 100-140 人日、当前可见功能全量兑现 165-250 人日；按 2026-07-16 已落盘状态重新核算，仓库内部接入门禁已通过，真实生产外部依赖验收与硬切的剩余量统一为 **26-48 人日**。
-
-`165-250` 人日成立的范围是：受控 IR 预览、结构化表单式设计系统编辑、从 IR/RenderPlan 生成可运行 React、以及官方 Figma importer。任意生成代码在线执行、Figma 级完整设计系统编辑器、实时多人协作和外部 Figma 双向同步不在该数字内；前两项若加入，通常分别增加约 15-30+ 和 15-30 人日。产品工作台 Importer 1.0.0 已经落盘，不能再把“重做 importer”计入剩余量；真实 Figma Desktop 和目标生产环境验收已包含在当前 26-48 人日中。
+本策略只维护采用边界、许可证和退出条件，不维护历史工时估算、剩余人日或一次性测试计数。当前整改状态以两份现行执行规格为准，实际完成度只由 CI、runbook 和同一候选的生产证据判定。
 
 ## 从当前状态继续的落地顺序
 
@@ -452,7 +437,7 @@ Dify 的修改版 Apache 条款、Open WebUI 的品牌/用户规模条款、tldr
 2. 在选定的真实 S3/IAM 与 clamd 上完成断网、刷新、浏览器崩溃、过期 session、取消失败、EICAR、Export Worker 和下载恢复。
 3. 使用已完成的 Knowledge Profile 与 AdoptionReceipt 治理，以真实模型、TEI/reranker、生产 DeerFlow trusted tool 和固定中文评测集完成 adopted 决策。
 4. 在选定生产环境完成 OIDC/KMS、真实 DeerFlow、外部 OTLP collector、双 HTTPS Preview origin、Figma Desktop、Docker 镜像和全服务网络 E2E。
-5. 使用硬切 manifest v2 一次切流并物理删除旧系统，写入删除回执并运行 `--enforce`；不保留兼容、双写或旧版回退。
+5. 使用 hard-cut acceptance package v3 与 receipt v2 一次切流并物理删除旧系统，写入删除回执并运行 `--enforce`；不保留兼容、双写或旧版回退。
 
 每一步都必须复用已经通过的契约、集成和浏览器门禁，再补目标生产环境证据；不能把已经完成的开源接线重复包装成新工作量，也不能把跨 feature 状态堆回持久 Scene 或任一聚合 controller。
 

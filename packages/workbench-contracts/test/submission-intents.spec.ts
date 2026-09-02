@@ -15,6 +15,41 @@ const automaticRequest = {
 };
 
 describe("SubmissionIntent contracts", () => {
+  it("rejects a source-free generic PRD request before generation can invent scope", () => {
+    const genericRequest = {
+      ...automaticRequest,
+      prompt: "帮我写个需求文档",
+      requestedArtifactKinds: ["prd" as const],
+    };
+    for (const prompt of [
+      "帮我写个需求文档",
+      "麻烦帮忙出一份 PRD",
+      "我想要一个产品需求说明书",
+      "Please draft a product requirements document",
+    ]) {
+      const result = createSubmissionIntentRequestSchema.safeParse({
+        request: { ...genericRequest, prompt },
+        attachments: [],
+      });
+
+      expect(result.success, prompt).toBe(false);
+      if (result.success) throw new Error("Expected generic PRD input to be rejected");
+      expect(result.error.issues).toContainEqual(expect.objectContaining({
+        path: ["request", "prompt"],
+        message: expect.stringContaining("业务功能、目标用户和核心变化"),
+      }));
+    }
+
+    expect(createSubmissionIntentRequestSchema.safeParse({
+      request: { ...genericRequest, prompt: "为订单状态通知设置编写需求文档" },
+      attachments: [],
+    }).success).toBe(true);
+    expect(createSubmissionIntentRequestSchema.safeParse({
+      request: genericRequest,
+      attachments: [{ kind: "existing", fileAssetId: "file_requirement_source" }],
+    }).success).toBe(true);
+  });
+
   it("derives the durable Run request with canonical sourceIds", () => {
     expect(createSubmissionIntentRequestSchema.parse({
       request: automaticRequest,

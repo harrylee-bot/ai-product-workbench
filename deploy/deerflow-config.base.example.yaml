@@ -1,10 +1,14 @@
 config_version: 1
 
+database:
+  backend: sqlite
+  sqlite_dir: .deer-flow/data
+
 models:
-  - name: gpt-5.5
-    display_name: GPT-5.5
+  - name: gemini-3.6-flash
+    display_name: Gemini 3.6
     use: langchain_openai:ChatOpenAI
-    model: gpt-5.5
+    model: gemini-3.6-flash
     api_key: $OPENAI_API_KEY
     base_url: $WORKBENCH_DEERFLOW_PROVIDER_BASE_URL
     supports_thinking: true

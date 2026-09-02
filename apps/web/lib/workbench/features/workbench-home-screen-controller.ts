@@ -37,7 +37,6 @@ export function useWorkbenchHomeScreenController({
   const updateCommunicationPreferences = useUpdateWorkbenchCommunicationPreferences();
   const [newsletterOpen, setNewsletterOpen] = useState(false);
   const [announcementOpen, setAnnouncementOpen] = useState(true);
-  const [targetSurface, setTargetSurface] = useState<"app" | "web">("app");
   const [homeModel, setHomeModel] = useState("");
   const [homeModelMenuOpen, setHomeModelMenuOpen] = useState(false);
   const [homeStyleMenuOpen, setHomeStyleMenuOpen] = useState(false);
@@ -133,6 +132,9 @@ export function useWorkbenchHomeScreenController({
     setHomeModel(model);
     setHomeModelMenuOpen(false);
   }, []);
+  const closeHomeModelMenu = useCallback(() => {
+    setHomeModelMenuOpen(false);
+  }, []);
   const toggleHomeModelMenu = useCallback(() => {
     setHomeStyleMenuOpen(false);
     setHomeModelMenuOpen((open) => !open);
@@ -166,7 +168,11 @@ export function useWorkbenchHomeScreenController({
       const target = event.target;
       if (
         target instanceof Element
-        && (target.closest("[data-home-composer]") || target.closest("[data-home-more-menu]"))
+        && (
+          target.closest('[role="menu"]')
+          || target.closest('[aria-haspopup="menu"]')
+          || target.closest("[data-home-more-menu]")
+        )
       ) {
         return;
       }
@@ -181,6 +187,7 @@ export function useWorkbenchHomeScreenController({
     archiveFailed,
     archiveProjectTarget,
     closeHomeMenus,
+    closeHomeModelMenu,
     closeNewsletter,
     communicationPreferences,
     communicationPreferencesBusy,
@@ -199,8 +206,6 @@ export function useWorkbenchHomeScreenController({
     requestArchiveProject,
     saveCommunicationPreferences,
     selectHomeModel,
-    setTargetSurface,
-    targetSurface,
     toggleHomeModelMenu,
     toggleHomeMoreMenu,
     toggleHomeStyleMenu,

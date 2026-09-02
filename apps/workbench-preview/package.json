@@ -18,8 +18,7 @@
     "@workbench/workbench-preview-token": "0.1.0",
     "htmlparser2": "10.0.0",
     "parse5": "8.0.0",
-    "penpal": "7.0.6",
-    "zod": "^3.25.76"
+    "penpal": "7.0.6"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",

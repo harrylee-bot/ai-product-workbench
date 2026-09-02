@@ -424,6 +424,30 @@ describe("workbench.prd.v2", () => {
     expect(prdDocumentV2Schema.safeParse(duplicateChannel).success).toBe(false);
   });
 
+  it("rejects vague acceptance language, generic success promises, and linear degradation flows", () => {
+    const vagueAcceptance = cloneExample();
+    acceptanceTable(vagueAcceptance).rows[0]!.cells[2]!.content = text(
+      "用户进入页面后，各组件正常展示并正确显示对应结果。",
+    );
+    expect(prdDocumentV2Schema.safeParse(vagueAcceptance).success).toBe(false);
+
+    const vagueMetric = cloneExample();
+    const goal = vagueMetric.sections.businessRequirements.coreRules.blocks.find((block) => block.type === "goal");
+    if (!goal || goal.type !== "goal") throw new Error("missing fixture goal");
+    goal.successMetric = "提升需求评审效率与研发交付质量";
+    expect(prdDocumentV2Schema.safeParse(vagueMetric).success).toBe(false);
+
+    const linearFlow = cloneExample();
+    const productFlow = linearFlow.sections.businessRequirements.flowAndPages.diagrams[0]!;
+    productFlow.nodes = productFlow.nodes.slice(0, 4);
+    productFlow.edges = [
+      { id: "linear-1", from: productFlow.nodes[0]!.id, to: productFlow.nodes[1]!.id, label: "进入" },
+      { id: "linear-2", from: productFlow.nodes[1]!.id, to: productFlow.nodes[2]!.id, label: "处理" },
+      { id: "linear-3", from: productFlow.nodes[2]!.id, to: productFlow.nodes[3]!.id, label: "完成" },
+    ];
+    expect(prdDocumentV2Schema.safeParse(linearFlow).success).toBe(false);
+  });
+
   it("requires affirmative body evidence for every involved safety row", () => {
     const disabledChannel = cloneExample();
     disabledChannel.sections.safetyBaseline.rows[11] = {

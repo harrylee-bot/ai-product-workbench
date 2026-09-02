@@ -29,6 +29,7 @@
     "@workbench/workbench-knowledge": "0.1.0",
     "@workbench/workbench-preview-token": "0.1.0",
     "@workbench/workbench-telemetry": "0.1.0",
+    "express": "5.2.1",
     "helmet": "^8.2.0",
     "jieba-wasm": "2.4.0",
     "jwks-rsa": "^3.2.0",
@@ -41,9 +42,9 @@
     "zod": "^3.25.76"
   },
   "devDependencies": {
+    "@types/express": "5.0.6",
     "@types/node": "^22.10.0",
     "@types/passport-jwt": "^4.0.1",
-    "tsx": "^4.20.5",
     "typescript": "^5.9.2",
     "vitest": "4.1.9"
   },

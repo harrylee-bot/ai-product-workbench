@@ -1,0 +1,6 @@
+services:
+  workbench-web:
+    image: ${WORKBENCH_GRIST_WEB_IMAGE_REF:-workbench-web:grist-sso-v1}
+    environment:
+      WORKBENCH_GRIST_ORIGIN: ${WORKBENCH_GRIST_ORIGIN:?WORKBENCH_GRIST_ORIGIN is required}
+      WORKBENCH_GRIST_SSO_SECRET: ${WORKBENCH_GRIST_SSO_SECRET:?WORKBENCH_GRIST_SSO_SECRET is required}

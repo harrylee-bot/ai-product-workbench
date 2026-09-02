@@ -1,0 +1,133 @@
+diff --git a/app/client/components/GristDoc.ts b/app/client/components/GristDoc.ts
+index a4dd8a0..9ce1bd2 100644
+--- a/app/client/components/GristDoc.ts
++++ b/app/client/components/GristDoc.ts
+@@ -87,6 +87,7 @@ import {
+ } from "app/common/gristUrls";
+ import { undef, waitObs } from "app/common/gutil";
+ import { LocalPlugin } from "app/common/plugin";
++import { isOwner } from "app/common/roles";
+ import { StringUnion } from "app/common/StringUnion";
+ import { TableData } from "app/common/TableData";
+ import { getGristConfig } from "app/common/urlUtils";
+@@ -146,6 +147,7 @@ export interface TabOptions {
+ }
+ 
+ const RightPanelTool = StringUnion("none", "docHistory", "validations", "discussion");
++const ownerOnlyDocPages = new Set<IDocPage>(["acl", "data", "code", "settings"]);
+ 
+ export interface IExtraTool {
+   icon: IconName;
+@@ -394,6 +396,9 @@ export class GristDocImpl extends DisposableWithEvents implements GristDoc {
+ 
+       // Return most special pages like 'code' and 'acl' as is
+       if (typeof docPage === "string" && docPage !== "GristDocTour" && SpecialDocPage.guard(docPage)) {
++        if (ownerOnlyDocPages.has(docPage) && !isOwner(this.docPageModel.currentDoc.get())) {
++          return use(defaultViewId);
++        }
+         return docPage;
+       }
+ 
+@@ -406,6 +411,12 @@ export class GristDocImpl extends DisposableWithEvents implements GristDoc {
+       return viewId || use(defaultViewId);
+     });
+     this._activeContent = Computed.create(this, use => use(this.activeViewId));
++    this.autoDispose(subscribe(urlState().state, (_use, state) => {
++      if (state.docPage && ownerOnlyDocPages.has(state.docPage) &&
++        !isOwner(this.docPageModel.currentDoc.get())) {
++        void urlState().pushUrl({ docPage: undefined }, { replace: true, avoidReload: true });
++      }
++    }));
+     this.externalSectionId = Computed.create(this, (use) => {
+       const externalContent = use(this._popupSectionOptions);
+       return externalContent ? use(externalContent.viewSection.id) : null;
+@@ -935,6 +946,9 @@ export class GristDocImpl extends DisposableWithEvents implements GristDoc {
+   }
+ 
+   public showTool(tool: typeof RightPanelTool.type): void {
++    if (tool === "docHistory" && !isOwner(this.docPageModel.currentDoc.get())) {
++      tool = "none";
++    }
+     this._rightPanelTool.set(tool);
+   }
+ 
+diff --git a/app/client/models/DocPageModel.ts b/app/client/models/DocPageModel.ts
+index 9b282e5..d3563a2 100644
+--- a/app/client/models/DocPageModel.ts
++++ b/app/client/models/DocPageModel.ts
+@@ -322,10 +322,12 @@ export class DocPageModelImpl extends Disposable implements DocPageModel {
+         ),
+         cssScrollPane(
+           dom.create(buildPagesDom, activeDoc, leftPanelOpen),
+-          dom.create(tools, activeDoc, leftPanelOpen),
++          dom.maybe(use => isOwner(use(this.currentDoc)), () =>
++            dom.create(tools, activeDoc, leftPanelOpen)),
+         ),
+       ]),
+-      createVersionFooter(leftPanelOpen),
++      dom.maybe(use => isOwner(use(this.currentDoc)), () =>
++        createVersionFooter(leftPanelOpen)),
+     );
+   }
+ 
+diff --git a/app/client/ui/AccountPage.ts b/app/client/ui/AccountPage.ts
+index cd79834..cff63a4 100644
+--- a/app/client/ui/AccountPage.ts
++++ b/app/client/ui/AccountPage.ts
+@@ -21,6 +21,5 @@ import { createTopBarHome } from "app/client/ui/TopBar";
+ import { transientInput } from "app/client/ui/transientInput";
+ import { fullBreadcrumbs } from "app/client/ui2018/breadcrumbs";
+-import { labeledSquareCheckbox } from "app/client/ui2018/checkbox";
+ import { cssLink, cssNestedLinks } from "app/client/ui2018/links";
+ import { select } from "app/client/ui2018/menus";
+ import { commonUrls, getPageTitleSuffix, isFeatureEnabled } from "app/common/gristUrls";
+@@ -45,9 +45,6 @@ export class AccountPage extends Disposable {
+   private _isEditingName = Observable.create(this, false);
+   private _nameEdit = Observable.create<string>(this, "");
+   private _isNameValid = Computed.create(this, this._nameEdit, (_use, val) => checkName(val));
+-  private _allowGoogleLogin = Computed.create(this, use => use(this._userObs)?.allowGoogleLogin ?? false)
+-    .onWrite(val => this._updateAllowGooglelogin(val));
+-
+   constructor(private _appModel: AppModel, private _appObj: App) {
+     super();
+     this._setPageTitle();
+@@ -144,14 +141,6 @@ export class AccountPage extends Disposable {
+           testId("login-method"),
+         ),
+         user.loginMethod !== "Email + Password" ? null : dom.frag(
+-          css.dataRow(
+-            labeledSquareCheckbox(
+-              this._allowGoogleLogin,
+-              t("Allow signing in to this account with Google"),
+-              testId("allow-google-login-checkbox"),
+-            ),
+-            testId("allow-google-login"),
+-          ),
+           css.subHeader(t("Two-factor authentication")),
+           css.description(
+             t("Two-factor authentication is an extra layer of security for your Grist account \
+@@ -256,11 +245,6 @@ OAuth apps are available with the [full version of Grist]({{fullGrist}}).`,
+     await this._fetchAll();
+   }
+ 
+-  private async _updateAllowGooglelogin(allowGoogleLogin: boolean) {
+-    await this._appModel.api.updateAllowGoogleLogin(allowGoogleLogin);
+-    await this._fetchUserProfile();
+-  }
+-
+   private _showChangePasswordDialog() {
+     return buildChangePasswordDialog();
+   }
+diff --git a/app/client/ui/AuthenticationSection.ts b/app/client/ui/AuthenticationSection.ts
+index 0de755b..4e221c7 100644
+--- a/app/client/ui/AuthenticationSection.ts
++++ b/app/client/ui/AuthenticationSection.ts
+@@ -713,7 +713,7 @@ const PROVIDER_META_BUILDERS: Record<string, () => ProviderMeta> = {
+   [OIDC_PROVIDER_KEY]: () => {
+     const docsUrl = "https://support.getgrist.com/install/oidc";
+     return {
+-      description: t("Works with most identity providers (Google, Azure AD, Keycloak, etc.)."),
++      description: "",
+       heroDesc: t("Your server is configured to authenticate users via OpenID Connect. \
+ Users sign in through your identity provider."),
+       docsUrl,

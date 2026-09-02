@@ -535,7 +535,6 @@ jobs:
                 --build-arg WORKBENCH_PREVIEW_ORIGIN=https://preview.workbench.example.test
                 --build-arg WORKBENCH_S3_BROWSER_UPLOAD_BUCKET_URL=https://uploads.workbench.example.test/workbench
                 --build-arg NEXT_PUBLIC_KNOWLEDGE_APP_URL=https://workbench.example.test/knowledge
-                --build-arg NEXT_PUBLIC_WORKBENCH_PUBLIC_REGISTRATION_ENABLED=false
               )
               ;;
             quartz)
@@ -705,7 +704,6 @@ jobs:
               NEXT_PUBLIC_WORKBENCH_FEEDBACK_URL=${{ github.ref == 'refs/heads/production' && vars.NEXT_PUBLIC_WORKBENCH_FEEDBACK_URL || '' }}
               NEXT_PUBLIC_WORKBENCH_FORUM_URL=${{ github.ref == 'refs/heads/production' && vars.NEXT_PUBLIC_WORKBENCH_FORUM_URL || '' }}
               NEXT_PUBLIC_WORKBENCH_PRIVACY_URL=${{ github.ref == 'refs/heads/production' && vars.NEXT_PUBLIC_WORKBENCH_PRIVACY_URL || '' }}
-              NEXT_PUBLIC_WORKBENCH_PUBLIC_REGISTRATION_ENABLED=${{ github.ref == 'refs/heads/production' && vars.WORKBENCH_PUBLIC_REGISTRATION_ENABLED || 'false' }}
               NODE_IMAGE=${{ github.ref == 'refs/heads/production' && vars.WORKBENCH_NODE_IMAGE || 'node:22-alpine' }}
           - name: api
             dockerfile: apps/workbench-api/Dockerfile

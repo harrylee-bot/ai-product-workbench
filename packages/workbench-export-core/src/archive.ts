@@ -1,5 +1,5 @@
 import { PassThrough } from "node:stream";
-import archiver from "archiver";
+import { ZipArchive } from "archiver";
 import { TerminalExportError } from "./errors.js";
 
 export type ArchiveEntry = {
@@ -18,7 +18,7 @@ export async function createDeterministicZip(entries: ArchiveEntry[], maximumByt
   }
 
   const output = new PassThrough();
-  const archive = archiver("zip", { zlib: { level: 9 }, forceLocalTime: false });
+  const archive = new ZipArchive({ zlib: { level: 9 }, forceLocalTime: false });
   const chunks: Buffer[] = [];
   let byteSize = 0;
   const completed = new Promise<Buffer>((resolve, reject) => {

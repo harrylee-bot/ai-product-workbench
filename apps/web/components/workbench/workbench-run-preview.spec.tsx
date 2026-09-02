@@ -20,6 +20,7 @@ import {
   mergeCanvasNodeSelection,
   observePersistedPrdNodes,
   projectReadyPrototypePreviewArtifacts,
+  projectReadyPrdPreviewArtifacts,
   projectRunBoardNodes,
   runtimeDraftsToWorkbench,
   shouldAutoFitActivePrdViewport,
@@ -261,7 +262,7 @@ describe("Mini Workbench Run preview", () => {
       .toBe("board-node-prd");
   });
 
-  it("normalizes an oversized persisted PRD and anchors it beyond the inspector", () => {
+  it("preserves a persisted PRD size and anchors it beyond the inspector", () => {
     const prd = persistedPrdNode({
       id: "board-node-prd",
       position: { x: 600, y: 400 },
@@ -275,17 +276,17 @@ describe("Mini Workbench Run preview", () => {
     const viewport = getPersistedPrdViewport(prd, 1440, 900);
     const projectedLeft = viewport.x + prd.position.x * viewport.zoom;
     const projectedTop = viewport.y + prd.position.y * viewport.zoom;
-    const projectedRight = projectedLeft + 500 * viewport.zoom;
+    const projectedRight = projectedLeft + prd.workbench.size!.width * viewport.zoom;
 
     expect(normalized).toMatchObject({
-      height: 500,
-      style: { height: 500, width: 500 },
-      width: 500,
+      height: 3001,
+      style: { height: 3001, width: 1154 },
+      width: 1154,
     });
     expect(projectedLeft).toBeGreaterThanOrEqual(320);
     expect(projectedTop).toBeCloseTo(92, 5);
     expect(projectedRight).toBeLessThanOrEqual(1400);
-    expect(viewport.zoom).toBeCloseTo((563 / 500) * 0.88, 5);
+    expect(viewport.zoom).toBeCloseTo((563 / 1154) * 0.88, 5);
   });
 
   it.each([
@@ -301,7 +302,7 @@ describe("Mini Workbench Run preview", () => {
       const viewport = getPersistedPrdViewport(prd, containerWidth, containerHeight);
       const projectedLeft = viewport.x + prd.position.x * viewport.zoom;
       const projectedTop = viewport.y + prd.position.y * viewport.zoom;
-      const projectedRight = projectedLeft + 500 * viewport.zoom;
+      const projectedRight = projectedLeft + prd.workbench.size!.width * viewport.zoom;
 
       expect(projectedLeft).toBeCloseTo(expectedLeft, 5);
       expect(projectedTop).toBeCloseTo(expectedTop, 5);
@@ -309,7 +310,7 @@ describe("Mini Workbench Run preview", () => {
     },
   );
 
-  it("renders a 500px PRD at the source-measured 563px width at 93%", () => {
+  it("renders a persisted 500px PRD at the source-measured 563px width at 93%", () => {
     const persisted = persistedPrdNode({
       id: "board-node-prd-square",
       position: { x: 0, y: 0 },
@@ -517,9 +518,30 @@ describe("Mini Workbench Run preview", () => {
       position: { x: 0, y: 0 },
       selectable: false,
       selected: false,
-      style: { height: 500, width: 500 },
+      style: { height: 1123, width: 794 },
       type: "documentCanvas",
     });
+  });
+
+  it("exposes a persisted complete PRD as a document Preview target", () => {
+    const reference = {
+      artifactId: "artifact-prd",
+      artifactVersionId: "version-prd-ready",
+      projectId: "project-real",
+    };
+    const nodes = [{
+      data: { artifact: reference, phase: "complete" as const, title: "订单通知需求说明书" },
+      id: "node-prd",
+      position: { x: 0, y: 0 },
+      type: "documentCanvas" as const,
+    }];
+
+    expect(projectReadyPrdPreviewArtifacts(nodes, new Set(["node-prd"]))).toEqual([{
+      kind: "prd",
+      reference,
+      title: "订单通知需求说明书",
+    }]);
+    expect(projectReadyPrdPreviewArtifacts(nodes, new Set())).toEqual([]);
   });
 
   it("projects no Board nodes before a real Artifact Draft exists", () => {

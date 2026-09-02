@@ -1,0 +1,58 @@
+name: workbench-grist
+
+services:
+  grist:
+    image: ${GRIST_IMAGE:-workbench-grist:1.7.17-owner-tools}
+    restart: unless-stopped
+    init: true
+    environment:
+      APP_HOME_URL: ${GRIST_PUBLIC_ORIGIN:?GRIST_PUBLIC_ORIGIN is required}
+      GRIST_BOOT_KEY: ${GRIST_BOOT_KEY:?GRIST_BOOT_KEY is required}
+      GRIST_DEFAULT_LOCALE: zh-CN
+      GRIST_FORWARD_AUTH_HEADER: X-Workbench-Email
+      GRIST_FORWARD_AUTH_LOGIN_PATH: /auth/login
+      GRIST_FORWARD_AUTH_LOGOUT_PATH: /auth/logout
+      GRIST_HIDE_UI_ELEMENTS: automations,sendToDrive
+      GRIST_IN_SERVICE: "true"
+      GRIST_LOCALES_DIR: /grist/custom-locales
+      GRIST_SANDBOX_FLAVOR: pyodide
+    volumes:
+      - ${GRIST_DATA_DIR:?GRIST_DATA_DIR is required}/persist:/persist
+      - ${GRIST_DATA_DIR:?GRIST_DATA_DIR is required}/locales:/grist/custom-locales:ro
+    networks: [grist-internal]
+
+  auth-gateway:
+    image: workbench-grist-auth-gateway:local
+    build:
+      context: ..
+      dockerfile: apps/grist-auth-gateway/Dockerfile
+      args:
+        NODE_IMAGE: ${WORKBENCH_NODE_IMAGE:-node:22-alpine}
+    restart: unless-stopped
+    init: true
+    depends_on:
+      - grist
+    environment:
+      GRIST_GATEWAY_HOST: 0.0.0.0
+      GRIST_GATEWAY_PORT: "8484"
+      GRIST_DEFAULT_USER_LOCALE: zh-Hans
+      GRIST_PUBLIC_ORIGIN: ${GRIST_PUBLIC_ORIGIN:?GRIST_PUBLIC_ORIGIN is required}
+      GRIST_UPSTREAM: http://grist:8484
+      WORKBENCH_GRIST_SSO_SECRET: ${WORKBENCH_GRIST_SSO_SECRET:?WORKBENCH_GRIST_SSO_SECRET is required}
+      WORKBENCH_ORIGIN: ${WORKBENCH_ORIGIN:?WORKBENCH_ORIGIN is required}
+    ports:
+      - 127.0.0.1:8484:8484
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - fetch('http://127.0.0.1:8484/',{redirect:'manual'}).then(r=>{if(r.status>=500)process.exit(1)}).catch(()=>process.exit(1))
+      interval: 15s
+      timeout: 5s
+      start_period: 20s
+      retries: 4
+    networks: [grist-internal]
+
+networks:
+  grist-internal:

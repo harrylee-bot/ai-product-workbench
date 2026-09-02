@@ -57,12 +57,11 @@ import {
 } from "./workbench-design-system-controls";
 import {
   ComposerAttachmentMenu,
+  ComposerArtifactOutputMenu,
   ComposerCommandMenu,
-  ModelChoiceMenu,
 } from "./workbench-composer-menus";
-import { WorkbenchModelCatalogButton } from "./workbench-model-catalog-button";
+import type { WorkbenchArtifactOutputKind } from "./workbench-composer-menus";
 import { viewTransition } from "./workbench-motion";
-import { WorkbenchTargetSurfaceControl } from "./workbench-target-surface-control";
 import { WorkbenchImportSourcesDialog } from "./workbench-import-sources-dialog";
 
 type WorkbenchRunSubmitHandler = (
@@ -88,6 +87,7 @@ export type WorkbenchProjectComposerProps = {
   modelChoices: WorkbenchModelChoice[];
   modelMenuOpen: boolean;
   onSelectModel: (model: string) => void;
+  onCloseModel?: () => void;
   onRefresh: () => Promise<unknown>;
   onClearContext?: () => void;
   onRetryDesignPresets: () => void;
@@ -118,11 +118,11 @@ export function ProjectComposer({
   modelChoices,
   modelMenuOpen,
   onSelectModel,
+  onCloseModel,
   onRefresh,
   onClearContext,
   onRetryDesignPresets,
-  onRetryModels,
-  onTargetSurfaceChange,
+  onRetryModels: _onRetryModels,
   onToggleModel,
   onSubmitPrompt,
   designPresetItems,
@@ -151,6 +151,7 @@ export function ProjectComposer({
     session,
     () => automaticDesignStyleSelection,
   );
+  const [outputKind, setOutputKind] = useWorkbenchProjectState<WorkbenchArtifactOutputKind | null>(session, () => null);
   const [customDesignOpen, setCustomDesignOpen] = useWorkbenchProjectState(session, () => false);
   const [importSourcesOpen, setImportSourcesOpen] = useWorkbenchProjectState(session, () => false);
   const [selectedSourceIds, setSelectedSourceIds] = useWorkbenchProjectState<string[]>(session, () => []);
@@ -214,7 +215,7 @@ export function ProjectComposer({
         : targetedGenerateArtifactTargets,
       requestedArtifactKinds: targetedGenerate
         ? ["prototype"]
-        : requestedArtifactKindsForPrompt(nextPrompt, {
+        : outputKind ? [outputKind] : requestedArtifactKindsForPrompt(nextPrompt, {
             prdContext: hasDocumentChip,
           }),
       sourceIds: selectedSourceIds,
@@ -271,12 +272,18 @@ export function ProjectComposer({
   useEffect(() => {
     const closeComposerPanelsOnOutsidePointer = (event: MouseEvent) => {
       const target = event.target;
-      if (target instanceof Element && target.closest("[data-project-composer]")) return;
+      if (
+        target instanceof Element
+        && (target.closest('[role="menu"]') || target.closest('[aria-haspopup="menu"]'))
+      ) {
+        return;
+      }
       setComposerPanel(null);
+      if (modelMenuOpen) onCloseModel?.();
     };
     window.addEventListener("mousedown", closeComposerPanelsOnOutsidePointer, true);
     return () => window.removeEventListener("mousedown", closeComposerPanelsOnOutsidePointer, true);
-  }, [setComposerPanel]);
+  }, [modelMenuOpen, onCloseModel, setComposerPanel]);
 
   const toggleComposerPanel = (panel: "commands" | "attachments" | "style") => {
     setComposerPanel((currentPanel) => currentPanel === panel ? null : panel);
@@ -418,11 +425,6 @@ export function ProjectComposer({
           >
             /
           </button>
-          <WorkbenchTargetSurfaceControl
-            disabled={disabled}
-            onChange={onTargetSurfaceChange}
-            surface={targetSurface}
-          />
           <div className="flex-1" />
           <button
             aria-expanded={composerPanel === "attachments"}
@@ -452,25 +454,35 @@ export function ProjectComposer({
           >
             <PaletteIcon className="size-[17px]" />
           </button>
-          <WorkbenchModelCatalogButton
-            catalog={modelCatalog}
-            chevronClassName="size-[16px]"
-            className="workbench-composer-model flex h-[34px] shrink-0 items-center gap-[7px] rounded-full bg-[#2b2c30]/95 px-[14px] text-[14px] font-semibold text-[#f1f3f4] max-sm:w-[32px] max-sm:justify-center max-sm:gap-0 max-sm:px-0 max-sm:text-[0px]"
-            disabled={disabled}
-            menuOpen={modelMenuOpen}
-            onRetry={onRetryModels}
-            onToggle={() => {
+          <button
+            aria-expanded={modelMenuOpen}
+            aria-haspopup="menu"
+            aria-label="选择生成类型"
+            className="workbench-composer-model flex h-[34px] shrink-0 items-center gap-[7px] rounded-full bg-[#2b2c30]/95 px-[14px] text-[13px] font-semibold text-[#f1f3f4] max-sm:px-[10px]"
+            disabled={disabled || modelCatalog.status !== "ready"}
+            onClick={() => {
               setComposerPanel(null);
               onToggleModel();
             }}
-            selectedLabel={selectedModel?.label}
-          />
+            type="button"
+          >
+            <FileTextIcon className="size-[15px]" />
+            {outputKind === "prd" ? "生成文档" : outputKind === "prototype" ? "生成原型" : "生成类型"}
+          </button>
           <AnimatePresence>
             {modelCatalog.status === "ready" && modelMenuOpen && (
-              <ModelMenu
-                model={model}
-                modelChoices={modelChoices}
-                onSelectModel={onSelectModel}
+              <ComposerArtifactOutputMenu
+                kind={outputKind}
+                onSelect={(kind) => {
+                  const generateChoice = modelChoices.find((choice) => (
+                    choice.workflow === "generate" && choice.modelId === selectedModel?.modelId
+                  )) ?? modelChoices.find((choice) => choice.workflow === "generate");
+                  if (generateChoice && generateChoice.key !== model) {
+                    onSelectModel(generateChoice.key);
+                  }
+                  setOutputKind(kind);
+                  (onCloseModel ?? onToggleModel)();
+                }}
               />
             )}
           </AnimatePresence>
@@ -561,24 +573,5 @@ export function ProjectComposer({
         selectedSourceIds={selectedSourceIds}
       />
     </motion.div>
-  );
-}
-
-function ModelMenu({
-  model,
-  modelChoices,
-  onSelectModel,
-}: {
-  model: string;
-  modelChoices: WorkbenchModelChoice[];
-  onSelectModel: (model: string) => void;
-}) {
-  return (
-    <ModelChoiceMenu
-      className="absolute bottom-[60px] right-[0px] w-[330px]"
-      model={model}
-      modelChoices={modelChoices}
-      onSelectModel={onSelectModel}
-    />
   );
 }

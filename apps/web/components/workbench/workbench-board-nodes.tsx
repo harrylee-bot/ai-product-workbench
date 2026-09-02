@@ -746,12 +746,12 @@ function DocumentCanvasNode({ data, selected }: NodeProps<DocumentCanvasNode>) {
     )} data-workbench-artifact-refresh-state={preservesPrevious ? artifactState : undefined}>
       <NodeResizer
         color="#7467f6"
-        handleClassName="!size-[8px] !border !border-[#7467f6] !bg-[#dfe2ff]"
+        handleClassName="!z-50 !size-[10px] !border !border-[#7467f6] !bg-[#dfe2ff]"
         isVisible={isWorkbenchNodeResizeVisible(canResizeNodes, selected)}
         keepAspectRatio
-        lineClassName="!border-[#7467f6]"
-        minHeight={500}
-        minWidth={500}
+        lineClassName="!z-40 !border-[#7467f6]"
+        minHeight={450}
+        minWidth={320}
       />
       {(selected || isLoading) && <div className="pointer-events-none absolute inset-0 z-20 border-[2px] border-[#7467f6]" />}
       <div className="absolute left-0 top-[-31px] z-30 flex items-center gap-[7px] text-[14px] font-medium leading-none text-[#f1f3f4]">

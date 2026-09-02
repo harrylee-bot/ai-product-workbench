@@ -75,7 +75,7 @@ test("the Web and CI builds pin their Linux x64 native dependencies", async () =
   const lockfile = JSON.parse(await readFile(path.join(root, "package-lock.json"), "utf8"));
   const nativePins = {
     "@esbuild/linux-x64": "0.28.1",
-    "@next/swc-linux-x64-musl": "16.2.10",
+    "@next/swc-linux-x64-musl": "16.2.12",
     "@rolldown/binding-linux-x64-gnu": "1.1.4",
     "@rolldown/binding-linux-x64-musl": "1.1.4",
     "@tailwindcss/oxide-linux-x64-gnu": "4.3.1",

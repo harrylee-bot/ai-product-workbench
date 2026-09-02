@@ -20,6 +20,61 @@ import { popoverTransition } from "./workbench-motion";
 
 type ModelName = string;
 
+export type WorkbenchArtifactOutputKind = "prd" | "prototype";
+
+export function ComposerArtifactOutputMenu({
+  kind,
+  onSelect,
+  placement = "project",
+}: {
+  kind: WorkbenchArtifactOutputKind | null;
+  onSelect: (kind: WorkbenchArtifactOutputKind) => void;
+  placement?: "home" | "project";
+}) {
+  const options = [
+    { icon: FileTextIcon, kind: "prd" as const, label: "生成文档", description: "输出需求说明书" },
+    { icon: FrameIcon, kind: "prototype" as const, label: "生成原型", description: "输出可交互原型" },
+  ];
+
+  return (
+    <motion.div
+      animate={{ opacity: 1, y: 0 }}
+      className={cn(
+        "absolute z-[70] w-[210px] overflow-hidden rounded-[10px] border border-white/[0.08] bg-[#18191b]/94 p-[8px] text-[#e8eaed] shadow-[0_24px_90px_-42px_rgba(0,0,0,0.95)] backdrop-blur-2xl",
+        placement === "home" ? "right-[74px] top-[154px]" : "bottom-[42px] right-[202px]",
+      )}
+      exit={{ opacity: 0, y: 3 }}
+      initial={{ opacity: 0, y: 5 }}
+      role="menu"
+      transition={popoverTransition}
+    >
+      {options.map((option) => {
+        const Icon = option.icon;
+        return (
+          <button
+            aria-pressed={kind === option.kind}
+            className={cn(
+              "flex min-h-[58px] w-full items-center gap-[10px] rounded-[8px] px-[10px] py-[8px] text-left hover:bg-white/[0.06]",
+              kind === option.kind && "bg-white/[0.10]",
+            )}
+            key={option.kind}
+            onClick={() => onSelect(option.kind)}
+            role="menuitemradio"
+            type="button"
+          >
+            <Icon className="size-[17px] shrink-0 text-[#f1f3f4]" />
+            <span className="min-w-0 flex-1">
+              <span className="block text-[13px] font-semibold leading-[17px]">{option.label}</span>
+              <span className="mt-[2px] block text-[11px] leading-[15px] text-[#aeb3bb]">{option.description}</span>
+            </span>
+            {kind === option.kind && <CheckCircle2Icon className="size-[15px] shrink-0 text-[#e8eaed]" />}
+          </button>
+        );
+      })}
+    </motion.div>
+  );
+}
+
 export function ComposerCommandMenu({
   onSelect,
   placement = "project",

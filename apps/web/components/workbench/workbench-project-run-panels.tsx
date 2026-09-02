@@ -317,6 +317,7 @@ export function ProjectTranscriptPanel({
     isPrdRun,
     stage: generationStage,
   });
+  const terminalFailureCopy = runStatus === "failed" ? failure?.message : null;
   const statusCopy = submissionError
     ? "提交失败"
     : runStatus === "failed"
@@ -334,10 +335,11 @@ export function ProjectTranscriptPanel({
               ?? currentActivity?.label
               ?? (isOverview ? "正在处理" : "准备就绪");
   const runBodyCopy = [
+    terminalFailureCopy,
     selectedActivity?.detail,
     latestMessage?.text,
     currentActivity?.detail,
-    failure?.message,
+    runStatus === "failed" ? null : failure?.message,
     cancellationReason,
     submissionError instanceof Error ? submissionError.message : null,
     runStatus === "waiting_input" ? "请在确认弹层中选择后继续。" : null,

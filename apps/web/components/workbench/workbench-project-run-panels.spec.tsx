@@ -314,6 +314,26 @@ describe("ProjectTranscriptPanel", () => {
     }
   });
 
+  it("shows the persisted failure detail before a generic terminal assistant message", () => {
+    const { container } = renderPanel({
+      failure: {
+        code: "RUNTIME_EXECUTION_FAILED",
+        message: "RUNTIME_ARTIFACTS_MISSING:prototype",
+        retryable: false,
+      },
+      messages: [{
+        id: "message-1",
+        status: "completed",
+        text: "RUNTIME_EXECUTION_FAILED",
+        working: false,
+      }],
+      prompt: "根据这个文档生成原型",
+      runStatus: "failed",
+    });
+
+    expect(within(getAgentCard(container)).getByText("RUNTIME_ARTIFACTS_MISSING:prototype")).not.toBeNull();
+  });
+
   it("restores queued PRD context on retry and keeps it deterministic after reconnect", () => {
     const onRetry = vi.fn();
     const rendered = renderPanel({

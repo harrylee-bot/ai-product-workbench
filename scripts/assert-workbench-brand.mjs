@@ -3,8 +3,6 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const stitchParityStatusPath = "docs/stitch-parity/IMPLEMENTATION-STATUS.md";
-const auditRemediationPath = "docs/CODEX-WORKBENCH-COMPREHENSIVE-AUDIT-REMEDIATION.md";
 const officialGoogleStitchReference = /(?:Google\s+Stitch|@google\/stitch-sdk|StitchToolClient|stitch\.(?:withgoogle|googleapis)\.com|google-labs-code\/stitch|gemini-cli-extensions\/stitch)/iu;
 const ignoredDirectories = new Set([
   ".next",
@@ -36,24 +34,18 @@ const forbidden = [
     label: "legacy Stitch name",
     pattern: /(?:stitch|stich|sttich|sticht|stitich|sitch)/i,
     allowedFiles: new Set([
-      "design-qa.md",
-      auditRemediationPath,
-      stitchParityStatusPath,
       "docs/workbench-greenfield-implementation-plan.md",
       "docs/workbench-open-source-reuse-strategy.md",
     ]),
     allowLine: (line, relativePath) =>
-      relativePath === auditRemediationPath ||
-      relativePath === stitchParityStatusPath ||
-      officialGoogleStitchReference.test(line) ||
-      (relativePath === "design-qa.md" && /\boutput\/(?:playwright\/live-)?stitch[-/]/iu.test(line)),
+      officialGoogleStitchReference.test(line),
   },
   { label: "legacy English product name", pattern: /AI Product Workbench/i },
   {
     label: "legacy ai-product-workbench identifier",
     pattern: /ai[_-]product[_-]workbench/i,
-    allowedFiles: new Set([auditRemediationPath, "docs/workbench-hard-cut-deletion-manifest.json"]),
-    allowLine: (line, relativePath) => relativePath === auditRemediationPath || (
+    allowedFiles: new Set(["docs/workbench-hard-cut-deletion-manifest.json"]),
+    allowLine: (line, relativePath) => (
       relativePath === "docs/workbench-hard-cut-deletion-manifest.json" && (
         /"(?:path|evidenceReference)":\s*"(?:git status --short -- )?integrations\/deerflow\/skills\/ai-product-workbench"/iu.test(line)
         || /^\s*"(?:database=ai_product_workbench;schema=public|ai-product-workbench(?:-(?:api|web|knowledge|postgres|storage))?(?::uploads\/)?|container=ai-product-workbench-(?:api|web))",?\s*$/iu.test(line)
@@ -102,7 +94,6 @@ const scriptEntries = await readdir(path.join(repoRoot, "scripts"), { withFileTy
 const deployEntries = await readdir(path.join(repoRoot, "deploy"), { withFileTypes: true });
 const roots = [
   "README.md",
-  "design-qa.md",
   "package.json",
   "package-lock.json",
   "docs",

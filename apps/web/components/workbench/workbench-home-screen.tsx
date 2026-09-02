@@ -9,7 +9,6 @@ import {
   Grid3X3Icon,
   HelpCircleIcon,
   MessageSquareIcon,
-  MonitorIcon,
   MoreVerticalIcon,
   PaletteIcon,
   PaperclipIcon,
@@ -72,8 +71,9 @@ import { WorkbenchAccountMenu } from "./workbench-account-menu";
 import {
   ComposerAttachmentMenu,
   ComposerCommandMenu,
-  ModelChoiceMenu,
+  ComposerArtifactOutputMenu,
 } from "./workbench-composer-menus";
+import type { WorkbenchArtifactOutputKind } from "./workbench-composer-menus";
 import {
   automaticDesignStyleSelection,
   CustomDesignSystemDialog,
@@ -81,7 +81,6 @@ import {
   HomeDesignSystemMenu,
   type WorkbenchDesignStyleSelection,
 } from "./workbench-design-system-controls";
-import { WorkbenchModelCatalogButton } from "./workbench-model-catalog-button";
 import { WorkbenchImportSourcesDialog } from "./workbench-import-sources-dialog";
 import {
   keepWorkbenchRouteMotionOnMainThread,
@@ -198,6 +197,7 @@ export function HomeScreen({
     archiveFailed,
     archiveProjectTarget,
     closeHomeMenus,
+    closeHomeModelMenu,
     closeNewsletter,
     communicationPreferences,
     communicationPreferencesBusy,
@@ -216,8 +216,6 @@ export function HomeScreen({
     requestArchiveProject,
     saveCommunicationPreferences,
     selectHomeModel,
-    setTargetSurface,
-    targetSurface,
     toggleHomeModelMenu,
     toggleHomeMoreMenu,
     toggleHomeStyleMenu,
@@ -438,6 +436,7 @@ export function HomeScreen({
         modelChoices={homeModelChoices}
         modelMenuOpen={homeModelMenuOpen}
         onSelectModel={selectHomeModel}
+        onCloseModel={closeHomeModelMenu}
         onToggleModel={toggleHomeModelMenu}
         onToggleStyle={toggleHomeStyleMenu}
         onSubmitPrompt={onSubmitPrompt}
@@ -448,15 +447,12 @@ export function HomeScreen({
         onRetryDesignSystems={onRetryDesignSystems}
         onRetryModels={onRetryModels}
         prompt={prompt}
-        setSurface={setTargetSurface}
         setPrompt={setPrompt}
         styleMenuOpen={homeStyleMenuOpen}
-        surface={targetSurface}
       />
       <InspirationStrip
         onSelectTemplate={(template) => {
           setPrompt(template.prompt);
-          setTargetSurface(template.targetSurface);
         }}
         rotationRequest={inspirationRotationRequest}
       />
@@ -618,6 +614,7 @@ function HomeComposer({
   modelChoices,
   modelMenuOpen,
   onSelectModel,
+  onCloseModel,
   onToggleModel,
   onToggleStyle,
   onSubmitPrompt,
@@ -626,12 +623,10 @@ function HomeComposer({
   onImportSourcesOpenChange,
   onLoadMoreDesignSystems,
   onRetryDesignSystems,
-  onRetryModels,
+  onRetryModels: _onRetryModels,
   prompt,
-  setSurface,
   setPrompt,
   styleMenuOpen,
-  surface,
 }: {
   busy: boolean;
   designSystemCatalogFetchingNextPage: boolean;
@@ -643,6 +638,7 @@ function HomeComposer({
   modelChoices: WorkbenchModelChoice[];
   modelMenuOpen: boolean;
   onSelectModel: (model: ModelName) => void;
+  onCloseModel?: () => void;
   onToggleModel: () => void;
   onToggleStyle: () => void;
   onSubmitPrompt: WorkbenchRunSubmitHandler;
@@ -653,14 +649,13 @@ function HomeComposer({
   onRetryDesignSystems: () => void;
   onRetryModels: () => void;
   prompt: string;
-  setSurface: (surface: "app" | "web") => void;
   setPrompt: (prompt: string) => void;
   styleMenuOpen: boolean;
-  surface: "app" | "web";
 }) {
   const [composerFocused, setComposerFocused] = useState(false);
   const [composerPanel, setComposerPanel] = useState<"attachments" | "commands" | null>(null);
   const [selectedStyle, setSelectedStyle] = useState<WorkbenchDesignStyleSelection>(automaticDesignStyleSelection);
+  const [outputKind, setOutputKind] = useState<WorkbenchArtifactOutputKind | null>(null);
   const [customDesignOpen, setCustomDesignOpen] = useState(false);
   const [suggestionOffset, setSuggestionOffset] = useState(0);
   const attachments = useWorkbenchComposerAttachments();
@@ -691,12 +686,12 @@ function HomeComposer({
     void onSubmitPrompt({
       prompt: text,
       modelChoiceKey: selectedModel.key,
-      targetSurface: surface,
+      targetSurface: "web",
       designStyle: selectedStyle.designStyle,
       designSystemProvision: selectedStyle.provision,
       files: selectedFiles,
       sourceIds: [],
-      requestedArtifactKinds: requestedArtifactKindsForPrompt(text),
+      requestedArtifactKinds: outputKind ? [outputKind] : requestedArtifactKindsForPrompt(text),
     });
   };
 
@@ -710,6 +705,21 @@ function HomeComposer({
     };
     window.addEventListener("keydown", closeComposerPanel);
     return () => window.removeEventListener("keydown", closeComposerPanel);
+  }, []);
+
+  useEffect(() => {
+    const closeComposerPanelOnOutsidePointer = (event: MouseEvent) => {
+      const target = event.target;
+      if (
+        target instanceof Element
+        && (target.closest('[role="menu"]') || target.closest('[aria-haspopup="menu"]'))
+      ) {
+        return;
+      }
+      setComposerPanel(null);
+    };
+    window.addEventListener("mousedown", closeComposerPanelOnOutsidePointer, true);
+    return () => window.removeEventListener("mousedown", closeComposerPanelOnOutsidePointer, true);
   }, []);
 
   const toggleComposerPanel = (panel: "attachments" | "commands") => {
@@ -818,32 +828,6 @@ function HomeComposer({
             >
               /
             </button>
-            <div className="flex h-[34px] items-center gap-[3px] rounded-full bg-[#121315]/80 p-[2px]">
-              <button
-                aria-pressed={surface === "app"}
-                className={cn(
-                  "workbench-composer-segment flex h-[30px] items-center gap-[6px] rounded-full px-[11px] text-[13px] font-semibold",
-                  surface === "app" ? "bg-[#3f4247]/90 text-[#f1f3f4]" : "text-[#bfc4ca]",
-                )}
-                onClick={() => setSurface("app")}
-                type="button"
-              >
-                <MonitorIcon className="size-[15px]" />
-                应用
-              </button>
-              <button
-                aria-pressed={surface === "web"}
-                className={cn(
-                  "workbench-composer-segment flex h-[30px] items-center gap-[6px] rounded-full px-[11px] text-[13px] font-semibold",
-                  surface === "web" ? "bg-[#3f4247]/90 text-[#f1f3f4]" : "text-[#bfc4ca]",
-                )}
-                onClick={() => setSurface("web")}
-                type="button"
-              >
-                <MonitorIcon className="size-[15px]" />
-                Web
-              </button>
-            </div>
             <div className="flex-1" />
             <button
               aria-expanded={styleMenuOpen}
@@ -862,18 +846,22 @@ function HomeComposer({
             >
               <PaletteIcon className="size-[17px]" />
             </button>
-            <WorkbenchModelCatalogButton
-              catalog={modelCatalog}
-              className="workbench-composer-model flex h-[36px] items-center gap-[7px] rounded-full bg-[#2b2d31]/86 px-[14px] text-[14px] font-semibold text-[#f1f3f4]"
-              leadingIcon={<SparklesIcon className="size-[15px]" />}
-              menuOpen={modelMenuOpen}
-              onRetry={onRetryModels}
-              onToggle={() => {
+            <button
+              aria-expanded={modelMenuOpen}
+              aria-haspopup="menu"
+              aria-label="选择生成类型"
+              className="workbench-composer-model flex h-[36px] items-center gap-[7px] rounded-full bg-[#2b2d31]/86 px-[14px] text-[13px] font-semibold text-[#f1f3f4]"
+              disabled={modelCatalog.status !== "ready"}
+              onClick={() => {
                 setComposerPanel(null);
                 onToggleModel();
               }}
-              selectedLabel={selectedModel?.label}
-            />
+              type="button"
+            >
+              <SparklesIcon className="size-[15px]" />
+              {outputKind === "prd" ? "生成文档" : outputKind === "prototype" ? "生成原型" : "生成类型"}
+              <ChevronDownIcon className="size-[14px]" />
+            </button>
             <button
               aria-label="换一个示例提示"
               className="workbench-composer-tool grid size-[36px] place-items-center rounded-full text-[#d7d9de] hover:bg-white/[0.06] disabled:cursor-not-allowed disabled:opacity-40"
@@ -947,10 +935,19 @@ function HomeComposer({
             />
           )}
           {modelCatalog.status === "ready" && modelMenuOpen && (
-            <HomeModelMenu
-              model={model}
-              modelChoices={modelChoices}
-              onSelectModel={onSelectModel}
+            <ComposerArtifactOutputMenu
+              kind={outputKind}
+              onSelect={(kind) => {
+                const generateChoice = modelChoices.find((choice) => (
+                  choice.workflow === "generate" && choice.modelId === selectedModel?.modelId
+                )) ?? modelChoices.find((choice) => choice.workflow === "generate");
+                if (generateChoice && generateChoice.key !== model) {
+                  onSelectModel(generateChoice.key);
+                }
+                setOutputKind(kind);
+                (onCloseModel ?? onToggleModel)();
+              }}
+              placement="home"
             />
           )}
         </AnimatePresence>
@@ -992,25 +989,6 @@ function HomeComposer({
         selectedSourceIds={[]}
       />
     </motion.div>
-  );
-}
-
-function HomeModelMenu({
-  model,
-  modelChoices,
-  onSelectModel,
-}: {
-  model: ModelName;
-  modelChoices: WorkbenchModelChoice[];
-  onSelectModel: (model: ModelName) => void;
-}) {
-  return (
-    <ModelChoiceMenu
-      className="absolute right-[74px] top-[154px] w-[330px]"
-      model={model}
-      modelChoices={modelChoices}
-      onSelectModel={onSelectModel}
-    />
   );
 }
 

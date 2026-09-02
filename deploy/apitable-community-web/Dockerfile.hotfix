@@ -1,0 +1,15 @@
+FROM workbench/apitable-web:v1.13.0-beta.1-ce-collaboration.8
+
+USER root
+WORKDIR /app
+
+COPY self-hosted-community-web/scripts/scrub-runtime-branding.mjs ./self-hosted-community-web/scripts/scrub-runtime-branding.mjs
+RUN node self-hosted-community-web/scripts/scrub-runtime-branding.mjs
+
+LABEL org.opencontainers.image.title="APITable Community Edition web server"
+LABEL org.opencontainers.image.version="v1.13.0-beta.1-ce-collaboration.9"
+LABEL org.opencontainers.image.licenses="AGPL-3.0-or-later"
+LABEL org.opencontainers.image.source="https://github.com/apitable/apitable/tree/v1.13.0-beta.1"
+
+WORKDIR /app/packages/datasheet
+USER nextjs

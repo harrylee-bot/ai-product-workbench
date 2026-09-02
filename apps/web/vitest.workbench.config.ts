@@ -18,6 +18,7 @@ export default defineConfig({
       "components/auth/**/*.spec.ts",
       "components/auth/**/*.spec.tsx",
       "components/share/**/*.spec.tsx",
+      "components/workbench/**/*.spec.ts",
       "components/workbench/**/*.spec.tsx",
     ],
   },

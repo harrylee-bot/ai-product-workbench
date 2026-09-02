@@ -12,6 +12,7 @@ Use this reference before drafting, supplementing, or reviewing a requirement do
 ## Required Content Quality
 
 - Include clear requirement background and concrete execution details that support test-case writing.
+- The requirement subject and requested business change must come from the user, an authorized project source, or an attachment. Never invent them merely because the user selected PRD as the output kind.
 - State the system/software/channel, current state, reason for change, changed module, target function, and expected purpose.
 - Keep background and requirement description related but not duplicated.
 - Do not copy the same body text under multiple headings.
@@ -23,6 +24,7 @@ Use this reference before drafting, supplementing, or reviewing a requirement do
 - If a diagram is included, add text that explains how the diagram relates to this requirement.
 - Keep the fixed `2.1` through `2.4` sections and include both `产品流程图` and `产品架构图` in `2.3`.
 - Keep exactly one channel table and ensure its selected channels agree with the surrounding requirement text.
+- Acceptance results must be observable. Do not use `正常展示`, `友好提示`, `流转顺畅`, `正确显示结果`, `符合预期`, `满足要求`, or a generic promise to improve efficiency/quality as a substitute for an exact result.
 
 ## Page Or Capability Details
 

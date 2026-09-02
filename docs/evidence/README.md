@@ -1,7 +1,6 @@
 # 产品工作台证据账本合同
 
-本目录定义整改验收使用的不可变证据账本和证据索引。它实现
-`CODEX-WORKBENCH-COMPREHENSIVE-AUDIT-REMEDIATION.md` 7.1 的字段合同，但不把当前候选或任一 Gate 自动判为通过。
+本目录定义整改验收使用的不可变证据账本和证据索引。这里的 schema、catalog 与 verifier 是字段合同的现行权威，但不把当前候选或任一 Gate 自动判为通过。
 
 ## 文件职责
 
@@ -17,7 +16,7 @@ ledger 的封印值为以下对象的 canonical JSON SHA-256：
 
 实际计算时 `payload` 是完整 payload。canonical JSON 使用 UTF-8、对象 key 词典序、紧凑编码和唯一尾随 LF；SHA-256 计算不包含文件尾随 LF。entries、证据、工具版本、镜像和关联项还必须按 verifier 规定的稳定键排序。修改 ledger 内容而不重新封印会直接失败；index 另以整份 canonical ledger 文件的 SHA-256 固定引用。
 
-## 7.1 字段映射
+## 字段映射
 
 | 规范字段 | ledger 字段 |
 | --- | --- |

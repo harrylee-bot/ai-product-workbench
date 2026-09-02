@@ -22,6 +22,7 @@ import {
   workbenchPrdExtensions,
 } from "../../lib/workbench/prd-editor";
 import type { WorkbenchArtifactReference } from "./workbench-artifact-reference";
+import { WorkbenchPrdDiagramCanvas } from "./workbench-prd-diagram-canvas";
 
 type PrdDocumentCommit = (
   reference: WorkbenchArtifactReference,
@@ -137,7 +138,7 @@ export function WorkbenchPrdArtifactEditor({
   const busy = saving || editingBusy;
   return (
     <article
-      className="relative h-full w-full overflow-auto bg-[#1d1d1f] px-[38px] py-[34px] text-[#e8eaed]"
+      className="relative h-full w-full overflow-auto break-words bg-[#1d1d1f] px-[38px] py-[34px] text-[#e8eaed] [overflow-wrap:anywhere]"
       data-prd-editor="active"
     >
       <div className="absolute right-[38px] top-[34px] z-10 flex items-center gap-[8px] bg-[#1d1d1f] py-[2px]">
@@ -180,8 +181,21 @@ export function WorkbenchPrdArtifactEditor({
           {busy ? <LoaderCircleIcon className="size-[15px] animate-spin" /> : dirty ? <CheckIcon className="size-[15px]" /> : <PencilIcon className="size-[15px]" />}
         </button>
       </div>
+      {document.protocol === "workbench.prd.v2" && (
+        <section className="mb-[34px] border-b border-white/[0.12] pb-[34px] pt-[48px]" data-prd-editor-diagrams>
+          {document.sections.businessRequirements.flowAndPages.diagrams.map((diagram) => (
+            <figure className="mb-[28px] last:mb-0" key={diagram.id}>
+              <figcaption>
+                <h2 className="text-[18px] font-semibold text-[#f1f3f4]">{diagram.title}</h2>
+                <p className="mt-[5px] text-[13px] leading-[21px] text-[#aeb4bd]">{diagram.description}</p>
+              </figcaption>
+              <WorkbenchPrdDiagramCanvas diagram={diagram} />
+            </figure>
+          ))}
+        </section>
+      )}
       <EditorContent
-        className="workbench-prd-editor-content"
+        className="workbench-prd-editor-content min-w-0 break-words [overflow-wrap:anywhere]"
         editor={editor}
       />
     </article>

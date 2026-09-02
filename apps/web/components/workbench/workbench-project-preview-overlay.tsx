@@ -33,6 +33,7 @@ import {
   useWorkbenchProjectState,
 } from "@/lib/workbench/project-session";
 import type { WorkbenchArtifactReference } from "./workbench-artifact-content";
+import { WorkbenchArtifactContent } from "./workbench-artifact-content";
 import { WorkbenchIsolatedPreview } from "./workbench-isolated-preview";
 import { popoverTransition, workbenchEase } from "./workbench-motion";
 
@@ -40,6 +41,12 @@ type WorkbenchPreviewCreator = (
   selection: ExportSelection,
   signal?: AbortSignal,
 ) => Promise<ExportPreviewTokenResponse>;
+
+export type ProjectPreviewArtifact = {
+  kind: "prd" | "prototype";
+  reference: WorkbenchArtifactReference;
+  title: string;
+};
 
 const previewDeviceOptions: ReadonlyArray<{
   mode: PreviewDeviceMode;
@@ -62,7 +69,7 @@ export function ProjectPreviewOverlay({
   projectId,
   projectTitle,
 }: {
-  artifacts: Array<{ reference: WorkbenchArtifactReference; title: string }>;
+  artifacts: ProjectPreviewArtifact[];
   createPreview: WorkbenchPreviewCreator;
   initialReference?: WorkbenchArtifactReference;
   onClose: () => void;
@@ -93,6 +100,7 @@ export function ProjectPreviewOverlay({
     () => null,
   );
   const selectedArtifact = artifacts[screenIndex] ?? artifacts[0];
+  const documentPreview = selectedArtifact?.kind === "prd";
 
   useEffect(() => {
     setScreenIndex((current) => Math.min(current, Math.max(artifacts.length - 1, 0)));
@@ -141,7 +149,9 @@ export function ProjectPreviewOverlay({
             <div className="max-w-[240px] truncate text-[14px] font-semibold max-md:max-w-[140px]">
               {projectTitle}
             </div>
-            <div className="mt-[1px] text-[11px] text-[#989da5]">交互预览</div>
+            <div className="mt-[1px] text-[11px] text-[#989da5]">
+              {documentPreview ? "文档预览" : "交互预览"}
+            </div>
           </div>
         </div>
 
@@ -165,7 +175,7 @@ export function ProjectPreviewOverlay({
         </div>
 
         <div className="flex items-center gap-[8px]">
-          <PreviewQrPopover capability={previewCapability} />
+          {!documentPreview && <PreviewQrPopover capability={previewCapability} />}
           <button
             aria-label="刷新预览"
             className="grid size-[34px] place-items-center rounded-[6px] border border-white/[0.09] bg-[#222326] text-[#d8dce2] transition hover:bg-[#303136] active:scale-95"
@@ -189,12 +199,14 @@ export function ProjectPreviewOverlay({
 
       <div className="absolute inset-x-0 bottom-0 top-[58px] overflow-hidden bg-[#202124] max-sm:top-[104px]">
         <div className="absolute inset-0 opacity-40 [background-image:radial-gradient(circle,#4a4d52_1px,transparent_1px)] [background-size:14px_14px]" />
-        <PreviewDeviceControls
-          customViewport={customViewport}
-          mode={deviceMode}
-          onCustomViewportChange={setCustomViewport}
-          onModeChange={setDeviceMode}
-        />
+        {!documentPreview && (
+          <PreviewDeviceControls
+            customViewport={customViewport}
+            mode={deviceMode}
+            onCustomViewportChange={setCustomViewport}
+            onModeChange={setDeviceMode}
+          />
+        )}
         <PreviewViewport
           createPreview={createPreview}
           customViewport={customViewport}
@@ -311,7 +323,7 @@ function PreviewViewport({
   onCapabilityChange: (capability: ExportPreviewTokenResponse | null) => void;
   projectId: string;
   refreshKey: number;
-  selectedArtifact?: { reference: WorkbenchArtifactReference; title: string };
+  selectedArtifact?: ProjectPreviewArtifact;
 }) {
   const stageRef = useRef<HTMLDivElement>(null);
   const [available, setAvailable] = useState({ width: 1_180, height: 780 });
@@ -335,6 +347,18 @@ function PreviewViewport({
     observer.observe(element);
     return () => observer.disconnect();
   }, []);
+
+  if (selectedArtifact?.kind === "prd") {
+    return (
+      <div
+        className="absolute inset-[12px] overflow-hidden rounded-[6px] border border-white/[0.12] bg-[#1d1d1f] shadow-[0_30px_100px_-38px_rgba(0,0,0,0.98)]"
+        data-preview-document
+        key={`${selectedArtifact.reference.artifactVersionId}:${refreshKey}`}
+      >
+        <WorkbenchArtifactContent reference={selectedArtifact.reference} />
+      </div>
+    );
+  }
 
   const viewport = resolvePreviewViewport(mode, customViewport, available);
   return (

@@ -187,6 +187,49 @@ describe("Project Composer Edit workflow", () => {
 });
 
 describe("Project Composer PRD context", () => {
+  it("collapses the command menu when clicking the blank prompt area", async () => {
+    renderComposer({
+      choice: createChoice,
+      editArtifactTargets: [],
+      onSubmitPrompt: vi.fn(async () => "run-1"),
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "命令" }));
+    expect(screen.getByRole("menuitem", { name: "生成 UI 界面设计" })).not.toBeNull();
+
+    fireEvent.mouseDown(screen.getByPlaceholderText("您想更改或创建什么内容?"));
+    await waitFor(() => expect(screen.queryByRole("menuitem", { name: "生成 UI 界面设计" })).toBeNull());
+  });
+
+  it("requests an explicit model-menu close when clicking the blank prompt area", () => {
+    const onCloseModel = vi.fn();
+    render(projectComposerElement({
+      choice: createChoice,
+      editArtifactTargets: [],
+      modelMenuOpen: true,
+      onCloseModel,
+      onSubmitPrompt: vi.fn(async () => "run-1"),
+    }));
+
+    fireEvent.mouseDown(screen.getByPlaceholderText("您想更改或创建什么内容?"));
+    expect(onCloseModel).toHaveBeenCalledOnce();
+  });
+
+  it("switches an Edit selection back to Generate for artifact output", () => {
+    const onSelectModel = vi.fn();
+    render(projectComposerElement({
+      choice: editChoice,
+      editArtifactTargets: [],
+      modelChoices: [editChoice, createChoice],
+      modelMenuOpen: true,
+      onSelectModel,
+      onSubmitPrompt: vi.fn(async () => "run-1"),
+    }));
+
+    fireEvent.click(screen.getByRole("menuitemradio", { name: /生成原型/ }));
+    expect(onSelectModel).toHaveBeenCalledWith(createChoice.key);
+  });
+
   it("removes the document context instead of leaving a no-op close button", () => {
     const onSubmitPrompt = vi.fn(async () => "run-1");
     render(<ProjectComposer
@@ -324,8 +367,13 @@ function projectComposerElement({
   context,
   editArtifactTargets,
   focusRequest,
+  modelChoices = [choice],
+  modelMenuOpen = false,
   onClearContext,
+  onCloseModel,
   onSubmitPrompt,
+  onSelectModel = vi.fn(),
+  onToggleModel = vi.fn(),
   projectId = "project-1",
   prompt = "Change the selected screens",
   setPrompt = vi.fn(),
@@ -334,8 +382,13 @@ function projectComposerElement({
   context?: Parameters<typeof ProjectComposer>[0]["context"];
   editArtifactTargets: typeof artifactTargets;
   focusRequest?: number;
+  modelChoices?: Array<typeof editChoice | typeof createChoice>;
+  modelMenuOpen?: boolean;
   onClearContext?: () => void;
+  onCloseModel?: () => void;
   onSubmitPrompt: (submission: Parameters<Parameters<typeof ProjectComposer>[0]["onSubmitPrompt"]>[0]) => Promise<string | null>;
+  onSelectModel?: (model: string) => void;
+  onToggleModel?: () => void;
   projectId?: string;
   prompt?: string;
   setPrompt?: (prompt: string) => void;
@@ -351,16 +404,17 @@ function projectComposerElement({
     focusRequest={focusRequest}
     model={choice.key}
     modelCatalog={{ error: null, retrying: false, status: "ready" }}
-    modelChoices={[choice]}
-    modelMenuOpen={false}
+    modelChoices={modelChoices}
+    modelMenuOpen={modelMenuOpen}
     onRefresh={vi.fn(async () => undefined)}
     onClearContext={onClearContext}
+    onCloseModel={onCloseModel}
     onRetryDesignPresets={vi.fn()}
     onRetryModels={vi.fn()}
-    onSelectModel={vi.fn()}
+    onSelectModel={onSelectModel}
     onSubmitPrompt={onSubmitPrompt}
     onTargetSurfaceChange={vi.fn()}
-    onToggleModel={vi.fn()}
+    onToggleModel={onToggleModel}
     projectDesignSystemChoices={[]}
     projectId={projectId}
     projectMode="generated"

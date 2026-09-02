@@ -1,0 +1,1010 @@
+{
+  "AccessRules": {
+    "## Access Rules\n\nBasic access to this document is controlled using the 'Manage Users' option in the 'Share' menu, where you can assign collaborator roles such as Owner, Editor, or Viewer.\n\nFor more granular control, you can create Access Rules to limit who can view or edit specific\ntables, columns, or rows — useful for sensitive data or role-based permissions.\n[Learn more.]({{helpAccessRules}})": "## 访问规则\n\n本文档的基本访问权限通过“分享”菜单中的“管理用户”选项控制，您可以在其中为协作者分配所有者、编辑者或查看者等角色。\n\n如需更精细的控制，您可以创建访问规则，限制哪些人可以查看或编辑特定的表、列或行。这适用于敏感数据或基于角色的权限管理。\n[了解更多。]({{helpAccessRules}})"
+  },
+  "AccountPage": {
+    "OAuth apps let you connect external integrations to this Grist server with more security and convenience than when using API keys.\n\nOAuth apps are available with the [full version of Grist]({{fullGrist}}).": "OAuth 应用允许你以比使用 API 密钥更安全、更便捷的方式将外部集成连接到这个 Grist 服务器。\n\nOAuth 应用已随 [Grist 完整版]({{fullGrist}})提供。"
+  },
+  "ColorSelect": {
+    "default": "默认",
+    "fill": "填充",
+    "none": "无",
+    "text": "文本"
+  },
+  "GridOptions": {
+    "Show": "显示",
+    "row IDs": "行 ID",
+    "row numbers": "行编号"
+  },
+  "GridViewMenus": {
+    "Row numbers": "行编号",
+    "Numbers": "数字",
+    "Row IDs": "行编号",
+    "Hidden": "隐藏"
+  },
+  "RightPanel": {
+    "You may use {{placeholder}} placeholder for the ID of the added record.": "你可以用 {{placeholder}} 占位符表示新增记录的 ID。"
+  },
+  "GristTooltips": {
+    "Row IDs are stable and unique numeric identifiers, used by reference columns to identify records.": "行 ID 是稳定且唯一的数字标识符，用于引用列用来识别记录。"
+  },
+  "GridView": {
+    "ID": "身份证"
+  },
+  "AdminPanel": {
+    "Apply changes": "应用更改",
+    "Grist is running in an environment that doesn't support restarting from the admin panel. Your change will be saved now, and takes effect the next time you restart Grist manually.": "Grist 运行在一个不支持从管理面板重启的环境中。你的变更现在会被保存，并在下次手动重启Grist时生效。",
+    "Switch to Community edition?": "切换到社区版？",
+    "Switch to full Grist?": "切换到完整的Grist？",
+    "This will also apply your other pending changes:": "这也将应用你其他待处理的变更："
+  },
+  "FormRenderer": {
+    "Are you sure you want to reset your form?": "你确定要重置表单吗？"
+  },
+  "ToggleEnterpriseWidget": {
+    "Copy": "复制",
+    "Good news: it can stay free.": "好消息：它可以保持免费。",
+    "Installation ID": "安装ID",
+    "Provide this when requesting an activation key. Keys are tied to your installation ID.": "请求激活密钥时提供此信息。密钥绑定在你的安装ID。",
+    "[Free activation keys]({{learnMoreLink}}) are available to individuals and small orgs under US $1 million total annual funding. For larger orgs, see [pricing]({{pricingLink}}).": "[免费激活密钥]({{learnMoreLink}}) 面向个人和小型组织，年总资金低于100万美元。对于较大的组织，请参见[定价]({{pricingLink}})。"
+  },
+  "Experiments": {
+    "Notifications": "通知",
+    "OAuth apps": "OAuth 应用",
+    "Simulate deployment as core": "模拟部署作为核心"
+  },
+  "NewRecordButton": {
+    "New card": "新卡片",
+    "New record": "新纪录"
+  },
+  "RegionFocusSwitcher": {
+    "Trying to access the creator panel? Use {{key}}.": "正在尝试访问创作者面板吗？用 {{key}}。"
+  },
+  "duplicateWidget": {
+    "Duplicate widget": "复制小部件",
+    "Duplicate widgets": "重复小部件",
+    "Active": "主动",
+    "Create new page": "创建新页面"
+  },
+  "AttachmentsWidget": {
+    "Uploading, please wait…": "上传中，请稍候......",
+    "Image": "图片"
+  },
+  "AttachmentsEditor": {
+    "Add": "添加",
+    "Delete": "删除",
+    "Download": "下载",
+    "Drop files here to attach": "将文件拖放到此处即可添加附件",
+    "Drop files here to attach.": "将文件拖放到此处即可添加附件。",
+    "No attachments": "无附件",
+    "Preview not available.": "预览不可用。",
+    "{{index}} of {{total}}": "第 {{index}} 项，共 {{total}} 项",
+    "Uploading…": "上传中......"
+  },
+  "RowHeightConfig": {
+    "Expand all rows to this height": "将所有行展开至此高度",
+    "Max height": "最大高度",
+    "Max row height": "最大行高度",
+    "Change": "更改"
+  },
+  "TreeViewComponent": {
+    "Collapse": "折叠",
+    "Expand": "展开"
+  },
+  "ActiveUserList": {
+    "active user": "活跃用户",
+    "active user list": "活跃用户列表",
+    "open full active user list": "打开完整的活跃用户列表"
+  },
+  "AdminChecks": {
+    "Grist allows for very powerful formulas, using Python. We recommend setting the environment variable GRIST_SANDBOX_FLAVOR to gvisor if your hardware supports it (most will), to run formulas in each document within a sandbox isolated from other documents and isolated from the network.": "Grist允许使用Python实现非常强大的公式。我们建议将环境变量 GRIST_SANDBOX_FLAVOR 设置为 gvisor（如果你的硬件支持的话），以便在沙盒中运行公式，且与其他文档隔离，也隔离网络。",
+    "Grist has a small built-in health check often used when running it as a container.": "Grist 内置了一个小型健康检查，通常用于作为容器运行时使用。",
+    "Requests arriving to Grist should have an accurate Host header. This is essential when GRIST_SERVE_SAME_ORIGIN is set.": "到达 Grist 的请求应具有准确的 Host 头。当GRIST_SERVE_SAME_ORIGIN设定好时，这一点至关重要。",
+    "This boot page should not be too easy to access. Either turn it off when configuration is ok (by unsetting GRIST_BOOT_KEY) or make GRIST_BOOT_KEY long and cryptographically secure.": "这个启动页面不应太容易访问。要么在配置正常时关闭（通过取消设置GRIST_BOOT_KEY），要么让长版和加密安全设置GRIST_BOOT_KEY。",
+    "Websocket connections need HTTP 1.1 and the ability to pass a few extra headers in order to work. Sometimes a reverse proxy can interfere with these requirements.": "Websocket 连接需要 HTTP 1.1 和能够传递一些额外报头才能正常工作。有时反向代理会干扰这些要求。",
+    "It is good practice not to run Grist as the root user.": "良好做法是不要将 Grist 作为根用户运行。",
+    "The main page of Grist should be available.": "Grist 的主页应该是可用的。",
+    "APP_HOME_URL is the base URL where users and integrations reach this Grist server. Auth callbacks, API links, and email notifications all depend on this being correct.": "APP_HOME_URL 是用户和集成访问该 Grist 服务器的基础 URL。身份验证回调、API 链接和邮件通知都依赖于这些信息是否正确。",
+    "If running in a container without external storage or with default database, ": {
+      "persist should be a mounted volume. Otherwise Grist documents and metadata will be lost when the container stops.": "如果运行在没有外部存储或默认数据库的容器中，/persist 应当是挂载卷。否则，当容器停止时，Grist的文档和元数据将丢失。"
+    }
+  },
+  "ChoiceListEntry": {
+    "+{{count}} more_one": "+{{count}} 更多",
+    "+{{count}} more_other": "+{{count}} 更多",
+    "Edit": "编辑",
+    "No choices configured": "未配置选项",
+    "Reset": "重置",
+    "Cancel": "取消",
+    "Save": "保存"
+  },
+  "FormulaTransform": {
+    "Apply": "应用",
+    "Cancel": "取消",
+    "Preview": "预览"
+  },
+  "ParseOptions": {
+    "Close": "关闭",
+    "Update preview": "更新预览",
+    "Convert quoted fields": "转换引用字段",
+    "Escape character": "转义字符",
+    "Field separator": "字段分隔符",
+    "Line terminator": "行结束符",
+    "Number of rows": "行数",
+    "Quote character": "引用字符",
+    "Quotes in fields are doubled": "字段中的引号加倍",
+    "Skip leading whitespace": "跳过前置空白",
+    "Start with row": "以行开头",
+    "Character encoding. See [the supported codecs]({{link}})": "字符编码。请参见[支持的编解码器]({{link}})"
+  },
+  "OpenAccessibilityModal": {
+    " or ": " 或 ",
+    "\"Regions\" are what we call the different parts of the user interface:": "“区域”是我们所说的用户界面的不同部分：",
+    "Accessibility": "无障碍",
+    "Close": "关闭",
+    "Finally, the right panel – or the creator panel – is only available through its own shortcut and is not included in the next and previous region cycle.": "最后，右侧面板——或创作者面板——只能通过其快捷方式访问，且不会包含在下一个和上一个区域周期中。",
+    "Focus on other parts of the user interface using the following shortcuts:": "通过以下快捷方式专注于用户界面的其他部分：",
+    "High contrast theme": "高对比度主题",
+    "Keyboard navigation": "键盘导航",
+    "On document pages, each [widget]({{supportPageUrl}}) is a region that can receive focus.": "在文档页面上，每个[控件]({{supportPageUrl}}) 是一个可以被聚焦的区域。",
+    "On non-document pages, the main content area is a region.": "在非文档页面上，主要内容区域是一个区域。",
+    "Other important keyboard shortcuts": "其他重要的键盘快捷键",
+    "The left panel, home of the main navigation.": "左侧面板，主导航的主页。",
+    "The top panel, or the document header.": "顶部面板，或文档标题。",
+    "To see other available themes, go to your {{profileSettingsLink}}.": "要查看其他可用主题，请访问您的 {{profileSettingsLink}}。",
+    "Use the high contrast theme (light appearance)": "使用高对比度主题（浅色外观）",
+    "You are currently **not using** the high contrast theme.": "您目前**未使用**高对比度主题。",
+    "You are currently using the high contrast theme.": "您目前正在使用高对比度主题。",
+    "profile settings": "配置文件设置",
+    "{{accessibilityModal}} Show the accessibility options (this modal)": "{{accessibilityModal}} 显示无障碍选项（此模态）",
+    "{{creatorPanelShortcut}} Focus to and from the creator panel": "{{creatorPanelShortcut}} 聚焦创建者面板与用户面板之间",
+    "{{nextRegionShortcut}} Focus on the next region": "{{nextRegionShortcut}} 专注于下一个区域",
+    "{{prevRegionShortcut}} Focus on the previous region": "{{prevRegionShortcut}} 专注于上一个区域",
+    "{{shortcutsModal}} Show the complete list of keyboard shortcuts": "{{shortcutsModal}} 显示完整的键盘快捷键列表",
+    "Enable screen reader improvements (keyboard shortcut: {{shortcut}})": "启用屏幕阅读器改进（键盘快捷键： {{shortcut}}）",
+    "Use your screen reader's focus mode, or disable Quick Nav if you use VoiceOver.": "使用屏幕阅读器的焦点模式，或者如果你使用VoiceOver，请禁用快速导航。",
+    "Please first read the \"Keyboard navigation\" section above to understand how to navigate across the interface's regions: specific keyboard shortcuts need to be used.": "请先阅读上方的“键盘导航”部分，了解如何在界面区域间导航：需要使用特定的快捷键。",
+    "Screen reader navigation": "屏幕阅读器导航",
+    "Warning: screen reader support is a work-in-progress in Grist and is improving over time. Feedback is greatly appreciated!": "警告：屏幕阅读器支持仍在Grist中进行中，并随着时间不断改进。非常感谢反馈！",
+    "While not mandatory, you can enable screen reader improvements for a better navigation experience:": "虽然不是强制，但你可以启用屏幕阅读器的改进，以提升导航体验：",
+    "We recommend using Firefox, Chrome or Edge in order to use Grist with a screen reader.": "我们建议使用 Firefox、Chrome 或 Edge 来配合屏幕阅读器使用 Grist。"
+  },
+  "ProposedChangesPage": {
+    "Proposed changes": "拟议变更",
+    "Replace original": "替换原文",
+    "This is a list of changes relative to the original document.": "这是相对于原始文档的变更列表。",
+    "Accept": "接受",
+    "Accepted {{at}}.": "已接受 {{at}}。",
+    "Dismiss": "忽略",
+    "Dismissed {{at}}.": "已于 {{at}} 忽略。",
+    "Learn more": "了解更多",
+    "No changes found to suggest. Please make some edits.": "未发现任何可建议的变化。请做些修改。",
+    "Retract suggestion": "撤回建议",
+    "Retracted {{at}}.": "收回 {{at}}。",
+    "Suggest change": "建议变更",
+    "Suggest changes": "建议更改",
+    "Suggestion made {{at}}.": "建议已 {{at}}。",
+    "Suggestions": "建议",
+    "The original document isn't asking for proposed changes.": "原始文档并未要求修改建议。",
+    "There are fresh changes that haven't been added to the suggestion yet.": "建议中还没有添加一些新变化。",
+    "This is a list of changes relative to the {{originalDocument}}.": "这是相对于 {{originalDocument}}的变更列表。",
+    "Update suggestion": "更新建议",
+    "Work on a copy": "在副本中处理",
+    "Your suggestions": "您的建议",
+    "experiment": "实验",
+    "original document": "原始文档",
+    "Undo dismissal": "撤销忽略"
+  },
+  "commandList": {
+    "Show accessibility options": "显示无障碍选项",
+    "Activate assistant": "激活助手",
+    "Add a new viewsection to the currently active view": "向当前活跃视图添加新视图部分",
+    "Adds all elements above the cursor to the selected range": "将光标以上的所有元素添加到所选范围",
+    "Adds all elements below the cursor to the selected range": "将光标下方的所有元素添加到所选范围",
+    "Adds all elements to the left of the cursor to the selected range": "将光标左侧的所有元素添加到所选范围",
+    "Adds all elements to the right of the cursor to the selected range": "将光标右侧的所有元素添加到所选范围",
+    "Adds the currently selected column(ascending) to the current view's sort spec": "将当前选中的列（递增）添加到当前视图的排序规范中",
+    "Adds the currently selected column(descending) to the current view's sort spec": "将当前选中的列（降序）添加到当前视图的排序规范中",
+    "Adds the element above the cursor to the selected range": "将光标上方的元素添加到所选范围",
+    "Adds the element below the cursor to the selected range": "将光标下方的元素添加到所选范围",
+    "Adds the element to the left of the cursor to the selected range": "将光标左侧的元素添加到所选范围",
+    "Adds the element to the right of the cursor to the selected range": "将光标右侧的元素添加到所选范围",
+    "Clear the selected columns": "清除所选列",
+    "Clears the current copy selection, if any": "清除当前的副本选择（如果有的话）",
+    "Clears the currently selected cells": "清除当前选中的单元格",
+    "Clears the section links in the current view": "清除当前视图中的部分链接",
+    "Clears the section links in the current viewsection": "清除当前视图中的部分链接",
+    "Collapse the currently active viewsection": "折叠当前活跃的视图部分",
+    "Convert the selected columns from formula to data": "将选定的列从公式转换为数据",
+    "Copy anchor link": "复制锚点链接",
+    "Copy current selection to clipboard": "将当前选择复制到剪贴板",
+    "Copy current selection to clipboard including headers": "将当前选择复制到剪贴板，包括头部",
+    "Creates form for active table": "为活动表创建表单",
+    "Cut current selection to clipboard": "将当前所选内容剪切到剪贴板",
+    "Delete collapsed viewsection": "删除折叠视图部分",
+    "Delete the currently active viewsection": "删除当前活跃的视图部分",
+    "Delete the currently selected columns": "删除当前选中的列",
+    "Delete the currently selected record(s)": "删除当前选择的记录",
+    "Detach active editor": "分离主动编辑器",
+    "Discard changes to a cell value": "丢弃对单元格值的更改",
+    "Display Grist documentation": "显示 Grist 文档",
+    "Display shortcuts pane": "显示快捷键面板",
+    "Duplicate the currently active viewsection": "复制当前活跃的视图部分",
+    "Duplicate the currently selected record(s)": "复制当前选择的记录",
+    "Edit record layout": "编辑记录布局",
+    "Enter text into currently-selected cell and start editing": "在当前选中的单元格中输入文本并开始编辑",
+    "Enters section linking mode in the current view": "在当前视图中进入部分链接模式",
+    "Exits section linking mode in the current view": "退出当前视图的区块关联模式",
+    "Expand collapsed viewsection": "展开折叠视图部分",
+    "Find": "查找",
+    "Find next occurrence": "查找下一处",
+    "Find previous occurrence": "查找上一处",
+    "Finish editing a cell and save without moving to next record": "完成编辑单元格并保存，但不进入下一个记录",
+    "Finish editing a cell, saving the value": "完成编辑单元格，保存值",
+    "Focus next page panel or widget": "聚焦下一页面板或小部件",
+    "Focus previous page panel or widget": "聚焦前一页面板或小部件",
+    "Freeze or unfreeze selected columns": "冻结或解冻选中的列",
+    "Hide the currently selected columns": "隐藏当前所选列",
+    "Move downward to next record or field": "向下移动到下一个记录或字段",
+    "Move left to the previous field": "向左移动到上一个字段",
+    "Move right to the next field": "右移至下一个字段",
+    "Move to the next field, saving changes if editing a value": "移动到下一个字段，编辑值时保存更改",
+    "Move to the previous field, saving changes if editing a value": "移动到上一个字段，编辑值时保存更改",
+    "Move up one page of records, or to previous record in a card list": "将记录往上移一页，或在卡片列表中移动到上一页记录",
+    "Move upward five records": "向上移动五条记录",
+    "Move upward to previous record or field": "向上移动到上一个记录或字段",
+    "Moves the cursor to the correct location": "将光标移动到正确位置",
+    "Open Custom widget configuration screen": "打开自定义控件配置界面",
+    "Open comment thread": "打开评论主题",
+    "Open next page": "打开下一页",
+    "Open previous page": "打开上一页",
+    "Opens document list": "打开文档列表",
+    "Paste clipboard contents at cursor": "将剪贴板内容粘贴到光标处",
+    "Print currently selected page widget": "打印当前选中的页面控件",
+    "Rename the currently selected column": "重命名当前选中的列",
+    "Reverts the sections links to the saved links the current view": "回退部分链接到当前视图中已保存的链接",
+    "Saves the sections links in the current view": "在当前视图中保存各部分的链接",
+    "Selects all currently displayed cells": "选择所有当前显示的单元格",
+    "Shortcut to data selection tab": "数据选择选项卡快捷方式",
+    "Shortcut to focus view tab if creator panel is open": "聚焦视图标签的快捷方式",
+    "Shortcut to open document tab": "打开文档标签的快捷方式",
+    "Shortcut to open field tab": "打开字段选项卡的快捷方式",
+    "Filter this column by just this cell's value": "仅用该单元格的值过滤本列",
+    "Open the context menu": "打开上下文菜单",
+    "Toggle the screen reader improvements": "切换屏幕阅读器改进",
+    "Open the current column menu": "打开当前列菜单",
+    "Open the current row menu": "打开当前行菜单"
+  },
+  "GridViewMenusDateHelpers": {
+    "12-hour format": "12小时格式",
+    "24-hour format": "24小时格式",
+    "AM": {
+      "PM": "上午/下午"
+    },
+    "Calendar": "日历",
+    "Date helpers…": "日期辅助项…",
+    "Day": "日",
+    "Day of month": "月中的日期",
+    "Day of week": "星期几",
+    "Day of week (abbrev)": "星期几（简写）",
+    "Day of week (full)": "星期几（完整）",
+    "Day of week (numeric)": "星期几（数字）",
+    "Days since": "距今已过天数",
+    "Days until": "距今剩余天数",
+    "Default": "默认",
+    "End of": "周期结束",
+    "Full date": "完整日期",
+    "Full name with year": "全名含年份",
+    "Hour": "小时",
+    "Intervals": "区间",
+    "Is weekend?": "是周末吗？",
+    "Minute": "分钟",
+    "Month": "月",
+    "Months since": "距今已过月数",
+    "Months until": "距今剩余月数",
+    "Name only": "仅名称",
+    "Number only": "仅数字",
+    "Quarter": "季度",
+    "Quick Picks": "快速选择",
+    "Relative": "相对时间",
+    "Short with year": "带年份的短日期",
+    "Sortable": "可排序",
+    "Start of": "周期开头",
+    "Time": "时间",
+    "Time bucket": "时间分组",
+    "Week": "周",
+    "Week of year": "年度周",
+    "Year": "年",
+    "Years since": "距今已过年数",
+    "Years until": "距今剩余年数"
+  },
+  "selectBy": {
+    "Select widget": "选择小部件"
+  },
+  "CoreNewDocMethods": {
+    "Untitled document": "无题文档"
+  },
+  "AuthenticationSection": {
+    "Active": "已启用",
+    "Active method is controlled by an environment variable. Unset variable to change active method.": "主动方法由环境变量控制。取消设置变量以更改活动方法。",
+    "Active on restart": "重启时激活",
+    "Are you sure you want to set **{{name}}** as the active authentication method?": "你确定要将**{{name}}**设置为主动认证方式吗？",
+    "Close": "关闭",
+    "Configure": "配置",
+    "Configured": "配置",
+    "Confirm": "确认",
+    "Disabled on restart": "重启时被禁用",
+    "Error": "错误",
+    "Error details": "错误详情",
+    "Instructions": "说明",
+    "No authentication method is active.": "没有激活的认证方法。",
+    "Set as active method": "设为当前认证方式",
+    "Set as active method?": "设置为主动方法？",
+    "The new method will go into effect after you restart Grist.": "新方法将在你重启Grist后生效。",
+    "**Forwarded headers** allows your Grist server to trust authentication performed by an external proxy (e.g. Traefik ForwardAuth).": "**转发头部**允许你的 Grist 服务器信任由外部代理（例如 Traefik ForwardAuth）执行的认证。",
+    "**Grist Connect** is a login solution built and maintained by Grist Labs that integrates seamlessly with your Grist server.": "**Grist Connect**是由Grist Labs开发和维护的登录解决方案，能够无缝集成您的Grist服务器。",
+    "**OIDC** allows users on your Grist server to sign in using an external identity provider that supports the OpenID Connect standard.": "**OIDC** 允许您的 Grist 服务器用户通过支持 OpenID Connect 标准的外部身份提供商登录。",
+    "**SAML** allows users on your Grist server to sign in using an external identity provider that supports the SAML 2.0 standard.": "**SAML** 允许用户在你的 Grist 服务器上通过支持 SAML 2.0 标准的外部身份提供商登录。",
+    "Change admin user": "更改管理员用户",
+    "If Grist is accessible on your network, or is available to multiple people, configure one of the authentication methods below.": "如果Grist在您的网络上可访问，或多人可用，请配置以下之一的认证方法。",
+    "No authentication: unrestricted sign-in as demo user": "无认证：作为演示用户无限制登录",
+    "Prepare changes": "准备更改",
+    "Restart required. Authentication change may affect your access": "需要重启。身份验证更改可能影响您的访问权限",
+    "Revert change of admin user": "恢复管理员用户的更改",
+    "See \"Restart Grist\" section on top of this page to restart.": "请查看本页顶部的“重启 Grist”部分以重启。",
+    "To set up **Grist Connect**, follow the instructions in [the Grist support article for Grist Connect](https:": {
+      "": {
+        "support.getgrist.com": {
+          "install": {
+            "grist-connect": {
+              ").": "要设置 **Grist Connect**，请按照 [Grist Connect 支持文章](https://support.getgrist.com/install/grist-connect/)中的说明操作。"
+            }
+          }
+        }
+      }
+    },
+    "To set up **OIDC**, follow the instructions in [the Grist support article for OIDC](https:": {
+      "": {
+        "support.getgrist.com": {
+          "install": {
+            "oidc).": "要设置 **OIDC**，请按照 [OIDC 支持文章](https://support.getgrist.com/install/oidc)中的说明操作。"
+          }
+        }
+      }
+    },
+    "To set up **SAML**, follow the instructions in [the Grist support article for SAML](https:": {
+      "": {
+        "support.getgrist.com": {
+          "install": {
+            "saml": {
+              ").": "要设置 **SAML**，请按照 [SAML 支持文章](https://support.getgrist.com/install/saml/)中的说明操作。"
+            }
+          }
+        }
+      }
+    },
+    "To set up **forwarded headers**, follow the instructions in [the Grist support article for forwarded headers](https:": {
+      "": {
+        "support.getgrist.com": {
+          "install": {
+            "forwarded-headers": {
+              ").": "要设置**转发请求头**，请按照[转发请求头支持文章](https://support.getgrist.com/install/forwarded-headers/)中的说明操作。"
+            }
+          }
+        }
+      }
+    },
+    "When a user accesses Grist, the proxy handles authentication and forwards verified user information through HTTP headers. Grist uses these headers to identify the user.": "当用户访问 Grist 时，代理负责认证并通过 HTTP 头部转发已验证的用户信息。Grist 使用这些头部来识别用户。",
+    "When signing in, users will be redirected to a Grist Connect login page where they can authenticate using various identity providers. After authentication, they'll be redirected back to your Grist server and signed in.": "登录时，用户将被重定向到Grist Connect登录页面，在那里他们可以通过各种身份提供者进行身份验证。认证后，他们会被重定向回你的Grist服务器并登录。",
+    "When signing in, users will be redirected to your chosen identity provider's login page to authenticate. After successful authentication, they'll be redirected back to your Grist server and signed in as the user verified by the provider.": "登录时，用户将被重定向到您所选身份提供商的登录页面进行身份验证。认证成功后，用户会被重定向回你的Grist服务器，并由提供商验证为用户登录。",
+    "You are signed in as {{email}}. After restart, the new administrative user will be {{newEmail}}.": "你已登录为 {{email}}。重启后，新的管理员用户将被 {{newEmail}}。",
+    "You are signed in as {{email}}. You may lose access to this server if you cannot sign in as this user after switching the authentication system.": "你已登录为 {{email}}。如果你在切换认证系统后无法以该用户登录，可能会失去对该服务器的访问权限。",
+    "If Grist is accessible on your network, or is available to multiple people, configure one of the authentication methods below and remove your boot key from Security Settings → Boot key.": "如果Grist在您的网络上可访问，或多人可用，请配置以下之一的认证方法，并从安全设置→启动密钥中移除启动密钥。",
+    "No authentication: using boot key as fallback method": "无认证：使用启动密钥作为备用方法",
+    "Anyone who can reach this server can access all data without signing in. Configure one of the authentication methods below.": "任何能访问该服务器的人都可以访问所有数据，无需登录。请配置以下其中一种认证方式。",
+    "Are you sure you want to deactivate **{{name}}**?": "你确定要停用**{{name}}**？",
+    "Authentication has been configured and will become active when Grist is restarted.": "认证已配置，Grist重启后将激活。",
+    "Authentication is misconfigured or unreachable. Users may not be able to sign in.": "认证配置错误或无法访问。用户可能无法登录。",
+    "Available methods": "可用方法",
+    "Change installation admin": "更改安装管理员",
+    "Deactivate": "停用",
+    "Deactivate authentication?": "停用认证？",
+    "For enterprise identity providers (Okta, OneLogin, etc.).": "针对企业身份提供商（Okta、OneLogin 等）。",
+    "For reverse proxy setups (Traefik, Authelia, etc.).": "用于反向代理设置（Traefik、Authelia等）。",
+    "I understand this server has no authentication": "我了解到这台服务器没有身份验证",
+    "Installation admin: ": "安装管理员： ",
+    "Managed login solution by Grist Labs (deprecated).": "由Grist Labs管理的登录解决方案（已弃用）。",
+    "No authentication": "无认证",
+    "No authentication: using boot key": "无认证：使用启动密钥",
+    "Not recommended": "不推荐",
+    "Other authentication methods": "其他认证方法",
+    "Reconfigure": "重新配置",
+    "The change will take effect after you restart Grist.": "该更改将在你重启Grist后生效。",
+    "This login mechanism is deprecated.": "该登录机制已被弃用。",
+    "To set up **Grist Connect**, follow the instructions in [the Grist support article for Grist Connect]({{url}}).": "要设置 **Grist Connect**，请按照 [Grist Connect 支持文章]({{url}})中的说明操作。",
+    "To set up **OIDC**, follow the instructions in [the Grist support article for OIDC]({{url}}).": "要设置 **OIDC**，请按照 [OIDC 支持文章]({{url}})中的说明操作。",
+    "To set up **SAML**, follow the instructions in [the Grist support article for SAML]({{url}}).": "要设置 **SAML**，请按照 [SAML 支持文章]({{url}})中的说明操作。",
+    "To set up **forwarded headers**, follow the instructions in [the Grist support article for forwarded headers]({{url}}).": "要设置**转发请求头**，请按照[转发请求头支持文章]({{url}})中的说明操作。",
+    "Works with most identity providers (Google, Azure AD, Keycloak, etc.).": "支持大多数身份提供者。",
+    "Your configuration will be preserved. You can reactivate it later without reconfiguring.": "您的配置将被保留。你可以之后重新激活它，无需重新配置。",
+    "Your server is configured to authenticate users via OpenID Connect. Users sign in through your identity provider.": "您的服务器已配置为通过 OpenID Connect 认证用户。用户通过您的身份提供商登录。",
+    "Your server is configured to authenticate users via SAML 2.0. Users sign in through your enterprise identity provider.": "您的服务器已配置为通过 SAML 2.0 认证用户。用户通过您的企业身份提供商登录。",
+    "Your server is using a boot key as a fallback login method. Configure one of the authentication methods below.": "你的服务器使用启动密钥作为备份登录方式。请配置以下其中一种认证方式。",
+    "Your server trusts authentication from a reverse proxy. Make sure only your proxy can reach the Grist backend.": "你的服务器信任反向代理的认证。确保只有你的代理能访问Grist后端。",
+    "Authentication": "认证",
+    "Choose how users sign in to Grist.": "选择用户如何登录 Grist。",
+    "New admin email": "新管理员邮箱",
+    "Reassign login to admin": "重新分配登录为管理员",
+    "The change will be saved when you apply pending changes, and will go into effect after you restart Grist.": "当你应用待处理的更改时，该更改将被保存，并在重启 Grist 后生效。",
+    "The change will be saved when you apply pending changes, and will take effect after you restart Grist.": "当你应用待处理的更改时，该更改将被保存，并在重启Grist后生效。",
+    "configuration updated": "配置已更新",
+    "disabled": "已禁用",
+    "Anyone who can reach this server can access all data without signing in. You can configure authentication later from the admin panel.": "任何能访问该服务器的人都可以访问所有数据，无需登录。你可以在管理面板中稍后设置认证。",
+    "Choose how people sign in. You can change this anytime after setup.": "选择用户登录方式。设置好后随时都可以更改。",
+    "Continue without authentication": "无需认证继续",
+    "Or connect your own identity provider": "或者连接您自己的身份提供者",
+    "Skip authentication setup?": "跳过认证设置？"
+  },
+  "DetailView": {
+    "This row is unavailable or does not exist": "此行不可用或不存在"
+  },
+  "GetGristComProvider": {
+    "**Sign in with getgrist.com** allows users on your Grist server to sign in using their account on getgrist.com, the cloud version of Grist managed by Grist Labs.": "**用 getgrist.com 登录** 允许用户在 Grist 服务器上使用其账户登录 getgrist.com， 是 Grist Labs 管理的云端版本。",
+    "Cancel": "取消",
+    "Configure": "配置",
+    "Configure Sign in with getgrist.com": "配置 使用 getgrist.com 登录",
+    "Home URL is not set; cannot configure Sign in with getgrist.com": "主页 URL 未设置;无法配置使用 getgrist.com 登录",
+    "Instructions": "说明",
+    "Learn more about Sign in with getgrist.com": "了解更多关于使用 getgrist.com 登录的信息",
+    "Paste configuration key here": "粘贴配置键在此",
+    "Register your Grist server": "注册您的 Grist 服务器",
+    "Sign in with getgrist.com": "登录 使用 getgrist.com",
+    "To set up {{provider}}, you need to register your Grist server on getgrist.com and paste the configuration key you receive below.": "要设置 {{provider}}，你需要在 getgrist.com 注册你的 Grist 服务器，并粘贴下方收到的配置密钥。",
+    "When signing in, users will be redirected to the getgrist.com login page to log in or register. After authenticating on getgrist.com, they'll be redirected back to your Grist server and signed in as the user they authenticated as.": "登录时，用户将被重定向到 getgrist.com 登录页面进行登录或注册。在 getgrist.com 上认证后，他们会被重定向回你的Grist服务器，并以他们认证的用户身份登录。",
+    "Managed authentication by Grist Labs.": "由 Grist Labs 管理认证。",
+    "Your server uses getgrist.com authentication. Users sign in with their getgrist.com account.": "您的服务器使用 getgrist.com 认证。用户用 getgrist.com 账号登录。",
+    "Error configuring provider with the provided key: {{reason}}": "错误 配置提供者使用提供的密钥： {{reason}}",
+    "Ideal for testing and prototyping. Sign in with a getgrist.com account, with no identity provider to configure.": "非常适合测试和原型制作。用 getgrist.com 账户登录，无需配置身份提供者。",
+    "Recommended": "推荐",
+    "Use getgrist.com sign-in": "使用登录 getgrist.com",
+    "You can switch to OIDC, SAML, or another method at any time.": "你可以随时切换到 OIDC、SAML 或其他方法。"
+  },
+  "AirtableImportUI": {
+    "Back": "返回",
+    "Cancel": "取消",
+    "Choose an Airtable base to import from": "选择一个Airtable基底进行导入",
+    "Choose destination": "选择目的地",
+    "Connect": "连接",
+    "Connect with Airtable": "连接Airtable",
+    "Connect your Airtable account to access your bases.": "连接您的Airtable账户以访问您的基地。",
+    "Connected via {{method}}": "通过{{method}}连接",
+    "Connecting...": "正在连接......",
+    "Continue": "继续",
+    "Destination": "目的地",
+    "Disconnect": "断开连接",
+    "Existing tables": "现有表",
+    "Failed to fetch base schema": "未能获取基底模式",
+    "Failed to fetch bases": "未能获取基地",
+    "Grist configuration required": "Grist配置要求",
+    "Import from {{baseName}} in progress. Do not navigate away from this page.": "正在进行的 {{baseName}} 导入。请勿离开此页面。",
+    "Import tables": "导入表",
+    "Import {{count}} tables_one": "导入 {{count}} 表",
+    "Import {{count}} tables_other": "导入 {{count}} 表",
+    "Make sure your token has the correct permissions.": "确保你的令牌拥有正确的权限。",
+    "New table": "新表格",
+    "New table: structure only": "新表：仅结构",
+    "No bases found": "未发现基地",
+    "OAuth": "OAuth",
+    "OAuth credentials not configured. Please set OAUTH2_AIRTABLE_CLIENT_ID and OAUTH2_AIRTABLE_CLIENT_SECRET, or use personal access token.": "OAuth凭证未配置。请设置OAUTH2_AIRTABLE_CLIENT_ID和OAUTH2_AIRTABLE_CLIENT_SECRET，或使用个人访问令牌。",
+    "Personal access token": "个人访问令牌",
+    "Please enter a personal access token": "请输入个人访问令牌",
+    "Refresh": "刷新",
+    "Select tables to import from {{baseName}}": "选择要从{{baseName}}导入的表",
+    "Skip": "跳过",
+    "Source tables": "Source表",
+    "Structure only": "仅结构",
+    "Use personal access token instead": "使用个人访问令牌代替",
+    "[Generate a token]({{url}}) in your Airtable account with scopes that include at least **\\`schema.bases:read\\`** and **\\`data.records:read\\`**.\n\nYour token is never sent to Grist's servers, and is only used to make API calls to Airtable from your browser.": "[生成令牌]({{url}}) 在你的Airtable账户中，范围至少包含**\\`schema.bases:read\\`**和**\\`data.records:read\\`**。\n\n你的令牌永远不会发送到Grist的服务器，只用于从浏览器调用Airtable的API。",
+    "loading your bases...": "加载你的基地......",
+    "loading your tables...": "加载您的表格......",
+    "or": "或",
+    "{{count}} warnings_one": "{{count}}警告",
+    "{{count}} warnings_other": "{{count}}警告",
+    "The more convenient ‘Connect with Airtable’ option can be configured by the installation administrator. [Learn more.]({{url}})": "安装管理员可以配置更便捷的“连接Airtable”选项。[了解更多。]({{url}})",
+    "Use personal access token": "使用个人访问令牌"
+  },
+  "AirtableImporter": {
+    "Creating a new Grist document...": "正在创建新的Grist文档......",
+    "Preparing to import base from Airtable...": "准备从Airtable导入基地......",
+    "Setting up tables...": "设置表格......"
+  },
+  "ChangeAdminModal": {
+    "Enter new admin email": "输入新的管理员邮箱",
+    "Make the new email the installation admin. Orgs, workspaces, and documents will remain owned by {{email}}. These changes will take effect after you restart this Grist server.": "将新邮箱设置为安装管理员。组织、工作区和文档仍归 {{email}}所有。这些更改将在你重启本Grist服务器后生效。",
+    "New admin": "新管理员",
+    "Replace {{email}} with the new email throughout. The new email will become the installation admin, as well as the owner of all materials previously owned by you@example.com.": "全程用新邮件替换 {{email}} 。新邮箱将成为安装管理员，同时也是 you@example.com 之前拥有的所有材料的所有者。",
+    "An account with {{email}} already exists.": "已有 {{email}} 账户存在。"
+  },
+  "startDocAirtableImport": {
+    "Import from Airtable": "从Airtable导入"
+  },
+  "startHomeAirtableImport": {
+    "Import from Airtable": "从Airtable导入",
+    "The current workspace can't be imported to.": "当前工作区无法导入。"
+  },
+  "NotifyModel": {
+    "Still working...": "仍在工作中......"
+  },
+  "TriggersPageUpsell": {
+    "Upgrade": "升级",
+    "Automate workflows from within Grist": "从 Grist 内部自动化工作流程",
+    "Automations Screenshot": "自动化截图",
+    "Learn more.": "了解更多。",
+    "Trigger automations based on data changes, and design actions such as custom email notifications and webhook integrations.": "根据数据变更触发自动化，设计动作如自定义邮件通知和 webhook 集成。",
+    "Try for free": "免费试用",
+    "Try full Grist": "试试完整版"
+  },
+  "AutomationsPageEntry": {
+    "Automations": "自动化",
+    "New": "新"
+  },
+  "BootKeyStatus": {
+    "Every new Grist installation includes a random boot key: a secret whose value is only obtainable by an installation operator.": "每一个新的 Grist 安装都会包含一个随机启动密钥：一个只有安装操作员才能获得的秘密密钥。",
+    "Make sure you have configured an authentication system that lets you sign in as an admin before removing the boot key.": "确保你配置了一个认证系统，允许你以管理员身份登录，然后再移除启动密钥。",
+    "Remove boot key": "移除启动密钥",
+    "Remove boot key?": "移除启动密钥？",
+    "The boot key should only be used as a temporary means of authentication until a more secure and robust authentication method is configured via Security Settings → Authentication. We recommend removing the boot key once you've finished setting up Grist.": "启动密钥应仅作为临时认证手段，直到通过安全设置→认证配置更安全、更稳健的认证方法。我们建议在完成Grist设置后移除启动键。",
+    "This setting is currently being managed by an environment variable (`GRIST_BOOT_KEY`).": "该设置目前由环境变量（`GRIST_BOOT_KEY`）管理。",
+    "Unset the environment variable to manage this setting via the Admin Panel.": "取消设置环境变量以通过管理面板管理此设置。",
+    "You will no longer be able to authenticate as the install admin on the `": {
+      "boot-key` page.": "您将无法在 `/boot-key` 页面上以安装管理员身份认证。"
+    }
+  },
+  "BootPage": {
+    "Administrator email": "管理员邮箱",
+    "After restarting, Grist will be available without this sign-in step.": "重启后，Grist将不再使用此登录步骤。",
+    "After restarting, return to this page and enter your chosen key.": "重启后，返回本页并输入你选择的密钥。",
+    "Boot key": "启动密钥",
+    "Can't find your boot key? You can {{setBootKeyButton}} or {{disableCheckButton}}.": "找不到启动密钥？你可以 {{setBootKeyButton}} 或 {{disableCheckButton}}。",
+    "Check key": "检查密钥",
+    "Checking key": "检查密钥",
+    "Confirm or change the administrator email address.": "确认或更改管理员邮箱地址。",
+    "Continue": "继续",
+    "Copied!": "复制！",
+    "Copy": "复制",
+    "Enter boot key": "输入启动密钥",
+    "For Docker, add \\`-e GRIST_BOOT_KEY={{bootKey}}\\` to your run command. For other setups, set it in your environment or configuration file.": "对于 Docker ，在你的 run 命令中添加 \\ 的`-e GRIST_BOOT_KEY={{bootKey}}\\` 。对于其他设置，可以在你的环境或配置文件中设置。",
+    "For Docker, add \\`-e GRIST_IN_SERVICE=true\\` to your run command. For other setups, set it in your environment or configuration file.": "对于 Docker ，在你的 run 命令中添加 \\ 的`-e GRIST_IN_SERVICE=true\\` 。对于其他设置，可以在你的环境或配置文件中设置。",
+    "Here's a random key you can use:": "这里有一个随机密钥，你可以使用：",
+    "If you cannot access server logs or cannot find your boot key, you can set it yourself. Add the environment variable \\`GRIST_BOOT_KEY\\` with a secret value to your Grist configuration, then restart Grist.": "如果你无法访问服务器日志或找不到启动密钥，可以自己设置。在你的Grist配置中添加环境变量\\`GRIST_BOOT_KEY\\` ，并用秘密值，然后重启Grist。",
+    "Look for this banner near the top of Grist's startup output — check your terminal, container logs, or hosting panel: {{exampleBootKeyBanner}}": "在Grist启动输出顶部附近寻找这个横幅——查看你的终端、容器日志或托管面板： {{exampleBootKeyBanner}}",
+    "Paste boot key here": "粘贴启动密钥在此",
+    "Set \\`GRIST_IN_SERVICE=true\\` in your Grist configuration, then restart. Grist will start without requiring a boot key.": "在你的 Grist 配置中设置 \\`GRIST_IN_SERVICE=true\\` ，然后重启。Grist可以无需启动键启动。",
+    "Set your boot key": "设置启动密钥",
+    "Skipping it is fine on a private, trusted network where only authorized people can connect.": "在只有授权人员能连接的私密可信网络上跳过它是可以的。",
+    "The boot key proves you have access to the server running Grist — it keeps out anyone who can reach this page but isn't the administrator.": "启动密钥证明你有权限访问运行Grist的服务器——它会阻止任何能访问但不是管理员的人访问该页面。",
+    "This will be your admin account for managing Grist.": "这将是你管理Grist的管理员账户。",
+    "Turn off this check": "关闭此检查",
+    "Valid boot key": "有效的启动密钥",
+    "Verify that you have access to this server to continue.": "确认您已访问此服务器以继续运行。",
+    "Welcome to Grist": "欢迎来到 Grist",
+    "Why does this check exist?": "为什么会有这个检查？",
+    "disable this check": "关闭此检查",
+    "set your own": "自己设置"
+  },
+  "QuickSetup": {
+    "Apply & restart": "应用并重启",
+    "Authentication": "认证",
+    "Backups": "备份",
+    "Configure Grist for your environment.": "配置Grist以适应您的环境。",
+    "Quick setup": "快速设置",
+    "Sandboxing": "沙箱",
+    "Server": "服务器",
+    "Continue": "继续",
+    "Set up later": "后续设置"
+  },
+  "ServiceStatus": {
+    "Enter maintenance mode": "进入维护模式",
+    "Enter maintenance mode?": "进入维护模式？",
+    "Non-admin users will be blocked until service is restored.": "非管理员用户将被屏蔽，直到服务恢复。",
+    "Non-admin users will no longer be blocked.": "非管理员用户将不再被屏蔽。",
+    "Restore service": "恢复服务",
+    "Restore service?": "恢复服务？",
+    "This setting is currently being managed by an environment variable (`GRIST_IN_SERVICE`).": "该设置目前由环境变量（`GRIST_IN_SERVICE`）管理。",
+    "Unset the environment variable to manage this setting via the Admin Panel.": "取消环境变量以通过管理面板管理此设置。"
+  },
+  "TeamSettingsPage": {
+    "Domain is already taken.": "领域已被占用。",
+    "Invalid domain.": "无效域名。"
+  },
+  "BackupsSection": {
+    "AWS S3 via native AWS SDK. Supports IAM roles and AWS-native auth.": "AWS S3。支持IAM角色和AWS原生认证。",
+    "AWS S3-compatible service via MinIO client library. Works with AWS S3, MinIO, and others.": "通过 MinIO 客户端库支持的 AWS S3 兼容服务。支持AWS S3、MinIO等。",
+    "Active": "已启用",
+    "Available in full edition": "完整版可用",
+    "Azure Blob Storage": "Azure Blob Storage",
+    "Backups": "备份",
+    "Documents stored on local disk only.": "仅存储在本地磁盘上的文档。",
+    "Learn more.": "了解更多。",
+    "Loading backup providers...": "正在加载备份提供者......",
+    "Microsoft Azure Blob Storage via native Azure SDK.": "通过原生 Azure SDK 使用 Microsoft Azure Blob Storage。",
+    "No external storage": "无外部存储",
+    "Off": "关闭",
+    "S3 (AWS client)": "S3（AWS 客户端）",
+    "S3 (MinIO client)": "S3（MinIO 客户端）",
+    "Set these environment variables and restart Grist to enable Azure storage:": "设置这些环境变量并重启 Grist 以启用 Azure 存储：",
+    "Set these environment variables and restart Grist to enable MinIO storage:": "设置这些环境变量并重启 Grist 以启用 MinIO 存储：",
+    "Set these environment variables and restart Grist to enable S3 storage:": "设置这些环境变量并重启 Grist 以启用 S3 存储：",
+    "Store document backups on an external service like S3 or Azure.           This protects against data loss if the server's disk fails.": "将文档备份存储在外部服务如 S3 或 Azure。          这可以防止服务器磁盘故障时的数据丢失。",
+    "Local filesystem (test only)": "本地文件系统（仅测试）",
+    "Stores document snapshots on the local filesystem. For tests only, not production.": "将文档快照存储在本地文件系统中。仅用于测试，不适用于生产。",
+    "Action needed": "需要处理",
+    "To preserve it, mount a volume at ": {
+      "persist.": "要保留它，可以在 /persist 挂载一个卷。"
+    },
+    "Your data may not survive a container restart.": "容器重启后，您的数据可能会丢失。"
+  },
+  "PermissionsSetupSection": {
+    "Allow anonymous access": "允许匿名访问",
+    "Allow anonymous playground": "允许匿名游乐场",
+    "Allow anyone to create team sites": "允许任何人创建团队网站",
+    "Allow personal sites": "允许个人网站",
+    "Any logged-in user can create new team sites. Turn off to restrict team creation to admins only.": "任何登录用户都可以创建新的团队网站。关闭限制团队创建权限，仅限管理员。",
+    "Apply & restart": "应用并重启",
+    "Apply and go live!": "申请并上线！",
+    "Applying settings and restarting…": "应用设置并重启......",
+    "Back to installation": "返回安装",
+    "Conflict": "冲突",
+    "DEFAULT PERMISSIONS": "默认权限",
+    "Environment": "环境",
+    "Grist is live!": "Grist上线！",
+    "Loading permissions…": "加载权限......",
+    "Locked down": "锁定",
+    "Open": "打开",
+    "Recommended": "推荐",
+    "Review these defaults before going live. You can change them later from the admin panel.": "上线前请先审查这些默认设置。你可以在管理面板里稍后更改它们。",
+    "Server did not restart in time. Please refresh the page.": "服务器未能及时重启。请刷新页面。",
+    "Some settings are controlled by environment variables and cannot be changed here: {{vars}}. To modify them, update the corresponding variables in your server configuration and restart.": "部分设置由环境变量控制，无法更改： {{vars}}。要修改它们，请更新服务器配置中的相应变量并重启。",
+    "The personal org is the only org available — personal sites must stay enabled or Grist will be non-functional.": "个人组织是唯一可用的组织——个人网站必须保持启用状态，否则 Grist 将无法使用。",
+    "Users can create their own personal sites with documents. Turn off to restrict all documents to team sites managed by admins.": "用户可以创建带有文档的个人网站。关闭限制所有文档只能访问管理员管理的团队网站。",
+    "Visitors who aren't signed in can create and edit documents in a temporary playground. Turn off to require sign-in before creating any documents.": "未登录的访客可以在临时游乐场创建和编辑文档。关闭要求在创建任何文件前登录的选项。",
+    "Visitors who aren't signed in can view publicly shared documents. This is needed for link sharing and published forms.": "未登录的访客可以查看公开共享的文档。这是链接分享和发布表单所必需的。",
+    "You have GRIST_SINGLE_ORG={{value}} set. With this, users only see one site — but personal sites and team creation still work behind the scenes. Worth locking down unless you have a specific reason to keep them.": "你有GRIST_SINGLE_ORG={{value}} 设置。这样，用户只能看到一个网站——但个人网站和团队创建仍然在幕后工作。除非你有特别的理由要保留，否则值得锁定。",
+    "Your configuration changes have been applied and the server has been restarted. Grist is now in service and available to users.": "您的配置更改已应用，服务器已重启。Grist现已投入使用，并向用户开放。",
+    "Custom": "自定义",
+    "loading…": "加载中......"
+  },
+  "SandboxSection": {
+    "Active": "已启用",
+    "Apply and Continue": "应用并继续",
+    "Applying...": "正在应用中......",
+    "Continue": "继续",
+    "Detecting sandbox options...": "检测沙盒选项......",
+    "Error": "错误",
+    "No sandbox": "无沙盒",
+    "Not available": "不可用",
+    "Not recommended": "不推荐",
+    "Other options": "其他选项",
+    "Ready": "准备就绪",
+    "Recommended": "推荐",
+    "Sandboxing": "沙箱",
+    "Skip and Continue": "跳过并继续",
+    "Uses the built-in macOS sandbox. Good isolation for local use on a Mac.": "使用内置的 macOS 沙盒。Mac本地使用时隔离性很好。",
+    "macOS sandbox": "macOS 沙盒",
+    "Sandbox": "沙盒"
+  },
+  "AdminPanelCss": {
+    "Confirmed": "确认",
+    "For later": "稍后用"
+  },
+  "BaseUrlSection": {
+    "Already set on this server.": "已经在这台服务器上设置好了。",
+    "Automatic": "自动",
+    "Base URL": "基础网址",
+    "Confirm URL": "确认网址",
+    "Could not reach server": "无法访问服务器",
+    "Could not reach server at this URL. ": "无法访问该网址的服务器。 ",
+    "Failed to save": "未能保存",
+    "Grist is reachable": "Grist 可访问",
+    "Leave automatic": "自动离开",
+    "Test URL": "测试网址",
+    "Testing...": "测试......",
+    "The URL where users and integrations reach this Grist server. Auth callbacks, API links, and email notifications all depend on this being correct.": "用户和集成访问该 Grist 服务器的 URL。身份验证回调、API 链接和邮件通知都依赖于这些信息是否正确。",
+    "This URL was auto-detected — confirm it is correct, then save.": "该 URL 是自动检测的——确认正确后保存。",
+    "URL is reachable": "URL 可访问",
+    "automatic": "自动",
+    "checking": "检查",
+    "https:": {
+      "": {
+        "grist.example.com": "https://grist.example.com"
+      }
+    },
+    "not set": "未设置",
+    "set": "场景"
+  },
+  "EditionSection": {
+    "Choose which edition of Grist to run on this server": "选择在本服务器上运行哪个版本的Grist？",
+    "Choose which edition of Grist to run on this server.": "选择在本服务器上运行的 Grist 版本。",
+    "Community edition": "社区版",
+    "Confirm edition": "确认版",
+    "Edition": "版",
+    "Full Grist": "Grist 完整版",
+    "Full Grist is enabled via environment variable.": "Full Grist 通过环境变量启用。",
+    "I understand I am running Grist Community edition": "我知道我正在运行Grist Community版",
+    "Learn more.": "了解更多。",
+    "On": "关于",
+    "See how to enable it.": "查看如何启用。",
+    "The free and open-source heart of Grist, with everything you need to open and edit Grist documents, control access, create forms, connect to single sign-on (SSO) providers, and much more.": "Grist 的免费开源核心，包含打开和编辑 Grist 文档、控制访问、创建表单、连接单点登录（SSO）提供商等所需的一切内容。",
+    "The full Grist experience, with all features enabled for improved security, governance, and collaboration.": "完整的Grist体验，所有功能均已启用，以提升安全性、治理和协作。",
+    "You have 30 days to enter an activation key. Free activation keys are available to individuals and small orgs with less than US $1 million in total annual funding. {{learnMoreLink}} For larger orgs, see {{pricingLink}}.": "你有30天时间输入激活密钥。免费激活密钥可向年资金总额低于100万美元的个人和小型组织开放。 {{learnMoreLink}} 关于大型组织，请参见 {{pricingLink}}。",
+    "Your installation does not bundle the Full Grist edition. Want Full Grist? {{enableLink}}": "您的安装未捆绑完整版。想要Full Grist吗？ {{enableLink}}",
+    "community": "社区",
+    "full": "完整",
+    "pricing": "定价",
+    "Cancel": "取消",
+    "Community": "社区版",
+    "Downgrade": "降级",
+    "Downgrade to Community Edition": "降级到社区版",
+    "Downgrade to Community edition? Full Grist features are disabled after restart. This is reversible.": "降级到社区版？重启后，完整Grist功能将被禁用。这是可逆的。",
+    "For automations, MCP server, AI assistant, OIDC": {
+      "SAML support, email notifications, admin controls, audit logging and more, switch to the full Grist edition.": "为了自动化、MCP 服务器、AI 助手、OIDC/SAML 支持、电子邮件通知、管理控制、审计日志等，请切换到完整的 Grist 版本。"
+    },
+    "Free activation keys": "免费激活密钥",
+    "Restart Grist to apply this change.": "重启 Grist 以应用此变更。",
+    "Switch to Full Grist": "切换到Full Grist",
+    "This server runs the full edition of Grist, with advanced security, governance, MCP server, automations, email notifications, and collaboration features.": "该服务器运行完整版Grist，具备高级安全、治理、MCP服务器、自动化、邮件通知和协作功能。",
+    "You are running the Grist Community edition.": "你正在运行 Grist 社区版。",
+    "{{freeKeysLink}} are available to individuals and small orgs under US $1 million total annual funding. For larger orgs, see {{pricingLink}}.": "{{freeKeysLink}}面向个人和小型组织，年资助总额低于100万美元。关于大型组织，请参见{{pricingLink}}。",
+    "Community Grist": "Grist 社区版",
+    "Continue with Community edition": "继续使用社区版",
+    "Continue with full edition": "继续完整版",
+    "Downgrade to Community edition": "降级到社区版",
+    "Downgrading to the Community edition restarts the server, which may be briefly unavailable.": "降级到社区版会重启服务器，服务器可能会短暂无法使用。",
+    "For automations, MCP server, AI assistant, OIDC support, email notifications, admin controls, audit logging and more, switch to the full Grist edition.": "如需自动化、MCP 服务器、AI 助手、OIDC 支持、邮件通知、管理控制、审计日志等，请切换到完整的 Grist 版本。",
+    "Full Grist features such as email notifications, automations, MCP server, and OIDC and SAML support will be disabled after restart. You may always upgrade to full Grist again.": "Grist 的完整功能如邮件通知、自动化、MCP 服务器以及 OIDC 和 SAML 支持将在重启后被禁用。你随时可以再次升级到完整的Grist。",
+    "Grist will switch to the Community edition after restarting, disabling full Grist features. You will not lose your data or need to reinstall Grist.": "Grist 重启后将切换到社区版，禁用完整的 Grist 功能。你不会丢失数据，也不需要重新安装Grist。",
+    "Switch to Community edition": "切换到社区版",
+    "Switch to full Grist": "切换到完整版",
+    "Switching Grist edition...": "Switching Grist版......",
+    "Switching to full Grist downloads the required extensions. This may take a few minutes, during which the server will be unavailable.": "切换到完整Grist会下载所需的扩展。这可能需要几分钟，期间服务器将无法使用。",
+    "Switching to full Grist restarts the server, which may be briefly unavailable.": "切换到完整版Grist会重启服务器，服务器可能会短暂无法使用。",
+    "Upgrade to full Grist": "升级为完整Grist",
+    "You may downgrade at any time to the Community edition. You will not lose your data or need to reinstall Grist.": "您可以随时降级到社区版。你不会丢失数据，也不需要重新安装Grist。",
+    "Your server will restart automatically once finished.": "服务器完成后会自动重启。",
+    "{{freeKeysLink}} are available to individuals and orgs under US $1M total annual funding. For larger orgs see {{pricingLink}}. Start your 30-day free trial today.": "{{freeKeysLink}}面向个人和组织，年总资金低于100万美元。关于大型组织，请参见{{pricingLink}}。今天就开始您的30天免费试用。"
+  },
+  "QuickSetupServerStep": {
+    "Apply and Continue": "应用并继续",
+    "Base URL": "基础网址",
+    "Confirm base URL and edition to continue": "确认基础 URL 和版本以继续",
+    "Confirm base URL to continue": "确认基础URL以继续",
+    "Confirm edition to continue": "确认版本继续",
+    "Continue": "继续",
+    "Edition": "版",
+    "Server": "服务器",
+    "Set your server's base URL and choose which edition of Grist to run.": "设置服务器的基础URL，并选择运行哪个版本的Grist。"
+  },
+  "AccountLeftPanel": {
+    "Account settings": "账户设置",
+    "Developer": "开发者",
+    "Profile": "个人资料",
+    "Authorized apps": "授权应用"
+  },
+  "SettingsLayout": {
+    "Authentication": "认证",
+    "Current authentication method": "当前认证方法",
+    "Installation": "安装",
+    "Sandbox settings for data engine": "数据引擎沙盒设置",
+    "Sandboxing": "沙盒",
+    "Security Settings": "安全设置"
+  },
+  "SettingsLayout.d": {
+    "Authentication": "认证",
+    "Current authentication method": "当前认证方法",
+    "Installation": "安装",
+    "Sandbox settings for data engine": "数据引擎沙盒设置",
+    "Sandboxing": "沙盒",
+    "Security Settings": "安全设置"
+  },
+  "QuickSetupContinueButton": {
+    "Apply and Continue": "应用并继续",
+    "Applying...": "正在应用中......",
+    "Continue": "继续"
+  },
+  "AdminAccessDeniedCard": {
+    "Administrator Panel Unavailable": "管理员面板不可用",
+    "If you are the server operator, you can sign in using the boot key from your server logs.": "如果你是服务器运营者，可以使用服务器日志中的启动密钥登录。",
+    "Sign in with boot key": "使用启动密钥登录",
+    "You do not have access to the administrator panel.\nPlease log in as an administrator.": "你无法访问管理员面板。\n请以管理员身份登录。"
+  },
+  "PermissionsToggleModel": {
+    "Allow anonymous access": "允许匿名访问",
+    "Allow anonymous playground": "允许匿名游乐场",
+    "Allow anyone to create team sites": "允许任何人创建团队网站",
+    "Allow personal sites": "允许个人网站",
+    "Any logged-in user can create new team sites. Turn off to restrict team creation to admins only.": "任何登录用户都可以创建新的团队网站。关闭限制团队创建权限，仅限管理员。",
+    "Permissions": "权限",
+    "Users can create their own personal sites with documents. Turn off to restrict all documents to team sites managed by admins.": "用户可以创建带有文档的个人网站。关闭限制所有文档只能访问管理员管理的团队网站。",
+    "Visitors who aren't signed in can create and edit documents in a temporary playground. Turn off to require sign-in before creating any documents.": "未登录的访客可以在临时游乐场创建和编辑文档。关闭要求在创建任何文件前登录的选项。",
+    "Visitors who aren't signed in can view publicly shared documents. This is needed for link sharing and published forms.": "未登录的访客可以查看公开共享的文档。这是链接分享和发布表单所必需的。",
+    "off": "不对劲",
+    "on": "关于",
+    "Sends anonymous usage metrics to Grist Labs. No document contents are collected. Configurable anytime from the admin panel.": "向 Grist Labs 发送匿名使用数据。不收集任何文件内容。可以随时从管理面板配置。",
+    "Share product telemetry": "分享产品遥测数据"
+  },
+  "ScreenReaderAnnouncer": {
+    "Notification: {{notification}}": "通知： {{notification}}"
+  },
+  "ScreenReaderConfig": {
+    "Enable screen reader improvements": "启用屏幕阅读器改进",
+    "Press {{accessibilityModalShortcut}} for more information about screen reader navigation.": "按 {{accessibilityModalShortcut}} 获取更多屏幕阅读器导航信息。"
+  },
+  "ScreenReaderFormatters": {
+    "Checked": "已勾选",
+    "Image": "图片",
+    "Toggled off": "关闭",
+    "Toggled on": "已切换",
+    "Unchecked": "未勾选",
+    "heading {{- text}}": "标题 {{- text}}",
+    "link {{- label}}": "链接 {{- label}}",
+    "list: {{- items}}": "列表： {{- items}}",
+    "{{- text}} (link)": "{{- text}}（链接）"
+  },
+  "OutgoingRequestsStatus": {
+    "Allowed: any host (*)": "允许：任何主机（*）",
+    "Allowed: {{list}}": "允许： {{list}}",
+    "Any editor could trigger a request to an internal URL.": "任何编辑器都可以触发对内部网址的请求。",
+    "Any host is allowed and no URL filter is in place.": "允许任何主机，且不设置 URL 过滤。",
+    "Checking…": "检查中......",
+    "For example, checking for updates or talking to your single sign-on provider.": "例如，查看更新或与单点登录服务提供商沟通。",
+    "Grist connects directly. No HTTPS proxy is in place.": "Grist 直接连接。没有安装任何HTTPS代理。",
+    "Grist routes those requests through the URL filter you've set up.": "Grist 会通过你设置的 URL 过滤器路由这些请求。",
+    "Grist sends them straight out. You've opted out of URL filtering.": "Grist 直接发送。你已经选择退出了URL过滤。",
+    "No URL filter is set up. Features that need one stay switched off.": "未设置 URL 过滤器。需要关闭的功能。",
+    "Not filtered.": "未过滤。",
+    "Open to any host. The URL proxy is what keeps this safe.": "对任何主机开放。URL代理就是保障这件事安全的关键。",
+    "Search docs for: {{envVar}}": "搜索文档： {{envVar}}",
+    "These requests go through your HTTPS proxy.": "这些请求会通过你的 HTTPS 代理进行。",
+    "Three features can make Grist send HTTP requests on behalf of your users. Here's how each one is set up right now.": "有三个功能可以让 Grist 代表你的用户发送 HTTP 请求。以下是目前每个项目的设置方式。",
+    "When Grist itself reaches out…": "当 Grist 本身伸出援手......",
+    "When your users reach out…": "当用户主动联系时......",
+    "bypassed": "被绕过",
+    "checking": "检查",
+    "filtered": "过滤",
+    "not configured": "未配置",
+    "review": "评测",
+    "unfiltered": "未过滤"
+  },
+  "McpConnectBanner": {
+    "**New!** Connect Grist to Claude and ChatGPT. [Try it now]({{mcp}})": "**新！** 将 Grist 连接到 Claude 和 ChatGPT。[现在试试]({{mcp}})"
+  },
+  "AdminSetupRequests": {
+    "1 request": "1个请求",
+    "Clear": "清晰",
+    "For": "对于",
+    "Setup requests": "设置请求",
+    "Setup steps users have asked for": "用户要求的设置步骤",
+    "already done": "已经完成了",
+    "{{count}} requests_one": "{{count}}请求",
+    "{{count}} requests_other": "{{count}}请求"
+  },
+  "NotificationsAndAutomationsNudge": {
+    "1 person has asked for this.": "一个人提出了这个要求。",
+    "Add a note": "添加备注",
+    "Ask questions and build formulas in plain language.": "用通俗语言提问并构建公式。",
+    "Ask the admin for this": "向管理员询问",
+    "Everything below is waiting on": "下面所有内容都在等待",
+    "Get emailed when data changes, or when someone comments or mentions you.": "当数据发生变化，或有人评论或提及你时，会收到邮件通知。",
+    "Next step": "下一步",
+    "Next step for everything below": "以下所有内容的下一步",
+    "Note sent.": "已发送笔记。",
+    "Notifications and Automations": "通知与自动化",
+    "React to changes in your data automatically with custom emails, webhook calls, and more.": "通过自定义邮件、网络钩呼叫等，自动响应数据变化。",
+    "Setting these up is done by whoever manages this Grist installation.": "这些设置由管理本 Grist 安装的人完成。",
+    "Some of these features are ready; others need more setup on this install.": "其中一些功能已经准备好;其他设备这次安装需要更多设置。",
+    "These features need additional setup on this install.": "这些功能在本次安装中需要额外设置。",
+    "This document can run automations, send notifications, and use an AI assistant.": "该文档可以运行自动化、发送通知，并使用AI助手。",
+    "Waiting on": "等待",
+    "When you share a document, new members get an email invite.": "当你分享文档时，新成员会收到邮件邀请。",
+    "Why do you want this? Press Enter to send.": "你为什么想要这个？按回车发送。",
+    "You and 1 other have asked for this.": "你和另一个人都要求过这个。",
+    "You and {{count}} others have asked for this._one": "你和其他 {{count}} 人都要求过这个。",
+    "You and {{count}} others have asked for this._other": "你和其他 {{count}} 人都要求过这个。",
+    "You've asked for this.": "这是你要求的。",
+    "{{count}} people have asked for this._one": "{{count}}人要求过这个。",
+    "{{count}} people have asked for this._other": "{{count}}人要求过这个。",
+    "{{done}} of {{total}} steps": "{{done}}{{total}}步骤"
+  },
+  "SetupSteps": {
+    "AI Assistant": "AI助手",
+    "Automations": "自动化",
+    "Change & comment notifications": "变更与评论通知",
+    "Choose full Grist edition": "选择完整版",
+    "Connect a task queue (Redis)": "连接任务队列（Redis）",
+    "Connect an AI provider": "连接AI提供商",
+    "Connect email delivery": "Connect 邮件投递",
+    "Invite emails": "邀请邮件",
+    "Use a plan with automations": "使用带有自动化的计划"
+  },
+  "VersionFooter": {
+    "Compare editions": "比较版本",
+    "Grist Community edition": "Grist 社区版",
+    "No official support": "无官方支持",
+    "Not the full edition": "非完整版",
+    "Only community support": "仅社区支持",
+    "Release notes": "发布说明",
+    "Version {{- version}}": "版本 {{- version}}"
+  },
+  "RowNumbersMenu": {
+    "Hidden": "隐藏",
+    "Numbers": "数字",
+    "Row IDs": "行编号",
+    "Row numbers": "行编号"
+  },
+  "HelpUsImproveSection": {
+    "A business or organization": "企业或组织",
+    "A couple of quick questions — optional, and only our team sees this.": "有几个快速问题——可选，只有我们团队能看到。",
+    "AI response": "AI 回应",
+    "Conference": {
+      "event": "会议/活动"
+    },
+    "Developer": {
+      "IT": "开发者/IT"
+    },
+    "Education": {
+      "Research Institute": "教育/研究院"
+    },
+    "Email is required when subscribing to updates.": "电子邮件。",
+    "Email:": "电子邮件：",
+    "Friend": {
+      "colleague": "朋友/同事"
+    },
+    "GitHub": "GitHub",
+    "Help us improve Grist": "帮助我们改进 Grist",
+    "How did you hear about Grist?": "你是怎么知道Grist的？",
+    "Individual or hobbyist": "个人还是业余爱好者",
+    "Nonprofit": "非营利组织",
+    "Occasional email about new releases and important security notices.": "偶尔发送关于新版本发布和重要安全通知的邮件。",
+    "Other": "其他",
+    "Please enter a valid email address.": "请输入有效的电子邮件地址。",
+    "Reddit": {
+      "forum": "Reddit/论坛"
+    },
+    "Search engine": "搜索引擎",
+    "Select…": "选择......",
+    "Send me product and security updates": "向我发送产品和安全更新",
+    "Social media": "社交媒体",
+    "What best describes you?": "什么最能形容你？"
+  },
+  "QuickSetupApplyStep": {
+    "Apply and go live!": "申请并上线！",
+    "Applying settings and restarting…": "应用设置并重启......",
+    "Back to installation": "返回安装",
+    "Grist is live!": "Grist上线！",
+    "Our servers may be experiencing issues. Please try again later.": "我们的服务器可能出现问题。请稍后再试。",
+    "Please try again.": "请再试一次。",
+    "Retry submission": "重试提交",
+    "Setup completion": "设置完成",
+    "We couldn't save your details or subscribe you to updates.": "我们无法保存您的信息或订阅您的更新。",
+    "We couldn't submit your details or your request to be kept up to date. Please try again.": "我们无法提交您的详细信息或请求以保持最新状态。请再试一次。",
+    "We saved your details, but couldn't subscribe you to updates.": "我们保存了您的信息，但无法订阅您的更新。",
+    "We subscribed you for product updates, but couldn't save your other details.": "我们订阅了您的产品更新，但无法保存您的其他信息。",
+    "Your configuration changes have been applied and the server has been restarted. Grist is now in service and available to users.": "您的配置更改已应用，服务器已重启。Grist现已投入使用，并向用户开放。"
+  },
+  "ColumnFilterMenu": {
+    "None": "无"
+  },
+  "WebhookPage": {
+    "Webhook Id": "Webhook ID",
+    "Header Authorization": "请求头授权"
+  },
+  "UserManager": {
+    "{{limitAt}} of {{limitTop}} {{collaborator}}s": "{{limitAt}} / {{limitTop}} 个{{collaborator}}"
+  },
+  "HomeIntroCards": {
+    "Webinars": "在线讲座"
+  },
+  "AuditLogsPage": {
+    "Home": "主页"
+  }
+}

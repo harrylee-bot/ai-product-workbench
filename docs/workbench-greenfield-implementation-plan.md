@@ -1,21 +1,19 @@
 # 产品工作台绿地重建与全量接入实施方案
 
-更新日期：2026-07-16
+更新日期：2026-07-28
 
 ## 结论
 
-本项目不再把新前端接入旧 `Conversation/Message/AI SDK` 后台，而是建设独立的新产品后台。开发期新旧应用只作为隔离施工区并存，不转发、不双写、不迁移旧业务数据；新链路验收完成后硬切并删除旧后台。
+本项目不把新前端接入旧 `Conversation/Message/AI SDK` 后台，而是使用独立的产品后台。旧应用代码与依赖已经从当前主树删除；生产硬切仍必须按受保护流程完成外部资源删除与回执，且全程不转发、不双写、不迁移旧业务数据。
 
-截至 2026-07-16，绿地合同、数据库、API、三个独立 Worker、BFF、Board、Artifact/Release、隔离 Preview、导出、Prototype v1 和受限 Knowledge retrieval 主链已经形成；它已不是“把一套新皮肤接到旧接口”的工作。前端入口已经收口为持久 `(workbench)` layout -> `WorkbenchRuntimeProvider` -> `WorkbenchScene`：Next Home 与 Project page 只承担 URL，组件本身返回 `null`；唯一负责 Home/Project 页面切换的 `AnimatePresence mode="sync"` 位于持久 Scene 内。Project 通过 fulfilled-module cache 动态拆包，P1 -> P2 始终使用 `key="project"`，不会按项目 ID 重挂载；真实 NavigationGuard 已证明 Project root、header 与 React Flow DOM identity 在切换后保持不变，任何 `key={projectId}` 写法都被禁止。项目 URL 已固定为 `/projects/[projectId]`，登录/注册也已使用独立 `components/auth` 与 Better Auth。项目邀请已与 Workspace membership 隔离，Run SSE 会持续复核授权，取消竞态使用数据库 CAS，PRD 编辑使用稳定 Section/Block ID，Viewer Preview 已与 Release/Export 解耦。Design preset 已改为服务端权威、版本化 catalog，并在 Run 中保存不可变 snapshot/hash；SubmissionIntent 已把 prompt、typed Run options、既有附件和有序上传槽位持久化，支持刷新后续传、重选、幂等提交和整单取消。领域与数据底座已有 16 个 feature 进入强制分层，聚合 `WorkbenchService` 与 `transport.service` 已物理删除，每个数据 feature 直接拥有 typed API adapter。当前 dependency-cruiser 快照为 432 modules / 1,403 dependencies / 0 violations，前端 route ownership、动态拆包和跨项目会话隔离均已有静态与浏览器门禁，不再列作待拆结构债务。生产硬切仍受真实 OIDC/KMS、S3/ClamAV、DeerFlow、已评测并 adopted 的 embedding/reranker、双 HTTPS origin、真实 OTLP collector、Docker 镜像、Figma Desktop 和全服务网络验收约束。
-
-按 2026-07-16 当前落盘状态重新核算，项目邀请隔离、连续 SSE 授权、Run 取消竞态、PRD 稳定投影、Viewer Preview、页面级上传控制、SubmissionIntent 完整提交恢复、权威 Design preset catalog、Knowledge Profile 治理、正式 Figma importer、ExportJob 恢复、硬切 manifest v2、OpenTelemetry 仓库接线、持久 Scene route ownership、Project 动态拆包、跨项目状态隔离，以及前端聚合 Service 的彻底移除均已完成，不再作为剩余工时重复计费。Web 全量 **144 files / 616 tests**、OpenAPI **79 paths / 97 operations**、根 `npm test`、typecheck、生产 build、bundle、品牌、浏览器上传部署、安全响应头和统一 `e2e:web` 门禁均已通过。从当前快照到“在真实生产外部依赖上完成验收并硬切”的 bottom-up 剩余量统一为 **26-48 人日**。这个数字不含旧接口兼容、旧对话迁移、双写或旧版维护；真实账号、模型、证书、S3/IAM 和部署审批的等待时间不计入人日，但会延长日历周期。
+目标前端由持久 `(workbench)` layout、`WorkbenchRuntimeProvider` 和 `WorkbenchScene` 统一拥有页面运行时；Next Home/Project page 只拥有 URL。领域功能通过公开入口和 `domain/application/api-adapter` 边界接入，禁止恢复旧 Chat、AI SDK、SWR、聚合 Service 或按项目 ID 重挂载页面。完成状态、测试数量和生产阻断不在架构文档中固化，统一以两份现行整改规格和实际门禁输出为准。
 
 唯一从旧环境继承的业务资产是：
 
 - `knowledge-vault`
 - 由 `knowledge-vault` Markdown 经路径校验、allowlist、SHA-256 和引用闭包明确引用的 `storage` 文件
 
-不得按目录整体保留 `storage`：未被 Markdown 明确引用的文件，即使位于 `storage/source-assets` 或 `storage/imports`，也必须删除。旧数据库中的知识文档行、chunk、embedding、向量索引、检索缓存和旧 `KnowledgeRelease` 均不迁移；新系统只从上述允许保留的源资产重建知识投影。
+不得按目录整体导入 `storage`。大体积原始来源按仓库治理保留在本地 `storage/`，并在 `knowledge-vault/` 建立包含路径、大小和 SHA-256 的结构化索引；未进入明确引用闭包的原件不进入发布候选。无来源价值的派生文件、缓存、测试输出和临时文件必须删除。旧数据库中的知识文档行、chunk、embedding、向量索引、检索缓存和旧 `KnowledgeRelease` 均不迁移；新系统只从允许保留的源资产重建知识投影。
 
 禁止未经明确授权向外部知识库同步项目对话、源文件或生成知识。
 
@@ -77,15 +75,15 @@ isolated artifact-preview origin
 | 能力 | 采用 | 方式 |
 |---|---|---|
 | Node 模块格式 | Node 22 ESM + TypeScript NodeNext | 仅迁新 Workbench；不为 ESM-only 开源库维护 CommonJS 兼容胶水 |
-| UI primitive | shadcn/ui、Radix、cmdk、Sonner、Lucide | shadcn 可复制改造，其余作为依赖 |
+| UI primitive | shadcn/ui、Radix、Sonner、Lucide；可搜索命令目录出现时再评估 cmdk | shadcn 可复制改造，其余按实际消费显式声明依赖；固定短命令列表不引入 cmdk |
 | 无限画布 | React Flow | 直接依赖；只自研 Board/Artifact 映射和 CAS |
 | 屏内元素选择与变换 | react-selecto + react-moveable | 先做 React 19/缩放/触控/IR round-trip PoC；只自研 PrototypeDocument command 和布局语义；因上游更新偏慢必须保留退出验证 |
 | 图层/列表排序 | Atlassian Pragmatic Drag and Drop | 按需直接依赖；不自研拖拽传感器和键盘排序；dnd-kit 只作备选 |
 | PRD 编辑 | Tiptap Core | 直接依赖；只自研 PRD schema、版本和引用 |
 | 代码与 Diff | CodeMirror 6 + merge | 直接依赖 |
 | 设计系统导入与投影 | Style Dictionary、Color.js、fontkit、unified + remark | `workbench.design-system.v1` 是唯一事实源；开源库只负责 token 投影、颜色运算、字体元数据和 Markdown AST，不接管领域 schema、版本、权限或导入回执 |
-| 表格 | TanStack Table；表格式 Artifact 保留 React Data Grid | 直接依赖并隔离 beta API |
-| 流式 Markdown | Streamdown、Shiki、Mermaid | 直接依赖 |
+| 表格 | TanStack Table；表格式 Artifact 可条件评估 React Data Grid | 当前均未安装；出现真实表格需求时在消费 workspace 直接声明，并隔离第三方 API |
+| 流式 Markdown | Streamdown、Shiki、Mermaid | 当前未安装；只有产品界面需要渲染不可信流式 Markdown 时才按隔离渲染合同接入 |
 | 上传 | Uppy + signed multipart upload | headless 接入；暂停/继续/取消/listParts/retry 归 Uppy，只自研 FileAsset、服务端 UploadSession、幂等和可信摘要；Golden Retriever 只作小文件可选增强 |
 | 服务端状态 | TanStack Query | 新 feature 的唯一 server cache |
 | API client | openapi-typescript + openapi-fetch | 从生成的 OpenAPI 3.1 产生，不手写 DTO/URL |
@@ -110,7 +108,7 @@ shadcn 小组件可以复制修改；React Flow、Tiptap、Uppy 等复杂引擎�
 
 本项目只自研 Project/ProjectMember/ProjectRelease/Thread/Run/Artifact/Board/KnowledgeRelease、`ArtifactKind.design_system` 与 `DesignSystemImport` 领域规则、PrototypeDocument 与 command、DeerFlow adapter、事件状态机、权限与知识路由。通用菜单焦点、画布手势、元素框选/变换、编辑器、上传重试、SSE 拆帧、JSON canonicalization、OpenAPI 完整校验和文档解析不得重复实现。每个新功能开工前必须完成 `docs/workbench-open-source-reuse-strategy.md` 定义的 reuse check；无合格候选时才允许自研通用能力。
 
-`@langchain/langgraph-sdk` 只是 DeerFlow transport，不是第二套 Runtime。Vercel AI SDK、`UIMessage`、`useChat`、SWR 和 AI Gateway 不进入 `(workbench)` 产品路由的依赖图；它们目前仍存在于隔离旧代码和 Web package manifest 中，必须在硬切删除门清零后，才能宣称不再进入最终生产发布物。
+`@langchain/langgraph-sdk` 只是 DeerFlow transport，不是第二套 Runtime。Vercel AI SDK、`UIMessage`、`useChat`、SWR 和 AI Gateway 已从当前应用依赖图删除；架构门禁必须持续阻止它们重新进入 `(workbench)` 产品路由或最终生产发布物。
 
 ## AI Runtime 与第三方技术评估（历史决策记录）
 
@@ -213,7 +211,7 @@ Run 只接受目标 Project 内 ready 的设计系统 ArtifactVersion。API 从�
 ## HTTP 契约
 
 - REST 从 `/api/v1` 开始。Zod schema + route registry 是唯一人工维护合同，OpenAPI 3.1 由它确定性生成并作为对外发布合同；生成 YAML 禁止手改。
-- 当前 route registry 与已刷新 baseline 同为 79 个 resource path、97 个 HTTP operation；上一批准基线为 71/89。新增 Design preset catalog 与 5 个 thread-scoped SubmissionIntent operation，删除可绕过持久提交合同的 direct Run POST；Run preset 引用直接升级为 `presetId + version + checksum`，上传创建体增加可选严格 slot binding。旧 project-scoped current route、旧 preset 形状和 direct Run 创建路由均不保留。项目读取仍采用跨 Workspace 的 `GET /projects`，只返回当前 Principal 具有显式 ProjectMember 的项目；项目创建仍为 `POST /workspaces/{workspaceId}/projects`。这些破坏性变更已按绿地无兼容层决策完成审查，current OpenAPI、Web 类型、Nest route 双向覆盖和 baseline 已同步。
+- Route registry、生成的 current OpenAPI、批准 baseline、Web 类型和 Nest route 双向覆盖必须保持同步。Design preset catalog 与 thread-scoped SubmissionIntent 已取代旧 preset 形状、project-scoped current route 和可绕过持久提交合同的 direct Run POST；Run preset 引用使用 `presetId + version + checksum`，上传创建体支持严格 slot binding。项目读取采用跨 Workspace 的 `GET /projects`，只返回当前 Principal 具有显式 ProjectMember 的项目；项目创建使用 `POST /workspaces/{workspaceId}/projects`。
 - Redocly 校验、oasdiff breaking-change 检查、生成物无差异检查必须同时通过；自有脚本只保留幂等、ETag、SSE 等产品语义断言。
 - Nest controller 从同一 registry 引用 method/path 常量；集成测试枚举实际注册路由并与 OpenAPI path set 双向比较，不能只保证 schema 字段一致。
 - POST command 使用 `Idempotency-Key`。
@@ -274,7 +272,7 @@ Run 只接受目标 Project 内 ready 的设计系统 ArtifactVersion。API 从�
 - Uppy signed multipart upload、浏览器增量 SHA-256、对象字节可信复核、MIME、扫描、yauzl 流式 ZIP 解包、Docling Serve/Sharp 解析、按需隔离 libarchive、衍生物和延迟 GC。
 - Quartz 锁定 commit/插件，只读构建 immutable `knowledge-vault` 展示站；静态输出可删除重建，不参与检索事实源。
 
-验收：当前 85 个 Markdown 及引用资产校验和闭包一致；检索固定题集不串层。
+验收：`knowledge-vault` 发布层与其明确引用的 `storage` 资产形成路径、大小和 SHA-256 闭包；未引用资产不进入发布候选，检索固定题集不串层。
 
 ### 5. Artifact and delivery
 
@@ -290,11 +288,11 @@ Run 只接受目标 Project 内 ready 的设计系统 ArtifactVersion。API 从�
 - 当前页面架构是持久 `app/(workbench)/layout.tsx` -> `WorkbenchRuntimeProvider` -> `WorkbenchScene`。`app/(workbench)/page.tsx` 与 `app/(workbench)/projects/[projectId]/page.tsx` 只拥有 URL，均返回 `null`，不再各自挂载一套 Home/Project UI。`WorkbenchScene` 内唯一的页面级 `AnimatePresence mode="sync"` 同时拥有 Home/Project 过渡，避免 Next route tree 与动画树形成双 owner。
 - Project route 经 fulfilled-module cache 按需加载；路由 commit 发生前先完成 module preload，避免 Suspense 空白帧。Home/Project route root 通过稳定 `onUpdate` 订阅仅关闭根 opacity 的 WAAPI accelerated path，规避 Framer 11.18.2 动画收尾时回落 initial 值的一帧空白；原 DOM、CSS、`initial/animate/exit`、duration、ease 和动画时序均未改变，Framer 升级必须重跑三浏览器逐帧门禁。Project 组件固定使用 `key="project"`，P1 -> P2 只切换 project-scoped session generation，并提交规范 `/projects/p2` URL，不重挂载 Project、header 或 React Flow；禁止 `key={projectId}` 及任何等价的按项目 ID remount。NavigationGuard 已在 Chromium、Firefox、WebKit 证明切换期间 Scene 非空、被拒绝的 Back 不闪 Home，且 Project root/header/React Flow DOM identity 保持。
 - Board node types/renderers、四组 edit context、Run 面板、画布工具、项目 chrome、预览覆盖层、重命名对话框、ProjectScreen View，以及 Composer/Preview/Board intent controller 均有独立 owner。迁移没有修改 DOM、class、尺寸、事件顺序或 Motion 参数。`artifacts`、`board`、`canvas-media`、`design-presets`、`design-systems`、`exports`、`files`、`identity`、`projects`、`public-shares`、`releases`、`runtime-models`、`runs`、`shares`、`submission-intents`、`threads` 共 16 个 feature 已进入强制 `domain/application/api-adapter` 分层；聚合 `WorkbenchService`、旧顶层 Projects 路径和 `transport.service` 已删除，静态门禁禁止恢复。
-- 每个 feature 分离 `ui`、`application`、`domain`、`api-adapter`；产品工作台视觉叶组件只接收 props/ViewModel，禁止发请求、持有跨 feature 领域状态机或处理持久化。跨 feature 依赖只能经过公开入口，禁止 deep import、聚合 Service、service locator 或兼容 facade。当前 dependency-cruiser 对 432 modules / 1,403 dependencies 检查为 0 violations，并强制 16 个 feature 的公开入口和层次边界。
+- 每个 feature 分离 `ui`、`application`、`domain`、`api-adapter`；产品工作台视觉叶组件只接收 props/ViewModel，禁止发请求、持有跨 feature 领域状态机或处理持久化。跨 feature 依赖只能经过公开入口，禁止 deep import、聚合 Service、service locator 或兼容 facade。dependency-cruiser 必须持续强制 feature 公开入口和层次边界，实际模块数量与违规数以当前门禁输出为准。
 - 产品入口已经完全归属 `(workbench)` route group，旧 `(chat)` route 和只服务旧页面/admin 的 Chat、Nest auth、AI SDK、SWR 代码已在硬切前物理删除；登录/注册只依赖 `components/auth` 与 `lib/auth/workbench-auth*`。
 - Project/Thread/Artifact 使用 TanStack Query。
 - Run 使用同源 BFF `fetch` + eventsource-parser + 局部 reducer；Board 使用 Zustand/局部 store；导航使用 URL。
-- 菜单、弹层、Switch、Tooltip 和命令面板复用现有 Radix/cmdk primitive，只保留产品工作台视觉叶组件。
+- 菜单、弹层、Switch 和 Tooltip 复用现有 Radix primitive；固定短命令列表保留现有产品工作台菜单组件，只有出现可搜索命令目录时才评估 `cmdk`。
 - 文件上传使用 `@uppy/core`/`@uppy/aws-s3`，暂停/取消/listParts/retry 不再在产品 wrapper 中重写；浏览器 hash 移入 Web Worker，服务端 UploadSession/ETag/幂等仍是恢复事实源；PRD 使用 Tiptap StarterKit、官方 Table/Link 和项目自有 12 类 block/citation/reference 扩展，Tiptap JSON 不入库；PRD/代码版本比较使用确定性文本投影与 CodeMirror merge；不继续扩建手写 ProseMirror、结构 Diff 和上传 transport。
 - Board 上的 Screen/Frame 放置与分组使用 React Flow；屏幕内部元素框选、移动、缩放、旋转和吸附优先使用 react-selecto/react-moveable，并以同一 IR fixture 验证上游停更时的退出实现；接 rotation 手柄前先让 Prototype IR、renderer 与全部 exporter 可表达同一 rotation/transform origin。Draw 使用 perfect-freehand；Media 使用 Uppy/crop；Style 写入内部 design token；Undo/Redo 使用 temporal store 并服从 Board revision。Puck/GrapesJS/Onlook 不作为当前 PrototypeDocument 内核。
 - 明确 React Flow 与 Moveable/Selecto 的坐标、选择、焦点、快捷键和手势所有权；`Frame` 在合同中区分 Board 分组与 Prototype 容器，进入内部编辑态时暂停冲突的 Board 手势。
@@ -318,138 +316,8 @@ Run 只接受目标 Project 内 ready 的设计系统 ArtifactVersion。API 从�
 - 删除范围包括只服务旧链路的前后端源码与测试、API、schema/表/视图/队列、数据库实例及备份快照、对象存储非知识 allowlist 数据及历史版本、卷与上传/解析/生成目录、DeerFlow binding/配置、部署服务/容器/镜像/制品、环境变量/secrets，以及日志/trace/metric 及其归档。
 - 删除动作必须输出可审计 manifest：仓库预切流基线 `docs/workbench-hard-cut-deletion-manifest.json` 已升级为 v3，覆盖数据库/备份、对象前缀与历史版本、容器/镜像/制品、卷、网络、密钥、日志/trace/metric 和删除回执。切流前运行 `npm run hard-cut:manifest` 时各生产删除项保持 `pending` 是正确状态；G12 只允许通过受保护的 `.github/workflows/workbench-production-acceptance.yml` 执行：从同一已验证 release chain 下载无凭证 HTTPS 外部证据包，验证 G5-G11、四方批准和候选绑定，再在临时 evidence root 运行 `node scripts/workbench-hard-cut-manifest.mjs --enforce --expected-candidate-id <G1-candidate-id> --expected-source-commit <G0-G2-source-commit> --expected-signed-tag <signed-tag>`。三个 expected 值不能从 manifest 自身回填。仅隐藏旧导航、NGINX 入口或停止容器不算完成。
 
-## 当前施工状态
+## 当前执行与验收
 
-- [x] 完成旧系统与新前端只读审计。
-- [x] 固化首批视觉截图、状态矩阵和源文件哈希。
-- [x] 新建 `packages/workbench-contracts`。
-- [x] 新建独立 `packages/workbench-db` 与首个基线迁移。
-- [x] 新建 `apps/workbench-api`，包含 `/api/v1`、OIDC 边界、RFC 9457、健康检查。
-- [x] 实现 Project 列表、创建、更新和 bootstrap 第一切片。
-- [x] 完成 ProjectMember 显式角色与权限、`q + cursor` 和 owned/shared 搜索、私有 duplicate、CAS archive、active lifecycle fence、归档后 preview 失效；真实 PostgreSQL 覆盖撤权/撤销竞态、幂等竞争和不可变快照。
-- [x] 完成 Project invitation 的 create/list/preview/accept/revoke 合同、项目 revision CAS、幂等创建、pending 唯一约束、HMAC key rotation 和登录后接受页；token 只持久化 SHA-256，邮箱只有在标准 OIDC `email_verified=true` 或 Better Auth 内部 JWT `emailVerified=true` 时可信，邀请凭据经 URL fragment 进入 sessionStorage 后立即从地址栏清除。真实 PostgreSQL 生命周期约束通过，邮件供应商未伪造，当前明确为人工复制链接交付。
-- [x] 实现 Board CAS、ArtifactVersion 钉住校验和 Run 创建/查询/SSE/取消/审批/精确重试；当前空 schema 可从零应用全部 migration，完整 constraint suite 通过。HTTP/SSE/Worker E2E 覆盖成功、审批、取消、重试、附件、retry lineage、Knowledge capability 幂等重放与并发预算。
-- [x] 新建 `apps/workbench-worker`，实现 pg-boss 消费、DeerFlow adapter、事件归一化和 ArtifactVersion 发布第一切片。
-- [x] 完成 typed Run options、approval、附件快照和空 schema PostgreSQL HTTP/SSE E2E 第一切片。
-- [x] 新建独立 `apps/workbench-file-worker`，完成 `file.verify`、可信 SHA/MIME、ClamAV INSTREAM、内容寻址 Blob、数据库 quarantine、有限重试与 stale reconciler；readiness 已校验 clamd `VERSION`、病毒库签名新鲜度和有效 stream limit，并在生产占位/失配时 fail closed。真实 PostgreSQL 已覆盖 clean、infected、重试耗尽和两类崩溃重放；真实 S3 provider 与生产 clamd/EICAR E2E 仍待外部基础设施验收。
-- [x] Web 已接 TanStack Query、Run SSE reducer、Board controller/autosave、Artifact renderer、File/Uppy、Runtime model、Share/Remix/Export 和 Run actions；产品入口由持久 `(workbench)` layout、`WorkbenchRuntimeProvider` 与 `WorkbenchScene` 唯一拥有，Home/Project Next pages 只保留 URL。页面级 `AnimatePresence mode="sync"`、Project fulfilled-module cache 动态拆包和 project-scoped session generation 已完成；P1 -> P2 固定 `key="project"`，Project/header/React Flow DOM identity 保持，禁止按 `projectId` remount。登录/注册已脱离旧 chat auth，16 个 feature 已进入强制分层，聚合 `WorkbenchService`、`transport.service` 和旧 Projects 路径均已删除。
-- [x] Uppy multipart 已接项目+文件指纹隔离的 IndexedDB checkpoint，恢复时重新校验文件摘要和服务端 `listParts`，不保存 File/blob、签名 URL 或 provider upload ID。SubmissionIntent 在上传前持久保存完整 typed request 与有序槽位，绑定上传使用 `intentId + position` 确定性 create/complete/extract 幂等键；刷新后可自动等待 verifying、重选未绑定/中断文件、重放同一 Run 或整单取消。这里已补齐“字节/session 可恢复但完整提交不可恢复”的旧缺口；真实目标 S3 的断网、浏览器崩溃、过期 session 和取消失败恢复仍是外部验收门。
-- [x] 新 Contracts、Preview Token、API 和 Runtime Worker 已统一到 Node 22 ESM/NodeNext；File/Export Worker、Preview 与 Knowledge 包同样使用 ESM，旧应用不跟迁。
-- [x] 以 Zod route registry 确定性生成 current/baseline 均为 79-path / 97-operation 的 OpenAPI 与 Web 类型；上一批准基线为 71/89。Design preset、SubmissionIntent 与唯一 Run 创建入口的直接合同改造不保留旧形状或 direct Run POST；生成物、Redocly、Nest route coverage、oasdiff 和 baseline 已同步。
-- [x] Design preset 已由 UI 常量升级为服务端权威、版本化 catalog；Run 校验 `presetId/version/checksum` 并持久化 materialized snapshot/hash，Worker 不重新查询 catalog。未知 ID、错误版本、错误 checksum、snapshot/hash 漂移均 fail closed，真实 PostgreSQL HTTP E2E 通过。
-- [x] SubmissionIntent 已完成 contract/API/PostgreSQL/Web 纵向链：每 Thread/Principal 活动唯一、槽位原子绑定、ready 门禁、并发双提交收敛到同一 Run、`submitting -> pending` 崩溃恢复、取消 CAS、创建人授权和前端刷新/重选/重试/取消。
-- [x] Project invitation 不再隐式授予 Workspace membership；Run SSE 持续复核授权，Run cancel 使用 CAS 收口取消竞态；PRD 使用稳定 Section/Block ID 投影，Artifact retry/version pagination/pin retry、公开分享/Prototype 图片网络失败、Home 真实模板、Viewer Preview 独立链路均已补齐。
-- [x] 将固定版本 oasdiff breaking-change、类型、测试、构建、lint 和 dependency-cruiser 检查并入产品工作台 CI。
-- [x] 完成 Better Auth 产品账号、username/email 双登录、database session、可选企业 SSO、同源 BFF、账户菜单和 `signOut()`；浏览器业务请求只使用不透明 session cookie，明文 `idToken` 已由写入 hook 和数据库约束禁止持久化，定向组件/服务/PostgreSQL 测试已通过。
-- [ ] 选定真实生产 OIDC provider 与唯一 KMS provider，完成登录/登出、Cookie 失效与密钥轮换浏览器 E2E，并以 KMS envelope encryption 替换 access/refresh token 当前基于应用 secret 的加密；供应商未确定前不预造多云抽象，`encryptOAuthTokens: true` 也不视为 KMS 验收。
-- [x] Runtime Worker 已采用 pinned `@langchain/langgraph-sdk@1.9.25`，新增 RuntimeAttempt/externalRunId checkpoint、metadata recovery、`joinStream`/cancel reconciliation，并删除手写 LangGraph thread/run/SSE transport；HTTP/SSE PostgreSQL E2E 已覆盖发布、幂等、cursor 重放、多审批恢复、取消和私有附件传输。
-- [x] Run 编辑目标已改为结构化 `artifactTargets`（Artifact、不可变版本、精确 `screenIds`）；API/Worker 会重验归属与 checksum，Runtime 以 `operation:create|revise` 显式声明发布语义，edit 必须一一覆盖目标且不得修改未选屏幕或共享 token/asset。
-- [x] DeerFlow 最终结果统一为严格校验的 `workbench_runtime_result` fence；Worker 支持 state/final-assistant 读取并过滤分片 fence，协议 JSON 不进入用户可见流。生产仍必须把 `workbench` 作为只读 PUBLIC skill 随 DeerFlow 部署交付。
-- [x] 完成 File Worker 基础设施重试/reconciler、25 MiB 上传上限、隔离 quarantine 和真实 PostgreSQL 崩溃重放集成测试。
-- [ ] 在硬切选定的真实 S3 provider 上完成 multipart/崩溃恢复 E2E，并完成 clamd/EICAR E2E；MinIO 未被明确选为生产 provider 时只作测试夹具。
-- [x] 完成 `knowledge-vault` 资产闭包：85 个 Markdown、5 个明确引用且校验通过的 `storage` 资产进入新链路，47,024 个未引用文件被排除；未删除本地原件，也未向外部知识库同步。
-- [x] `EmbeddingProfile v1` 严格 canonical 合同、独立无 typmod chunk embedding 表、chunk/document/release 与 profile/dimension 复合约束已实现；临时 `KnowledgeChunk.embeddingModel`、`vector(1536)` 和无 profile HNSW 已删除，真实 PostgreSQL 混合维度、归属与不可变门禁通过。
-- [x] `file.extract`、Docling、SafeVaultReader、KnowledgeRelease builder、release profile pin、可恢复 TEI embedding batch 和数据库完整性 finalizer 已实现；真实 PostgreSQL 已覆盖 batch 503 恢复与提交响应丢失重放。
-- [x] 完成受限运维 KnowledgeRelease 创建/入队命令：`key + version` advisory transaction lock、adopted Embedding/RetrievalProfile pin、业务行与 pg-boss job 同事务、终态幂等重放、failed version 不可复活，以及 `exclusive + releaseId singletonKey` 队列配置断言。该命令不构成普通用户 API，也不代表生产凭据和真实模型已验收。
-- [x] `RetrievalProfile v1` strict canonical 合同与 reranker 不可变身份已实现，覆盖 39 项聚焦测试；独立 `candidate -> poc -> adopted -> retired` 数据库状态机、不可变 spec、五列复合 FK、KnowledgeRelease/manifest/build/query/readiness pin 与 profile 驱动检索策略已完成。该项不代表真实生产模型已经评测或 adopted。
-- [x] 完成受限 Knowledge retrieval 生产边界：lexical/dense 各取 40、RRF `k=60`、rerank 24、最终 10；真实 `jieba-wasm` query projection、TEI query embedding adapter、独立 reranker adapter、稳定 citation、`POST /runtime/knowledge/retrieve` capability tool、DeerFlow skill 调用协议、provider 脱敏与 reranker degraded evidence 均已实现。dense SQL 在隔离 schema 下显式使用 `OPERATOR(public.<=>)`。
-- [x] Knowledge capability 已绑定 grant/Run/RuntimeAttempt/Principal/Project/Release 与固定 route scope；`wbkg1` grant 增加 `iat`，数据库持久化 budget、grant hash 和 invocation receipt，签发时先锁定 budget row，强制 `Idempotency-Key` 回放、成功/并发/窗口/重试/总启动预算，并在 provider 前后重新验证动态授权。scope 只接受使用数据库时钟判定的 `submitting | running` 当前 attempt，明确拒绝 `pending`、过期 attempt 和终态 Run。两条真实 PostgreSQL 连接已证明同一 RuntimeAttempt 并发签发只生成一个 grant。readiness 逐个校验 ready/active-pin-retired release 的 checkpoint、canonical manifest、embedding pin 和 Jieba identity，并对 embedding/reranker `/info` 做有界探测；Runtime Worker 在可服务 release 存在但 tool 未配置时 fail closed。
-- [x] File Worker 已接入本地 Hugging Face 原生 tokenizer artifact，启动时校验 `tokenizer.json`/`tokenizer_config.json` 的 canonical SHA-256 与 EmbeddingProfile pin，切分上限直接来自 profile；不再保留独立 `o200k_base` 或 `WORKBENCH_KNOWLEDGE_MAX_CHUNK_TOKENS` 配置。
-- [x] 仓库内 Blob GC 已完成：延迟 eligibility、事务行锁与二次引用校验、幂等对象删除、失败收据、有限重试和 crash reconciler 均通过真实 PostgreSQL 19 场景；BlobScan 明确为 non-owning 审计证据。
-- [x] 已提供固定中文 retrieval evaluation dataset/results 合同与 CLI，计算 Recall@K、nDCG@K、nearest-rank p95 和 route leakage；smoke fixture 已通过，真实语料/模型结果仍不能伪造。
-- [ ] 完成受限命令的生产凭据/真实执行、production adopted Embedding/RetrievalProfile、固定生产权重/revision/image digest/凭据、真实 provider conformance、DeerFlow 可访问的真实 tool URL、真实延迟/召回验收和生产 S3/IAM/ClamAV 演练。仓库不提供未经评测的默认 TEI 模型，当前 repository adapter/E2E 完成不等于真实模型与生产网络已经验收。
-- [x] 新建隔离 Export Worker，完成 Release/ArtifactVersion/Asset pin、HTML/React/Figma/MCP job、真实 Blob 下载与服务端 Figma capability 门禁；Web 已完成 ExportJob 刷新恢复、轮询、CAS 取消和下载竞态保护，并以终态优先级保证较旧 `running` job 不遮挡较新 `succeeded` job；真实 Chromium smoke 覆盖恢复/取消/下载且无 console error。
-- [x] 完成 `workbench.figma-export.v1` 和固定产品工作台 Importer 1.0.0；确定性 ZIP、资产 SHA-256、官方 Plugin API 导入计划、可编辑节点、rotation/transform origin 与假 Figma API 测试通过，私有 `.fig`/Kiwi/剪贴板 PoC 代码和依赖已删除。真实 Figma Desktop 字体、图片和大文件验收仍未完成。
-- [x] 完成独立 Preview 容器、专用 gateway/token、opaque sandbox、Penpal v1 RPC、严格 origin 校验、CSP 和绿地 Compose 配置；现有 Chromium smoke 只证明 UI、sandbox、RPC 与 origin 校验，不证明真实数据库、S3、TLS 或生产网络链路。
-- [ ] 在真实双 HTTPS origin、S3/IAM 和生产网络策略下完成 Preview 镜像构建与跨 origin 浏览器验收；本机无 Docker CLI，不能以配置检查替代此门禁。
-- [x] 完成 Quartz v5 commit 锁定、构建期 Vault 静态生成、运行时只读 nginx、无 Vault mount/watcher，以及 `/knowledge/` 绿地网关代理。
-- [ ] 完成 Quartz 镜像真实构建及 `/knowledge/` 桌面/移动浏览器验收。
-- [x] 完成 `workbench` Compose 和部署脚本结构：只启动新 Web/API/Workers/Preview/Quartz，不加载根 `.env`，不执行 Git reset/pull，以容器健康状态验收。
-- [ ] 完成绿地镜像真实构建、全服务健康、TLS 和生产依赖 smoke。
-- [x] 启用 ESLint direct-import 与 dependency-cruiser transitive-reach 架构边界；`npm run lint:workbench` 与 `npm run architecture:workbench` 已通过并进入 CI，禁止新前端反向依赖旧 chat/AI SDK/SWR。
-- [x] 完成真实 pgvector PostgreSQL 集成测试，覆盖混合维度、release/profile 归属、durable batch 状态机、向量完整性 finalizer 和崩溃重放；真实候选模型/TEI 的质量与性能评测仍是独立门禁。
-- [x] 完成跨服务 OpenTelemetry 仓库底座：共享 `workbench-telemetry`、BFF/API HTTP server/client span、pg-boss producer/consumer context、DeerFlow/Docling/TEI client span、无 collector 不联网和优雅 flush；队列不传播 baggage/token。真实 OTLP collector 的链路、脱敏、断连与 SIGTERM 验收仍是生产门禁。
-- [ ] 完成真实 DeerFlow 部署 E2E；RuntimeAttempt/checkpoint 的本地合同与 PostgreSQL E2E 已完成。
-- [x] 完成 ProjectRelease、Artifact/Asset 只读、公开分享/撤销/重混、按 screen 预览、Board 节点多选导出和产品工作台主数据链路接入。
-- [x] Board 已原生支持 Artifact/Frame/Drawing、稳定 sibling `order`、嵌套 reparent、子树复制/删除、Drawing `intrinsicSize`、压力笔迹、Undo/Redo、限额和 PUT idempotency receipt；桌面/移动浏览器 smoke 已覆盖保存、撤销、重做和刷新恢复。
-- [x] Board 工具与隔离 Preview 的 Chromium UI/sandbox smoke 已迁入 `scripts/e2e/` 并进入 CI；覆盖桌面/移动视口、四次 Board CAS 保存、opaque sandbox、独立 origin、Preview RPC、刷新和多屏切换。该 smoke 使用受控浏览器夹具，不替代真实 API/DB/S3/TLS/独立 hostname 的生产 E2E。
-- [x] Project NavigationGuard 已用真实 Chromium、Firefox、WebKit history back/forward 覆盖完整 committed URL：indexed pop 会先回到 committed Project 再等待 dirty Board save barrier，pending 画布经像素熵/标准差证明非空；自动保存与离开 flush 同时失败时恢复原 `pathname + search + hash + boardNode`、保留 Project DOM/节点选择和失败反馈，三次保存尝试复用同一 idempotency key 和完全相同的 Board 请求体。保存成功后 replay back 接受完整 Home query/hash，forward 返回真实 Next Project page owner 并恢复节点；P1 -> P2 同时等待规范 `/projects/p2` URL、history index 2 和准确的 P2 Next route tree。重复两轮 back/forward 后只有一个可见 route owner、唯一 Runtime stage，Next `display:none` Activity cache 数量有界且无 opacity-only 残留。测试未手工派发 `PopStateEvent`。
-- [x] Prototype v1 的 rotation/transform origin 已贯通编辑器、嵌套 Group 矩阵、生产 renderer、HTML/React/MCP 和 Figma affine matrix，并通过真实 Chromium payload 验证。
-- [x] Prototype v1 已冻结并执行统一语义校验：全局 ID/binding/action 唯一、form/input/radio/select 约束、局部 reset、显式 submit 合同、双击同一飞行窗口去重以及 Web 异步 generation guard 均已覆盖；Contracts、Prototype Web 与 Export 定向套件均通过。后续只需在生产外部环境继续执行共用 trace corpus，不再建设兼容协议。
-- [x] 完成 `workbench.design-system.v1`、同 Workspace catalog/create/import receipt、Run `RuntimeDesignStyleSnapshot` 物化，以及 Home/Project 的 React Hook Form + react-colorful 接线；浏览器 smoke 已验证创建目标 Project、导入来源版本、重取目标 Project，并只用目标 ArtifactVersion 启动 Run。
-- [x] 完成 Media/Style/Special、Prototype 屏内元素变换与公开 Blob Artifact 真实预览主链。
-- [x] “添加屏幕截图”已使用 `getDisplayMedia` 获取单帧 PNG，经 4096px/1600 万像素边界处理后进入现有附件上传与 Run 链；成功/失败均停止媒体轨道，单元测试通过。
-- [x] 收藏/喜欢/不喜欢已按 `principal + ArtifactVersion + screenId` 隔离，Prototype 强制校验真实 screen 归属，ETag CAS、刷新查询与界面按钮接线完成；合同/API/Web/真实 PostgreSQL 定向测试通过。
-- [x] 通信偏好已实现 `GET/PUT /identity/preferences`、默认双 `false`、Principal 隔离、ETag CAS 和首页保存；反馈/论坛/隐私入口已做协议白名单与未配置禁用。
-- [x] 通信偏好刷新保持与审批键盘操作已进入真实 Chromium E2E：覆盖权威 GET、强 ETag PUT、整页刷新后新 revision/UI 保持，以及 RadioGroup 键盘进入/切换、焦点 trap、Escape 阻塞、Enter/Space 结构化提交和最终 Run 恢复。
-- [ ] 完成截图授权选择器到真实 S3/Run、screen 偏好刷新保持，并为反馈/论坛/隐私配置经授权的生产目的地。通信偏好不等于邮件投递与退订合规链。
-- [x] Artifact 历史版本列表、预览、比较、Board pin/CAS 与错误恢复已接通；模型目录 loading/error/retry 状态和无持久 Artifact 时的请求相关 fallback 已覆盖测试。
-- [x] 完成受限 Knowledge Profile operator grant/revoke、create/list/get/promote/retire、`candidate -> poc -> adopted` 晋升、不可变 AdoptionReceipt 和数据库 deferred constraint；这些仓库治理能力不等于真实生产模型已经 adopted。
-- [ ] 完成真实 adopted embedding/reranker 模型与部署验收、真实外部基础设施上的 accessibility/视觉验收及其余生产可见闭环；前端 route ownership、Knowledge release producer、Profile 治理和 provider/tool adapter 不再列为未完成项。
-- [x] PRD 编辑已接入 Tiptap Core/StarterKit/Table/Link/UniqueID；结构化 PRD projection、引用保留、版本创建/CAS/幂等、保存/取消/撤销重做和错误恢复测试已通过（2026-07-14）。
+本文件只保留稳定目标架构、阶段边界和硬切原则，不维护完成清单、历史测试计数或工时快照。当前整改范围与状态只以 `docs/CODEX-WORKBENCH-FUNCTIONAL-VISUAL-REMEDIATION-SPEC-20260727.md` 和 `docs/CODEX-RUNTIME-DATABASE-REMEDIATION-SPEC-20260723.md` 为准。
 
-## 仓库验证快照
-
-| 范围 | 结果 | 结论 |
-|---|---:|---|
-| 根回归 `npm test` | 通过 | Contracts、API、三个 Worker、Preview、Export、Knowledge、数据库合同和施工期隔离回归均通过；细分计数随实现变化，不在本方案固化旧快照 |
-| Web | 144 files / 616 tests | 全部通过；含持久 Scene、动态 Project route cache、project-scoped session、跨项目 mutation/SubmissionIntent 隔离、DOM identity 与 Strict Mode/并发回归 |
-| TypeScript 与 lint | `npm run typecheck`、`npm run lint:workbench` | 通过 |
-| 架构 | 432 modules / 1,403 dependencies / 0 violations / 16 features | dependency-cruiser 与 restricted-import 门禁通过；禁止旧 Chat/AI SDK/SWR 反向可达、deep import、聚合 Service 和按 `projectId` remount |
-| 全量生产构建 | `npm run build` | 通过；API、三个 Worker、Preview、Next 16、Figma Importer 与生成发布物均成功 |
-| Web bundle | `npm run bundle:workbench:check` | 通过；Home 静态图不包含 Project UI/编辑器，Project 使用 fulfilled-module cache 动态边 |
-| 品牌 | `npm run brand:check` | 通过；用户可见品牌统一为“产品工作台”，`workbench` 仅作内部标识，Google Stitch 只在外部技术说明中出现 |
-| 浏览器上传部署 | `npm run deployment:upload:check` | 通过 |
-| Web 安全响应头 | `npm run web:assert-security-headers` | 通过 |
-| 统一浏览器门禁 `npm run e2e:web` | Run Preview、Approval/Preferences、Board、NavigationGuard、Design System Import、Export Recovery、Isolated Preview | 全部通过；NavigationGuard 另在 Chromium、Firefox、WebKit 验证 Home/Project 同屏过渡非空、拒绝 Back 不闪 Home、P1 -> P2 仍是同一 Project root/header/React Flow DOM |
-| OpenAPI | current/baseline 79 paths / 97 operations；上一批准基线 71/89 | current 已反映 Design preset、thread-scoped SubmissionIntent 和唯一 Run 创建入口；旧 preset shape、project-current 路由与 direct Run POST 不保留，生成链、Web types、route coverage 与 baseline 已同步 |
-| 外部生产门禁 | 未由仓库测试替代 | 真实 OIDC/KMS、S3/IAM/ClamAV、DeerFlow、embedding/reranker、双 HTTPS origin、OTLP collector、Docker 镜像、Figma Desktop 与全服务网络仍须在目标环境验收 |
-
-本次快照中的测试计数是对应命令当次运行结果；后续合同和实现继续变化时必须以最新 CI 输出为准，不得把历史计数当作当前证明。仓库级测试与 Chromium UI/sandbox smoke 不替代真实 OIDC/KMS、S3/ClamAV、DeerFlow、双 HTTPS origin、外部 OTLP trace backend、生产模型、Docker 镜像、Figma Desktop 和全服务网络验收。
-
-## 当前剩余阻断与工作量
-
-当前前端不是“完整一坨代码”。准确状态是：持久 `(workbench)` layout、`WorkbenchRuntimeProvider` 与 `WorkbenchScene` 组成唯一页面运行时，Home/Project Next pages 只拥有 URL；Home、Composer、Artifact、Canvas、Run、Preview、认证和 16 个 feature 均有明确模块边界。Project 使用 fulfilled-module cache 动态拆包，页面级 `AnimatePresence mode="sync"` 由 Scene 唯一拥有；P1 -> P2 固定 `key="project"` 并通过 session generation 同步换域，Project root、header 和 React Flow DOM 不重挂载。聚合 `features/service.ts` 与 `transport.service` 已删除，Projects 接口及其 bootstrap/Board cache、ETag/CAS 恢复语义已归入 Projects bounded context。432 modules / 1,403 dependencies 的架构检查为 0 violations，当前不再存在“拆主壳”或“补 route ownership”的内部工作包。
-
-除结构治理外，当前仍有以下上线阻断：
-
-1. 选定真实 OIDC provider 与唯一 KMS provider，在目标域完成登录/登出、Cookie/CSRF、token envelope encryption、失效和密钥轮换 E2E。
-2. 在硬切选定的 S3/IAM 与真实 clamd 上完成 multipart、断网/刷新/崩溃/过期 session/取消失败恢复、可信摘要、EICAR、Export Worker 和下载 E2E；仓库内 Uppy/SubmissionIntent/ClamAV readiness 已完成，不重复实现。
-3. 固定生产 DeerFlow commit/image、只读 PUBLIC `workbench` skill、真实模型凭据与 Gateway/LangGraph 合同；用真实 embedding/reranker 权重、revision、TEI image 和中文评测集完成 adopted 决策、延迟/召回与零泄漏验收。
-4. 在双 HTTPS 主站/Preview origin、真实 OTLP collector、Quartz 与 Docker 镜像环境完成跨服务网络、隔离、父子 trace、重试、脱敏、断连、优雅退出与故障恢复验收。
-5. 在 Figma Desktop 验收产品工作台 Importer 1.0.0 的字体、图片、大文件和官方 Plugin API；若上线要求系统发信或外部反馈/论坛/隐私目的地，还须选择并授权相应供应商、域名和合规策略。
-6. 生产验收后执行硬切 manifest v2，物理删除旧数据库、对象、镜像、卷、网络、密钥和可观测数据，保存删除回执并运行 `--enforce` 与残留扫描；不保留兼容、双写或旧版回退。
-
-以下是从 2026-07-16 当前快照到“在真实生产外部依赖上完成验收并硬切”的 bottom-up 剩余估算，已经假定继续复用本文选定的开源组件，不包含兼容旧接口、迁移旧对话、双写或维护旧版：
-
-| 剩余工作包 | 人日 | 主要范围 |
-|---|---:|---|
-| 身份与 BFF 生产验收 | 4-7 | 真实 OIDC/KMS、Cookie 失效/轮换、CSRF/SSE 生产验证；Better Auth、BFF 与服务端 ESM 不重复计入 |
-| 知识库生产模型与 DeerFlow 验收 | 4-8 | production adopted profile、固定模型/镜像、真实 conformance、trusted tool 生产执行、中文质量/延迟/无泄漏结果；Profile 治理、adapter、tokenizer、runner 和检索内核不重复计入 |
-| 对象存储、文件安全、导出与 Figma | 6-11 | 真实 S3/IAM 上传恢复、clamd/EICAR、Export Worker/下载、Figma Desktop 与生产浏览器视觉链 |
-| 生产运行环境与跨服务验收 | 9-16 | 双 HTTPS Preview、DeerFlow 全链、外部 OTLP collector、Quartz、Docker 镜像、全服务网络与故障恢复 |
-| 硬切、旧版物理删除与残留审计 | 3-6 | 使用已完成的 manifest v2 删除数据库/对象/镜像/卷/网络/密钥/日志并保存回执，执行生产残留扫描 |
-| **合计** | **26-48** | 已完成的持久 Scene、route ownership、动态拆包、跨项目状态隔离、聚合 Service 删除及全部仓库门禁均不重复计入 |
-
-以 2 名前端、2 名后端/平台和 1 名部分投入 QA/DevOps 计算，合理日历周期约 2-5 周；单人串行约 1.5-2.5 个月。外部账号、模型、证书、S3/IAM 或部署审批的等待时间不包含在人日内，但会延长日历周期。该区间不包含任意生成代码在线执行、Figma 级完整设计编辑器、实时多人协作或外部 Figma 双向同步。
-
-## 规模预估（从零累计基线，不是当前剩余工时）
-
-以下数字已经假定采用 `docs/workbench-open-source-reuse-strategy.md` 中的成熟组件，不能再次机械扣减组件开发量。
-
-全部数字按纯绿地建设计算：旧接口兼容、旧数据迁移、双写、旧版回退和旧系统继续维护均为 0 人日；生产门禁后的不可逆删除与残留审计作为发布任务包含在区间内，不构成旧版演进范围。
-
-下表是立项时“从空白到完整范围”的累计预算，不是 2026-07-14 起的剩余工时。当前已经完成的合同、数据库、API、Worker、Board、设计系统、分享/导出和 Prototype rotation 不能再次计入剩余量；剩余工作必须在功能冻结后按未完成门禁重新做 bottom-up 基线，仓库没有足够的工时历史支持直接用总预算减百分比得出精确数字。
-
-与画布、上传、编辑器、协议和解析全部手写相比，当前开源方案去重后约节省 45-70 人日。LangGraph 官方 SDK、标准 multipart encoder、Uppy checkpoint/摘要恢复和固定 Figma Importer 已经进入当前实现，其收益已经反映在剩余估算中，不能再次机械扣减；它们也不会消除 ProjectRelease、权限、IR 映射、页面级上传控制、真实导出验证或生产 E2E。
-
-设计系统这一子范围按上述开源边界估算为 7-10 人日：合同/schema/迁移与 import receipt 约 2-3，权限校验、幂等和资产复制约 2，Runtime materialization 约 1-2，Home/Project 接线与集成验收约 2-3。它已经包含在“当前可见功能全量兑现”的累计预算中，不能再叠加一次；不包含完整设计系统可视化编辑器、跨 Workspace 市场、外部 Figma 双向同步或字体采购。
-
-以下总量假设 v1 只执行受控 IR preview，“自定义设计”为结构化表单编辑，React 从 IR/RenderPlan 生成可运行项目，Figma 通过已经落盘的官方 Plugin API importer 导入。任意生成代码在线执行或完整 Figma 式设计系统编辑器各自通常还会增加约 15-30+ 人日；真实 Figma Desktop 验收和 RenderPlan 直出 React 的剩余工作已进入当前工作包，不再把“重新开发 importer”作为风险储备重复计费。
-
-| 范围 | 从零累计人日 | 说明 |
-|---|---:|---|
-| 生产级基础平台 | 100-140 | Project、Thread、Run、知识、文件、PRD、原型、版本、画布、HTML 分享导出和生产保障 |
-| 当前可见功能全量兑现 | 165-250 | 再含 Frame/Draw/Media/Style/Special、完整 Undo/Redo、公开重混及真实 Figma/React/MCP 导出 |
-
-用户确认的最终目标是“当前可见功能全量兑现”，因此 100-140 人日只能作为从零建设的中间里程碑，不能作为完整项目预算。原始全量范围按 4 名有经验工程师加 1 名部分投入的 QA/DevOps 约 12-18 周，单人约 9-13 个月；这些日历数字同样不是当前剩余周期。实时多人协作和当前界面之外的新产品能力另行估算。
+可执行验收合同位于 `docs/runbooks/`、`docs/evidence/`、`schemas/` 和 `docs/workbench-hard-cut-deletion-manifest.json`。任何 PASS 必须来自同一候选的实际命令与证据，不能由本架构文件中的描述推导。

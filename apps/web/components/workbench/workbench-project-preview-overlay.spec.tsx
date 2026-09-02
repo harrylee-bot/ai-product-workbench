@@ -12,6 +12,18 @@ const previewHarness = vi.hoisted(() => ({
   } satisfies ExportPreviewTokenResponse,
 }));
 
+vi.mock("./workbench-artifact-content", async (importOriginal) => {
+  const original = await importOriginal<typeof import("./workbench-artifact-content")>();
+  return {
+    ...original,
+    WorkbenchArtifactContent: ({
+      reference,
+    }: {
+      reference: { artifactVersionId: string };
+    }) => <article>电商订单状态通知设置需求说明书 {reference.artifactVersionId}</article>,
+  };
+});
+
 vi.mock("qrcode.react", () => ({
   QRCodeSVG: ({ title, value }: { title?: string; value: string }) => (
     <div aria-label={title} data-qr-value={value} />
@@ -118,12 +130,39 @@ describe("Project Preview overlay", () => {
     fireEvent.keyDown(window, { key: "Escape" });
     expect(onClose).toHaveBeenCalledOnce();
   });
+
+  it("renders a PRD through the document renderer without creating an isolated Prototype preview", () => {
+    render(
+      <ProjectPreviewOverlay
+        artifacts={[{
+          kind: "prd",
+          reference: {
+            projectId: "project-1",
+            artifactId: "artifact-prd",
+            artifactVersionId: "version-prd",
+          },
+          title: "电商订单状态通知设置需求说明书",
+        }]}
+        createPreview={vi.fn()}
+        onClose={vi.fn()}
+        projectId="project-1"
+        projectTitle="订单通知设置"
+      />,
+    );
+
+    expect(screen.getByText("文档预览")).not.toBeNull();
+    expect(screen.getByText(/电商订单状态通知设置需求说明书 version-prd/)).not.toBeNull();
+    expect(document.querySelector("[data-preview-document]")).not.toBeNull();
+    expect(document.querySelector("[data-isolated-preview-mock]")).toBeNull();
+    expect(screen.queryByRole("group", { name: "预览设备" })).toBeNull();
+  });
 });
 
 function renderOverlay(onClose = vi.fn()) {
   return render(
     <ProjectPreviewOverlay
       artifacts={[{
+        kind: "prototype",
         reference: {
           projectId: "project-1",
           artifactId: "artifact-1",

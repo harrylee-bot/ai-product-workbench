@@ -237,9 +237,9 @@ describe("deterministic heading-aware chunking", () => {
 describe("repository Vault release", () => {
   it("parses the repository Vault and produces an order-independent immutable release", async () => {
     const sources = await readVaultSources();
-    expect(sources).toHaveLength(661);
+    expect(sources).toHaveLength(40);
     const assets = await readVaultAssets(sources);
-    expect(assets).toHaveLength(10);
+    expect(assets).toHaveLength(62);
     const input = {
       releaseKey: "global-product-knowledge",
       releaseVersion: 1,
@@ -266,24 +266,18 @@ describe("repository Vault release", () => {
     expect(JSON.stringify(first.chunks)).toBe(JSON.stringify(second.chunks));
     expect(JSON.stringify(first.projections)).toBe(JSON.stringify(second.projections));
     expect(first.manifestChecksum).toMatch(/^[a-f0-9]{64}$/);
-    expect(first.manifest.issues).toMatchObject([{
-      code: "UNRESOLVED_HEADING_REFERENCE",
-      reference: "07-来源资产索引/旧版整理/01-产品知识/需求文档知识库/业务域索引#运营配置与活动治理",
-    }]);
+    expect(first.manifest.issues).toEqual([]);
     expect(Object.isFrozen(first)).toBe(true);
 
     const routeCounts = first.documents.reduce<Record<string, number>>((counts, document) => {
       counts[document.route] = (counts[document.route] ?? 0) + 1;
       return counts;
     }, {});
-    expect(routeCounts).toEqual({ production: 34, source_lookup: 594, excluded: 31, quarantine: 2 });
+    expect(routeCounts).toEqual({ production: 34, source_lookup: 4, excluded: 1, quarantine: 1 });
     const unresolved = first.documents.flatMap((document) => document.references.filter((reference) => (
       reference.kind !== "external" && reference.resolution !== "resolved"
     )));
-    expect(unresolved).toMatchObject([{
-      rawTarget: "07-来源资产索引/旧版整理/01-产品知识/需求文档知识库/业务域索引#运营配置与活动治理",
-      resolution: "unresolved",
-    }]);
+    expect(unresolved).toEqual([]);
   }, 15_000);
 });
 

@@ -547,6 +547,7 @@ export function ProjectScreenView({
         editArtifactTargets={composer.projectComposer.editArtifactTargets}
         focusRequest={composer.projectComposer.focusRequest}
         onClearContext={composer.projectComposer.onClearContext}
+        onCloseModel={composer.projectComposer.onCloseModel}
         onSelectModel={composer.projectComposer.onSelectModel}
         onToggleModel={composer.projectComposer.onToggleModel}
         onRefresh={composer.projectComposer.onRefresh}

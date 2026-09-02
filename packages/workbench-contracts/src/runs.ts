@@ -137,6 +137,19 @@ type RunWorkflowArtifactTargetInput = Readonly<{
   requestedArtifactKinds: readonly z.infer<typeof runtimeRequestedArtifactKindSchema>[];
 }>;
 
+const genericChinesePrdPromptPattern = /^(?:(?:请|麻烦|劳驾|可以|能否|帮(?:我|忙)?|协助|给我|我想要|我要))*(?:(?:写|生成|创建|输出|编写|撰写|制作|完善|整理|做|出))*(?:(?:一|1)?(?:个|份|篇)?)*(?:(?:产品|业务)?需求(?:文档|说明书)?|产品需求文档|PRD)(?:吧|谢谢)?[。.!！?？]*$/iu;
+const genericEnglishPrdPromptPattern = /^(?:(?:please|couldyou|canyou|kindly))*(?:(?:helpme))*(?:(?:write|create|generate|draft|make|prepare))*(?:(?:a|an|the))*(?:(?:product|business))*(?:(?:requirements?document)|prd)(?:please)?[.!?]*$/iu;
+
+/**
+ * A PRD create request needs a business subject from the prompt or an explicit
+ * source. The Artifact kind itself is an output choice, not requirement input.
+ */
+export function isGenericPrdCreationPrompt(prompt: string): boolean {
+  const compact = prompt.normalize("NFKC").replace(/\s+/gu, "").trim();
+  return genericChinesePrdPromptPattern.test(compact)
+    || genericEnglishPrdPromptPattern.test(compact);
+}
+
 export function refineRunWorkflowArtifactTargets(
   request: RunWorkflowArtifactTargetInput,
   context: z.RefinementCtx,

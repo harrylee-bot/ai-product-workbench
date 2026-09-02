@@ -42,6 +42,7 @@ import {
 } from "../../lib/workbench/features/public-shares";
 import { workbenchQueryKeys } from "../../lib/workbench/query/keys";
 import { WorkbenchPrdArtifactEditor } from "./workbench-prd-editor";
+import { WorkbenchPrdDiagramCanvas, type PrdDiagram } from "./workbench-prd-diagram-canvas";
 import type { WorkbenchArtifactReference } from "./workbench-artifact-reference";
 
 export type { WorkbenchArtifactReference } from "./workbench-artifact-reference";
@@ -451,7 +452,7 @@ function PrdArtifact({ document }: { document: PrdDocument }) {
 
 function PrdArtifactV1({ document }: { document: PrdDocumentV1 }) {
   return (
-    <article className="nowheel h-full w-full overflow-auto bg-[#1d1d1f] px-[38px] py-[34px] text-[#e8eaed]">
+    <article className="nowheel h-full w-full overflow-auto break-words bg-[#1d1d1f] px-[38px] py-[34px] text-[#e8eaed] [overflow-wrap:anywhere]">
       <h2 className="mb-[42px] text-[50px] font-semibold leading-none tracking-normal text-[#f1f3f4]">
         {document.title}
       </h2>
@@ -476,7 +477,7 @@ function PrdArtifactV2({ document }: { document: PrdDocumentV2 }) {
   const { businessRequirements, degradation, introduction, safetyBaseline } = document.sections;
   return (
     <article
-      className="nowheel h-full w-full overflow-auto bg-[#1d1d1f] px-[20px] py-[28px] text-[16px] leading-[27px] text-[#e8eaed] sm:px-[38px] sm:py-[34px]"
+      className="nowheel h-full w-full overflow-auto break-words bg-[#1d1d1f] px-[20px] py-[28px] text-[16px] leading-[27px] text-[#e8eaed] [overflow-wrap:anywhere] sm:px-[38px] sm:py-[34px]"
       data-prd-protocol={document.protocol}
     >
       <div className="mx-auto w-full max-w-[1120px]">
@@ -499,7 +500,7 @@ function PrdArtifactV2({ document }: { document: PrdDocumentV2 }) {
         <section className="border-b border-white/[0.12] py-[42px]" aria-labelledby="prd-version-history">
           <h2 className="mb-[20px] text-[28px] font-semibold text-[#f1f3f4]" id="prd-version-history">版 本 历 史</h2>
           <div className="overflow-x-auto border border-white/[0.12]">
-            <table className="w-full min-w-[780px] border-collapse text-[14px] leading-[22px]">
+            <table className="w-full border-collapse text-[14px] leading-[22px]">
               <thead className="bg-white/[0.05] text-[#f1f3f4]">
                 <tr>
                   {[
@@ -613,7 +614,7 @@ function PrdChannelTable({
 }) {
   return (
     <div className="mt-[24px] overflow-x-auto border border-white/[0.12]" data-prd-channel-table>
-      <table className="w-full min-w-[520px] border-collapse text-[14px] leading-[22px]">
+      <table className="w-full border-collapse text-[14px] leading-[22px]">
         <caption className="border-b border-white/[0.12] bg-white/[0.05] px-[12px] py-[10px] text-left font-semibold text-[#f1f3f4]">
           {table.title}
         </caption>
@@ -638,24 +639,23 @@ function PrdChannelTable({
   );
 }
 
-type PrdDiagram = PrdDocumentV2["sections"]["businessRequirements"]["flowAndPages"]["diagrams"][number];
-
 function PrdDiagramView({ diagram }: { diagram: PrdDiagram }) {
   const nodeLabels = new Map(diagram.nodes.map((node) => [node.id, node.label]));
+  const hasRenderableGraph = diagram.nodes.length > 0
+    && diagram.edges.some((edge) => nodeLabels.has(edge.from) && nodeLabels.has(edge.to));
   return (
     <figure className="border-y border-white/[0.12] py-[24px]" data-prd-diagram={diagram.kind}>
       <figcaption>
         <h4 className="text-[18px] font-semibold text-[#f1f3f4]">{diagram.title}</h4>
         <p className="mt-[6px] max-w-[880px] text-[14px] leading-[23px] text-[#aeb4bd]">{diagram.description}</p>
       </figcaption>
-      <div className="mt-[18px] grid grid-cols-1 gap-[8px] sm:grid-cols-2 lg:grid-cols-3">
-        {diagram.nodes.map((node) => (
-          <div className="rounded-[4px] border border-white/[0.12] bg-white/[0.035] px-[12px] py-[10px]" data-prd-diagram-node key={node.id}>
-            <div className="font-semibold text-[#edf0f4]">{node.label}</div>
-            {node.group && <div className="mt-[2px] text-[12px] text-[#8f96a0]">{node.group}</div>}
-          </div>
-        ))}
-      </div>
+      {hasRenderableGraph ? (
+        <WorkbenchPrdDiagramCanvas diagram={diagram} />
+      ) : (
+        <div className="mt-[18px] border border-dashed border-[#d97706]/50 bg-[#d97706]/[0.08] px-[14px] py-[12px] text-[13px] text-[#f3c78b]" data-prd-diagram-empty>
+          图表数据不完整，暂时无法绘制可视化关系。请重新生成文档。
+        </div>
+      )}
       <div className="mt-[20px]">
         <h5 className="mb-[6px] text-[13px] font-semibold text-[#aeb4bd]">节点关系</h5>
         <ol className="divide-y divide-white/[0.08] border-t border-white/[0.08]">
@@ -680,7 +680,7 @@ function PrdSafetyBaselineTable({
 }) {
   return (
     <div className="mt-[24px] overflow-x-auto border border-white/[0.12]" data-prd-safety-table>
-      <table className="w-full min-w-[980px] border-collapse text-[13px] leading-[20px]">
+      <table className="w-full border-collapse text-[13px] leading-[20px]">
         <thead className="bg-white/[0.05] text-[#f1f3f4]">
           <tr>
             <th className="w-[58px] border-b border-white/[0.12] px-[10px] py-[10px] text-left">序号</th>

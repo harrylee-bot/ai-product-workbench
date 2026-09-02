@@ -3,7 +3,7 @@ title: 签到活动高保真HTML原型框架
 description: 从贵州签到打卡 Axure HTML 原型中提炼的签到/打卡/积分活动高保真页面框架、字段、状态和前后台联动规则。
 date: 2026-07-08
 status: 已整理
-source: storage/imports/manuals-prototypes-20260702/axure-html/guizhou-signin/贵州签到打卡.html
+source: storage/imports/manuals-prototypes-20260702/assets/贵州签到打卡赢流量活动.rp
 tags:
   - 原型规则
   - HTML原型
@@ -111,7 +111,6 @@ aliases:
 
 ## 关联资产
 
-- 原始 HTML：`storage/imports/manuals-prototypes-20260702/axure-html/guizhou-signin/贵州签到打卡.html`
-- 入口页面：`storage/imports/manuals-prototypes-20260702/axure-html/guizhou-signin/index.html`
-- 页面数据：`storage/imports/manuals-prototypes-20260702/axure-html/guizhou-signin/files/贵州签到打卡/data.js`
-- 关联索引：[[07-来源资产索引/旧版整理/01-产品知识/手册与原型资料库/原型转HTML资产索引-2026-07-03|原型转HTML资产索引-2026-07-03]]
+- 原始 RP：`storage/imports/manuals-prototypes-20260702/assets/贵州签到打卡赢流量活动.rp`
+- HTML 归档：`storage/source-assets/prototype-html/html.zip`
+- 关联索引：[[07-来源资产索引/原始手册与原型资产索引|原始手册与原型资产索引]]、[[07-来源资产索引/原型HTML归档索引|原型 HTML 归档索引]]

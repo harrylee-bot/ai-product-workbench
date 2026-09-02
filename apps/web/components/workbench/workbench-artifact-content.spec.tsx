@@ -345,6 +345,13 @@ describe("Workbench Artifact content", () => {
     expect(screen.getAllByText("☑是 □否")).toHaveLength(2);
     expect(screen.getByText("□是 ☑否")).not.toBeNull();
     expect(rendered.container.querySelectorAll("[data-prd-diagram]")).toHaveLength(2);
+    expect(rendered.container.querySelectorAll("[data-prd-diagram-canvas]")).toHaveLength(2);
+    expect(rendered.container.querySelectorAll("[data-prd-diagram-canvas] svg")).toHaveLength(2);
+    expect(rendered.container.querySelector("[data-prd-protocol]")?.classList.contains("break-words"))
+      .toBe(true);
+    expect(rendered.container.querySelector("[data-prd-diagram-canvas] svg")
+      ?.classList.contains("min-w-[760px]")).toBe(false);
+    expect(rendered.container.querySelectorAll("[data-prd-diagram-canvas] path").length).toBeGreaterThanOrEqual(8);
     expect(rendered.container.querySelectorAll("[data-prd-diagram-node]")).toHaveLength(8);
     expect(rendered.container.querySelectorAll("[data-prd-diagram-edge]")).toHaveLength(6);
     expect(screen.getByText("支付结果页展示订单编号、支付状态和后续操作入口。")).not.toBeNull();
@@ -409,6 +416,23 @@ describe("Workbench Artifact content", () => {
     expect(screen.getByRole("textbox", { name: "PRD 编辑器" }).closest(".nowheel"))
       .not.toBeNull();
     expect((screen.getByRole("button", { name: "保存 PRD" }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("keeps PRD v2 diagrams visible while editing", () => {
+    mocks.useArtifactVersion.mockReturnValue(artifactQuery("prd", prdV2Document()));
+    const onPrdDocumentCommit = vi.fn(async () => undefined);
+
+    const rendered = render(
+      <WorkbenchArtifactContent
+        editable
+        onPrdDocumentCommit={onPrdDocumentCommit}
+        reference={reference()}
+      />,
+    );
+
+    expect(rendered.container.querySelectorAll("[data-prd-editor-diagrams]")).toHaveLength(1);
+    expect(rendered.container.querySelectorAll("[data-prd-editor-diagrams] [data-prd-diagram-canvas]")).toHaveLength(2);
+    expect(rendered.container.querySelectorAll('[data-prd-editor="active"]')).toHaveLength(1);
   });
 
   it("renders authenticated blob-backed image Artifact content", async () => {

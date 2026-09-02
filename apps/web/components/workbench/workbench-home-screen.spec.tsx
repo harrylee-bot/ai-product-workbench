@@ -104,7 +104,8 @@ describe("Workbench home inspiration templates", () => {
 
     const composer = screen.getByRole("textbox", { name: "提示词" });
     expect((composer as HTMLTextAreaElement).value).toBe(workbenchHomeTemplates[2].prompt);
-    expect(screen.getByRole("button", { name: "Web" }).getAttribute("aria-pressed")).toBe("true");
+    expect(screen.queryByRole("button", { name: "应用" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Web" })).toBeNull();
 
     const editedPrompt = `${workbenchHomeTemplates[2].prompt} 首屏增加作品分类筛选。`;
     fireEvent.change(composer, { target: { value: editedPrompt } });
@@ -120,9 +121,60 @@ describe("Workbench home inspiration templates", () => {
       targetSurface: "web",
     })));
   });
+
+  it("submits web even when a legacy app template is selected", async () => {
+    const onSubmitPrompt = vi.fn(async () => "project-template");
+    render(<HomeScreenHarness onSubmitPrompt={onSubmitPrompt} />);
+
+    fireEvent.click(screen.getByRole("button", {
+      name: `使用模板：${workbenchHomeTemplates[0].title}`,
+    }));
+
+    expect(screen.queryByRole("button", { name: "应用" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Web" })).toBeNull();
+    const submitButton = screen.getByRole("button", { name: "提交提示" });
+    await waitFor(() => expect((submitButton as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.click(submitButton);
+
+    await waitFor(() => expect(onSubmitPrompt).toHaveBeenCalledWith(expect.objectContaining({
+      targetSurface: "web",
+    })));
+  });
 });
 
 describe("Workbench home responsive shell", () => {
+  it("collapses the artifact output menu after selecting an output kind", async () => {
+    render(<HomeScreenHarness onSubmitPrompt={vi.fn(async () => "project")} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "选择生成类型" }));
+    expect(screen.getByRole("menu")).not.toBeNull();
+
+    fireEvent.click(screen.getByRole("menuitemradio", { name: /生成文档/ }));
+    await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
+    expect(screen.getByRole("button", { name: "选择生成类型" }).getAttribute("aria-expanded"))
+      .toBe("false");
+  });
+
+  it("collapses the command menu when clicking the blank prompt area", async () => {
+    render(<HomeScreenHarness onSubmitPrompt={vi.fn(async () => "project")} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "命令" }));
+    expect(screen.getByRole("menuitem", { name: "生成 UI 界面设计" })).not.toBeNull();
+
+    fireEvent.mouseDown(screen.getByRole("textbox", { name: "提示词" }));
+    await waitFor(() => expect(screen.queryByRole("menuitem", { name: "生成 UI 界面设计" })).toBeNull());
+  });
+
+  it("collapses the artifact output menu when clicking the blank prompt area", async () => {
+    render(<HomeScreenHarness onSubmitPrompt={vi.fn(async () => "project")} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "选择生成类型" }));
+    expect(screen.getByRole("menuitemradio", { name: /生成文档/ })).not.toBeNull();
+
+    fireEvent.mouseDown(screen.getByRole("textbox", { name: "提示词" }));
+    await waitFor(() => expect(screen.queryByRole("menuitemradio", { name: /生成文档/ })).toBeNull());
+  });
+
   it("keeps the project panel mounted as an accessible mobile bottom drawer", async () => {
     render(<HomeScreenHarness onSubmitPrompt={vi.fn(async () => "project")} />);
 

@@ -608,7 +608,7 @@ export function createWorkbenchSubmissionPlan(
       position: index,
     };
   });
-  const request = createSubmissionIntentRequestSchema.parse({
+  const parsedRequest = createSubmissionIntentRequestSchema.safeParse({
     request: {
       ...submission.request,
       sourceIds: [...new Set(submission.request.sourceIds ?? [])],
@@ -622,6 +622,16 @@ export function createWorkbenchSubmissionPlan(
         lastModified: file.lastModified,
       })),
   });
+  if (!parsedRequest.success) {
+    const promptIssue = parsedRequest.error.issues.find((issue) => (
+      issue.path.length === 2
+      && issue.path[0] === "request"
+      && issue.path[1] === "prompt"
+    ));
+    if (promptIssue) throw new Error(promptIssue.message);
+    throw parsedRequest.error;
+  }
+  const request = parsedRequest.data;
   return { request, uploads };
 }
 

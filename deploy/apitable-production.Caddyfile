@@ -1,0 +1,22 @@
+requirements.aionbench.com {
+	encode zstd gzip
+
+	handle_path /source/* {
+		root * /var/www/apitable-source
+		file_server browse
+	}
+
+	handle {
+		reverse_proxy 127.0.0.1:4290 {
+			header_up -Forwarded
+			header_up -X-Real-IP
+			header_up -X-Forwarded-For
+			header_up -X-Forwarded-Host
+			header_up -X-Forwarded-Proto
+			header_up Host {http.request.host}
+			header_up X-Forwarded-Host {http.request.host}
+			header_up X-Forwarded-Proto https
+			header_up X-Forwarded-For {http.request.remote.host}
+		}
+	}
+}

@@ -69,6 +69,16 @@ describe("SubmissionIntent coordinator domain planning", () => {
     ]);
   });
 
+  it("surfaces an actionable message for a source-free generic PRD request", () => {
+    expect(() => createWorkbenchSubmissionPlan({
+      request: {
+        ...runRequest(),
+        prompt: "帮我写个需求文档",
+        requestedArtifactKinds: ["prd"],
+      },
+    })).toThrow("请先说明要建设或修改的业务功能、目标用户和核心变化");
+  });
+
   it("matches reselected files by immutable metadata and consumes duplicate slots once", () => {
     const first = testFile("brief.pdf");
     const second = testFile("brief.pdf");

@@ -584,6 +584,9 @@ const prdV2WeakStandalonePatterns = [
   /^(?:沿用|复用).{1,80}(?:逻辑|规则)[。.]*$/u,
 ] as const;
 
+const prdV2UntestableAcceptancePattern = /(?:正常(?:可见|展示|显示|加载|运行)|友好(?:错误)?提示|状态流转顺畅|正确(?:展示|显示|呈现|加载)(?:对应|最终)?(?:内容|结果)?|符合预期|满足要求)/u;
+const prdV2VagueSuccessMetricPattern = /^(?:提升|优化|增强|改善|保障|确保).{0,120}(?:效率|质量|体验|能力|效果|稳定性)[。.]*$/u;
+
 const prdV2StandaloneApiHeadingPattern = /(?:接口|API)/iu;
 
 type PrdV2EvidenceRule = {
@@ -1109,6 +1112,9 @@ function refinePrdDocumentV2(
       if ([...item].length < 2 || [...standard].length < 10) {
         addIssue(context, ["sections", "businessRequirements", "acceptanceCriteria", "blocks", "rows", rowIndex], "acceptance rows must name a concrete item and a substantive testable standard");
       }
+      if (prdV2UntestableAcceptancePattern.test(standard)) {
+        addIssue(context, ["sections", "businessRequirements", "acceptanceCriteria", "blocks", "rows", rowIndex], "acceptance standards must state observable results instead of vague quality wording");
+      }
     }
     for (const duplicate of duplicateValues(normalizedItems.filter(Boolean))) {
       addIssue(context, ["sections", "businessRequirements", "acceptanceCriteria", "blocks"], `acceptance items must be distinct: ${duplicate}`);
@@ -1140,6 +1146,32 @@ function refinePrdDocumentV2(
   }
   if (!document.sections.introduction.scope.blocks.some((block) => block.type === "bulletList" || block.type === "orderedList")) {
     addIssue(context, ["sections", "introduction", "scope", "blocks"], "document scope must contain an explicit list");
+  }
+  for (const [blockIndex, block] of allBlocks.entries()) {
+    if (block.type === "goal" && prdV2VagueSuccessMetricPattern.test(block.successMetric.trim())) {
+      addIssue(context, ["sections", "blocks", blockIndex, "successMetric"], "success metrics must be verifiable instead of promising a generic improvement");
+    }
+  }
+
+  if (document.sections.degradation.applicable) {
+    const productFlow = diagrams[0];
+    const outgoingCounts = new Map<string, number>();
+    for (const edge of productFlow?.edges ?? []) {
+      outgoingCounts.set(edge.from, (outgoingCounts.get(edge.from) ?? 0) + 1);
+    }
+    const flowText = productFlow
+      ? [
+          productFlow.description,
+          ...productFlow.nodes.map((node) => node.label),
+          ...productFlow.edges.map((edge) => edge.label ?? ""),
+        ].join(" ")
+      : "";
+    const hasExceptionBranch = [...outgoingCounts.values()].some((count) => count >= 2)
+      && /(?:失败|异常|错误|超时|不可用|降级)/u.test(flowText)
+      && /(?:重试|恢复|回退|返回|保留|缓存|人工处理)/u.test(flowText);
+    if (!hasExceptionBranch) {
+      addIssue(context, ["sections", "businessRequirements", "flowAndPages", "diagrams", 0], "an applicable degradation plan requires an explicit failure and recovery branch in the product flow");
+    }
   }
   for (const [blockIndex, block] of allBlocks.entries()) {
     if (block.type === "table") {
