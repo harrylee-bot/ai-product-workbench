@@ -1,6 +1,7 @@
 "use client";
 
 import { AnimatePresence, motion } from "framer-motion";
+import Link from "next/link";
 import {
   ArrowUpIcon,
   ChevronDownIcon,
@@ -269,6 +270,13 @@ export function HomeScreen({
             <FileTextIcon className="size-[17px]" />
             Docs
           </button>
+          <Link
+            className="flex h-[34px] items-center gap-[7px] rounded-full px-[4px] text-[14px] font-semibold hover:bg-white/[0.05]"
+            href="/mindmap"
+          >
+            <Share2Icon className="size-[17px]" />
+            需求脑图
+          </Link>
           <button
             aria-label="换一组灵感"
             className="grid size-[32px] place-items-center rounded-full hover:bg-white/[0.06]"
