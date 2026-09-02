@@ -6,6 +6,11 @@ requirements.aionbench.com {
 		file_server browse
 	}
 
+	handle_path /mindmap {
+		root * /var/www/apitable-mindmap
+		file_server
+	}
+
 	handle {
 		reverse_proxy 127.0.0.1:4290 {
 			header_up -Forwarded
