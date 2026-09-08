@@ -31,6 +31,8 @@
       .actions button:hover, .zoom button:hover { background: #f2f3f5; }
       .actions .primary { color: #fff; border-color: var(--blue); background: var(--blue); }
       .actions .primary:hover { background: #2860df; }
+      .actions .status-indicator { cursor: default; color: #8f959e; background: transparent; border-color: transparent; }
+      .actions .status-indicator:hover { background: transparent; }
       .divider { width: 1px; height: 22px; margin: 0 4px; background: var(--line); }
       .workspace { position: relative; flex: 1; min-height: 0; display: flex; }
       .canvas-wrap { position: relative; flex: 1; min-width: 0; background: #fff; }
@@ -72,55 +74,53 @@
           <button id="childBtn" class="optional">子节点</button>
           <button id="siblingBtn" class="optional">同级</button>
           <button id="themeBtn" class="optional">切换主题</button>
+          <span class="divider"></span>
           <button id="importBtn" class="optional">导入</button>
           <button id="exportBtn" class="optional">导出</button>
-          <button id="saveBtn" class="primary">保存</button>
+          <button id="saveStatus" class="status-indicator" disabled>已保存</button>
         </div>
       </header>
-      <section class="workspace">
+      <div class="workspace">
         <div class="canvas-wrap">
-          <div id="mindmap" aria-label="需求脑图画布"></div>
+          <div id="mindmap"></div>
+          <div class="hint">点击节点编辑 · Tab 新增子节点 · Enter 同级节点 · Delete 删除</div>
           <div class="zoom">
             <button id="zoomOut" title="缩小">−</button>
             <span id="zoomValue" class="zoom-value">100%</span>
-            <button id="zoomIn" title="放大">＋</button>
-            <button id="fitBtn" title="适配画布">适配</button>
+            <button id="zoomIn" title="放大">+</button>
+            <button id="fitBtn" title="适应画布">⊡</button>
           </div>
         </div>
         <aside class="inspector">
-          <h2>节点信息</h2>
-          <div id="emptyInspector" class="empty">未选择节点</div>
+          <div id="emptyInspector" class="empty">点击节点查看详情</div>
           <div id="nodeInspector" hidden>
-            <div class="field"><label for="statusInput">状态</label><select id="statusInput"><option value="">留空</option><option>规划中</option><option>进行中</option><option>已上线</option><option>已暂停</option></select></div>
-            <div class="field"><label for="ownerInput">负责人</label><input id="ownerInput" placeholder="留空" /></div>
+            <h2>节点属性</h2>
+            <div class="field">
+              <label for="statusInput">状态</label>
+              <input id="statusInput" placeholder="留空不展示" />
+            </div>
+            <div class="field">
+              <label for="ownerInput">负责人</label>
+              <input id="ownerInput" placeholder="留空不展示" />
+            </div>
             <button id="deleteBtn" class="danger">删除节点</button>
           </div>
         </aside>
-      </section>
+      </div>
     </main>
     <script src="/mindmap/vendor/simpleMindMap.umd.min.js"></script>
     <script>
       (() => {
-        const STORAGE_KEY = 'apitable-simple-mindmap-v1';
-        const defaultData = { root: { data: { text: '需求管理平台', status: '规划中', owner: '产品团队', expand: true }, children: [
-          { data: { text: '需求收集', status: '进行中', owner: '产品经理', expand: true }, children: [
-            { data: { text: '表单提交', status: '已上线', owner: '全员' }, children: [] },
-            { data: { text: '外部需求导入', status: '规划中', owner: '产品经理' }, children: [] }
-          ] },
-          { data: { text: '评审与排期', status: '进行中', owner: '项目负责人', expand: true }, children: [
-            { data: { text: '优先级确认', status: '进行中', owner: '项目负责人' }, children: [] }
-          ] },
-          { data: { text: '研发与发版', status: '规划中', owner: '研发团队', expand: true }, children: [
-            { data: { text: '日历发版视图', status: '已上线', owner: '项目负责人' }, children: [] },
-            { data: { text: '上线通知', status: '规划中', owner: '运营' }, children: [] }
-          ] }
-        ] } };
-        const clone = (v) => JSON.parse(JSON.stringify(v));
-        const stored = (() => { try { return JSON.parse(localStorage.getItem(STORAGE_KEY) || 'null'); } catch { return null; } })();
+        const STORAGE_KEY = 'apitable-mindmap-data';
+        const clone = (x) => JSON.parse(JSON.stringify(x));
+        const defaultData = { root: { data: { text: '需求管理平台' }, children: [{ data: { text: '核心模块', expand: true }, children: [{ data: { text: '需求池', status: '开发中', owner: '产品团队' } }, { data: { text: '看板', status: '规划中' } }, { data: { text: '脑图', status: '已上线' } }] }, { data: { text: '扩展功能', expand: true }, children: [{ data: { text: '数据分析' } }, { data: { text: '团队协作' } }] }] } };
+        let stored = null;
+        try { const raw = localStorage.getItem(STORAGE_KEY); if (raw) stored = JSON.parse(raw); } catch {}
         let title = stored?.title || '需求脑图';
         let currentNode = null;
         let themeIndex = 0;
-        const themes = ['default', 'classic2', 'classic3'];
+        const themes = ['default', 'classic', 'minions', 'pinkGrape', 'mint', 'gold', 'vitalityOrange', 'greenLeaf', 'dark2'];
+
         const mindMap = new window.simpleMindMap.default({
           el: document.getElementById('mindmap'),
           data: stored?.data?.root || stored?.data || clone(defaultData.root),
@@ -149,21 +149,33 @@
           document.getElementById('statusInput').value = node.getData?.('status') || node.data?.status || '';
           document.getElementById('ownerInput').value = node.getData?.('owner') || node.data?.owner || '';
         };
+
+        let saveTimer = null;
+        const save = () => {
+          localStorage.setItem(STORAGE_KEY, JSON.stringify({ title, data: getData() }));
+          const btn = document.getElementById('saveStatus');
+          btn.textContent = '已保存';
+          btn.style.color = '#52c41a';
+          window.setTimeout(() => { btn.style.color = ''; }, 800);
+        };
+        const autoSave = () => {
+          if (saveTimer) window.clearTimeout(saveTimer);
+          const btn = document.getElementById('saveStatus');
+          btn.textContent = '保存中...';
+          btn.style.color = '#8f959e';
+          saveTimer = window.setTimeout(save, 400);
+        };
+
         mindMap.on('node_active', (node) => { selectNode(node); setTextEditor(node); });
         mindMap.on('node_click', (node) => { selectNode(node); });
-        mindMap.on('data_change', () => { updateZoom(); });
+        mindMap.on('data_change', () => { updateZoom(); autoSave(); });
 
         const updateZoom = () => {
           const value = mindMap.view?.scale || mindMap.renderer?.scale || 1;
           document.getElementById('zoomValue').textContent = Math.round(value * 100) + '%';
         };
-        const save = () => {
-          localStorage.setItem(STORAGE_KEY, JSON.stringify({ title, data: getData() }));
-          const btn = document.getElementById('saveBtn'); const old = btn.textContent; btn.textContent = '已保存';
-          window.setTimeout(() => { btn.textContent = old; }, 1200);
-        };
-        document.getElementById('titleInput').addEventListener('input', (e) => { title = e.target.value; });
-        document.getElementById('saveBtn').addEventListener('click', save);
+
+        document.getElementById('titleInput').addEventListener('input', (e) => { title = e.target.value; autoSave(); });
         document.getElementById('undoBtn').addEventListener('click', () => mindMap.execCommand('BACK'));
         document.getElementById('redoBtn').addEventListener('click', () => mindMap.execCommand('FORWARD'));
         document.getElementById('layoutBtn').addEventListener('click', () => mindMap.execCommand('RESET_LAYOUT'));
@@ -174,11 +186,11 @@
         document.getElementById('zoomIn').addEventListener('click', () => { mindMap.view.enlarge?.(); updateZoom(); });
         document.getElementById('zoomOut').addEventListener('click', () => { mindMap.view.narrow?.(); updateZoom(); });
         document.getElementById('deleteBtn').addEventListener('click', () => { if (currentNode) { mindMap.execCommand('REMOVE_NODE'); currentNode = null; selectNode(null); } });
-        document.getElementById('statusInput').addEventListener('change', (e) => { if (!currentNode) return; currentNode.data.status = e.target.value; });
-        document.getElementById('ownerInput').addEventListener('input', (e) => { if (!currentNode) return; currentNode.data.owner = e.target.value; });
+        document.getElementById('statusInput').addEventListener('change', (e) => { if (!currentNode) return; currentNode.data.status = e.target.value; autoSave(); });
+        document.getElementById('ownerInput').addEventListener('input', (e) => { if (!currentNode) return; currentNode.data.owner = e.target.value; autoSave(); });
         document.getElementById('importBtn').addEventListener('click', () => {
           const input = document.createElement('input'); input.type = 'file'; input.accept = 'application/json';
-          input.onchange = () => { const file = input.files?.[0]; if (!file) return; const reader = new FileReader(); reader.onload = () => { try { const value = JSON.parse(String(reader.result)); const data = value.data || value; if (!data.root) throw new Error('invalid'); mindMap.setFullData(data); title = value.title || '需求脑图'; document.getElementById('titleInput').value = title; } catch { window.alert('导入文件格式不正确'); } }; reader.readAsText(file); };
+          input.onchange = () => { const file = input.files?.[0]; if (!file) return; const reader = new FileReader(); reader.onload = () => { try { const value = JSON.parse(String(reader.result)); const data = value.data || value; if (!data.root) throw new Error('invalid'); mindMap.setFullData(data); title = value.title || '需求脑图'; document.getElementById('titleInput').value = title; autoSave(); } catch { window.alert('导入文件格式不正确'); } }; reader.readAsText(file); };
           input.click();
         });
         document.getElementById('exportBtn').addEventListener('click', () => { const blob = new Blob([JSON.stringify({ title, data: getData() }, null, 2)], { type: 'application/json' }); const link = document.createElement('a'); link.href = URL.createObjectURL(blob); link.download = '需求脑图.json'; link.click(); URL.revokeObjectURL(link.href); });

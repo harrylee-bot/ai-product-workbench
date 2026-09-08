@@ -43,7 +43,7 @@ export function WorkbenchPrdArtifactEditor({
   onDocumentCommit: PrdDocumentCommit;
   reference: WorkbenchArtifactReference;
 }) {
-  const [draft, setDraft] = useState(document);
+  const [_draft, setDraft] = useState(document);
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);

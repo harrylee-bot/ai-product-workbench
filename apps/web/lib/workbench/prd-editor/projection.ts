@@ -485,7 +485,7 @@ function channelTableText(document: PrdDocumentV2): string {
 
 type PrdV2Diagram = PrdDocumentV2["sections"]["businessRequirements"]["flowAndPages"]["diagrams"][number];
 
-function diagramText(diagram: PrdV2Diagram): string {
+function _diagramText(diagram: PrdV2Diagram): string {
   const labels = new Map(diagram.nodes.map((node) => [node.id, node.label]));
   return [
     diagram.title,
@@ -675,7 +675,7 @@ function tableFromTiptap(
     return {
       id: original?.id ?? editorIrId(stringAttribute(row, "dataId"), `${tableId}-row-${rowIndex + 1}`),
       cells: columns.map((column, cellIndex) => {
-        const field = firstTextBlock(row.content?.[cellIndex]);
+        const _field = firstTextBlock(row.content?.[cellIndex]);
         return {
           columnId: column.id,
           content: inlinesFromTextBlocks(row.content?.[cellIndex]),
