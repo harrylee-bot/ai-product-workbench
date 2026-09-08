@@ -457,7 +457,7 @@ for (const field of ["format", "packaging"]) {
 const formatCapabilities = resolveSchema(schemas.ExportCapabilities.properties.formats);
 const packagingCapabilities = resolveSchema(schemas.ExportCapabilities.properties.packaging);
 const externalCapabilities = resolveSchema(schemas.ExportCapabilities.properties.external);
-assert(JSON.stringify(Object.keys(formatCapabilities.properties)) === JSON.stringify(["html", "react", "figma", "mcp"]), "Export format capabilities must remain explicit");
+assert(JSON.stringify(Object.keys(formatCapabilities.properties)) === JSON.stringify(["html", "react", "figma", "mcp", "docx", "pdf"]), "Export format capabilities must remain explicit");
 assert(JSON.stringify(Object.keys(packagingCapabilities.properties)) === JSON.stringify(["single_file", "zip"]), "Export packaging capabilities must remain explicit");
 assert(JSON.stringify(Object.keys(externalCapabilities.properties)) === JSON.stringify(["ai_studio", "netlify", "lovable", "bolt"]), "External Export target capabilities must remain explicit");
 for (const capability of [
