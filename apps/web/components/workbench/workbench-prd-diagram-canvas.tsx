@@ -17,7 +17,7 @@ type DiagramRow = {
 export function WorkbenchPrdDiagramCanvas({ diagram }: { diagram: PrdDiagram }) {
   const width = 1000;
   const nodeWidth = diagram.kind === "productArchitecture" ? 220 : 190;
-  const nodeHeight = 82;
+  const nodeHeight = 110;
   const horizontalGap = diagram.kind === "productArchitecture" ? 40 : 28;
   const verticalGap = 58;
   const groups = diagram.kind === "productArchitecture"
@@ -86,6 +86,7 @@ export function WorkbenchPrdDiagramCanvas({ diagram }: { diagram: PrdDiagram }) 
             : (start.y + end.y) / 2;
           return (
             <g key={edge.id}>
+              <title>{`${edge.from} → ${edge.to}${edge.label ? `：${edge.label}` : ""}`}</title>
               <path d={path} fill="none" markerEnd={`url(#${markerId})`} stroke={accent} strokeOpacity="0.72" strokeWidth="2" />
               {edge.label && (
                 <text fill="#c7cad0" fontSize="13" textAnchor="middle" x={labelX} y={labelY}>{edge.label}</text>
@@ -100,9 +101,10 @@ export function WorkbenchPrdDiagramCanvas({ diagram }: { diagram: PrdDiagram }) 
         ))}
         {nodes.map((node) => (
           <g data-prd-diagram-node={node.id} key={node.id}>
+            <title>{node.label}</title>
             <rect fill="#242629" height={nodeHeight} rx="6" stroke={accent} strokeOpacity="0.7" width={nodeWidth} x={node.x} y={node.y} />
             <text fill="#edf0f4" fontSize="15" fontWeight="600" textAnchor="middle" x={node.x + nodeWidth / 2} y={node.y + 31}>
-              {wrapDiagramLabel(node.label, 13).map((line, index) => (
+              {wrapDiagramLabel(node.label, 16, 4).map((line, index) => (
                 <tspan dy={index === 0 ? 0 : 19} key={`${node.id}-${index}`} x={node.x + nodeWidth / 2}>{line}</tspan>
               ))}
             </text>
@@ -123,8 +125,12 @@ function chunkNodes<Node>(nodes: readonly Node[], size: number): Node[][] {
   return chunks;
 }
 
-function wrapDiagramLabel(value: string, maxLength: number): string[] {
+function wrapDiagramLabel(value: string, maxLength: number, maxLines: number): string[] {
   const chars = Array.from(value);
   if (chars.length <= maxLength) return [value];
-  return [chars.slice(0, maxLength).join(""), `${chars.slice(maxLength, maxLength * 2).join("")}${chars.length > maxLength * 2 ? "…" : ""}`];
+  const lines = Array.from({ length: Math.ceil(chars.length / maxLength) }, (_, index) => (
+    chars.slice(index * maxLength, (index + 1) * maxLength).join("")
+  ));
+  if (lines.length <= maxLines) return lines;
+  return [...lines.slice(0, maxLines - 1), `${lines[maxLines - 1]!.slice(0, maxLength - 1)}…`];
 }

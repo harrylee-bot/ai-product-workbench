@@ -7,7 +7,7 @@ const PRD_REFERENCE_ROOT = "/mnt/skills/public";
 export const PRD_RUNTIME_REFERENCE_FILES = [
   {
     relativePath: "requirement-doc-template/SKILL.md",
-    sha256: "82ec80d5b8d68916b2fb9259e30db9e0982645ae96e6d189a9d1dd3daf2baf0f",
+    sha256: "fe1493653986206aeed4684b46235c41d58e1e49db2b143ec0be5840542446e0",
   },
   {
     relativePath: "requirement-doc-template/references/structure.md",
@@ -15,7 +15,7 @@ export const PRD_RUNTIME_REFERENCE_FILES = [
   },
   {
     relativePath: "requirement-doc-template/references/quality-standards.md",
-    sha256: "ad2206958aee116654a657b1c979e7a0228aee1e080e2a289712bd7ad82b1c76",
+    sha256: "32dc990927fbaf126e2d79f291869df8e576454261d4a644e916f3020c70d44e",
   },
   {
     relativePath: "workbench/references/prd-runtime-result.schema.json",

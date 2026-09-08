@@ -343,6 +343,8 @@ describe("export contracts", () => {
         react: available,
         figma: { available: false as const, authentication: "not_required" as const, reasonCode: "EXPORT_FIGMA_UNAVAILABLE" as const },
         mcp: available,
+        docx: available,
+        pdf: available,
       },
       packaging: { single_file: available, zip: available },
       external: {
@@ -451,7 +453,7 @@ describe("export contracts", () => {
     }).success).toBe(true);
     expect(createExportJobRequestSchema.safeParse({
       releaseId: "release-1",
-      format: "pdf",
+      format: "keynote",
       packaging: "zip",
       selection: { kind: "board" },
     }).success).toBe(false);

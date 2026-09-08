@@ -122,7 +122,7 @@ describe("workbench v1 contracts", () => {
     if (!result.success) {
       expect(result.error.issues).toContainEqual(expect.objectContaining({
         path: ["requestedArtifactKinds"],
-        message: "PRD and Prototype/code must be requested in two sequential Runs: complete the PRD Run first",
+        message: "PRD must be requested in its own Run: complete the PRD Run before requesting other artifact kinds",
       }));
     }
   });

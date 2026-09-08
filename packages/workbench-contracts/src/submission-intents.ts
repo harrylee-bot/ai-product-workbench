@@ -11,7 +11,8 @@ import { isoDateTimeSchema, opaqueIdSchema, revisionSchema } from "./common.js";
 import {
   runFailureSchema,
   runSchema,
-  isGenericPrdCreationPrompt,
+  hasMissingPrdRequirementSource,
+  missingPrdRequirementSourceMessage,
   refineRunWorkflowArtifactTargets,
   startRunRequestObjectSchema,
 } from "./runs.js";
@@ -102,23 +103,11 @@ export const createSubmissionIntentRequestSchema = z.object({
     uploadFingerprints.add(attachment.clientFingerprint);
   }
 
-  const request = value.request;
-  const isTargetlessPrdCreate = request.workflow === "generate"
-    && request.requestedArtifactKinds.length === 1
-    && request.requestedArtifactKinds[0] === "prd"
-    && request.artifactTargets.length === 0;
-  const hasExplicitRequirementSource = request.sourceIds.length > 0
-    || value.attachments.length > 0
-    || (request.canvasSnapshot?.selectedScreens.length ?? 0) > 0;
-  if (
-    isTargetlessPrdCreate
-    && !hasExplicitRequirementSource
-    && isGenericPrdCreationPrompt(request.prompt)
-  ) {
+  if (hasMissingPrdRequirementSource(value.request, value.attachments.length)) {
     context.addIssue({
       code: z.ZodIssueCode.custom,
       path: ["request", "prompt"],
-      message: "请先说明要建设或修改的业务功能、目标用户和核心变化，或附上现有需求资料；仅要求生成需求文档不足以形成可信 PRD",
+      message: missingPrdRequirementSourceMessage,
     });
   }
 

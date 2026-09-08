@@ -89,6 +89,8 @@ describe("Workbench publication controller", () => {
         react: available,
         figma: { available: false, authentication: "not_required", reasonCode: "EXPORT_FIGMA_UNAVAILABLE" },
         mcp: available,
+        docx: available,
+        pdf: available,
       },
       packaging: { single_file: available, zip: available },
       external: {

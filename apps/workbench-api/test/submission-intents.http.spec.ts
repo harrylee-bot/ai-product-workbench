@@ -105,7 +105,7 @@ describe("SubmissionIntent authenticated HTTP mixed-request boundary", () => {
       code: "VALIDATION_ERROR",
       errors: {
         "request.requestedArtifactKinds": [
-          "PRD and Prototype/code must be requested in two sequential Runs: complete the PRD Run first",
+          "PRD must be requested in its own Run: complete the PRD Run before requesting other artifact kinds",
         ],
       },
     };

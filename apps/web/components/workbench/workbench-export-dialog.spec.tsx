@@ -14,6 +14,8 @@ const capabilities = {
     react: available,
     figma: { available: false as const, authentication: "not_required" as const, reasonCode: "EXPORT_FIGMA_UNAVAILABLE" as const },
     mcp: available,
+    docx: available,
+    pdf: available,
   },
   packaging: { single_file: available, zip: available },
   external: {

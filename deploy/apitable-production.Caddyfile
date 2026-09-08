@@ -6,7 +6,7 @@ requirements.aionbench.com {
 		file_server browse
 	}
 
-	handle_path /mindmap {
+	handle_path /mindmap* {
 		root * /var/www/apitable-mindmap
 		file_server
 	}

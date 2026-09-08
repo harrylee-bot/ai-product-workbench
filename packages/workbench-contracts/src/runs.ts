@@ -150,21 +150,49 @@ export function isGenericPrdCreationPrompt(prompt: string): boolean {
     || genericEnglishPrdPromptPattern.test(compact);
 }
 
+export function hasMissingPrdRequirementSource(
+  request: {
+    workflow: string;
+    prompt: string;
+    requestedArtifactKinds: readonly string[];
+    sourceIds: readonly string[];
+    artifactTargets: readonly unknown[];
+    canvasSnapshot?: { selectedScreens: readonly unknown[] } | null;
+  },
+  attachmentCount = 0,
+): boolean {
+  return request.workflow === "generate"
+    && request.requestedArtifactKinds.includes("prd")
+    && request.artifactTargets.length === 0
+    && request.sourceIds.length === 0
+    && attachmentCount === 0
+    && (request.canvasSnapshot?.selectedScreens.length ?? 0) === 0
+    && isGenericPrdCreationPrompt(request.prompt);
+}
+
+export const missingPrdRequirementSourceMessage =
+  "请先说明要建设或修改的业务功能、目标用户和核心变化，或附上现有需求资料；仅要求生成需求文档不足以形成可信 PRD";
+
 export function refineRunWorkflowArtifactTargets(
   request: RunWorkflowArtifactTargetInput,
   context: z.RefinementCtx,
 ): void {
   const requestsPrd = request.requestedArtifactKinds.includes("prd");
-  const requestsPrototypeWork = request.requestedArtifactKinds.some(
-    (kind) => kind === "prototype" || kind === "code",
-  );
-  if (requestsPrd && requestsPrototypeWork) {
+  const hasDuplicateKinds = new Set(request.requestedArtifactKinds).size
+    !== request.requestedArtifactKinds.length;
+  if (hasDuplicateKinds) {
     context.addIssue({
       code: z.ZodIssueCode.custom,
       path: ["requestedArtifactKinds"],
-      message: "PRD and Prototype/code must be requested in two sequential Runs: complete the PRD Run first",
+      message: "Requested artifact kinds must be unique",
     });
-    return;
+  }
+  if (requestsPrd && request.requestedArtifactKinds.some((kind) => kind !== "prd")) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["requestedArtifactKinds"],
+      message: "PRD must be requested in its own Run: complete the PRD Run before requesting other artifact kinds",
+    });
   }
 
   if (request.workflow === "edit") {
@@ -344,6 +372,13 @@ export const startRunRequestObjectSchema = z.object({
 }).strict();
 
 export const startRunRequestSchema = startRunRequestObjectSchema.superRefine((request, context) => {
+  if (hasMissingPrdRequirementSource(request)) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["prompt"],
+      message: missingPrdRequirementSourceMessage,
+    });
+  }
   if (
     request.workflow === "redesign"
     && request.sourceIds.length === 0

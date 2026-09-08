@@ -1,0 +1,189 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>需求管理 · 脑图</title>
+    <link rel="stylesheet" href="/mindmap/vendor/simpleMindMap.css" />
+    <style>
+      :root {
+        font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", sans-serif;
+        color: #1f2329;
+        background: #f5f6f7;
+        --line: #e5e6eb;
+        --muted: #646a73;
+        --blue: #3370ff;
+      }
+      * { box-sizing: border-box; }
+      html, body { margin: 0; height: 100%; overflow: hidden; }
+      body { background: #f5f6f7; }
+      button, input, select { font: inherit; }
+      button { cursor: pointer; }
+      button:disabled { cursor: not-allowed; opacity: .45; }
+      .page { display: flex; flex-direction: column; height: 100%; }
+      .topbar { height: 58px; flex: 0 0 58px; display: flex; align-items: center; justify-content: space-between; padding: 0 18px; border-bottom: 1px solid var(--line); background: #fff; }
+      .crumbs { display: flex; align-items: center; gap: 10px; min-width: 0; color: var(--muted); font-size: 13px; }
+      .crumbs a { color: #1f2329; text-decoration: none; font-weight: 650; }
+      .crumbs .slash { color: #afb3b8; }
+      .title-input { width: 190px; border: 0; outline: 0; background: transparent; color: #1f2329; font-size: 15px; font-weight: 650; }
+      .actions { display: flex; align-items: center; gap: 6px; }
+      .actions button, .zoom button { height: 32px; border: 1px solid #d9dce1; border-radius: 6px; background: #fff; color: #1f2329; padding: 0 11px; font-size: 12px; }
+      .actions button:hover, .zoom button:hover { background: #f2f3f5; }
+      .actions .primary { color: #fff; border-color: var(--blue); background: var(--blue); }
+      .actions .primary:hover { background: #2860df; }
+      .divider { width: 1px; height: 22px; margin: 0 4px; background: var(--line); }
+      .workspace { position: relative; flex: 1; min-height: 0; display: flex; }
+      .canvas-wrap { position: relative; flex: 1; min-width: 0; background: #fff; }
+      #mindmap { position: absolute; inset: 0; background-color: #fff; background-image: radial-gradient(#e7e9ed 1px, transparent 1px); background-size: 24px 24px; }
+      .hint { position: absolute; left: 18px; bottom: 16px; z-index: 5; padding: 7px 10px; border: 1px solid var(--line); border-radius: 6px; color: #8f959e; background: rgba(255,255,255,.94); font-size: 12px; pointer-events: none; }
+      .zoom { position: absolute; right: 18px; bottom: 16px; z-index: 5; display: flex; align-items: center; gap: 4px; padding: 4px; border: 1px solid var(--line); border-radius: 8px; background: rgba(255,255,255,.96); box-shadow: 0 4px 14px rgba(31,35,41,.08); }
+      .zoom button { width: 32px; padding: 0; }
+      .zoom-value { min-width: 48px; text-align: center; color: var(--muted); font-size: 12px; }
+      .inspector { width: 248px; flex: 0 0 248px; padding: 18px 16px; border-left: 1px solid var(--line); background: #fff; }
+      .inspector h2 { margin: 0 0 16px; font-size: 14px; }
+      .empty { color: #9aa0a6; font-size: 13px; line-height: 1.6; }
+      .field { margin-bottom: 14px; }
+      .field label { display: block; margin-bottom: 6px; color: var(--muted); font-size: 12px; }
+      .field input, .field select { width: 100%; height: 34px; padding: 0 9px; border: 1px solid #d9dce1; border-radius: 6px; outline: 0; color: #1f2329; background: #fff; font-size: 13px; }
+      .field input:focus, .field select:focus { border-color: var(--blue); box-shadow: 0 0 0 2px rgba(51,112,255,.12); }
+      .danger { width: 100%; height: 34px; border: 1px solid #f2b8b5; border-radius: 6px; color: #d93025; background: #fff; font-size: 13px; }
+      .danger:hover { background: #fff4f3; }
+      .smm-node-text { font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", sans-serif !important; }
+      .smm-richtext-node-wrap, .smm-richtext-node-wrap p { margin: 0 !important; padding: 0 !important; }
+      @media (max-width: 800px) {
+        .inspector { display: none; }
+        .actions button.optional { display: none; }
+        .title-input { width: 130px; }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="page">
+      <header class="topbar">
+        <div class="crumbs">
+          <a href="/">需求管理</a><span class="slash">/</span>
+          <input id="titleInput" class="title-input" aria-label="画布名称" value="需求脑图" />
+        </div>
+        <div class="actions">
+          <button id="undoBtn" title="撤销">↶</button>
+          <button id="redoBtn" title="重做">↷</button>
+          <span class="divider"></span>
+          <button id="layoutBtn" class="optional">整理布局</button>
+          <button id="childBtn" class="optional">子节点</button>
+          <button id="siblingBtn" class="optional">同级</button>
+          <button id="themeBtn" class="optional">切换主题</button>
+          <button id="importBtn" class="optional">导入</button>
+          <button id="exportBtn" class="optional">导出</button>
+          <button id="saveBtn" class="primary">保存</button>
+        </div>
+      </header>
+      <section class="workspace">
+        <div class="canvas-wrap">
+          <div id="mindmap" aria-label="需求脑图画布"></div>
+          <div class="zoom">
+            <button id="zoomOut" title="缩小">−</button>
+            <span id="zoomValue" class="zoom-value">100%</span>
+            <button id="zoomIn" title="放大">＋</button>
+            <button id="fitBtn" title="适配画布">适配</button>
+          </div>
+        </div>
+        <aside class="inspector">
+          <h2>节点信息</h2>
+          <div id="emptyInspector" class="empty">未选择节点</div>
+          <div id="nodeInspector" hidden>
+            <div class="field"><label for="statusInput">状态</label><select id="statusInput"><option value="">留空</option><option>规划中</option><option>进行中</option><option>已上线</option><option>已暂停</option></select></div>
+            <div class="field"><label for="ownerInput">负责人</label><input id="ownerInput" placeholder="留空" /></div>
+            <button id="deleteBtn" class="danger">删除节点</button>
+          </div>
+        </aside>
+      </section>
+    </main>
+    <script src="/mindmap/vendor/simpleMindMap.umd.min.js"></script>
+    <script>
+      (() => {
+        const STORAGE_KEY = 'apitable-simple-mindmap-v1';
+        const defaultData = { root: { data: { text: '需求管理平台', status: '规划中', owner: '产品团队', expand: true }, children: [
+          { data: { text: '需求收集', status: '进行中', owner: '产品经理', expand: true }, children: [
+            { data: { text: '表单提交', status: '已上线', owner: '全员' }, children: [] },
+            { data: { text: '外部需求导入', status: '规划中', owner: '产品经理' }, children: [] }
+          ] },
+          { data: { text: '评审与排期', status: '进行中', owner: '项目负责人', expand: true }, children: [
+            { data: { text: '优先级确认', status: '进行中', owner: '项目负责人' }, children: [] }
+          ] },
+          { data: { text: '研发与发版', status: '规划中', owner: '研发团队', expand: true }, children: [
+            { data: { text: '日历发版视图', status: '已上线', owner: '项目负责人' }, children: [] },
+            { data: { text: '上线通知', status: '规划中', owner: '运营' }, children: [] }
+          ] }
+        ] } };
+        const clone = (v) => JSON.parse(JSON.stringify(v));
+        const stored = (() => { try { return JSON.parse(localStorage.getItem(STORAGE_KEY) || 'null'); } catch { return null; } })();
+        let title = stored?.title || '需求脑图';
+        let currentNode = null;
+        let themeIndex = 0;
+        const themes = ['default', 'classic2', 'classic3'];
+        const mindMap = new window.simpleMindMap.default({
+          el: document.getElementById('mindmap'),
+          data: stored?.data?.root || stored?.data || clone(defaultData.root),
+          layout: 'logicalStructure',
+          theme: themes[themeIndex],
+          fit: true,
+          readonly: false,
+          enableFreeDrag: true,
+          mousewheelAction: 'zoom'
+        });
+        window.__mindMap = mindMap;
+        document.getElementById('titleInput').value = title;
+
+        const getData = () => mindMap.getData(true);
+        const setTextEditor = (node) => {
+          if (node && mindMap.renderer?.textEdit && !mindMap.renderer.textEdit.isShowTextEdit()) {
+            window.setTimeout(() => mindMap.renderer.textEdit.show({ node }), 0);
+          }
+        };
+        const selectNode = (node) => {
+          currentNode = node || null;
+          const empty = document.getElementById('emptyInspector');
+          const panel = document.getElementById('nodeInspector');
+          if (!node) { empty.hidden = false; panel.hidden = true; return; }
+          empty.hidden = true; panel.hidden = false;
+          document.getElementById('statusInput').value = node.getData?.('status') || node.data?.status || '';
+          document.getElementById('ownerInput').value = node.getData?.('owner') || node.data?.owner || '';
+        };
+        mindMap.on('node_active', (node) => { selectNode(node); setTextEditor(node); });
+        mindMap.on('node_click', (node) => { selectNode(node); });
+        mindMap.on('data_change', () => { updateZoom(); });
+
+        const updateZoom = () => {
+          const value = mindMap.view?.scale || mindMap.renderer?.scale || 1;
+          document.getElementById('zoomValue').textContent = Math.round(value * 100) + '%';
+        };
+        const save = () => {
+          localStorage.setItem(STORAGE_KEY, JSON.stringify({ title, data: getData() }));
+          const btn = document.getElementById('saveBtn'); const old = btn.textContent; btn.textContent = '已保存';
+          window.setTimeout(() => { btn.textContent = old; }, 1200);
+        };
+        document.getElementById('titleInput').addEventListener('input', (e) => { title = e.target.value; });
+        document.getElementById('saveBtn').addEventListener('click', save);
+        document.getElementById('undoBtn').addEventListener('click', () => mindMap.execCommand('BACK'));
+        document.getElementById('redoBtn').addEventListener('click', () => mindMap.execCommand('FORWARD'));
+        document.getElementById('layoutBtn').addEventListener('click', () => mindMap.execCommand('RESET_LAYOUT'));
+        document.getElementById('childBtn').addEventListener('click', () => { if (currentNode) mindMap.execCommand('INSERT_CHILD_NODE'); });
+        document.getElementById('siblingBtn').addEventListener('click', () => { if (currentNode) mindMap.execCommand('INSERT_NODE'); });
+        document.getElementById('themeBtn').addEventListener('click', () => { themeIndex = (themeIndex + 1) % themes.length; mindMap.setTheme(themes[themeIndex]); mindMap.render?.(); });
+        document.getElementById('fitBtn').addEventListener('click', () => { mindMap.view.fit(); updateZoom(); });
+        document.getElementById('zoomIn').addEventListener('click', () => { mindMap.view.enlarge?.(); updateZoom(); });
+        document.getElementById('zoomOut').addEventListener('click', () => { mindMap.view.narrow?.(); updateZoom(); });
+        document.getElementById('deleteBtn').addEventListener('click', () => { if (currentNode) { mindMap.execCommand('REMOVE_NODE'); currentNode = null; selectNode(null); } });
+        document.getElementById('statusInput').addEventListener('change', (e) => { if (!currentNode) return; currentNode.data.status = e.target.value; });
+        document.getElementById('ownerInput').addEventListener('input', (e) => { if (!currentNode) return; currentNode.data.owner = e.target.value; });
+        document.getElementById('importBtn').addEventListener('click', () => {
+          const input = document.createElement('input'); input.type = 'file'; input.accept = 'application/json';
+          input.onchange = () => { const file = input.files?.[0]; if (!file) return; const reader = new FileReader(); reader.onload = () => { try { const value = JSON.parse(String(reader.result)); const data = value.data || value; if (!data.root) throw new Error('invalid'); mindMap.setFullData(data); title = value.title || '需求脑图'; document.getElementById('titleInput').value = title; } catch { window.alert('导入文件格式不正确'); } }; reader.readAsText(file); };
+          input.click();
+        });
+        document.getElementById('exportBtn').addEventListener('click', () => { const blob = new Blob([JSON.stringify({ title, data: getData() }, null, 2)], { type: 'application/json' }); const link = document.createElement('a'); link.href = URL.createObjectURL(blob); link.download = '需求脑图.json'; link.click(); URL.revokeObjectURL(link.href); });
+        updateZoom();
+      })();
+    </script>
+  </body>
+</html>

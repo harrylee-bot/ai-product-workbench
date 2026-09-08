@@ -69,6 +69,8 @@ COPY self-hosted-community-web/src/mobile_home.tsx \
   ./packages/datasheet/src/pc/components/home/mobile_home.tsx
 COPY self-hosted-community-web/src/gantt_brand_desc.tsx \
   ./packages/datasheet/src/pc/components/gantt_view/group/brand_desc.tsx
+COPY self-hosted-community-web/src/workbench_side.tsx \
+  ./packages/datasheet/src/pc/components/common_side/workbench_side/workbench_side.tsx
 COPY self-hosted-community-web/src/_app.tsx ./packages/datasheet/pages/_app.tsx
 COPY self-hosted-community-web/src/index.less ./packages/datasheet/src/index.less
 COPY self-hosted-community-web/scripts/apply-branding.mjs ./self-hosted-community-web/scripts/apply-branding.mjs

@@ -574,6 +574,35 @@ function PrdArtifactV2({ document }: { document: PrdDocumentV2 }) {
           <p className="mt-[18px] max-w-[980px] whitespace-pre-line text-[14px] leading-[24px] text-[#c7cad0]">{safetyBaseline.intro}</p>
           <PrdSafetyBaselineTable rows={safetyBaseline.rows} />
         </section>
+        {(document.assumptions.length > 0 || document.citations.length > 0) && (
+          <section className="border-t border-white/[0.12] py-[46px]" aria-labelledby="prd-evidence">
+            <h2 className="text-[30px] font-semibold text-[#f1f3f4]" id="prd-evidence">假设与来源</h2>
+            {document.assumptions.length > 0 && (
+              <div className="mt-[20px] rounded-[8px] border border-[#e6a05a]/30 bg-[#e6a05a]/[0.06] p-[18px]">
+                <h3 className="font-semibold text-[#f1f3f4]">假设与未决事项</h3>
+                <ul className="mt-[10px] ml-[24px] list-disc">
+                  {document.assumptions.map((assumption) => (
+                    <li key={assumption.id}>
+                      {assumption.statement}（{assumption.status}，影响：{assumption.impact}
+                      {assumption.owner ? `，负责人：${assumption.owner}` : ""}）
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            {document.citations.length > 0 && (
+              <ol className="mt-[20px] space-y-[12px]">
+                {document.citations.map((citation) => (
+                  <li className="border-b border-white/[0.08] pb-[10px]" key={citation.id}>
+                    <div className="font-semibold text-[#f1f3f4]">{citation.title ?? citation.sourcePath}</div>
+                    <div className="text-[13px] text-[#aeb4bd]">{citation.sourcePath}</div>
+                    {citation.quote && <div className="mt-[4px] text-[14px] text-[#d8dce2]">{citation.quote}</div>}
+                  </li>
+                ))}
+              </ol>
+            )}
+          </section>
+        )}
       </div>
     </article>
   );
@@ -744,11 +773,19 @@ function PrdBlockView({ block }: { block: PrdBlock }) {
       );
     }
     case "goal":
+      return (
+        <div className="rounded-[8px] border border-white/[0.10] bg-white/[0.04] p-[18px]">
+          <div className="font-semibold text-[#f1f3f4]">{block.title}</div>
+          <p>{renderPrdInlines(block.description)}</p>
+          <p className="text-[18px] text-[#c7cad0]">成功指标：{block.successMetric} · 优先级：{block.priority}</p>
+        </div>
+      );
     case "requirement":
       return (
         <div className="rounded-[8px] border border-white/[0.10] bg-white/[0.04] p-[18px]">
           <div className="font-semibold text-[#f1f3f4]">{block.title}</div>
           <p>{renderPrdInlines(block.description)}</p>
+          <p className="text-[18px] text-[#c7cad0]">优先级：{block.priority}</p>
         </div>
       );
     case "persona":
@@ -757,6 +794,7 @@ function PrdBlockView({ block }: { block: PrdBlock }) {
           <div className="font-semibold text-[#f1f3f4]">{block.name}</div>
           <p>{renderPrdInlines(block.description)}</p>
           <p className="mt-[10px] text-[18px] text-[#c7cad0]">{block.needs.join(" · ")}</p>
+          <p className="mt-[10px] text-[18px] text-[#c7cad0]">痛点：{block.painPoints.join(" · ")}</p>
         </div>
       );
     case "acceptanceCriterion":
@@ -771,15 +809,18 @@ function PrdBlockView({ block }: { block: PrdBlock }) {
       return (
         <div>
           <div className="font-semibold text-[#f1f3f4]">{block.title}</div>
+          <p className="text-[18px] text-[#c7cad0]">角色：{block.actor} · 触发：{block.trigger}</p>
           <ol className="ml-[30px] list-decimal">
             {block.steps.map((step) => <li key={step.id}>{step.text}</li>)}
           </ol>
+          <p className="text-[18px] text-[#c7cad0]">结果：{block.outcome}</p>
         </div>
       );
     case "risk":
       return (
         <div className="rounded-[8px] border border-[#e6a05a]/30 bg-[#e6a05a]/[0.06] p-[18px]">
           <p>{renderPrdInlines(block.description)}</p>
+          <p className="text-[18px] text-[#c7cad0]">可能性：{block.likelihood} · 影响：{block.impact}</p>
           <p className="text-[18px] text-[#c7cad0]">缓解措施：{renderPrdInlines(block.mitigation)}</p>
         </div>
       );

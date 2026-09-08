@@ -23,6 +23,8 @@ describe("Run target ArtifactVersion contracts", () => {
     for (const requestedArtifactKinds of [
       ["prd", "prototype"],
       ["prd", "code"],
+      ["prd", "document"],
+      ["prd", "data"],
     ] as const) {
       const parsed = startRunRequestSchema.safeParse({
         ...request,
@@ -33,9 +35,18 @@ describe("Run target ArtifactVersion contracts", () => {
       if (parsed.success) throw new Error("Expected mixed PRD work to be rejected");
       expect(parsed.error.issues).toContainEqual(expect.objectContaining({
         path: ["requestedArtifactKinds"],
-        message: expect.stringContaining("two sequential Runs"),
+        message: expect.stringContaining("own Run"),
       }));
     }
+  });
+
+  it("rejects duplicate PRD kinds and source-free generic creation at the direct Run entry", () => {
+    expect(startRunRequestSchema.safeParse({
+      ...request, workflow: "generate", requestedArtifactKinds: ["prd", "prd"],
+    }).success).toBe(false);
+    const generic = { ...request, workflow: "generate", prompt: "生成需求文档", requestedArtifactKinds: ["prd"] };
+    expect(startRunRequestSchema.safeParse(generic).success).toBe(false);
+    expect(startRunRequestSchema.safeParse({ ...generic, sourceIds: ["source-requirement"] }).success).toBe(true);
   });
 
   it("defaults ordinary Generate targets to an empty immutable-reference list", () => {

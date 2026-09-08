@@ -4,6 +4,9 @@ import {
   designSystemDocumentSchema,
   materializeRuntimeDesignStyleSnapshot,
   orderBoardNodesByHierarchy,
+  prdChannelLabels,
+  prdDocumentSchema,
+  prdSafetyBaselineItems,
   prototypeDocumentSchema,
   resolveExportBoardNodeSelection,
   type DesignSystemDocument,
@@ -14,6 +17,9 @@ import {
   type PrototypeDocument,
   type PrototypeNode,
   type PrototypeToken,
+  type PrdBlock,
+  type PrdDocument,
+  type PrdInline,
 } from "@workbench/workbench-contracts";
 import * as LucideIcons from "lucide-react";
 import { getStroke } from "perfect-freehand";
@@ -75,7 +81,7 @@ type RuntimePrototype = {
 
 type PrototypeStyle = PrototypeNode["style"];
 
-const baseStyles = String.raw`*{box-sizing:border-box}html,body{margin:0;min-height:100%;background:#f4f5f7;color:#17191d;font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}button,input,textarea,select{font:inherit}.wb-export{min-height:100vh}.wb-export__header{position:sticky;top:0;z-index:100;display:flex;align-items:center;justify-content:space-between;gap:16px;min-height:56px;padding:10px 20px;background:#fff;border-bottom:1px solid #dfe2e7}.wb-export__title{margin:0;font-size:16px;line-height:1.4;font-weight:650}.wb-export__meta{font-size:12px;color:#69707d}.wb-export__content{padding:20px}.wb-board{position:relative;min-width:720px;min-height:360px;margin:0 0 24px;background:#e9ebef;background-image:linear-gradient(#d9dce2 1px,transparent 1px),linear-gradient(90deg,#d9dce2 1px,transparent 1px);background-size:24px 24px;border:1px solid #ced2d9;overflow:auto}.wb-board__node{position:absolute;display:flex;flex-direction:column;justify-content:center;min-width:120px;min-height:72px;padding:12px;background:#fff;border:1px solid #bcc2cc;box-shadow:0 2px 8px rgba(18,22,30,.08)}.wb-board__node--frame{justify-content:flex-start;min-width:0;min-height:0;padding:0;background:transparent;box-shadow:none}.wb-board__node--frame .wb-board__label{position:absolute;left:0;top:-20px;margin:0}.wb-board__node--drawing{display:block;min-width:0;min-height:0;padding:0;background:transparent;border:0;box-shadow:none}.wb-board__drawing{display:block;width:100%;height:100%;overflow:visible}.wb-board__kind{font-size:11px;color:#69707d;text-transform:uppercase}.wb-board__label{margin-top:4px;font-size:13px;font-weight:600}.wb-artifacts{display:grid;gap:20px}.wb-artifact{min-width:0;background:#fff;border:1px solid #d5d9e0}.wb-artifact__header{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 14px;border-bottom:1px solid #e1e4e9}.wb-artifact__title{margin:0;font-size:14px;font-weight:650}.wb-artifact__kind{font-size:11px;color:#69707d}.wb-artifact__body{padding:14px;overflow:auto}.wb-prototype__tabs{display:flex;gap:6px;margin-bottom:12px;overflow:auto}.wb-prototype__tab{height:32px;padding:0 12px;border:1px solid #cbd0d8;background:#fff;color:#3b414b;cursor:pointer}.wb-prototype__tab[aria-selected="true"]{background:#17191d;color:#fff;border-color:#17191d}.wb-prototype__stage{display:flex;justify-content:flex-start;overflow:auto;padding:16px;background:#e8eaee}.wb-screen{position:relative;flex:0 0 auto;background:#fff;box-shadow:0 8px 24px rgba(18,22,30,.14);overflow:hidden}.wb-node[hidden],.wb-screen[hidden]{display:none!important}.wb-node{letter-spacing:0}.wb-design-system{display:grid;gap:22px}.wb-design-system h3{margin:0 0 10px;font-size:13px}.wb-design-system__tokens,.wb-design-system__assets,.wb-design-system__items{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:10px}.wb-design-system__token,.wb-design-system__asset,.wb-design-system__item{min-width:0;padding:10px;border:1px solid #dfe2e7;background:#fafbfc}.wb-design-system__swatch{display:block;width:100%;height:44px;margin-bottom:8px;border:1px solid rgba(0,0,0,.12)}.wb-design-system__label{display:block;font-size:12px;font-weight:650;overflow-wrap:anywhere}.wb-design-system__value{display:block;margin-top:3px;color:#69707d;font:11px/1.45 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;overflow-wrap:anywhere}.wb-design-system__image{display:block;width:100%;height:120px;margin-bottom:8px;object-fit:contain;background:#eef0f3}.wb-design-system__font-preview{display:flex;align-items:center;width:100%;height:72px;margin-bottom:8px;padding:8px;background:#eef0f3;font-size:28px;line-height:1;overflow:hidden}.wb-design-system__copy{margin:4px 0 0;color:#565d68;font-size:12px;line-height:1.5}.wb-json{max-height:70vh;margin:0;overflow:auto;padding:16px;background:#15171b;color:#e8eaed;font:12px/1.55 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;white-space:pre-wrap}.wb-image{display:block;max-width:100%;height:auto}.wb-document{white-space:pre-wrap;line-height:1.6}.wb-empty{padding:40px;text-align:center;color:#69707d}@media(max-width:700px){.wb-export__content{padding:10px}.wb-export__header{padding:8px 12px}.wb-board{min-width:640px}.wb-artifact__body{padding:8px}.wb-design-system__tokens,.wb-design-system__assets,.wb-design-system__items{grid-template-columns:1fr}}`;
+const baseStyles = String.raw`*{box-sizing:border-box}html,body{margin:0;min-height:100%;background:#f4f5f7;color:#17191d;font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}button,input,textarea,select{font:inherit}.wb-export{min-height:100vh}.wb-export__header{position:sticky;top:0;z-index:100;display:flex;align-items:center;justify-content:space-between;gap:16px;min-height:56px;padding:10px 20px;background:#fff;border-bottom:1px solid #dfe2e7}.wb-export__title{margin:0;font-size:16px;line-height:1.4;font-weight:650}.wb-export__meta{font-size:12px;color:#69707d}.wb-export__content{padding:20px}.wb-board{position:relative;min-width:720px;min-height:360px;margin:0 0 24px;background:#e9ebef;background-image:linear-gradient(#d9dce2 1px,transparent 1px),linear-gradient(90deg,#d9dce2 1px,transparent 1px);background-size:24px 24px;border:1px solid #ced2d9;overflow:auto}.wb-board__node{position:absolute;display:flex;flex-direction:column;justify-content:center;min-width:120px;min-height:72px;padding:12px;background:#fff;border:1px solid #bcc2cc;box-shadow:0 2px 8px rgba(18,22,30,.08)}.wb-board__node--frame{justify-content:flex-start;min-width:0;min-height:0;padding:0;background:transparent;box-shadow:none}.wb-board__node--frame .wb-board__label{position:absolute;left:0;top:-20px;margin:0}.wb-board__node--drawing{display:block;min-width:0;min-height:0;padding:0;background:transparent;border:0;box-shadow:none}.wb-board__drawing{display:block;width:100%;height:100%;overflow:visible}.wb-board__kind{font-size:11px;color:#69707d;text-transform:uppercase}.wb-board__label{margin-top:4px;font-size:13px;font-weight:600}.wb-artifacts{display:grid;gap:20px}.wb-artifact{min-width:0;background:#fff;border:1px solid #d5d9e0}.wb-artifact__header{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 14px;border-bottom:1px solid #e1e4e9}.wb-artifact__title{margin:0;font-size:14px;font-weight:650}.wb-artifact__kind{font-size:11px;color:#69707d}.wb-artifact__body{padding:14px;overflow:auto}.wb-prototype__tabs{display:flex;gap:6px;margin-bottom:12px;overflow:auto}.wb-prototype__tab{height:32px;padding:0 12px;border:1px solid #cbd0d8;background:#fff;color:#3b414b;cursor:pointer}.wb-prototype__tab[aria-selected="true"]{background:#17191d;color:#fff;border-color:#17191d}.wb-prototype__stage{display:flex;justify-content:flex-start;overflow:auto;padding:16px;background:#e8eaee}.wb-screen{position:relative;flex:0 0 auto;background:#fff;box-shadow:0 8px 24px rgba(18,22,30,.14);overflow:hidden}.wb-node[hidden],.wb-screen[hidden]{display:none!important}.wb-node{letter-spacing:0}.wb-design-system{display:grid;gap:22px}.wb-design-system h3{margin:0 0 10px;font-size:13px}.wb-design-system__tokens,.wb-design-system__assets,.wb-design-system__items{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:10px}.wb-design-system__token,.wb-design-system__asset,.wb-design-system__item{min-width:0;padding:10px;border:1px solid #dfe2e7;background:#fafbfc}.wb-design-system__swatch{display:block;width:100%;height:44px;margin-bottom:8px;border:1px solid rgba(0,0,0,.12)}.wb-design-system__label{display:block;font-size:12px;font-weight:650;overflow-wrap:anywhere}.wb-design-system__value{display:block;margin-top:3px;color:#69707d;font:11px/1.45 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;overflow-wrap:anywhere}.wb-design-system__image{display:block;width:100%;height:120px;margin-bottom:8px;object-fit:contain;background:#eef0f3}.wb-design-system__font-preview{display:flex;align-items:center;width:100%;height:72px;margin-bottom:8px;padding:8px;background:#eef0f3;font-size:28px;line-height:1;overflow:hidden}.wb-design-system__copy{margin:4px 0 0;color:#565d68;font-size:12px;line-height:1.5}.wb-json{max-height:70vh;margin:0;overflow:auto;padding:16px;background:#15171b;color:#e8eaed;font:12px/1.55 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;white-space:pre-wrap}.wb-image{display:block;max-width:100%;height:auto}.wb-document{white-space:pre-wrap;line-height:1.6}.wb-prd{max-width:1100px;margin:0 auto;background:#fff;color:#1e2935;padding:48px 64px;font-family:"Noto Sans SC","Microsoft YaHei",sans-serif;line-height:1.7}.wb-prd__cover{min-height:320px;display:flex;flex-direction:column;justify-content:center;border-bottom:1px solid #cbd5e1;margin-bottom:36px}.wb-prd__cover h1{font-size:32px;margin:8px 0;color:#124b7a}.wb-prd h2{font-size:24px;color:#124b7a;border-bottom:2px solid #d8e4ef;padding-bottom:8px;margin:38px 0 16px}.wb-prd h3{font-size:18px;color:#1c628f;margin:24px 0 8px}.wb-prd__muted{color:#64748b;font-size:13px}.wb-prd__toc,.wb-prd__history,.wb-prd__table,.wb-prd__safety{width:100%;border-collapse:collapse;margin:12px 0 22px}.wb-prd__toc td,.wb-prd__history th,.wb-prd__history td,.wb-prd__table th,.wb-prd__table td,.wb-prd__safety th,.wb-prd__safety td{border:1px solid #cbd5e1;padding:8px;text-align:left;vertical-align:top}.wb-prd__history th,.wb-prd__table th,.wb-prd__safety th{background:#edf4f9}.wb-prd__block{margin:10px 0}.wb-prd__card{border:1px solid #d8e1ea;border-left:4px solid #2b6f9f;padding:12px 16px;margin:12px 0}.wb-prd__diagram{border:1px solid #cbd5e1;background:#f8fafc;padding:14px;margin:14px 0}.wb-prd__diagram-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:8px}.wb-prd__diagram-node{border:1px solid #6b8ca8;border-radius:4px;background:#fff;padding:8px;font-size:13px}.wb-prd__assumptions{border-left:4px solid #d97706;background:#fff7ed;padding:12px 16px}.wb-json{max-height:70vh;margin:0;overflow:auto;padding:16px;background:#15171b;color:#e8eaed;font:12px/1.55 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;white-space:pre-wrap}.wb-image{display:block;max-width:100%;height:auto}.wb-document{white-space:pre-wrap;line-height:1.6}.wb-empty{padding:40px;text-align:center;color:#69707d}@media(max-width:700px){.wb-export__content{padding:10px}.wb-export__header{padding:8px 12px}.wb-board{min-width:640px}.wb-artifact__body{padding:8px}.wb-prd{padding:28px 18px}.wb-prd__cover{min-height:220px}.wb-design-system__tokens,.wb-design-system__assets,.wb-design-system__items{grid-template-columns:1fr}}`;
 
 export function renderExportHtml(request: ExportBuildRequest): RenderedHtml {
   const selected = selectExportArtifacts(request.source.artifacts, request.selection, request.source.boardSnapshot.nodes);
@@ -325,10 +331,145 @@ function renderArtifact(
   }
   const body = artifact.kind === "prototype"
     ? renderPrototypeArtifact(artifact, runtimePrototypes, fontFaces, fontAssets, screenId)
-    : artifact.kind === "design_system"
-      ? renderDesignSystemArtifact(artifact, fontFaces, fontAssets)
+      : artifact.kind === "design_system"
+        ? renderDesignSystemArtifact(artifact, fontFaces, fontAssets)
+    : artifact.kind === "prd"
+      ? renderPrdArtifact(artifact)
     : renderGenericArtifact(artifact);
   return `<article class="wb-artifact" data-artifact-id="${escapeHtml(artifact.artifactId)}" data-artifact-version-id="${escapeHtml(artifact.artifactVersionId)}"><header class="wb-artifact__header"><h2 class="wb-artifact__title">${escapeHtml(artifact.title)}</h2><span class="wb-artifact__kind">${escapeHtml(artifact.kind)} · v${artifact.version}</span></header><div class="wb-artifact__body">${body}</div></article>`;
+}
+
+function renderPrdArtifact(artifact: ExportArtifactSource) {
+  const parsed = prdDocumentSchema.safeParse(artifact.content);
+  if (!parsed.success) {
+    throw new TerminalExportError(
+      "EXPORT_PRD_CONTENT_INVALID",
+      "The selected PRD artifact does not conform to the PRD document contract",
+    );
+  }
+  return renderPrdDocument(parsed.data);
+}
+
+function renderPrdDocument(document: PrdDocument) {
+  if (document.protocol === "workbench.prd.v2") {
+    const introduction = document.sections.introduction;
+    const requirements = document.sections.businessRequirements;
+    return `<div class="wb-prd">
+      <section class="wb-prd__cover">
+        <div class="wb-prd__muted">需求说明书 · v${document.revision.number}</div>
+        <h1>${escapeHtml(document.cover.title)}</h1>
+        <p>${escapeHtml(document.revision.summary)}</p>
+        <p class="wb-prd__muted">变更时间：${escapeHtml(document.revision.changedAt)}</p>
+      </section>
+      ${renderPrdVersionHistory(document.versionHistory)}
+      ${renderPrdToc(document.tableOfContents.entries)}
+      <h2>${escapeHtml(introduction.title)}</h2>
+      ${renderPrdSection(introduction.background)}
+      ${renderPrdSection(introduction.scope)}
+      ${renderPrdSection(introduction.usageScenarios)}
+      ${renderPrdChannelTable(introduction.usageScenarios.channelTable)}
+      <h2>${escapeHtml(requirements.title)}</h2>
+      <div class="wb-prd__block">${renderPrdInlinesHtml(requirements.summary)}</div>
+      ${renderPrdSection(requirements.pageLinks)}
+      ${renderPrdSection(requirements.coreRules)}
+      ${renderPrdSection(requirements.flowAndPages)}
+      ${requirements.flowAndPages.diagrams.map(renderPrdDiagram).join("")}
+      ${renderPrdSection(requirements.acceptanceCriteria)}
+      ${requirements.additionalSections.map((section) => renderPrdSection(section)).join("")}
+      <h2>${escapeHtml(document.sections.degradation.title)}</h2>
+      <div class="wb-prd__block">${renderPrdInlinesHtml(document.sections.degradation.content)}</div>
+      <h2>${escapeHtml(document.sections.safetyBaseline.title)}</h2>
+      <p>${escapeHtml(document.sections.safetyBaseline.intro)}</p>
+      ${renderPrdSafetyTable(document.sections.safetyBaseline.rows)}
+      ${renderPrdAssumptions(document.assumptions)}
+    </div>`;
+  }
+
+  return `<div class="wb-prd">
+    <section class="wb-prd__cover">
+      <div class="wb-prd__muted">PRD · v${document.revision.number}</div>
+      <h1>${escapeHtml(document.title)}</h1>
+      <p>${escapeHtml(document.revision.summary)}</p>
+    </section>
+    ${document.sections && Object.entries(document.sections).map(([key, section]) => (
+      `<h2>${escapeHtml(section.title || key)}</h2>${renderPrdSection(section)}`
+    )).join("")}
+  </div>`;
+}
+
+function renderPrdVersionHistory(entries: ReadonlyArray<{ status: string; author: string; participants: readonly string[]; startDate: string; endDate: string; notes: string }>) {
+  return `<h2>版本历史</h2><table class="wb-prd__history"><thead><tr><th>状态</th><th>作者</th><th>参与人</th><th>日期</th><th>变更说明</th></tr></thead><tbody>${
+    entries.map((entry) => `<tr><td>${escapeHtml(entry.status)}</td><td>${escapeHtml(entry.author)}</td><td>${entry.participants.map(escapeHtml).join("、")}</td><td>${escapeHtml(entry.startDate)} 至 ${escapeHtml(entry.endDate)}</td><td>${escapeHtml(entry.notes)}</td></tr>`).join("")
+  }</tbody></table>`;
+}
+
+function renderPrdToc(entries: readonly string[]) {
+  return `<h2>目 录</h2><table class="wb-prd__toc"><tbody>${entries.map((entry) => `<tr><td>${escapeHtml(entry)}</td></tr>`).join("")}</tbody></table>`;
+}
+
+function renderPrdSection(section: { title: string; blocks: readonly PrdBlock[] }) {
+  return `<section class="wb-prd__section">${section.blocks.map(renderPrdBlock).join("")}</section>`;
+}
+
+function renderPrdBlock(block: PrdBlock): string {
+  switch (block.type) {
+    case "paragraph":
+      return `<p class="wb-prd__block">${renderPrdInlinesHtml(block.content)}</p>`;
+    case "heading":
+      return `<h${block.level}>${renderPrdInlinesHtml(block.content)}</h${block.level}>`;
+    case "bulletList":
+    case "orderedList":
+      return `<${block.type === "bulletList" ? "ul" : "ol"}>${block.items.map((item) => `<li>${renderPrdInlinesHtml(item.content)}</li>`).join("")}</${block.type === "bulletList" ? "ul" : "ol"}>`;
+    case "table":
+      return `<table class="wb-prd__table"><thead><tr>${block.columns.map((column) => `<th>${escapeHtml(column.label)}</th>`).join("")}</tr></thead><tbody>${block.rows.map((row) => `<tr>${row.cells.map((cell) => `<td>${renderPrdInlinesHtml(cell.content)}</td>`).join("")}</tr>`).join("")}</tbody></table>`;
+    case "callout":
+      return `<div class="wb-prd__card"><strong>${block.title ? escapeHtml(block.title) : block.tone}</strong><div>${renderPrdInlinesHtml(block.content)}</div></div>`;
+    case "goal":
+      return `<div class="wb-prd__card"><strong>${escapeHtml(block.title)}</strong><p>${renderPrdInlinesHtml(block.description)}</p><p><b>成功指标：</b>${escapeHtml(block.successMetric)} <b>优先级：</b>${escapeHtml(block.priority)}</p></div>`;
+    case "persona":
+      return `<div class="wb-prd__card"><strong>${escapeHtml(block.name)}</strong><p>${renderPrdInlinesHtml(block.description)}</p><p><b>需求：</b>${block.needs.map(escapeHtml).join("；")}</p><p><b>痛点：</b>${block.painPoints.map(escapeHtml).join("；")}</p></div>`;
+    case "requirement":
+      return `<div class="wb-prd__card"><strong>${escapeHtml(block.title)}</strong><p>${renderPrdInlinesHtml(block.description)}</p><p><b>优先级：</b>${escapeHtml(block.priority)} <b>目标：</b>${block.goalIds.map(escapeHtml).join("、")}</p></div>`;
+    case "acceptanceCriterion":
+      return `<div class="wb-prd__card"><div><b>前置条件：</b>${renderPrdInlinesHtml(block.given)}</div><div><b>触发操作：</b>${renderPrdInlinesHtml(block.when)}</div><div><b>预期结果：</b>${renderPrdInlinesHtml(block.then)}</div></div>`;
+    case "flow":
+      return `<div class="wb-prd__card"><strong>${escapeHtml(block.title)}</strong><p><b>角色：</b>${escapeHtml(block.actor)} <b>触发：</b>${escapeHtml(block.trigger)}</p><ol>${block.steps.map((step) => `<li>${escapeHtml(step.text)}</li>`).join("")}</ol><p><b>结果：</b>${escapeHtml(block.outcome)}</p></div>`;
+    case "risk":
+      return `<div class="wb-prd__card"><p>${renderPrdInlinesHtml(block.description)}</p><p><b>可能性：</b>${escapeHtml(block.likelihood)} <b>影响：</b>${escapeHtml(block.impact)}</p><p><b>缓解：</b>${renderPrdInlinesHtml(block.mitigation)}</p></div>`;
+  }
+}
+
+function renderPrdInlinesHtml(inlines: readonly PrdInline[]) {
+  return inlines.map((inline) => {
+    if (inline.type === "link") return `<a href="${escapeHtml(inline.href)}">${escapeHtml(inline.text)}</a>`;
+    if (inline.type === "citation") return `<sup>[${escapeHtml(inline.label ?? inline.citationId)}]</sup>`;
+    if (inline.type === "reference") return `<span>[${escapeHtml(inline.label ?? inline.targetId)}]</span>`;
+    let text = escapeHtml(inline.text);
+    for (const mark of inline.marks) {
+      if (mark === "strong") text = `<strong>${text}</strong>`;
+      if (mark === "emphasis") text = `<em>${text}</em>`;
+      if (mark === "code") text = `<code>${text}</code>`;
+      if (mark === "strikethrough") text = `<s>${text}</s>`;
+    }
+    return text;
+  }).join("");
+}
+
+function renderPrdChannelTable(table: { title: string; rows: ReadonlyArray<{ sequence: number; channel: keyof typeof prdChannelLabels; enabled: boolean }> }) {
+  return `<h3>${escapeHtml(table.title)}</h3><table class="wb-prd__table"><thead><tr><th>序号</th><th>渠道</th><th>是否启用</th></tr></thead><tbody>${table.rows.map((row) => `<tr><td>${row.sequence}</td><td>${escapeHtml(prdChannelLabels[row.channel])}</td><td>${row.enabled ? "是" : "否"}</td></tr>`).join("")}</tbody></table>`;
+}
+
+function renderPrdDiagram(diagram: { title: string; description: string; nodes: ReadonlyArray<{ id: string; label: string; group: string | null }>; edges: ReadonlyArray<{ from: string; to: string; label: string | null }> }) {
+  return `<div class="wb-prd__diagram"><h3>${escapeHtml(diagram.title)}</h3><p>${escapeHtml(diagram.description)}</p><div class="wb-prd__diagram-grid">${diagram.nodes.map((node) => `<div class="wb-prd__diagram-node"><strong>${escapeHtml(node.label)}</strong>${node.group ? `<div class="wb-prd__muted">${escapeHtml(node.group)}</div>` : ""}</div>`).join("")}</div><ul>${diagram.edges.map((edge) => `<li>${escapeHtml(edge.from)} → ${escapeHtml(edge.to)}${edge.label ? `：${escapeHtml(edge.label)}` : ""}</li>`).join("")}</ul></div>`;
+}
+
+function renderPrdSafetyTable(rows: ReadonlyArray<{ sequence: number; applicability: string; remarks: string | null }>) {
+  return `<table class="wb-prd__safety"><thead><tr><th>序号</th><th>安全基线项</th><th>是否涉及</th><th>备注</th></tr></thead><tbody>${rows.map((row) => `<tr><td>${row.sequence}</td><td>${escapeHtml(prdSafetyBaselineItems[row.sequence - 1]?.requirement ?? "")}</td><td>${escapeHtml(row.applicability)}</td><td>${escapeHtml(row.remarks ?? "")}</td></tr>`).join("")}</tbody></table>`;
+}
+
+function renderPrdAssumptions(assumptions: ReadonlyArray<{ statement: string; status: string; impact: string; owner: string | null }>) {
+  if (assumptions.length === 0) return "";
+  return `<section class="wb-prd__assumptions"><h3>假设与未决事项</h3><ul>${assumptions.map((item) => `<li>${escapeHtml(item.statement)}（${escapeHtml(item.status)}，影响：${escapeHtml(item.impact)}${item.owner ? `，负责人：${escapeHtml(item.owner)}` : ""}）</li>`).join("")}</ul></section>`;
 }
 
 function renderDesignSystemArtifact(

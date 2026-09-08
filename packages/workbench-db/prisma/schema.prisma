@@ -295,6 +295,8 @@ enum ExportFormat {
   react
   figma
   mcp
+  docx
+  pdf
 }
 
 enum ExportPackaging {

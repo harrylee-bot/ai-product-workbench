@@ -85,9 +85,7 @@ function prdDocumentV2ToTiptap(document: PrdDocumentV2): JSONContent {
       ),
       section("v2:businessRequirements.pageLinks"),
       section("v2:businessRequirements.coreRules"),
-      section("v2:businessRequirements.flowAndPages", document.sections.businessRequirements.flowAndPages.diagrams.map((diagram) => (
-        fixedBlock(diagramText(diagram), "diagram")
-      ))),
+      section("v2:businessRequirements.flowAndPages"),
       section("v2:businessRequirements.acceptanceCriteria"),
       ...document.sections.businessRequirements.additionalSections.map((additionalSection, index) => {
         const key = `v2:businessRequirements.additionalSections.${index}`;
@@ -591,6 +589,20 @@ function blockFromTiptapNode(
 }
 
 function rebuildExistingBlock(block: PrdBlock, node: JSONContent): PrdBlock {
+  if ((block.type === "paragraph" || block.type === "heading")
+    && (node.type === "paragraph" || node.type === "heading")) {
+    return node.type === "heading"
+      ? { id: block.id, type: "heading", level: headingLevel(node), content: inlinesFromContent(node.content) }
+      : { id: block.id, type: "paragraph", content: inlinesFromContent(node.content) };
+  }
+  if ((block.type === "bulletList" || block.type === "orderedList")
+    && (node.type === "bulletList" || node.type === "orderedList")) {
+    return {
+      id: block.id,
+      type: node.type,
+      items: listItemsFromTiptap(node, block.items),
+    };
+  }
   switch (block.type) {
     case "paragraph":
       return { ...block, content: inlinesFromContent(node.content) };
@@ -633,7 +645,7 @@ function listItemsFromTiptap(
       ?? (originalIndex === null ? undefined : existingItems[originalIndex]);
     return [{
       id: original?.id ?? editorIrId(fieldId, `list-item-${index + 1}`),
-      content: inlinesFromContent(field.content),
+      content: inlinesFromTextBlocks(item),
     }];
   });
 }
@@ -666,7 +678,7 @@ function tableFromTiptap(
         const field = firstTextBlock(row.content?.[cellIndex]);
         return {
           columnId: column.id,
-          content: inlinesFromContent(field?.content),
+          content: inlinesFromTextBlocks(row.content?.[cellIndex]),
         };
       }),
     };
@@ -679,7 +691,7 @@ function stringListFromCard(cardNode: JSONContent, listId: string): string[] {
   if (!list || (list.type !== "bulletList" && list.type !== "orderedList")) return [];
   return (list.content ?? []).flatMap((item) => {
     const field = firstTextBlock(item);
-    return field ? [stringFromContent(field.content)] : [];
+    return field ? [inlinePlainText(inlinesFromTextBlocks(item))] : [];
   });
 }
 
@@ -691,6 +703,7 @@ function flowStepsFromCard(
     stringAttribute(node, "dataId") === `${block.id}-steps`
   ));
   if (!list || list.type !== "orderedList") return [];
+  const fallbackRequirementIds = [...new Set(block.steps.flatMap((step) => step.requirementIds))];
   return (list.content ?? []).flatMap((item, index) => {
     const field = firstTextBlock(item);
     if (!field) return [];
@@ -698,8 +711,8 @@ function flowStepsFromCard(
     const original = originalIndex === null ? undefined : block.steps[originalIndex];
     return [{
       id: original?.id ?? editorIrId(stringAttribute(field, "dataId"), `${block.id}-step-${index + 1}`),
-      text: stringFromContent(field.content),
-      requirementIds: original?.requirementIds ?? [],
+      text: inlinePlainText(inlinesFromTextBlocks(item)),
+      requirementIds: original?.requirementIds ?? fallbackRequirementIds,
     }];
   });
 }
@@ -763,6 +776,20 @@ function firstTextBlock(node: JSONContent | undefined): JSONContent | null {
     if (found) return found;
   }
   return null;
+}
+
+function inlinesFromTextBlocks(node: JSONContent | undefined): PrdInline[] {
+  const fields = textBlocks(node);
+  return fields.flatMap((field, index) => [
+    ...(index === 0 ? [] : [{ type: "text" as const, text: "\n", marks: [] as PrdTextMark[] }]),
+    ...inlinesFromContent(field.content),
+  ]);
+}
+
+function textBlocks(node: JSONContent | undefined): JSONContent[] {
+  if (!node) return [];
+  if (node.type === "paragraph" || node.type === "heading") return [node];
+  return (node.content ?? []).flatMap((child) => textBlocks(child));
 }
 
 function headingLevel(node: JSONContent): 2 | 3 {

@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { unzipSync } from "fflate";
 import { boardNodeProtocol, type PrototypeDocument } from "@workbench/workbench-contracts";
+import { prdDocumentV2Example } from "@workbench/workbench-contracts/test-fixtures";
 import {
   buildExport,
   renderExportHtml,
@@ -21,6 +22,21 @@ describe("Workbench export core", () => {
     expect(html).toContain("action-next");
     expect(html).toContain('data-wb-screen="screen-success"');
     expect(html).not.toContain("https://");
+  });
+
+  it("renders PRD artifacts as structured requirement documents instead of raw JSON", () => {
+    const request = exportRequest("html");
+    const artifact = request.source.artifacts[0]!;
+    artifact.kind = "prd";
+    artifact.schemaVersion = 2;
+    artifact.title = prdDocumentV2Example.title;
+    artifact.content = structuredClone(prdDocumentV2Example);
+    const rendered = renderExportHtml(request);
+    expect(rendered.bodyMarkup).toContain("wb-prd__cover");
+    expect(rendered.bodyMarkup).toContain("版本历史");
+    expect(rendered.bodyMarkup).toContain("目 录");
+    expect(rendered.bodyMarkup).toContain("wb-prd__safety");
+    expect(rendered.bodyMarkup).not.toContain("wb-json");
   });
 
   it("packages HTML as a deterministic ZIP without creating a second render", async () => {

@@ -37,6 +37,8 @@ export class ExportCapabilitiesConfig {
         react: localAvailable,
         figma: localAvailable,
         mcp: localAvailable,
+        docx: localAvailable,
+        pdf: localAvailable,
       },
       packaging: {
         single_file: localAvailable,

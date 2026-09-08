@@ -58,6 +58,17 @@ describe("requestedArtifactKindsForPrompt", () => {
     })).toEqual(["prd"]);
   });
 
+  it("does not route negated or contextual UI mentions to Prototype", () => {
+    expect(requestedArtifactKindsForPrompt("只写需求文档，不要生成原型"))
+      .toEqual(["prd"]);
+    expect(requestedArtifactKindsForPrompt("生成需求文档，不要生成 UI"))
+      .toEqual(["prd"]);
+    expect(requestedArtifactKindsForPrompt("Create a PRD, no prototype"))
+      .toEqual(["prd"]);
+    expect(requestedArtifactKindsForPrompt("把需求文档中的界面说明写详细"))
+      .toEqual(["prd"]);
+  });
+
   it("defaults a new product prompt to Prototype outside PRD context", () => {
     expect(requestedArtifactKindsForPrompt("做一个活动管理后台"))
       .toEqual(["prototype"]);

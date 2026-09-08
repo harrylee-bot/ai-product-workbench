@@ -190,12 +190,18 @@ export function exportFailure(record: Pick<ExportJobRecord, "failureCode" | "fai
     : { code: record.failureCode, detail: record.failureDetail };
 }
 
-export function outputFileName(exportId: string, format: ExportFormat, packaging: ExportPackaging = format === "html" ? "single_file" : "zip") {
+export function outputFileName(
+  exportId: string,
+  format: ExportFormat,
+  packaging: ExportPackaging = format === "html" || format === "docx" || format === "pdf" ? "single_file" : "zip",
+) {
   const extension: Record<ExportFormat, string> = {
     html: "html",
     react: "zip",
     figma: "zip",
     mcp: "zip",
+    docx: "docx",
+    pdf: "pdf",
   };
   const effectiveExtension = packaging === "zip" ? "zip" : extension[format];
   return `workbench-export-${exportId}.${effectiveExtension}`;

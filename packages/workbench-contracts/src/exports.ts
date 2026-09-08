@@ -7,7 +7,7 @@ import {
   revisionSchema,
 } from "./common.js";
 
-export const exportFormatSchema = z.enum(["html", "react", "figma", "mcp"]);
+export const exportFormatSchema = z.enum(["html", "react", "figma", "mcp", "docx", "pdf"]);
 /** A build format describes the shape of the generated project. Packaging is
  * deliberately separate so adding a delivery action never creates another
  * renderer or another ExportJob. */
@@ -124,6 +124,8 @@ export const exportCapabilitiesSchema = z.object({
     react: exportCapabilitySchema,
     figma: figmaExportCapabilitySchema,
     mcp: exportCapabilitySchema,
+    docx: exportCapabilitySchema,
+    pdf: exportCapabilitySchema,
   }).strict(),
   packaging: z.object({
     single_file: exportCapabilitySchema,

@@ -56,7 +56,9 @@ export type WorkbenchExportTarget =
   | "Bolt"
   | "Download .zip"
   | "Copy code"
-  | "React";
+  | "React"
+  | "Download Word"
+  | "Download PDF";
 
 export type WorkbenchExportTargetDescriptor = {
   format: ExportFormat;
@@ -905,6 +907,8 @@ export function exportTargetDescriptor(target: WorkbenchExportTarget): Workbench
     "Download .zip": { format: "html", packaging: "zip", delivery: "download", externalTarget: null },
     "Copy code": { format: "html", packaging: "single_file", delivery: "clipboard", externalTarget: null },
     React: { format: "react", packaging: "zip", delivery: "download", externalTarget: null },
+    "Download Word": { format: "docx", packaging: "single_file", delivery: "download", externalTarget: null },
+    "Download PDF": { format: "pdf", packaging: "single_file", delivery: "download", externalTarget: null },
   };
   return descriptors[target];
 }
@@ -996,6 +1000,8 @@ function exportFileName(projectId: string, job: ExportJob): string {
     html: "html",
     react: "zip",
     mcp: "zip",
+    docx: "docx",
+    pdf: "pdf",
   };
   const extension = job.packaging === "zip" ? "zip" : extensions[job.format];
   return `workbench-${projectId}-${job.id}.${extension}`;

@@ -20,6 +20,15 @@ const pairedArtifactsPattern = new RegExp(
 );
 const artifactOutputActionPattern = new RegExp(artifactOutputAction, "iu");
 const artifactClauseBoundaryPattern = /[。！？.!?；;\r\n]+/u;
+const prototypeTermPattern = /\bui\b|\bprototype\b|界面|原型/iu;
+const prototypeOutputPattern = new RegExp(
+  `(?:${artifactOutputAction})[^。！？.!?；;\r\n]{0,24}(?:${prototypeTermPattern.source})`,
+  "iu",
+);
+const negatedArtifactPattern = new RegExp(
+  `(?:不要|无需|不需要|不用|禁止|不生成|不制作|\\bno\\b|\\bwithout\\b|\\bnot\\b|\\bdon't\\b|\\bdo\\s+not\\b)[^，,。！？.!?；;\\r\\n]{0,24}(?:${prdArtifactTerm}|${prototypeArtifactTerm})`,
+  "giu",
+);
 
 function explicitlyRequestsBothAcrossClauses(prompt: string): boolean {
   let sawExplicitPrdClause = false;
@@ -45,8 +54,15 @@ export function requestedArtifactKindsForPrompt(
   prompt: string,
   options: { prdContext?: boolean } = {},
 ): StartRunRequest["requestedArtifactKinds"] {
-  const requestsPrototype = /\bui\b|\bprototype\b|界面|原型/iu.test(prompt);
+  prompt = prompt.replace(negatedArtifactPattern, "");
   const requestsPrd = /需求(?:文档|说明书|说明)|需求规格(?:说明书)?|\bprd\b|product\s+requirements?\s+document/iu.test(prompt);
+  const hasPrototypeTerm = prototypeTermPattern.test(prompt);
+  const requestsPrototype = hasPrototypeTerm
+    && (
+      prototypeOutputPattern.test(prompt)
+      || pairedArtifactsPattern.test(prompt)
+      || !requestsPrd
+    );
   const explicitlyRequestsBoth = requestsPrd
     && requestsPrototype
     && (
