@@ -10040,6 +10040,8 @@ components:
         - react
         - figma
         - mcp
+        - docx
+        - pdf
     ExportPackaging:
       type: string
       enum:
@@ -11692,11 +11694,17 @@ components:
               $ref: "#/components/schemas/AvailableExportCapability"
             mcp:
               $ref: "#/components/schemas/AvailableExportCapability"
+            docx:
+              $ref: "#/components/schemas/AvailableExportCapability"
+            pdf:
+              $ref: "#/components/schemas/AvailableExportCapability"
           required:
             - html
             - react
             - figma
             - mcp
+            - docx
+            - pdf
           additionalProperties: false
         packaging:
           type: object
