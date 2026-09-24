@@ -14,6 +14,8 @@ import * as commonSchemas from "./common.js";
 import * as designSystemSchemas from "./design-systems.js";
 import * as designPresetSchemas from "./design-presets.js";
 import * as fileSchemas from "./files.js";
+import * as finalizationSchemas from "./finalizations.js";
+import * as documentSchemas from "./documents.js";
 import * as exportSchemas from "./exports.js";
 import * as previewSchemas from "./previews.js";
 import {
@@ -97,6 +99,8 @@ function buildSchemaCatalog() {
     ...schemasFrom(canvasAgentSchemas),
     ...schemasFrom(bootstrapSchemas),
     ...schemasFrom(fileSchemas),
+    ...schemasFrom(finalizationSchemas),
+    ...schemasFrom(documentSchemas),
     ...schemasFrom(exportSchemas),
     ...schemasFrom(previewSchemas),
     ...schemasFrom(identitySchemas),
@@ -226,6 +230,7 @@ type ReviewedEffect = Readonly<{
 }>;
 
 const reviewedEffectSchemas: readonly ReviewedEffect[] = [
+  { label: "BusinessDocument.body", schema: documentSchemas.businessDocumentSchema, description: "A business document contains exactly one nonempty text or Markdown body; enforced by the runtime Zod contract." },
   { label: "ApprovalOptions.uniqueIds", schema: approvalSchemas.approvalOptionsSchema, description: "Approval option ids are unique; enforced by the runtime Zod contract." },
   { label: "ArtifactVersionBlobDetail.schemaVersion", schema: artifactSchemas.artifactVersionBlobDetailSchema, description: "PRD and prototype blob details require schemaVersion 1; enforced by the runtime Zod contract." },
   { label: "ArtifactCreation.currentVersion", schema: artifactSchemas.artifactCreationSchema, description: "The created image Artifact current pointer and returned ready blob-backed ArtifactVersion are the same immutable version; enforced by the runtime Zod contract." },
@@ -249,6 +254,7 @@ const reviewedEffectSchemas: readonly ReviewedEffect[] = [
   { label: "ExportCapability.state", schema: exportSchemas.exportCapabilitySchema, description: "Export capability availability, authentication state, and stable reason codes remain mutually consistent; enforced by the runtime Zod contract." },
   { label: "ExportJob.lifecycle", schema: exportSchemas.exportJobSchema, description: "Export timestamps, output, and failure fields match the durable lifecycle state; enforced by the runtime Zod contract." },
   { label: "CreateExportJobRequest.figmaOptions", schema: exportSchemas.createExportJobRequestSchema, description: "Figma Export uses the fixed versioned Workbench Importer contract and does not accept client-controlled converter options." },
+  { label: "CreateProjectPreviewRequest.initialScreen", schema: previewSchemas.createProjectPreviewRequestSchema, description: "Project Preview keeps initial-screen intent separate from single-screen Export cropping, and only Artifact selections can name an initial screen." },
   { label: "ExportBoardNodeIds.canonicalOrder", schema: exportSchemas.exportBoardNodeIdsSchema, description: "Board node ids are unique and in canonical ascending order; enforced by the runtime Zod contract and database constraint." },
   { label: "ExternalExportDelivery.lifecycle", schema: exportSchemas.externalExportDeliverySchema, description: "External delivery confirmation, execution timestamps, remote references, and failure state match the durable lifecycle; enforced by the runtime Zod contract and database constraints." },
   { label: "KnowledgeToolResponse.orderedItems", schema: knowledgeSchemas.knowledgeToolResponseSchema, description: "Knowledge result ranks are contiguous in response order and citation ids are unique; enforced by the runtime Zod contract." },
@@ -273,6 +279,7 @@ const reviewedEffectSchemas: readonly ReviewedEffect[] = [
   { label: "PublicProjectRelease.integrity", schema: releaseSchemas.publicProjectReleaseSchema, description: "Public release lifecycle, Board snapshot, artifact pins, and manifest references agree without exposing creator principal ids." },
   { label: "PrototypeState.values.maxProperties", schema: prototypeSchemas.prototypeStateSchema.shape.values, description: "A Prototype state defines at most 200 explicitly named runtime values; enforced by the runtime Zod contract." },
   { label: "PrototypeStateOverride.nonEmpty", schema: prototypeSchemas.prototypeStateOverrideSchema, description: "A state override changes at least one property in addition to nodeId; enforced by the runtime Zod contract." },
+  { label: "PrototypeExpression.boundedTree", schema: prototypeSchemas.prototypeExpressionSchema, description: "Prototype expressions use only the declared operators, at most eight levels and 64 total nodes, and one to sixteen operands per and/or. A bounded pre-parse walk enforces tree limits before structural parsing; variable references and operand/result types are checked by the Prototype document contract." },
   { label: "PrototypeOpenUrl.safeScheme", schema: prototypeSchemas.prototypeOpenUrlSchema, description: "Prototype external navigation is restricted to canonical HTTP(S), mailto, and tel URLs; stricter mail recipient, query, and telephone syntax is enforced by the runtime Zod contract." },
   { label: "PrototypeDocument.semanticGraph", schema: prototypeSchemas.prototypeDocumentSchema, description: "Prototype screens, nodes, states, actions, bindings, assets, tokens, and motions form a valid semantic graph; enforced by the runtime Zod contract." },
   { label: "PublicPrototypeDocument.semanticGraph", schema: prototypeSchemas.publicPrototypeDocumentSchema, description: "Public Prototype projections preserve the same semantic graph after private Blob identities are removed." },
@@ -623,6 +630,36 @@ function annotateOpenApiStructure() {
   applyOpenApiMetadata(prdSchemas.prdInlineMarksSchema, { uniqueItems: true });
   applyOpenApiMetadata(prototypeSchemas.prototypeStateOverrideSchema, { minProperties: 2 });
   applyOpenApiMetadata(prototypeSchemas.prototypeStateSchema.shape.values, { maxProperties: 200 });
+  // zod-to-openapi 7.3.4 recomputes referenced schema metadata recursively.
+  // Describe these finite levels with references so each level is generated once.
+  const expressionObject = (kind: string, properties: Record<string, unknown>) => ({
+    type: "object",
+    properties: { kind: { type: "string", enum: [kind] }, ...properties },
+    required: ["kind", ...Object.keys(properties)],
+    additionalProperties: false,
+  });
+  for (let depth = 1; depth <= prototypeSchemas.PROTOTYPE_EXPRESSION_MAX_DEPTH; depth += 1) {
+    const child = { $ref: `#/components/schemas/PrototypeExpressionDepth${depth - 1}` };
+    const oneOf = [
+      expressionObject("literal", { value: { $ref: "#/components/schemas/PrototypeRuntimeValue" } }),
+      expressionObject("variable", {
+        path: { type: "string", pattern: "^[A-Za-z][A-Za-z0-9_]*(?:\\.[A-Za-z][A-Za-z0-9_]*)*$", maxLength: 500 },
+      }),
+      ...(depth === 1 ? [] : [
+        expressionObject("contains", { left: child, right: child }),
+        expressionObject("equals", { left: child, right: child }),
+        expressionObject("and", { operands: { type: "array", items: child, minItems: 1, maxItems: prototypeSchemas.PROTOTYPE_EXPRESSION_MAX_OPERANDS } }),
+        expressionObject("or", { operands: { type: "array", items: child, minItems: 1, maxItems: prototypeSchemas.PROTOTYPE_EXPRESSION_MAX_OPERANDS } }),
+        expressionObject("not", { operand: child }),
+      ]),
+    ];
+    const schema = (prototypeSchemas as unknown as Record<string, ZodTypeAny>)[`prototypeExpressionDepth${depth}Schema`]!;
+    applyOpenApiMetadata(schema, { type: "object", oneOf });
+  }
+  applyOpenApiMetadata(prototypeSchemas.prototypeExpressionSchema, {
+    type: "object",
+    allOf: [{ $ref: `#/components/schemas/PrototypeExpressionDepth${prototypeSchemas.PROTOTYPE_EXPRESSION_MAX_DEPTH}` }],
+  });
 
   const runShape = unwrapToObject(runSchemas.runSchema).shape;
   applyOpenApiMetadata(runShape.sources, {

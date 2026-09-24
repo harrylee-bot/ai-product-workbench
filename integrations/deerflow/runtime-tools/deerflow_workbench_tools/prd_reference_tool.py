@@ -46,7 +46,7 @@ PRD_REFERENCE_FILES: Final[Mapping[PrdReferencePath, PrdReferenceSpec]] = Mappin
         physical_path=Path(
             "/app/skills/public/workbench/references/prd-runtime-result.schema.json",
         ),
-        sha256="bd2f09b81bf8538a33ccf9eb0942d364c23dedf071979dad991fe09812f9e747",
+        sha256="09a620e90af5cf28e307922e080782e91b232d4b213e470dbd3e43d690361ba3",
     ),
 })
 
@@ -57,7 +57,7 @@ def workbench_prd_reference_read(
     description: str,
     path: PrdReferencePath,
 ) -> str:
-    """Read one complete, pinned PRD reference for an authorized PRD-only Run.
+    """Read one complete, pinned PRD reference for a Run that requests a PRD.
 
     Args:
         description: Explain briefly why this PRD reference is being read.
@@ -74,7 +74,7 @@ def workbench_prd_reference_read(
         or any(not isinstance(kind, str) for kind in requested_artifact_kinds)
     ):
         raise ValueError("WORKBENCH_REQUESTED_ARTIFACT_KINDS_INVALID")
-    if requested_artifact_kinds != ["prd"]:
+    if "prd" not in requested_artifact_kinds:
         raise ValueError("WORKBENCH_PRD_REFERENCE_TOOL_NOT_AUTHORIZED")
 
     if not isinstance(path, str):

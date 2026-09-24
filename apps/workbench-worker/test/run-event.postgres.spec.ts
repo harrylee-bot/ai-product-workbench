@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { PrismaClient } from "@workbench/workbench-db";
+import { seedReadyKnowledge } from "../../../scripts/test-support/knowledge-fixture.mjs";
 
 const databaseUrl = process.env.WORKBENCH_TEST_DATABASE_URL;
 const describeWithPostgres = databaseUrl ? describe : describe.skip;
@@ -97,6 +98,7 @@ async function seedFixture(db: PrismaClient) {
     });
     await tx.run.create({
       data: {
+        knowledgeReleaseId: await seedReadyKnowledge(tx),
         id: runId,
         projectId,
         threadId,

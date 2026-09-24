@@ -1,6 +1,11 @@
 import {
   boardNodeProtocol,
+  messageDeltaMaxLength,
 } from "@workbench/workbench-contracts";
+// Publication orchestration is tested here; receipt verification has its own boundary suite.
+vi.mock("../src/runs/generation-knowledge-evidence.js", () => ({
+  assertGenerationKnowledgeEvidence: vi.fn(async () => undefined),
+}));
 import { prdDocumentV2Example } from "@workbench/workbench-contracts/test-fixtures";
 import {
   boardPlacementsForArtifact,
@@ -19,8 +24,15 @@ import {
 } from "../src/runs/run-processor.js";
 import { PrismaCanvasToolGrantIssuer } from "../src/runtime/canvas-tool-grant.service.js";
 import { prototypeScreenProjectionChecksum } from "../src/runs/prototype-patch-applier.js";
-import { RuntimeSubmissionUnknownError } from "../src/runtime/runtime.port.js";
+import {
+  RuntimeSubmissionUnknownError,
+  type RuntimeCancellationResult,
+  type RuntimePort,
+  type RuntimeSubmissionState,
+} from "../src/runtime/runtime.port.js";
 import { RuntimeLivenessError } from "../src/runtime/runtime-liveness.js";
+import { RuntimeProviderContentFilterError } from "../src/runtime/runtime-provider-content-filter-error.js";
+import { runtimeProviderCancellationUnconfirmedCode } from "../src/runs/runtime-cancellation-state.js";
 import { runtimePrdResultFixture } from "./runtime-prd-result.fixture.js";
 
 const now = new Date("2026-07-12T00:00:00.000Z");
@@ -30,7 +42,49 @@ const executionClaim = {
   ownerId: "runtime-worker:test",
   epoch: 1,
 };
+const providerCleanupClaim = {
+  ...executionClaim,
+  ownerId: "runtime-cleanup:test",
+  epoch: 2,
+};
+function providerCancellationOperationStubs(externalRunId: string | null) {
+  return {
+    claimProviderCancellation: vi.fn(async () => ({
+      disposition: "claimed" as const,
+      claim: providerCleanupClaim,
+    })),
+    releaseProviderCancellation: vi.fn(async () => undefined),
+    startProviderCancellationOperation: vi.fn(async (
+      _runId: string,
+      _attemptId: string,
+      hardDeadlineMs: number,
+    ) => ({
+      runId: executionClaim.runId,
+      attemptId: executionClaim.attemptId,
+      epoch: 1,
+      externalRunId,
+      deadlineAt: new Date(Date.now() + hardDeadlineMs),
+      monotonicDeadlineAtMs: performance.now() + hardDeadlineMs,
+    })),
+    finishProviderCancellationOperation: vi.fn(async () => true),
+    settleProviderCancellationOperation: vi.fn(async () => "finished" as const),
+  };
+}
 const noKnowledgeToolGrants = () => ({ issue: vi.fn(async () => null) });
+const runtimeBindingMetadata = (ownerId = "principal-thread-owner") => ({
+  workbenchProjectId: "project-1",
+  workbenchThreadId: "thread-1",
+  workbenchPrincipalId: ownerId,
+});
+const runtimeBindingRecord = (ownerId = "principal-binding-owner") => ({
+  id: "binding-1",
+  adapter: "deerflow",
+  externalThreadId: "external-thread-1",
+  metadata: runtimeBindingMetadata(ownerId),
+});
+const runtimeAttemptBinding = (ownerId = "principal-binding-owner") => ({
+  runtimeBinding: { metadata: runtimeBindingMetadata(ownerId) },
+});
 const prototypePatchCoordinator = () => ({
   persistPatch: vi.fn(),
   loadRunBaselinesTx: vi.fn(async () => []),
@@ -51,6 +105,45 @@ const prototypePatchCoordinator = () => ({
 });
 
 describe("Runtime retry classification", () => {
+  it("exposes a stable provider-filter failure without retrying or leaking provider metadata", () => {
+    const error = new RuntimeProviderContentFilterError();
+    expect(isRetryableRuntimeError(error)).toBe(false);
+    expect(runtimeExecutionErrorCode(error)).toBe("RUNTIME_PROVIDER_CONTENT_FILTERED");
+    expect(publicErrorMessage(error)).toBe("模型服务商拦截了本次输出，任务已停止。");
+    expect(runtimeExecutionErrorCode(new Error("RUNTIME_PROVIDER_CONTENT_FILTERED")))
+      .toBe("RUNTIME_EXECUTION_FAILED");
+  });
+
+  it("persists the provider-filter code, safe message and terminal flag on the Run and SSE event", async () => {
+    const tx = eventTransaction();
+    const { processor } = processorWithTransaction(tx);
+    const error = new RuntimeProviderContentFilterError();
+
+    await processor.failRun("run-1", "runtime-attempt-1", error, isRetryableRuntimeError(error));
+
+    const failure = {
+      errorCode: "RUNTIME_PROVIDER_CONTENT_FILTERED",
+      errorDetail: "模型服务商拦截了本次输出，任务已停止。",
+      errorRetryable: false,
+    };
+    expect(tx.run.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ status: "failed", ...failure }),
+    }));
+    expect(tx.runtimeAttempt.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ status: "failed", ...failure }),
+    }));
+    expect(tx.runEvent.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        type: "run.failed",
+        payload: {
+          code: failure.errorCode,
+          message: failure.errorDetail,
+          retryable: false,
+        },
+      }),
+    });
+  });
+
   it("does not retry deterministic stream protocol or identity failures", () => {
     expect(isRetryableRuntimeError(new Error("DEERFLOW_STREAM_END_INVALID"))).toBe(false);
     expect(isRetryableRuntimeError(new Error("RUNTIME_EXTERNAL_EVENT_IDENTITY_CONFLICT")))
@@ -116,6 +209,36 @@ describe("Runtime retry classification", () => {
       .toBe("RUNTIME_PROVIDER_STATE_TERMINAL_ATTEMPT");
     expect(publicErrorMessage(prismaError)).not.toContain("runtimeProviderState.update");
   });
+
+  it("publishes only controlled error codes and rejects provider text at every nesting depth", () => {
+    const secrets = [
+      "Bearer provider-bearer-secret",
+      `wbkg1.${"a".repeat(64)}.${"b".repeat(43)}`,
+      `wbct1.${"c".repeat(64)}.${"d".repeat(43)}`,
+      "postgresql://runtime:database-secret@postgres.internal/workbench",
+      "prompt: reproduce the customer's private roadmap",
+      "response body: upstream returned private generated content",
+    ];
+    for (const secret of secrets) {
+      expect(publicErrorMessage(new Error(secret))).toBe("Runtime execution failed");
+      expect(publicErrorMessage(new Error("SDK request failed", {
+        cause: new Error(secret),
+      }))).toBe("Runtime execution failed");
+    }
+
+    const liveness = new RuntimeLivenessError("RUNTIME_PROVIDER_STREAM_IDLE_TIMEOUT", true);
+    const submissionUnknown = new RuntimeSubmissionUnknownError(
+      "RUNTIME_SUBMISSION_RECONCILIATION_UNAVAILABLE",
+      { cause: new Error(secrets.join(" ")) },
+    );
+    expect(publicErrorMessage(new Error("wrapper", { cause: liveness })))
+      .toBe("RUNTIME_PROVIDER_STREAM_IDLE_TIMEOUT");
+    expect(publicErrorMessage(new RuntimeCancelledError())).toBe("RUNTIME_CANCELLED");
+    expect(publicErrorMessage(submissionUnknown))
+      .toBe("RUNTIME_SUBMISSION_RECONCILIATION_UNAVAILABLE");
+    expect(runtimeExecutionErrorCode(submissionUnknown))
+      .toBe("RUNTIME_SUBMISSION_RECONCILIATION_UNAVAILABLE");
+  });
 });
 
 describe("Runtime wall-clock terminalization", () => {
@@ -130,9 +253,9 @@ describe("Runtime wall-clock terminalization", () => {
     const runtime = {
       execute: vi.fn(async () => new Promise<never>(() => undefined)),
       cancel: vi.fn(async () => ({
+        disposition: "cancelled" as const,
         externalRunId: "external-run-1",
         externalStatus: "interrupted",
-        found: true,
       })),
     };
     const db = {
@@ -153,6 +276,7 @@ describe("Runtime wall-clock terminalization", () => {
         ensure: ReturnType<typeof vi.fn>;
         claim: ReturnType<typeof vi.fn>;
         submissionContext: ReturnType<typeof vi.fn>;
+        executionLivenessClock: ReturnType<typeof vi.fn>;
         providerTextState: ReturnType<typeof vi.fn>;
         attachExternalRun: ReturnType<typeof vi.fn>;
       };
@@ -160,11 +284,7 @@ describe("Runtime wall-clock terminalization", () => {
     Object.assign(internals, {
       prepare: vi.fn(async () => durableExecutionPrepared()),
       bindings: {
-        ensure: vi.fn(async () => ({
-          id: "binding-1",
-          adapter: "deerflow",
-          externalThreadId: "external-thread-1",
-        })),
+        ensure: vi.fn(async () => runtimeBindingRecord()),
       },
       attempts: {
         ensure: vi.fn(async () => ({ id: "runtime-attempt-1", startedAt: now })),
@@ -175,11 +295,13 @@ describe("Runtime wall-clock terminalization", () => {
           externalRunId: "external-run-1",
           lastExternalEventId: null,
         })),
+        executionLivenessClock: vi.fn(async () => ({ databaseNow: now, startedAt: now })),
         providerTextState: vi.fn(async () => emptyProviderTextState()),
         attachExternalRun: vi.fn(async () => undefined),
+        ...providerCancellationOperationStubs("external-run-1"),
       },
     });
-    const failRun = vi.spyOn(internals, "failRun").mockResolvedValue(undefined);
+    const failRun = vi.spyOn(internals, "failRun").mockResolvedValue("terminalized");
 
     const execution = processor.execute("run-1", [], undefined, {
       retryCount: 0,
@@ -189,7 +311,13 @@ describe("Runtime wall-clock terminalization", () => {
     for (let index = 0; index < 10 && runtime.execute.mock.calls.length === 0; index += 1) {
       await Promise.resolve();
     }
-    expect(runtime.execute).toHaveBeenCalledTimes(1);
+    expect(runtime.execute).toHaveBeenCalledWith(
+      expect.objectContaining({
+        runtimeTransportOwnerId: "principal-binding-owner",
+      }),
+      expect.any(Object),
+      expect.any(AbortSignal),
+    );
     await vi.advanceTimersByTimeAsync(899);
     expect(runtime.cancel).not.toHaveBeenCalled();
     await vi.advanceTimersByTimeAsync(1);
@@ -202,6 +330,7 @@ describe("Runtime wall-clock terminalization", () => {
       expect.objectContaining({
         runId: "run-1",
         runtimeAttemptId: "runtime-attempt-1",
+        runtimeTransportOwnerId: "principal-binding-owner",
         externalThreadId: "external-thread-1",
         externalRunId: "external-run-1",
       }),
@@ -214,7 +343,418 @@ describe("Runtime wall-clock terminalization", () => {
       expect.objectContaining({ code: "RUNTIME_EXECUTION_WALL_CLOCK_EXCEEDED" }),
       false,
       executionClaim,
+      {
+        code: "RUNTIME_PROVIDER_CANCELLATION_UNCONFIRMED",
+        detailCode: "RUNTIME_EXECUTION_WALL_CLOCK_EXCEEDED",
+        submissionUnknown: false,
+      },
     );
+  });
+
+  it("terminalizes an expired UNKNOWN attempt instead of resetting its retry budget", async () => {
+    const harness = wallClockRecoveryHarness({
+      startedAt: now,
+      submissions: [{
+        mode: "reconcile",
+        providerIdempotencyKey: "wbrt:test-attempt-key",
+      }],
+      execute: async () => new Promise<never>(() => undefined),
+      cancel: async () => ({
+        disposition: "not_found",
+        externalRunId: null,
+        externalStatus: null,
+      }),
+    });
+
+    const execution = harness.processor.execute("run-1", [], undefined, {
+      retryCount: 5,
+      retryLimit: 5,
+    });
+    const observed = execution.catch((error: unknown) => error);
+    for (let index = 0; index < 10 && harness.runtime.execute.mock.calls.length === 0; index += 1) {
+      await Promise.resolve();
+    }
+    await vi.advanceTimersByTimeAsync(900);
+    await expect(observed).resolves.toMatchObject({
+      code: "RUNTIME_EXECUTION_WALL_CLOCK_EXCEEDED",
+      retryable: false,
+    });
+
+    expect(harness.attempts.claim).toHaveBeenCalledTimes(1);
+    expect(harness.runtime.execute).toHaveBeenCalledTimes(1);
+    expect(harness.attempts.markSubmissionUnknown).not.toHaveBeenCalled();
+    expect(harness.attempts.recordRetryableError).not.toHaveBeenCalled();
+    expect(harness.failRun).toHaveBeenCalledWith(
+      "run-1",
+      "runtime-attempt-1",
+      expect.objectContaining({ code: "RUNTIME_EXECUTION_WALL_CLOCK_EXCEEDED" }),
+      false,
+      executionClaim,
+      {
+        code: "RUNTIME_PROVIDER_CANCELLATION_UNCONFIRMED",
+        detailCode: "RUNTIME_EXECUTION_WALL_CLOCK_EXCEEDED",
+        submissionUnknown: true,
+      },
+    );
+  });
+
+  it("terminalizes an expired joined attempt when its final cleanup also times out", async () => {
+    let providerCancelSignal: AbortSignal | undefined;
+    const harness = wallClockRecoveryHarness({
+      startedAt: new Date(now.getTime() - 900),
+      submissions: [{
+        mode: "join",
+        providerIdempotencyKey: "wbrt:test-attempt-key",
+        externalRunId: "external-run-1",
+        lastExternalEventId: null,
+      }],
+      execute: async () => new Promise<never>(() => undefined),
+      cancel: async (_cancellation, _onExternalRunRecovered, signal) => {
+        providerCancelSignal = signal;
+        return new Promise<never>(() => undefined);
+      },
+    });
+
+    const execution = harness.processor.execute("run-1", [], undefined, {
+      retryCount: 5,
+      retryLimit: 5,
+    });
+    const observed = execution.catch((error: unknown) => error);
+    for (let index = 0; index < 10 && harness.runtime.execute.mock.calls.length === 0; index += 1) {
+      await Promise.resolve();
+    }
+    await vi.advanceTimersByTimeAsync(100);
+    expect(harness.runtime.cancel).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(99);
+    expect(providerCancelSignal?.aborted).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
+
+    await expect(observed).resolves.toMatchObject({
+      code: "RUNTIME_EXECUTION_WALL_CLOCK_EXCEEDED",
+      retryable: false,
+    });
+    expect(providerCancelSignal?.aborted).toBe(false);
+    expect(harness.attempts.recordRetryableError).not.toHaveBeenCalled();
+    expect(harness.failRun).toHaveBeenCalledWith(
+      "run-1",
+      "runtime-attempt-1",
+      expect.objectContaining({ code: "RUNTIME_EXECUTION_WALL_CLOCK_EXCEEDED" }),
+      false,
+      executionClaim,
+      {
+        code: "RUNTIME_PROVIDER_CANCELLATION_UNCONFIRMED",
+        detailCode: "RUNTIME_EXECUTION_WALL_CLOCK_EXCEEDED",
+        submissionUnknown: false,
+      },
+    );
+  });
+
+  it("terminalizes an expired submit intent only when it was never authorized", async () => {
+    const execute = vi.fn<RuntimePort["execute"]>(async () => {
+      throw new Error("runtime.execute must not run for an expired pending submission");
+    });
+    const harness = wallClockRecoveryHarness({
+      startedAt: new Date(now.getTime() - 900),
+      submissions: [{
+        mode: "submit",
+        providerIdempotencyKey: "wbrt:test-attempt-key",
+      }],
+      execute,
+      cancel: async () => ({
+        disposition: "not_found",
+        externalRunId: null,
+        externalStatus: null,
+      }),
+    });
+
+    await expect(harness.processor.execute("run-1", [], undefined, {
+      retryCount: 5,
+      retryLimit: 5,
+    })).rejects.toMatchObject({
+      code: "RUNTIME_EXECUTION_WALL_CLOCK_EXCEEDED",
+      retryable: false,
+    });
+
+    expect(execute).not.toHaveBeenCalled();
+    expect(harness.attempts.authorizeSubmission).not.toHaveBeenCalled();
+    expect(harness.runtime.cancel).not.toHaveBeenCalled();
+    expect(harness.failRun).toHaveBeenCalledWith(
+      "run-1",
+      "runtime-attempt-1",
+      expect.objectContaining({ code: "RUNTIME_EXECUTION_WALL_CLOCK_EXCEEDED" }),
+      false,
+      executionClaim,
+    );
+  });
+});
+
+describe("Runtime provider liveness retry exhaustion", () => {
+  it("confirms provider interruption before failing an exhausted stream-idle Run", async () => {
+    const idleTimeout = new RuntimeLivenessError(
+      "RUNTIME_PROVIDER_STREAM_IDLE_TIMEOUT",
+      true,
+    );
+    const harness = runtimeLivenessHarness({
+      executionError: idleTimeout,
+      submission: {
+        mode: "join",
+        providerIdempotencyKey: "wbrt:test-attempt-key",
+        externalRunId: "external-run-1",
+        lastExternalEventId: "provider-event-7",
+      },
+      cancel: async () => ({
+        disposition: "cancelled",
+        externalRunId: "external-run-1",
+        externalStatus: "interrupted",
+      }),
+    });
+
+    await expect(harness.processor.execute("run-1", [], undefined, {
+      retryCount: 5,
+      retryLimit: 5,
+    })).rejects.toBe(idleTimeout);
+
+    expect(harness.runtime.cancel).toHaveBeenCalledWith(
+      expect.objectContaining({
+        runtimeAttemptId: "runtime-attempt-1",
+        externalThreadId: "external-thread-1",
+        externalRunId: "external-run-1",
+      }),
+      expect.any(Function),
+      expect.any(AbortSignal),
+    );
+    expect(harness.failRun).toHaveBeenCalledWith(
+      "run-1",
+      "runtime-attempt-1",
+      idleTimeout,
+      true,
+      executionClaim,
+      {
+        code: "RUNTIME_PROVIDER_CANCELLATION_UNCONFIRMED",
+        detailCode: "RUNTIME_PROVIDER_STREAM_IDLE_TIMEOUT",
+        submissionUnknown: false,
+      },
+    );
+    expect(harness.attempts.recordRetryableError).not.toHaveBeenCalled();
+    expect(harness.attempts.markSubmissionUnknown).not.toHaveBeenCalled();
+  });
+
+  it("terminalizes an exhausted ambiguous submission when metadata lookup finds no Run", async () => {
+    const submissionTimeout = new RuntimeLivenessError(
+      "RUNTIME_PROVIDER_SUBMISSION_TIMEOUT",
+      true,
+    );
+    const ambiguity = new RuntimeSubmissionUnknownError("RUNTIME_SUBMISSION_UNKNOWN", {
+      cause: submissionTimeout,
+    });
+    const harness = runtimeLivenessHarness({
+      executionError: ambiguity,
+      submission: {
+        mode: "submit",
+        providerIdempotencyKey: "wbrt:test-attempt-key",
+      },
+      submissionStarted: true,
+      cancel: async () => ({
+        disposition: "not_found",
+        externalRunId: null,
+        externalStatus: null,
+      }),
+    });
+
+    await expect(harness.processor.execute("run-1", [], undefined, {
+      retryCount: 5,
+      retryLimit: 5,
+    })).rejects.toBe(submissionTimeout);
+
+    expect(harness.attempts.authorizeSubmission).toHaveBeenCalledWith(executionClaim);
+    expect(harness.runtime.cancel).toHaveBeenCalledWith(
+      expect.objectContaining({ externalRunId: null }),
+      expect.any(Function),
+      expect.any(AbortSignal),
+    );
+    expect(harness.attempts.markSubmissionUnknown).not.toHaveBeenCalled();
+    expect(harness.attempts.recordRetryableError).not.toHaveBeenCalled();
+    expect(harness.failRun).toHaveBeenCalledWith(
+      "run-1",
+      "runtime-attempt-1",
+      submissionTimeout,
+      true,
+      executionClaim,
+      {
+        code: "RUNTIME_PROVIDER_CANCELLATION_UNCONFIRMED",
+        detailCode: "RUNTIME_PROVIDER_SUBMISSION_TIMEOUT",
+        submissionUnknown: true,
+      },
+    );
+  });
+
+  it("terminalizes a known external Run when final provider cancellation times out", async () => {
+    vi.useFakeTimers();
+    try {
+      const idleTimeout = new RuntimeLivenessError(
+        "RUNTIME_PROVIDER_STREAM_IDLE_TIMEOUT",
+        true,
+      );
+      let providerSignal: AbortSignal | undefined;
+      const harness = runtimeLivenessHarness({
+        executionError: idleTimeout,
+        submission: {
+          mode: "join",
+          providerIdempotencyKey: "wbrt:test-attempt-key",
+          externalRunId: "external-run-1",
+          lastExternalEventId: null,
+        },
+        deadlineCancelMs: 100,
+        cancel: async (_cancellation, _onExternalRunRecovered, signal) => {
+          providerSignal = signal;
+          return new Promise<never>(() => undefined);
+        },
+      });
+
+      const execution = harness.processor.execute("run-1", [], undefined, {
+        retryCount: 5,
+        retryLimit: 5,
+      });
+      const observed = execution.catch((error: unknown) => error);
+      for (let index = 0; index < 25 && harness.runtime.cancel.mock.calls.length === 0; index += 1) {
+        await Promise.resolve();
+      }
+      expect(harness.runtime.cancel).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(99);
+      expect(providerSignal?.aborted).toBe(false);
+      await vi.advanceTimersByTimeAsync(1);
+
+      await expect(observed).resolves.toBe(idleTimeout);
+      expect(providerSignal?.aborted).toBe(false);
+      expect(harness.attempts.recordRetryableError).not.toHaveBeenCalled();
+      expect(harness.attempts.markSubmissionUnknown).not.toHaveBeenCalled();
+      expect(harness.failRun).toHaveBeenCalledWith(
+        "run-1",
+        "runtime-attempt-1",
+        idleTimeout,
+        true,
+        executionClaim,
+        {
+          code: "RUNTIME_PROVIDER_CANCELLATION_UNCONFIRMED",
+          detailCode: "RUNTIME_PROVIDER_STREAM_IDLE_TIMEOUT",
+          submissionUnknown: false,
+        },
+      );
+      await vi.advanceTimersByTimeAsync(44_900);
+      expect(providerSignal?.aborted).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("records late provider success as settled and terminalizes with the local failure", async () => {
+    const submissionTimeout = new RuntimeLivenessError(
+      "RUNTIME_PROVIDER_SUBMISSION_TIMEOUT",
+      true,
+    );
+    const ambiguity = new RuntimeSubmissionUnknownError("RUNTIME_SUBMISSION_UNKNOWN", {
+      cause: submissionTimeout,
+    });
+    const harness = runtimeLivenessHarness({
+      executionError: ambiguity,
+      submission: {
+        mode: "submit",
+        providerIdempotencyKey: "wbrt:test-attempt-key",
+      },
+      submissionStarted: true,
+      cancel: async (_cancellation, onExternalRunRecovered) => {
+        await onExternalRunRecovered("external-run-late");
+        return {
+          disposition: "already_terminal",
+          externalRunId: "external-run-late",
+          externalStatus: "success",
+        };
+      },
+    });
+
+    await expect(harness.processor.execute("run-1", [], undefined, {
+      retryCount: 5,
+      retryLimit: 5,
+    })).rejects.toBe(submissionTimeout);
+
+    expect(harness.attempts.attachExternalRunForCleanup).toHaveBeenCalledWith(
+      executionClaim.attemptId,
+      1,
+      "external-run-late",
+    );
+    expect(harness.attempts.recordRetryableError).not.toHaveBeenCalled();
+    expect(harness.attempts.attachExternalRunForCleanup.mock.invocationCallOrder[0]).toBeGreaterThan(
+      harness.failRun.mock.invocationCallOrder[0]!,
+    );
+    expect(harness.attempts.markSubmissionUnknown).not.toHaveBeenCalled();
+    expect(harness.failRun).toHaveBeenCalledWith(
+      "run-1",
+      "runtime-attempt-1",
+      submissionTimeout,
+      true,
+      executionClaim,
+      {
+        code: "RUNTIME_PROVIDER_CANCELLATION_UNCONFIRMED",
+        detailCode: "RUNTIME_PROVIDER_SUBMISSION_TIMEOUT",
+        submissionUnknown: true,
+      },
+    );
+  });
+
+  it("persists a recovered external Run id after cleanup timeout releases the claim", async () => {
+    vi.useFakeTimers();
+    try {
+      const idleTimeout = new RuntimeLivenessError(
+        "RUNTIME_PROVIDER_STREAM_IDLE_TIMEOUT",
+        true,
+      );
+      const providerCancellation = deferred<RuntimeCancellationResult>();
+      let recoverExternalRun!: () => Promise<void>;
+      const harness = runtimeLivenessHarness({
+        executionError: idleTimeout,
+        submission: {
+          mode: "submit",
+          providerIdempotencyKey: "wbrt:test-attempt-key",
+        },
+        submissionStarted: true,
+        deadlineCancelMs: 100,
+        cancel: async (_cancellation, onExternalRunRecovered) => {
+          recoverExternalRun = async () => {
+            await onExternalRunRecovered("external-run-late");
+            providerCancellation.resolve({
+              disposition: "already_terminal",
+              externalRunId: "external-run-late",
+              externalStatus: "success",
+            });
+          };
+          return providerCancellation.promise;
+        },
+      });
+
+      const execution = harness.processor.execute("run-1", [], undefined, {
+        retryCount: 5,
+        retryLimit: 5,
+      });
+      const observed = execution.catch((error: unknown) => error);
+      for (let index = 0; index < 10 && harness.runtime.cancel.mock.calls.length === 0; index += 1) {
+        await Promise.resolve();
+      }
+      await vi.advanceTimersByTimeAsync(100);
+
+      await expect(observed).resolves.toBe(idleTimeout);
+      expect(harness.failRun).toHaveBeenCalledTimes(1);
+      await recoverExternalRun();
+      expect(harness.attempts.attachExternalRunForCleanup).toHaveBeenCalledWith(
+        "runtime-attempt-1",
+        1,
+        "external-run-late",
+      );
+      expect(harness.attempts.attachExternalRunForCleanup.mock.invocationCallOrder[0]).toBeGreaterThan(
+        harness.failRun.mock.invocationCallOrder[0]!,
+      );
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 
@@ -224,9 +764,9 @@ function durableExecutionPrepared() {
       id: "run-1",
       attempt: 1,
       createdById: "principal-1",
-      knowledgeReleaseId: null,
+      knowledgeReleaseId: "knowledge-release-1",
     },
-    thread: { id: "thread-1" },
+    thread: { id: "thread-1", createdById: "principal-thread-owner" },
     project: { id: "project-1" },
     entryId: "entry-1",
     request: {
@@ -258,6 +798,139 @@ function emptyProviderTextState(visibleAssistantText = "") {
     redactionBuffer: "",
     committedFinalization: null,
   };
+}
+
+type RuntimeCancelStub = (
+  cancellation: unknown,
+  onExternalRunRecovered: (externalRunId: string) => Promise<void>,
+  signal?: AbortSignal,
+) => Promise<RuntimeCancellationResult>;
+
+function wallClockRecoveryHarness(input: {
+  startedAt: Date;
+  submissions: RuntimeSubmissionState[];
+  execute: RuntimePort["execute"];
+  cancel: RuntimeCancelStub;
+}) {
+  const runtime = {
+    execute: vi.fn(input.execute),
+    cancel: vi.fn(input.cancel),
+  };
+  const db = {
+    run: { findUnique: vi.fn(async () => ({ status: "running" })) },
+  };
+  const processor = new RunProcessor(
+    db as never,
+    runtime as never,
+    noKnowledgeToolGrants(),
+    undefined,
+    prototypePatchCoordinator() as never,
+    undefined,
+    { maximumWallClockMs: 900, deadlineCancelMs: 100 },
+  );
+  let submissionIndex = 0;
+  const attempts = {
+    ensure: vi.fn(async () => ({ id: "runtime-attempt-1", startedAt: input.startedAt })),
+    claim: vi.fn(async () => executionClaim),
+    submissionContext: vi.fn(async () => (
+      input.submissions[Math.min(submissionIndex++, input.submissions.length - 1)]!
+    )),
+    executionLivenessClock: vi.fn(async () => ({
+      databaseNow: now,
+      startedAt: input.startedAt,
+    })),
+    providerTextState: vi.fn(async () => emptyProviderTextState()),
+    authorizeSubmission: vi.fn(async () => undefined),
+    attachExternalRun: vi.fn(async () => undefined),
+    attachExternalRunForCleanup: vi.fn(async (_attemptId, _epoch, externalRunId) => ({
+      externalRunId,
+      operationCurrent: true,
+    })),
+    ...providerCancellationOperationStubs(
+      "externalRunId" in input.submissions[0]! ? input.submissions[0]!.externalRunId : null,
+    ),
+    markSubmissionUnknown: vi.fn(async () => undefined),
+    recordRetryableError: vi.fn(async () => undefined),
+  };
+  const internals = processor as unknown as ProcessorInternals & {
+    bindings: { ensure: ReturnType<typeof vi.fn> };
+    attempts: typeof attempts;
+  };
+  const publishResult = vi.fn(async () => undefined);
+  Object.assign(internals, {
+    prepare: vi.fn(async () => durableExecutionPrepared()),
+    bindings: {
+      ensure: vi.fn(async () => runtimeBindingRecord()),
+    },
+    attempts,
+    publishResult,
+  });
+  const failRun = vi.spyOn(internals, "failRun").mockResolvedValue("terminalized");
+  return { attempts, failRun, processor, publishResult, runtime };
+}
+
+function runtimeLivenessHarness(input: {
+  executionError: Error;
+  submission: RuntimeSubmissionState;
+  submissionStarted?: boolean;
+  cancel: RuntimeCancelStub;
+  deadlineCancelMs?: number;
+}) {
+  const runtime = {
+    execute: vi.fn(async (_execution: unknown, observer: {
+      onSubmissionStarted(): Promise<void>;
+    }) => {
+      if (input.submissionStarted) await observer.onSubmissionStarted();
+      throw input.executionError;
+    }),
+    cancel: vi.fn(input.cancel),
+  };
+  const db = {
+    run: { findUnique: vi.fn(async () => ({ status: "running" })) },
+  };
+  const processor = new RunProcessor(
+    db as never,
+    runtime as never,
+    noKnowledgeToolGrants(),
+    undefined,
+    prototypePatchCoordinator() as never,
+    undefined,
+    {
+      maximumWallClockMs: 10_000,
+      deadlineCancelMs: input.deadlineCancelMs ?? 100,
+    },
+  );
+  const attempts = {
+    ensure: vi.fn(async () => ({ id: "runtime-attempt-1" })),
+    claim: vi.fn(async () => executionClaim),
+    submissionContext: vi.fn(async () => input.submission),
+    executionLivenessClock: vi.fn(async () => ({ databaseNow: now, startedAt: now })),
+    providerTextState: vi.fn(async () => emptyProviderTextState()),
+    authorizeSubmission: vi.fn(async () => undefined),
+    attachExternalRun: vi.fn(async () => undefined),
+    attachExternalRunForCleanup: vi.fn(async (_attemptId, _epoch, externalRunId) => ({
+      externalRunId,
+      operationCurrent: true,
+    })),
+    ...providerCancellationOperationStubs(
+      "externalRunId" in input.submission ? input.submission.externalRunId : null,
+    ),
+    markSubmissionUnknown: vi.fn(async () => undefined),
+    recordRetryableError: vi.fn(async () => undefined),
+  };
+  const internals = processor as unknown as ProcessorInternals & {
+    bindings: { ensure: ReturnType<typeof vi.fn> };
+    attempts: typeof attempts;
+  };
+  Object.assign(internals, {
+    prepare: vi.fn(async () => durableExecutionPrepared()),
+    bindings: {
+      ensure: vi.fn(async () => runtimeBindingRecord()),
+    },
+    attempts,
+  });
+  const failRun = vi.spyOn(internals, "failRun").mockResolvedValue("terminalized");
+  return { attempts, failRun, processor, runtime };
 }
 
 function deferred<T>() {
@@ -805,7 +1478,7 @@ describe("Runtime Artifact revision publication", () => {
           status: "ready",
           content: baseContent,
           contentBlobId: null,
-          knowledgeReleaseId: null,
+          knowledgeReleaseId: "knowledge-release-1",
           assets: [],
         })),
         findFirst: vi.fn(async () => ({
@@ -893,7 +1566,7 @@ describe("Runtime Artifact revision publication", () => {
           status: "ready",
           content: baseContent,
           contentBlobId: null,
-          knowledgeReleaseId: null,
+          knowledgeReleaseId: "knowledge-release-1",
         })),
         findFirst: vi.fn(async () => ({
           id: "version-prd-next",
@@ -948,7 +1621,7 @@ describe("Runtime Artifact revision publication", () => {
     const { draft, processor, target, tx } = revisionHarness();
     await expect(processor.promoteStagedArtifactRevision(
       tx,
-      { id: "run-edit", projectId: "project-1", knowledgeReleaseId: null },
+      { id: "run-edit", projectId: "project-1", knowledgeReleaseId: "knowledge-release-1" },
       "board-1",
       draft,
       0,
@@ -982,7 +1655,7 @@ describe("Runtime Artifact revision publication", () => {
 
     await expect(processor.promoteStagedArtifactRevision(
       tx,
-      { id: "run-edit", projectId: "project-1", knowledgeReleaseId: null },
+      { id: "run-edit", projectId: "project-1", knowledgeReleaseId: "knowledge-release-1" },
       "board-1",
       draft,
       0,
@@ -1003,7 +1676,7 @@ describe("Runtime Artifact revision publication", () => {
 
     await expect(processor.promoteStagedArtifactRevision(
       tx,
-      { id: "run-edit", projectId: "project-1", knowledgeReleaseId: null },
+      { id: "run-edit", projectId: "project-1", knowledgeReleaseId: "knowledge-release-1" },
       "board-1",
       draft,
       0,
@@ -1030,7 +1703,7 @@ describe("Runtime Artifact revision publication", () => {
 
     await expect(processor.promoteStagedArtifactRevision(
       tx,
-      { id: "run-edit", projectId: "project-1", knowledgeReleaseId: null },
+      { id: "run-edit", projectId: "project-1", knowledgeReleaseId: "knowledge-release-1" },
       "board-1",
       changedDraft,
       0,
@@ -1051,7 +1724,7 @@ describe("Runtime Artifact revision publication", () => {
     const { draft, processor, tx } = revisionHarness(nextContent);
     await expect(processor.promoteStagedArtifactRevision(
       tx,
-      { id: "run-edit", projectId: "project-1", knowledgeReleaseId: null },
+      { id: "run-edit", projectId: "project-1", knowledgeReleaseId: "knowledge-release-1" },
       "board-1",
       draft,
       0,
@@ -1069,7 +1742,7 @@ describe("Runtime Artifact revision publication", () => {
     const { draft, processor, tx } = revisionHarness(nextContent);
     await expect(processor.promoteStagedArtifactRevision(
       tx,
-      { id: "run-edit", projectId: "project-1", knowledgeReleaseId: null },
+      { id: "run-edit", projectId: "project-1", knowledgeReleaseId: "knowledge-release-1" },
       "board-1",
       draft,
       0,
@@ -1110,7 +1783,7 @@ describe("Runtime Artifact revision publication", () => {
       status: "ready",
       content: baseContent,
       contentBlobId: null,
-      knowledgeReleaseId: null,
+      knowledgeReleaseId: "knowledge-release-1",
       assets: [],
     });
     tx.$queryRaw.mockImplementation(async (query: unknown) => (
@@ -1140,7 +1813,7 @@ describe("Runtime Artifact revision publication", () => {
 
     await expect(processor.promoteStagedArtifactRevision(
       tx,
-      { id: "run-edit", projectId: "project-1", knowledgeReleaseId: null },
+      { id: "run-edit", projectId: "project-1", knowledgeReleaseId: "knowledge-release-1" },
       "board-1",
       draft,
       0,
@@ -1372,6 +2045,7 @@ describe("Runtime Artifact draft staging and publication", () => {
       artifactVersion: {
         findFirst: vi.fn(async () => staged),
         create: vi.fn(),
+        updateMany: vi.fn(async () => ({ count: 1 })),
         update: vi.fn(async () => ({ id: "version-staged" })),
       },
     });
@@ -1412,6 +2086,7 @@ describe("Runtime Artifact draft staging and publication", () => {
         runtimeDraftIndex: 0,
         runtimeDraftTitle: draft.title,
         knowledgeReleaseId: "knowledge-release-1",
+        sourcePrdVersionId: null,
       },
       include: {
         artifact: {
@@ -1469,7 +2144,7 @@ describe("Runtime Artifact draft staging and publication", () => {
       projectId: "project-1",
       attempt: 1,
       request: {
-        prompt: "Generate the requirement document",
+        prompt: "为已登录消费者建设端内订单状态通知设置功能，沿用现有通知设置和订单中心分类，支持状态通知、失败重试与权限反馈，并生成需求说明书",
         modelId: "quality",
         workflow: "generate",
         generationIntent: null,
@@ -1492,6 +2167,86 @@ describe("Runtime Artifact draft staging and publication", () => {
     expect(tx.artifact.create).not.toHaveBeenCalled();
     expect(tx.artifactVersion.create).not.toHaveBeenCalled();
     expect(tx.runEvent.create).not.toHaveBeenCalled();
+  });
+
+  it("re-emits a staged PRD in the linked terminal result after Prototype stages", async () => {
+    const draft = runtimePrdResultFixture.artifacts[0]!;
+    const existing = {
+      id: "version-prd", artifactId: "artifact-prd", projectId: "project-1",
+      version: 1, schemaVersion: 2, status: "staging", content: draft.content, contentBlobId: null,
+      checksum: sha256Canonical(draft.content), citations: draft.citations, createdByRunId: "run-1",
+      runtimeDraftSourceId: "prd-checkpoint", runtimeDraftIndex: 0, runtimeDraftTitle: draft.title,
+      knowledgeReleaseId: "knowledge-release-1",
+      artifact: { id: "artifact-prd", kind: "prd", title: draft.title, currentVersionId: null },
+    };
+    const { processor, tx } = draftStagingHarness(existing);
+    const run = await tx.run.findUniqueOrThrow();
+    tx.run.findUniqueOrThrow.mockResolvedValue({
+      ...run, request: { ...run.request, requestedArtifactKinds: ["prd", "prototype"] },
+    });
+    tx.artifactVersion.update.mockResolvedValue(existing as never);
+    tx.runEvent.findMany.mockResolvedValue([{ payload: { attempt: 1, stage: "summarizing" } }]);
+    await processor.persistArtifactDraft(executionClaim, {
+      type: "artifact.draft", artifactIndex: 0, sourceEventId: "linked-terminal:prd",
+      draft, checkpointScreens: [],
+    }, [], []);
+    expect(tx.artifactVersion.create).not.toHaveBeenCalled();
+    expect(tx.artifactVersion.update).toHaveBeenCalledWith(expect.objectContaining({
+      where: { id: "version-prd" },
+      data: expect.objectContaining({ content: draft.content }),
+    }));
+    expect(tx.runEvent.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ sourceId: "linked-terminal:prd", type: "artifact.draft.created" }),
+    }));
+  });
+
+  it("pins a linked Prototype to the PRD staged by the same Run", async () => {
+    const { processor, tx } = draftStagingHarness();
+    const run = await tx.run.findUniqueOrThrow();
+    tx.run.findUniqueOrThrow.mockResolvedValue({
+      ...run, request: { ...run.request, requestedArtifactKinds: ["prd", "prototype"] },
+    });
+    const findFirst = vi.fn().mockResolvedValue({ id: "version-prd" });
+    Object.assign(tx.artifactVersion, { findFirst });
+    const { event, source } = createDraftFixture();
+    await processor.persistArtifactDraft(executionClaim, { ...event, artifactIndex: 1 }, [source], []);
+    expect(findFirst).toHaveBeenCalledWith(expect.objectContaining({
+      where: { createdByRunId: "run-1", projectId: "project-1", runtimeDraftIndex: 0, artifact: { kind: "prd" } },
+    }));
+    expect(tx.artifactVersion.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ runtimeDraftIndex: 1, sourcePrdVersionId: "version-prd" }),
+    }));
+  });
+
+  it("retains the source PRD version when AI revises a linked Prototype", async () => {
+    const { processor, tx } = draftStagingHarness();
+    const target = { artifactId: "artifact-new", artifactVersionId: "version-base", screenIds: ["screen-home"] };
+    const run = await tx.run.findUniqueOrThrow();
+    tx.run.findUniqueOrThrow.mockResolvedValue({
+      ...run, request: { ...run.request, workflow: "edit", sourceIds: [], artifactTargets: [target] },
+    });
+    const query = tx.$queryRaw.getMockImplementation()!;
+    tx.$queryRaw.mockImplementation((statement: unknown) => rawSqlText(statement).includes('FROM "artifacts"')
+      ? Promise.resolve([{ id: target.artifactId, kind: "prototype", title: "Linked", currentVersionId: target.artifactVersionId }])
+      : query(statement));
+    const content = { ...prototypeDocument(), revision: 2 };
+    tx.artifactVersion.findUnique.mockResolvedValueOnce({
+      id: target.artifactVersionId, artifactId: target.artifactId, projectId: "project-1",
+      status: "ready", version: 1, schemaVersion: 1, content: prototypeDocument(), contentBlobId: null,
+      assets: [], knowledgeReleaseId: "knowledge-release-1", sourcePrdVersionId: "version-prd",
+    }).mockResolvedValueOnce(null);
+    Object.assign(tx.artifactVersion, { findFirst: vi.fn().mockResolvedValue({ version: 1 }) });
+    await processor.persistArtifactDraft(executionClaim, {
+      type: "artifact.draft", artifactIndex: 0, sourceEventId: "revise-linked",
+      draft: { kind: "prototype", schemaVersion: 1, title: "Revised", content, citations: runtimePrdResultFixture.artifacts[0]!.citations,
+        operation: { kind: "revise", target } },
+      checkpointScreens: content.screens.map(({ id }) => ({
+        screenId: id, revision: 0, checksum: prototypeScreenProjectionChecksum(content, id, 0),
+      })),
+    }, [], []);
+    expect(tx.artifactVersion.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ version: 2, sourcePrdVersionId: "version-prd" }),
+    }));
   });
 
   it("authorizes a Generate create draft from independently pinned source target assets", async () => {
@@ -1768,7 +2523,7 @@ describe("Runtime Artifact draft staging and publication", () => {
       projectId: "project-1",
       attempt: 1,
       request: {
-        prompt: "Generate the requirement document",
+        prompt: "为已登录消费者建设端内订单状态通知设置功能，沿用现有通知设置和订单中心分类，支持状态通知、失败重试与权限反馈，并生成需求说明书",
         modelId: "quality",
         workflow: "generate",
         generationIntent: null,
@@ -1778,7 +2533,7 @@ describe("Runtime Artifact draft staging and publication", () => {
         artifactTargets: [],
         requestedArtifactKinds: ["prd"],
       },
-      knowledgeReleaseId: null,
+      knowledgeReleaseId: "knowledge-release-1",
     });
     tx.runEvent.findMany.mockResolvedValue([
       { payload: { attempt: 1, stage: "drafting-prd" } },
@@ -1985,7 +2740,7 @@ describe("Runtime Artifact draft staging and publication", () => {
     expect(tx.runEvent.create).not.toHaveBeenCalled();
   });
 
-  it("rejects final publication when its content differs from the latest staging checkpoint", async () => {
+  it("synchronizes a refined terminal Prototype over the latest staging checkpoint", async () => {
     const fixture = createDraftFixture();
     const staged = {
       id: "version-staged",
@@ -2008,16 +2763,31 @@ describe("Runtime Artifact draft staging and publication", () => {
     const { draft, processor, tx } = createPublicationHarness(staged);
     const mismatched = { ...draft, content: { ...draft.content, revision: 2 } };
 
-    await expect(processor.publishResult(executionClaim, "entry-1", "", {
+    await processor.publishResult(executionClaim, "entry-1", "", {
       protocol: "workbench.runtime.result.v1",
       message: "Done",
       artifacts: [mismatched],
-    })).rejects.toThrow("RUNTIME_FINAL_ARTIFACT_DIVERGED");
+    });
 
-    expect(tx.artifactVersion.update).not.toHaveBeenCalled();
-    expect(tx.artifact.update).not.toHaveBeenCalled();
-    expect(tx.boardNode.create).not.toHaveBeenCalled();
-    expect(tx.runEvent.create).not.toHaveBeenCalled();
+    expect(tx.artifactVersion.updateMany).toHaveBeenCalledWith({
+      where: {
+        id: "version-staged",
+        status: "staging",
+        checksum: sha256Canonical(fixture.content),
+      },
+      data: {
+        content: mismatched.content,
+        checksum: sha256Canonical(mismatched.content),
+        citations: [],
+        runtimeDraftTitle: mismatched.title,
+      },
+    });
+    expect(tx.artifactVersion.update).toHaveBeenCalledWith({
+      where: { id: "version-staged" },
+      data: { status: "ready" },
+    });
+    expect(tx.artifact.update).toHaveBeenCalled();
+    expect(tx.boardNode.create).toHaveBeenCalledTimes(mismatched.content.screens.length);
   });
 
   it("rejects final publication when the persisted staging checksum drifts despite unchanged content", async () => {
@@ -2062,6 +2832,10 @@ describe("Runtime Artifact draft staging and publication", () => {
 
 type ProcessorInternals = {
   prepare(runId: string, approvalIds: string[]): Promise<unknown>;
+  recoverPublishedSuccess(runId: string): Promise<{
+    runtimeAttemptId: string;
+    artifactCount: number;
+  } | null>;
   persistProgress(claim: typeof executionClaim, event: {
     type: "phase";
     phase: "generating";
@@ -2107,7 +2881,18 @@ type ProcessorInternals = {
     draft: unknown,
     artifactIndex: number,
   ): Promise<{ id: string; artifactId: string; version: number }>;
-  failRun(runId: string, runtimeAttemptId: string | null, error: unknown, retryable: boolean): Promise<void>;
+  failRun(
+    runId: string,
+    runtimeAttemptId: string | null,
+    error: unknown,
+    retryable: boolean,
+    claim?: typeof executionClaim | null,
+    context?: {
+      code: "RUNTIME_PROVIDER_CANCELLATION_UNCONFIRMED";
+      detailCode: string;
+      submissionUnknown: boolean;
+    } | null,
+  ): Promise<"terminalized" | "fenced">;
   finalizeCancellation(runId: string, reason: string, runtimeAttemptId?: string): Promise<void>;
 };
 
@@ -2300,11 +3085,18 @@ function rawSqlText(query: unknown): string {
 function eventTransaction() {
   let sequence = 0;
   return {
-    $queryRaw: vi.fn(async (query: unknown) => (
-      rawSqlText(query).includes('FROM "artifact_version_assets"')
-        ? []
-        : [{ id: "board-1", status: "running" }]
-    )),
+    $queryRaw: vi.fn(async (query: unknown) => {
+      const sql = rawSqlText(query);
+      if (sql.includes('FROM "artifact_version_assets"')) return [];
+      if (sql.includes("clock_timestamp()")) return [{ databaseNow: now }];
+      if (sql.includes('FROM "runs"')) {
+        return [{ status: "cancelling", startedAt: now }];
+      }
+      if (sql.includes('FROM "runtime_attempts"')) {
+        return [{ status: "running", startedAt: now, submissionUnknownAt: null }];
+      }
+      return [{ id: "board-1", status: "running" }];
+    }),
     run: {
       findUniqueOrThrow: vi.fn(async () => ({ status: "running" })),
       update: vi.fn(async () => eventRun(++sequence)),
@@ -2394,7 +3186,7 @@ function publishableRun() {
     status: "running",
     attempt: 1,
     projectId: "project-1",
-    knowledgeReleaseId: null,
+    knowledgeReleaseId: "knowledge-release-1",
     request: {
       prompt: "Build it",
       modelId: "quality",
@@ -2447,7 +3239,7 @@ function canvasDirectPublishHarness() {
     attempt: 1,
     projectId: "project-1",
     createdById: "principal-1",
-    knowledgeReleaseId: null,
+    knowledgeReleaseId: "knowledge-release-1",
     request: {
       prompt: "Edit the selected screen",
       modelId: "quality",
@@ -2518,7 +3310,7 @@ function canvasDirectPublishHarness() {
       status: "ready",
       content: baseContent,
       contentBlobId: null,
-      knowledgeReleaseId: null,
+      knowledgeReleaseId: "knowledge-release-1",
     })),
     updateMany: vi.fn(async ({ data }: { data: Record<string, unknown> }) => {
       stagedContent = data.content as typeof aiContent;
@@ -2714,6 +3506,69 @@ describe("Canvas Agent Run lifecycle", () => {
     expect(tx.canvasAgentSession.findUnique.mock.invocationCallOrder[0]).toBeLessThan(
       tx.$queryRaw.mock.invocationCallOrder[0]!,
     );
+    expect(tx.run.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("publishes a normal result after an unused Canvas session expires", async () => {
+    const tx = eventTransaction();
+    tx.run.findUniqueOrThrow.mockResolvedValue(publishableRun());
+    tx.canvasAgentSession.findUnique.mockResolvedValue({ id: "canvas-session-expired" });
+    tx.$queryRaw.mockResolvedValueOnce([{
+      id: "canvas-session-expired",
+      status: "expired",
+      boardId: "board-1",
+      boardRevision: 0,
+      canvasStateRevision: 0,
+    }]);
+    Object.assign(tx, {
+      threadEntry: { update: vi.fn(async () => ({})) },
+      board: { findUniqueOrThrow: vi.fn(async () => ({ id: "board-1" })) },
+      boardNode: {
+        findMany: vi.fn(async () => []),
+        aggregate: vi.fn(async () => ({ _max: { sortOrder: null } })),
+      },
+    });
+    const { processor } = processorWithTransaction(tx);
+
+    await processor.publishResult(executionClaim, "entry-1", "", {
+      protocol: "workbench.runtime.result.v1",
+      message: "Done",
+      artifacts: [],
+    });
+
+    expect(tx.canvasToolInvocation.findFirst).toHaveBeenNthCalledWith(2, {
+      where: { agentSessionId: "canvas-session-expired" },
+      select: { id: true },
+    });
+    expect(tx.run.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ status: "succeeded" }),
+    }));
+    expect(tx.canvasAgentSession.updateMany).not.toHaveBeenCalled();
+    expect(tx.canvasToolGrant.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("rejects an expired Canvas session that has any invocation history", async () => {
+    const tx = eventTransaction();
+    tx.run.findUniqueOrThrow.mockResolvedValue(publishableRun());
+    tx.canvasAgentSession.findUnique.mockResolvedValue({ id: "canvas-session-expired" });
+    tx.$queryRaw.mockResolvedValueOnce([{
+      id: "canvas-session-expired",
+      status: "expired",
+      boardId: "board-1",
+      boardRevision: 0,
+      canvasStateRevision: 0,
+    }]);
+    tx.canvasToolInvocation.findFirst
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({ id: "invocation-settled" });
+    const { processor } = processorWithTransaction(tx);
+
+    await expect(processor.publishResult(executionClaim, "entry-1", "", {
+      protocol: "workbench.runtime.result.v1",
+      message: "Done",
+      artifacts: [],
+    })).rejects.toThrow("CANVAS_AGENT_SESSION_PUBLISH_STATE_INVALID");
+
     expect(tx.run.updateMany).not.toHaveBeenCalled();
   });
 
@@ -3146,7 +4001,7 @@ describe("Run durable snapshots", () => {
       projectId: "project-1",
       threadId: "thread-1",
       createdById: "principal-1",
-      knowledgeReleaseId: null,
+      knowledgeReleaseId: "knowledge-release-1",
       designStyleSnapshot: snapshot,
       designStyleSnapshotSha256: sha256Canonical(snapshot),
       status: "running",
@@ -3204,7 +4059,7 @@ describe("Run durable snapshots", () => {
       projectId: "project-1",
       threadId: "thread-1",
       createdById: "principal-1",
-      knowledgeReleaseId: null,
+      knowledgeReleaseId: "knowledge-release-1",
       designStyleSnapshot: snapshot,
       designStyleSnapshotSha256: sha256Canonical(snapshot),
       status: "running",
@@ -3242,7 +4097,7 @@ describe("Run durable snapshots", () => {
       projectId: "project-1",
       threadId: "thread-1",
       createdById: "principal-1",
-      knowledgeReleaseId: null,
+      knowledgeReleaseId: "knowledge-release-1",
       designStyleSnapshot: snapshot,
       designStyleSnapshotSha256: sha256Canonical(snapshot),
       status: "queued",
@@ -3292,7 +4147,7 @@ describe("Run durable snapshots", () => {
       projectId: "project-1",
       threadId: "thread-1",
       createdById: "principal-1",
-      knowledgeReleaseId: null,
+      knowledgeReleaseId: "knowledge-release-1",
       designStyleSnapshot: snapshot,
       designStyleSnapshotSha256: "b".repeat(64),
       status: "queued",
@@ -3329,7 +4184,7 @@ describe("Run durable snapshots", () => {
       projectId: "project-1",
       threadId: "thread-1",
       createdById: "principal-1",
-      knowledgeReleaseId: null,
+      knowledgeReleaseId: "knowledge-release-1",
       status: "queued",
       attempt: 0,
       startedAt: null,
@@ -3386,7 +4241,7 @@ describe("Run durable snapshots", () => {
       projectId: "project-1",
       threadId: "thread-1",
       createdById: "principal-1",
-      knowledgeReleaseId: null,
+      knowledgeReleaseId: "knowledge-release-1",
       status: "queued",
       attempt: 0,
       startedAt: null,
@@ -3427,7 +4282,7 @@ describe("Run durable snapshots", () => {
       projectId: "project-1",
       threadId: "thread-1",
       createdById: "principal-1",
-      knowledgeReleaseId: null,
+      knowledgeReleaseId: "knowledge-release-1",
       status: "running",
       attempt: 2,
       startedAt: now,
@@ -3466,8 +4321,55 @@ describe("Run durable snapshots", () => {
     expect(tx.runEvent.create).not.toHaveBeenCalled();
   });
 
-  it("keeps a running run and its attempt non-terminal when a retry remains", async () => {
-    const retryableError = new Error("socket closed before the runtime stream completed");
+  it("recovers a committed successful result and its exact RuntimeAttempt", async () => {
+    const db = {
+      run: {
+        findUnique: vi.fn(async () => ({ status: "succeeded", attempt: 2, eventSequence: 9 })),
+      },
+      runtimeAttempt: {
+        findUnique: vi.fn(async () => ({
+          id: "runtime-attempt-2",
+          runId: "run-1",
+          attempt: 2,
+          status: "succeeded",
+        })),
+      },
+      runEvent: {
+        findMany: vi.fn(async () => [{
+          sequence: 9,
+          type: "run.completed",
+          payload: { artifactCount: 4 },
+        }]),
+      },
+    };
+    const processor = new RunProcessor(
+      db as never,
+      {} as never,
+      noKnowledgeToolGrants(),
+      undefined,
+      prototypePatchCoordinator() as never,
+    );
+    const internals = processor as unknown as ProcessorInternals;
+    vi.spyOn(internals, "prepare").mockResolvedValue(null);
+    const onRuntimeAttemptResolved = vi.fn();
+
+    await expect(processor.execute("run-1", [], undefined, undefined, {
+      onRuntimeAttemptResolved,
+    })).resolves.toEqual({ runId: "run-1", artifactCount: 4 });
+
+    expect(onRuntimeAttemptResolved).toHaveBeenCalledExactlyOnceWith("runtime-attempt-2");
+    expect(db.runEvent.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: {
+        runId: "run-1",
+        type: { in: ["run.completed", "run.failed", "run.cancelled"] },
+      },
+      take: 2,
+    }));
+  });
+
+  it.each(["transport", "terminal-provider"])("preserves the Run and selects the correct retry path (%s)", async (kind) => {
+    const retryableError = new Error(kind === "terminal-provider"
+      ? "RUNTIME_PROVIDER_TEMPORARILY_UNAVAILABLE" : "socket closed before the runtime stream completed");
     const runtime = {
       execute: vi.fn(async () => {
         throw retryableError;
@@ -3479,11 +4381,12 @@ describe("Run durable snapshots", () => {
       },
     };
     const knowledgeToolGrants = noKnowledgeToolGrants();
+    const canvasToolGrants = { issue: vi.fn(async () => null) };
     const processor = new RunProcessor(
       db as never,
       runtime as never,
       knowledgeToolGrants,
-      undefined,
+      canvasToolGrants,
       prototypePatchCoordinator() as never,
     );
     const internals = processor as unknown as ProcessorInternals & {
@@ -3497,15 +4400,16 @@ describe("Run durable snapshots", () => {
       };
     };
     const recordRetryableError = vi.fn(async () => undefined);
+    const rolloverTerminalProviderError = vi.fn(async () => ({ nextAttempt: 3 }));
     Object.assign(internals, {
       prepare: vi.fn(async () => ({
         run: {
           id: "run-1",
           attempt: 2,
           createdById: "principal-1",
-          knowledgeReleaseId: null,
+          knowledgeReleaseId: "knowledge-release-1",
         },
-        thread: { id: "thread-1" },
+        thread: { id: "thread-1", createdById: "principal-thread-owner" },
         project: { id: "project-1" },
         entryId: "entry-1",
         request: {
@@ -3520,11 +4424,7 @@ describe("Run durable snapshots", () => {
         previousAssistantText: "",
       })),
       bindings: {
-        ensure: vi.fn(async () => ({
-          id: "binding-1",
-          adapter: "deerflow",
-          externalThreadId: "external-thread-1",
-        })),
+        ensure: vi.fn(async () => runtimeBindingRecord()),
       },
       attempts: {
         ensure: vi.fn(async () => ({
@@ -3537,8 +4437,10 @@ describe("Run durable snapshots", () => {
           mode: "submit",
           providerIdempotencyKey: "wbrt:test-attempt-key",
         })),
+        executionLivenessClock: vi.fn(async () => ({ databaseNow: now, startedAt: now })),
         providerTextState: vi.fn(async () => emptyProviderTextState()),
         recordRetryableError,
+        rolloverTerminalProviderError,
       },
     });
     const failRun = vi.spyOn(internals, "failRun");
@@ -3546,17 +4448,35 @@ describe("Run durable snapshots", () => {
     await expect(processor.execute("run-1", [], undefined, { retryCount: 0, retryLimit: 2 }))
       .rejects.toBe(retryableError);
 
-    expect(recordRetryableError).toHaveBeenCalledWith(executionClaim, {
-      code: "RUNTIME_EXECUTION_RETRYABLE",
-      detail: retryableError.message,
-    });
+    if (kind === "terminal-provider") {
+      expect(rolloverTerminalProviderError).toHaveBeenCalledExactlyOnceWith(executionClaim, {
+        code: "RUNTIME_PROVIDER_TEMPORARILY_UNAVAILABLE",
+      });
+      expect(recordRetryableError).not.toHaveBeenCalled();
+    } else {
+      expect(recordRetryableError).toHaveBeenCalledWith(executionClaim, { code: "RUNTIME_EXECUTION_RETRYABLE" });
+      expect(rolloverTerminalProviderError).not.toHaveBeenCalled();
+    }
     expect(knowledgeToolGrants.issue).toHaveBeenCalledWith({
       runId: "run-1",
       runtimeAttemptId: "runtime-attempt-1",
       principalId: "principal-1",
       projectId: "project-1",
-      releaseId: null,
+      releaseId: "knowledge-release-1",
     });
+    expect(canvasToolGrants.issue).toHaveBeenCalledWith(expect.objectContaining({
+      principalId: "principal-1",
+      projectId: "project-1",
+      threadId: "thread-1",
+    }));
+    expect(internals.bindings.ensure).toHaveBeenCalledWith("thread-1", {
+      workbenchProjectId: "project-1",
+      workbenchThreadId: "thread-1",
+      workbenchPrincipalId: "principal-thread-owner",
+    }, expect.any(AbortSignal));
+    expect(runtime.execute).toHaveBeenCalledWith(expect.objectContaining({
+      runtimeTransportOwnerId: "principal-binding-owner",
+    }), expect.any(Object), expect.any(AbortSignal));
     expect(failRun).not.toHaveBeenCalled();
   });
 
@@ -3591,11 +4511,7 @@ describe("Run durable snapshots", () => {
     Object.assign(internals, {
       prepare: vi.fn(async () => durableExecutionPrepared()),
       bindings: {
-        ensure: vi.fn(async () => ({
-          id: "binding-1",
-          adapter: "deerflow",
-          externalThreadId: "external-thread-1",
-        })),
+        ensure: vi.fn(async () => runtimeBindingRecord()),
       },
       attempts: {
         // This row was read before claim and is intentionally stale.
@@ -3611,17 +4527,23 @@ describe("Run durable snapshots", () => {
           externalRunId: "external-run-authoritative",
           lastExternalEventId: "provider-event-7",
         })),
+        executionLivenessClock: vi.fn(async () => ({ databaseNow: now, startedAt: now })),
         providerTextState: vi.fn(async () => emptyProviderTextState()),
       },
       publishResult,
     });
 
-    await expect(processor.execute("run-1")).resolves.toEqual({
+    const onRuntimeAttemptResolved = vi.fn();
+    await expect(processor.execute("run-1", [], undefined, undefined, {
+      onRuntimeAttemptResolved,
+    })).resolves.toEqual({
       runId: "run-1",
       artifactCount: 0,
     });
+    expect(onRuntimeAttemptResolved).toHaveBeenCalledWith("runtime-attempt-1");
 
     expect(runtime.execute).toHaveBeenCalledWith(expect.objectContaining({
+      runtimeTransportOwnerId: "principal-binding-owner",
       submission: {
         mode: "join",
         providerIdempotencyKey: "wbrt:test-attempt-key",
@@ -3674,11 +4596,7 @@ describe("Run durable snapshots", () => {
     Object.assign(internals, {
       prepare: vi.fn(async () => prepared),
       bindings: {
-        ensure: vi.fn(async () => ({
-          id: "binding-1",
-          adapter: "deerflow",
-          externalThreadId: "external-thread-1",
-        })),
+        ensure: vi.fn(async () => runtimeBindingRecord()),
       },
       attempts: {
         ensure: vi.fn(async () => ({ id: "runtime-attempt-1" })),
@@ -3687,6 +4605,7 @@ describe("Run durable snapshots", () => {
           mode: "submit",
           providerIdempotencyKey: "wbrt:test-attempt-key",
         })),
+        executionLivenessClock: vi.fn(async () => ({ databaseNow: now, startedAt: now })),
         providerTextState: vi.fn(async () => emptyProviderTextState()),
       },
       persistProgress,
@@ -3755,11 +4674,7 @@ describe("Run durable snapshots", () => {
     Object.assign(internals, {
       prepare: vi.fn(async () => prepared),
       bindings: {
-        ensure: vi.fn(async () => ({
-          id: "binding-1",
-          adapter: "deerflow",
-          externalThreadId: "external-thread-1",
-        })),
+        ensure: vi.fn(async () => runtimeBindingRecord()),
       },
       attempts: {
         ensure: vi.fn(async () => ({ id: "runtime-attempt-1" })),
@@ -3768,6 +4683,7 @@ describe("Run durable snapshots", () => {
           mode: "submit",
           providerIdempotencyKey: "wbrt:test-attempt-key",
         })),
+        executionLivenessClock: vi.fn(async () => ({ databaseNow: now, startedAt: now })),
         providerTextState: vi.fn(async () => emptyProviderTextState()),
       },
       persistProgress,
@@ -3825,11 +4741,7 @@ describe("Run durable snapshots", () => {
     Object.assign(internals, {
       prepare: vi.fn(async () => prepared),
       bindings: {
-        ensure: vi.fn(async () => ({
-          id: "binding-1",
-          adapter: "deerflow",
-          externalThreadId: "external-thread-1",
-        })),
+        ensure: vi.fn(async () => runtimeBindingRecord()),
       },
       attempts: {
         ensure: vi.fn(async () => ({ id: "runtime-attempt-1" })),
@@ -3838,6 +4750,7 @@ describe("Run durable snapshots", () => {
           mode: "submit",
           providerIdempotencyKey: "wbrt:test-attempt-key",
         })),
+        executionLivenessClock: vi.fn(async () => ({ databaseNow: now, startedAt: now })),
         providerTextState: vi.fn(async () => emptyProviderTextState()),
       },
       persistProgress,
@@ -3883,11 +4796,7 @@ describe("Run durable snapshots", () => {
     Object.assign(internals, {
       prepare: vi.fn(async () => durableExecutionPrepared()),
       bindings: {
-        ensure: vi.fn(async () => ({
-          id: "binding-1",
-          adapter: "deerflow",
-          externalThreadId: "external-thread-1",
-        })),
+        ensure: vi.fn(async () => runtimeBindingRecord()),
       },
       attempts: {
         ensure: vi.fn(async () => ({ id: "runtime-attempt-1" })),
@@ -3896,6 +4805,7 @@ describe("Run durable snapshots", () => {
           mode: "reconcile",
           providerIdempotencyKey: "wbrt:test-attempt-key",
         })),
+        executionLivenessClock: vi.fn(async () => ({ databaseNow: now, startedAt: now })),
         providerTextState: vi.fn(async () => emptyProviderTextState()),
         markSubmissionUnknown,
       },
@@ -3909,8 +4819,14 @@ describe("Run durable snapshots", () => {
 
     expect(markSubmissionUnknown).toHaveBeenCalledWith(
       executionClaim,
-      "provider lookup unavailable",
     );
+    expect(runtime.execute).toHaveBeenCalledWith(expect.objectContaining({
+      runtimeTransportOwnerId: "principal-binding-owner",
+      submission: {
+        mode: "reconcile",
+        providerIdempotencyKey: "wbrt:test-attempt-key",
+      },
+    }), expect.any(Object), expect.any(AbortSignal));
     expect(knowledgeToolGrants.issue).not.toHaveBeenCalled();
     expect(canvasToolGrants.issue).not.toHaveBeenCalled();
     expect(failRun).not.toHaveBeenCalled();
@@ -3976,7 +4892,7 @@ describe("Run durable snapshots", () => {
           id: "run-1",
           attempt: 1,
           createdById: "principal-1",
-          knowledgeReleaseId: null,
+          knowledgeReleaseId: "knowledge-release-1",
         },
         thread: { id: "thread-1" },
         project: { id: "project-1" },
@@ -3999,11 +4915,7 @@ describe("Run durable snapshots", () => {
         previousAssistantText: "",
       })),
       bindings: {
-        ensure: vi.fn(async () => ({
-          id: "binding-1",
-          adapter: "deerflow",
-          externalThreadId: "external-thread-1",
-        })),
+        ensure: vi.fn(async () => runtimeBindingRecord()),
       },
       attempts: {
         ensure: vi.fn(async () => ({
@@ -4018,6 +4930,7 @@ describe("Run durable snapshots", () => {
           externalRunId: "external-run-1",
           lastExternalEventId: null,
         })),
+        executionLivenessClock: vi.fn(async () => ({ databaseNow: now, startedAt: now })),
         providerTextState: vi.fn(async () => emptyProviderTextState()),
         processExternalEvent: vi.fn(async (
           _claim: unknown,
@@ -4065,6 +4978,7 @@ describe("Run durable snapshots", () => {
           status: "cancelling",
           createdById: "principal-1",
           runtimeAttempts: [{
+            ...runtimeAttemptBinding(),
             id: "runtime-attempt-1",
             status: "running",
             externalThreadId: "external-thread-1",
@@ -4091,19 +5005,170 @@ describe("Run durable snapshots", () => {
           externalRunId: "external-run-1",
           startedAt: new Date(),
         })),
+        ...providerCancellationOperationStubs("external-run-1"),
       },
     });
     const finalizeCancellation = vi.spyOn(internals, "finalizeCancellation");
 
     await expect(processor.cancel("run-1")).rejects.toBe(externalError);
 
-    expect(runtime.cancel).toHaveBeenCalledTimes(1);
+    expect(runtime.cancel).toHaveBeenCalledWith(
+      expect.objectContaining({
+        runtimeTransportOwnerId: "principal-binding-owner",
+      }),
+      expect.any(Function),
+      expect.any(AbortSignal),
+    );
     expect(finalizeCancellation).not.toHaveBeenCalled();
     expect(db.$transaction).not.toHaveBeenCalled();
   });
 
+  it("uses the monotonic operation budget when the host wall clock is ahead of PostgreSQL", async () => {
+    const runtime = {
+      cancel: vi.fn(async () => ({
+        disposition: "already_terminal" as const,
+        externalRunId: "external-run-1",
+        externalStatus: "interrupted",
+      })),
+    };
+    const db = {
+      run: {
+        findUnique: vi.fn(async () => ({
+          status: "cancelling",
+          createdById: "principal-1",
+          runtimeAttempts: [{
+            ...runtimeAttemptBinding(),
+            id: "runtime-attempt-1",
+            status: "running",
+            externalThreadId: "external-thread-1",
+            externalRunId: "external-run-1",
+          }],
+        })),
+      },
+    };
+    const operationStubs = providerCancellationOperationStubs("external-run-1");
+    operationStubs.startProviderCancellationOperation.mockResolvedValue({
+      runId: "run-1",
+      attemptId: "runtime-attempt-1",
+      epoch: 1,
+      externalRunId: "external-run-1",
+      deadlineAt: new Date(0),
+      monotonicDeadlineAtMs: performance.now() + 30_000,
+    });
+    const processor = new RunProcessor(
+      db as never,
+      runtime as never,
+      noKnowledgeToolGrants(),
+    );
+    const internals = processor as unknown as ProcessorInternals;
+    Object.assign(internals, {
+      attempts: {
+        beginCancellation: vi.fn(async () => ({
+          id: "runtime-attempt-1",
+          status: "cancelling",
+          externalThreadId: "external-thread-1",
+          externalRunId: "external-run-1",
+          startedAt: new Date(),
+        })),
+        ...operationStubs,
+      },
+    });
+    const finalizeCancellation = vi.spyOn(internals, "finalizeCancellation")
+      .mockResolvedValue(undefined);
+
+    await expect(processor.cancel("run-1")).resolves.toEqual({
+      runId: "run-1",
+      cancelled: true,
+    });
+
+    expect(runtime.cancel).toHaveBeenCalledTimes(1);
+    expect(operationStubs.settleProviderCancellationOperation).toHaveBeenCalledTimes(1);
+    expect(finalizeCancellation).toHaveBeenCalledWith(
+      "run-1",
+      "Cancelled by user",
+      "runtime-attempt-1",
+    );
+  });
+
+  it("returns control without finalizing when the cancellation provider ignores abort", async () => {
+    vi.useFakeTimers();
+    try {
+      let providerSignal: AbortSignal | undefined;
+      const runtime = {
+        cancel: vi.fn(async (
+          _scope: unknown,
+          _onExternalRunCreated: (externalRunId: string) => Promise<void>,
+          signal?: AbortSignal,
+        ) => {
+          providerSignal = signal;
+          return new Promise<never>(() => undefined);
+        }),
+      };
+      const db = {
+        run: {
+          findUnique: vi.fn(async () => ({
+            status: "cancelling",
+            createdById: "principal-1",
+            runtimeAttempts: [{
+              ...runtimeAttemptBinding(),
+              id: "runtime-attempt-1",
+              status: "running",
+              externalThreadId: "external-thread-1",
+              externalRunId: "external-run-1",
+            }],
+          })),
+        },
+      };
+      const processor = new RunProcessor(
+        db as never,
+        runtime as never,
+        noKnowledgeToolGrants(),
+        undefined,
+        prototypePatchCoordinator() as never,
+        undefined,
+        { deadlineCancelMs: 900 },
+      );
+      const internals = processor as unknown as ProcessorInternals;
+      Object.assign(internals, {
+        attempts: {
+          beginCancellation: vi.fn(async () => ({
+            id: "runtime-attempt-1",
+            status: "cancelling",
+            externalThreadId: "external-thread-1",
+            externalRunId: "external-run-1",
+            startedAt: new Date(),
+          })),
+          ...providerCancellationOperationStubs("external-run-1"),
+        },
+      });
+      const finalizeCancellation = vi.spyOn(internals, "finalizeCancellation");
+
+      const cancellation = processor.cancel("run-1");
+      const observed = cancellation.catch((error: unknown) => error);
+      for (let index = 0; index < 10 && runtime.cancel.mock.calls.length === 0; index += 1) {
+        await Promise.resolve();
+      }
+      expect(runtime.cancel).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(899);
+      expect(providerSignal?.aborted).toBe(false);
+      await vi.advanceTimersByTimeAsync(1);
+
+      await expect(observed).resolves.toMatchObject({
+        code: "RUNTIME_PROVIDER_CANCEL_TIMEOUT",
+        retryable: true,
+      });
+      expect(providerSignal?.aborted).toBe(false);
+      expect(finalizeCancellation).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("keeps cancellation pending when an external Run may still appear", async () => {
-    const attachExternalRun = vi.fn(async () => undefined);
+    const attachExternalRun = vi.fn(async (_attemptId, _epoch, externalRunId) => ({
+      externalRunId,
+      operationCurrent: true,
+    }));
     const runtime = {
       cancel: vi.fn(async (
         _scope: unknown,
@@ -4111,7 +5176,11 @@ describe("Run durable snapshots", () => {
       ) => {
         // The provider races cancellation with submission and reveals the id late.
         await onExternalRunCreated("external-run-late");
-        return { found: false };
+        return {
+          disposition: "not_found" as const,
+          externalRunId: null,
+          externalStatus: null,
+        };
       }),
     };
     const db = {
@@ -4120,6 +5189,7 @@ describe("Run durable snapshots", () => {
           status: "cancelling",
           createdById: "principal-1",
           runtimeAttempts: [{
+            ...runtimeAttemptBinding(),
             id: "runtime-attempt-1",
             status: "submitting",
             externalThreadId: "external-thread-1",
@@ -4147,20 +5217,29 @@ describe("Run durable snapshots", () => {
           externalRunId: null,
           startedAt: new Date(),
         })),
-        attachExternalRunForCancellation: attachExternalRun,
+        attachExternalRunForCleanup: attachExternalRun,
+        ...providerCancellationOperationStubs(null),
       },
     });
     const finalizeCancellation = vi.spyOn(internals, "finalizeCancellation");
 
     await expect(processor.cancel("run-1")).rejects.toThrow("RUNTIME_EXTERNAL_RUN_UNRESOLVED");
 
-    expect(attachExternalRun).toHaveBeenCalledWith("runtime-attempt-1", "external-run-late");
+    expect(attachExternalRun).toHaveBeenCalledWith(
+      "runtime-attempt-1",
+      1,
+      "external-run-late",
+    );
     expect(finalizeCancellation).not.toHaveBeenCalled();
   });
 
-  it("finalizes missing external cancellation only after the recovery window", async () => {
+  it("keeps unknown external cancellation unresolved after the recovery window", async () => {
     const runtime = {
-      cancel: vi.fn(async () => ({ found: false })),
+      cancel: vi.fn(async () => ({
+        disposition: "not_found" as const,
+        externalRunId: null,
+        externalStatus: null,
+      })),
     };
     const db = {
       run: {
@@ -4168,6 +5247,7 @@ describe("Run durable snapshots", () => {
           status: "cancelling",
           createdById: "principal-1",
           runtimeAttempts: [{
+            ...runtimeAttemptBinding(),
             id: "runtime-attempt-1",
             status: "submitting",
             externalThreadId: "external-thread-1",
@@ -4196,20 +5276,15 @@ describe("Run durable snapshots", () => {
           externalRunId: null,
           startedAt: new Date(Date.now() - recoveryWindowMs - 1),
         })),
+        ...providerCancellationOperationStubs(null),
       },
     });
     const finalizeCancellation = vi.spyOn(internals, "finalizeCancellation");
 
-    await expect(processor.cancel("run-1")).resolves.toEqual({
-      runId: "run-1",
-      cancelled: true,
-      externalRunAbsent: true,
-    });
-    expect(finalizeCancellation).toHaveBeenCalledWith(
-      "run-1",
-      "Cancelled after external Run creation window elapsed",
-      "runtime-attempt-1",
+    await expect(processor.cancel("run-1")).rejects.toThrow(
+      "RUNTIME_EXTERNAL_RUN_UNRESOLVED",
     );
+    expect(finalizeCancellation).not.toHaveBeenCalled();
   });
 
   it("stores runtime phase state before appending its event", async () => {
@@ -4468,6 +5543,21 @@ describe("Run durable snapshots", () => {
     expect(tx.runEvent.create).not.toHaveBeenCalled();
   });
 
+  it("splits large message deltas without splitting surrogate pairs or changing the durable draft", async () => {
+    const tx = eventTransaction();
+    const { processor } = processorWithTransaction(tx);
+    const delta = "a".repeat(messageDeltaMaxLength - 1) + "\uD83D\uDE00" + "b".repeat(messageDeltaMaxLength);
+    await processor.persistDelta(executionClaim, "entry-1", delta, delta);
+    const chunks = tx.runEvent.create.mock.calls.map(([input]) => input.data.payload as { delta: string });
+    expect(chunks.map((item) => item.delta).join("")).toBe(delta);
+    expect(chunks).toHaveLength(3);
+    expect(chunks.every((item) => item.delta.length <= messageDeltaMaxLength && item.delta.isWellFormed())).toBe(true);
+    expect(tx.runDraft.upsert).toHaveBeenCalledOnce();
+    expect(tx.runDraft.upsert).toHaveBeenCalledWith(expect.objectContaining({
+      update: expect.objectContaining({ content: { entryId: "entry-1", text: delta } }),
+    }));
+  });
+
   it("does not append message deltas or drafts after cancellation has committed", async () => {
     const tx = eventTransaction();
     const { processor } = processorWithTransaction(tx);
@@ -4517,7 +5607,7 @@ describe("Run durable snapshots", () => {
       id: "run-1",
       status: "running",
       projectId: "project-1",
-      knowledgeReleaseId: null,
+      knowledgeReleaseId: "knowledge-release-1",
       request: {
         prompt: "Build it",
         modelId: "quality",
@@ -4576,7 +5666,7 @@ describe("Run durable snapshots", () => {
       id: "run-1",
       status: "running",
       projectId: "project-1",
-      knowledgeReleaseId: null,
+      knowledgeReleaseId: "knowledge-release-1",
       request: {
         prompt: "Build it",
         modelId: "quality",
@@ -4637,18 +5727,29 @@ describe("Run durable snapshots", () => {
       where: { id: "run-1", status: { in: ["queued", "running"] } },
       data: expect.objectContaining({
         status: "failed",
+        errorCode: "RUNTIME_EXECUTION_FAILED",
+        errorDetail: "RUNTIME_EXECUTION_FAILED",
         errorRetryable: false,
       }),
     });
     expect(tx.runEvent.create).toHaveBeenCalledWith({
       data: expect.objectContaining({
         type: "run.failed",
-        payload: expect.objectContaining({ retryable: false }),
+        payload: {
+          code: "RUNTIME_EXECUTION_FAILED",
+          message: "RUNTIME_EXECUTION_FAILED",
+          retryable: false,
+        },
       }),
     });
     expect(tx.runtimeAttempt.updateMany).toHaveBeenCalledWith({
       where: { id: "runtime-attempt-1" },
-      data: expect.objectContaining({ status: "failed", errorRetryable: false }),
+      data: expect.objectContaining({
+        status: "failed",
+        errorCode: "RUNTIME_EXECUTION_FAILED",
+        errorDetail: "RUNTIME_EXECUTION_FAILED",
+        errorRetryable: false,
+      }),
     });
     expect(tx.canvasAgentSession.updateMany).toHaveBeenCalledWith({
       where: { id: { in: ["canvas-session-failed"] }, status: "active" },
@@ -4702,6 +5803,81 @@ describe("Run durable snapshots", () => {
     expect(tx.runDraft.deleteMany).toHaveBeenCalledWith({ where: { runId: "run-1" } });
   });
 
+  it("persists an unconfirmed provider cancellation as a failed Run with UNKNOWN evidence", async () => {
+    const tx = eventTransaction();
+    tx.runtimeAttempt.findUnique.mockResolvedValue({
+      id: "runtime-attempt-1",
+      runId: "run-1",
+      status: "submitting",
+      startedAt: now,
+      submissionUnknownAt: null,
+    });
+    const { processor } = processorWithTransaction(tx);
+    const liveness = new RuntimeLivenessError("RUNTIME_PROVIDER_SUBMISSION_TIMEOUT", true);
+
+    await processor.failRun(
+      "run-1",
+      "runtime-attempt-1",
+      liveness,
+      true,
+      executionClaim,
+      {
+        code: "RUNTIME_PROVIDER_CANCELLATION_UNCONFIRMED",
+        detailCode: "RUNTIME_PROVIDER_SUBMISSION_TIMEOUT",
+        submissionUnknown: true,
+      },
+    );
+
+    expect(tx.run.updateMany).toHaveBeenCalledWith({
+      where: {
+        id: "run-1",
+        status: "running",
+        executionOwnerId: executionClaim.ownerId,
+        executionEpoch: executionClaim.epoch,
+      },
+      data: expect.objectContaining({
+        status: "failed",
+        errorCode: "RUNTIME_PROVIDER_CANCELLATION_UNCONFIRMED",
+        errorDetail: "RUNTIME_PROVIDER_SUBMISSION_TIMEOUT",
+        errorRetryable: true,
+        executionOwnerId: null,
+        executionHeartbeatAt: null,
+        executionLeaseExpiresAt: null,
+      }),
+    });
+    expect(tx.runtimeAttempt.updateMany).toHaveBeenCalledWith({
+      where: {
+        id: "runtime-attempt-1",
+        runId: "run-1",
+        executionOwnerId: executionClaim.ownerId,
+        executionEpoch: executionClaim.epoch,
+      },
+      data: expect.objectContaining({
+        status: "failed",
+        errorCode: "RUNTIME_PROVIDER_CANCELLATION_UNCONFIRMED",
+        errorDetail: "RUNTIME_PROVIDER_SUBMISSION_TIMEOUT",
+        errorRetryable: true,
+        submissionUnknownAt: expect.any(Date),
+        executionOwnerId: null,
+        executionHeartbeatAt: null,
+        executionLeaseExpiresAt: null,
+      }),
+    });
+    expect(tx.runEvent.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        type: "run.failed",
+        payload: {
+          code: "RUNTIME_PROVIDER_CANCELLATION_UNCONFIRMED",
+          message: "RUNTIME_PROVIDER_CANCELLATION_UNCONFIRMED",
+          retryable: true,
+        },
+      }),
+    });
+    expect(tx.runEvent.create.mock.calls.some(
+      ([{ data }]) => data.type === "run.cancelled",
+    )).toBe(false);
+  });
+
   it("stores cancellation and removes the Run's staging version and temporary Artifact", async () => {
     const tx = eventTransaction();
     const pendingInvocation = pendingCanvasInvocation("canvas-session-cancelled", "waiting_approval");
@@ -4719,7 +5895,11 @@ describe("Run durable snapshots", () => {
     tx.artifact.deleteMany.mockResolvedValue({ count: 1 });
     const { db, processor } = processorWithTransaction(tx);
 
-    await processor.finalizeCancellation("run-1", "Cancelled before publishing");
+    await processor.finalizeCancellation(
+      "run-1",
+      "Cancelled before publishing",
+      "runtime-attempt-1",
+    );
 
     expect(db.$transaction).toHaveBeenCalledTimes(1);
     expect(tx.run.updateMany).toHaveBeenCalledWith({
@@ -4727,6 +5907,24 @@ describe("Run durable snapshots", () => {
       data: expect.objectContaining({
         status: "cancelled",
         cancellationReason: "Cancelled before publishing",
+        errorCode: null,
+        errorDetail: null,
+        errorRetryable: null,
+        executionOwnerId: null,
+        executionHeartbeatAt: null,
+        executionLeaseExpiresAt: null,
+      }),
+    });
+    expect(tx.runtimeAttempt.update).toHaveBeenCalledWith({
+      where: { id: "runtime-attempt-1" },
+      data: expect.objectContaining({
+        status: "cancelled",
+        errorCode: null,
+        errorDetail: null,
+        errorRetryable: null,
+        executionOwnerId: null,
+        executionHeartbeatAt: null,
+        executionLeaseExpiresAt: null,
       }),
     });
     expect(tx.runEvent.create).toHaveBeenCalledWith({
@@ -5116,3 +6314,240 @@ describe("Run durable snapshots", () => {
     }] as never)).toThrow("RUNTIME_SOURCE_BLOB_INVALID");
   });
 });
+
+describe("Provider cancellation convergence", () => {
+  afterEach(() => vi.useRealTimers());
+
+  it("converges an already-terminal provider Run without restoring runtime execution", async () => {
+    const resolution = providerCancellationResolutionHarness();
+    const runtime = {
+      cancel: vi.fn(async () => ({
+        disposition: "already_terminal" as const,
+        externalRunId: "external-run-1",
+        externalStatus: "success",
+      })),
+    };
+    const db = {
+      run: {
+        findUnique: vi.fn(async () => ({
+          status: "failed",
+          errorCode: runtimeProviderCancellationUnconfirmedCode,
+          errorDetail: "RUNTIME_PROVIDER_STREAM_IDLE_TIMEOUT",
+          createdById: "principal-1",
+          runtimeAttempts: [{
+            ...runtimeAttemptBinding(),
+            id: "runtime-attempt-1",
+            status: "failed",
+            errorCode: runtimeProviderCancellationUnconfirmedCode,
+            externalThreadId: "external-thread-1",
+            externalRunId: "external-run-1",
+            startedAt: now,
+            providerCancellationResolution: null,
+          }],
+        })),
+      },
+      $transaction: resolution.transaction,
+    };
+    const processor = new RunProcessor(
+      db as never,
+      runtime as never,
+      noKnowledgeToolGrants(),
+    );
+
+    await expect(processor.cancel("run-1")).resolves.toEqual({
+      runId: "run-1",
+      cancelled: false,
+      cancellationConverged: true,
+    });
+    expect(runtime.cancel).toHaveBeenCalledWith(
+      expect.objectContaining({
+        runId: "run-1",
+        runtimeAttemptId: "runtime-attempt-1",
+        runtimeTransportOwnerId: "principal-binding-owner",
+        externalRunId: "external-run-1",
+      }),
+      expect.any(Function),
+      expect.any(AbortSignal),
+    );
+    expect(resolution.create).toHaveBeenCalledWith({
+      data: {
+        runtimeAttemptId: "runtime-attempt-1",
+        runId: "run-1",
+        operationEpoch: 1,
+        externalRunId: "external-run-1",
+        failureCode: "RUNTIME_PROVIDER_STREAM_IDLE_TIMEOUT",
+        outcome: "already_terminal",
+      },
+    });
+  });
+
+  it("keeps a failed Run pending while provider absence is still within the recovery window", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(now);
+    const recoveryWindowMs = 10_000;
+    const resolution = providerCancellationResolutionHarness(
+      null,
+      "RUNTIME_PROVIDER_SUBMISSION_TIMEOUT",
+    );
+    const runtime = {
+      cancel: vi.fn(async () => ({
+        disposition: "not_found" as const,
+        externalRunId: null,
+        externalStatus: null,
+      })),
+    };
+    const db = {
+      run: {
+        findUnique: vi.fn(async () => ({
+          status: "failed",
+          errorCode: runtimeProviderCancellationUnconfirmedCode,
+          errorDetail: "RUNTIME_PROVIDER_SUBMISSION_TIMEOUT",
+          createdById: "principal-1",
+          runtimeAttempts: [{
+            ...runtimeAttemptBinding(),
+            id: "runtime-attempt-1",
+            status: "failed",
+            errorCode: runtimeProviderCancellationUnconfirmedCode,
+            externalThreadId: "external-thread-1",
+            externalRunId: null,
+            startedAt: new Date(now.getTime() - recoveryWindowMs + 1),
+            providerCancellationResolution: null,
+          }],
+        })),
+      },
+      $transaction: resolution.transaction,
+    };
+    const processor = new RunProcessor(
+      db as never,
+      runtime as never,
+      noKnowledgeToolGrants(),
+      undefined,
+      undefined,
+      recoveryWindowMs,
+    );
+
+    await expect(processor.cancel("run-1")).rejects.toThrow(
+      runtimeProviderCancellationUnconfirmedCode,
+    );
+    expect(resolution.create).not.toHaveBeenCalled();
+  });
+
+  it("keeps a failed Run unresolved at the external Run recovery-window boundary", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(now);
+    const recoveryWindowMs = 10_000;
+    const resolution = providerCancellationResolutionHarness(
+      null,
+      "RUNTIME_PROVIDER_SUBMISSION_TIMEOUT",
+    );
+    const runtime = {
+      cancel: vi.fn(async () => ({
+        disposition: "not_found" as const,
+        externalRunId: null,
+        externalStatus: null,
+      })),
+    };
+    const db = {
+      run: {
+        findUnique: vi.fn(async () => ({
+          status: "failed",
+          errorCode: runtimeProviderCancellationUnconfirmedCode,
+          errorDetail: "RUNTIME_PROVIDER_SUBMISSION_TIMEOUT",
+          createdById: "principal-1",
+          runtimeAttempts: [{
+            ...runtimeAttemptBinding(),
+            id: "runtime-attempt-1",
+            status: "failed",
+            errorCode: runtimeProviderCancellationUnconfirmedCode,
+            externalThreadId: "external-thread-1",
+            externalRunId: null,
+            startedAt: new Date(now.getTime() - recoveryWindowMs),
+            providerCancellationResolution: null,
+          }],
+        })),
+      },
+      $transaction: resolution.transaction,
+    };
+    const processor = new RunProcessor(
+      db as never,
+      runtime as never,
+      noKnowledgeToolGrants(),
+      undefined,
+      undefined,
+      recoveryWindowMs,
+    );
+
+    await expect(processor.cancel("run-1")).rejects.toThrow(
+      runtimeProviderCancellationUnconfirmedCode,
+    );
+    expect(resolution.create).not.toHaveBeenCalled();
+  });
+});
+
+function providerCancellationResolutionHarness(
+  externalRunId: string | null = "external-run-1",
+  runErrorDetail = "RUNTIME_PROVIDER_STREAM_IDLE_TIMEOUT",
+) {
+  const state = {
+    ownerId: null as string | null,
+    epoch: 0,
+    leaseExpiresAt: null as Date | null,
+    operationEpoch: 0,
+    operationStartedAt: null as Date | null,
+    operationDeadlineAt: null as Date | null,
+    resolutionId: null as string | null,
+  };
+  const updateMany = vi.fn(async ({ data }: { data: Record<string, unknown> }) => {
+    if ("executionOwnerId" in data) {
+      state.ownerId = data.executionOwnerId as string | null;
+    }
+    if (typeof data.executionEpoch === "number") state.epoch = data.executionEpoch;
+    if ("executionLeaseExpiresAt" in data) {
+      state.leaseExpiresAt = data.executionLeaseExpiresAt as Date | null;
+    }
+    if (typeof data.providerCancellationOperationEpoch === "number") {
+      state.operationEpoch = data.providerCancellationOperationEpoch;
+    }
+    if ("providerCancellationOperationStartedAt" in data) {
+      state.operationStartedAt = data.providerCancellationOperationStartedAt as Date | null;
+    }
+    if ("providerCancellationOperationDeadlineAt" in data) {
+      state.operationDeadlineAt = data.providerCancellationOperationDeadlineAt as Date | null;
+    }
+    return { count: 1 };
+  });
+  const create = vi.fn(async ({ data }: { data: Record<string, unknown> }) => {
+    state.resolutionId = String(data.runtimeAttemptId);
+    return data;
+  });
+  const transaction = vi.fn(async (callback: (tx: unknown) => Promise<unknown>) => callback({
+    $queryRaw: vi.fn(async () => [{
+      databaseNow: new Date(),
+      runStatus: "failed",
+      runErrorCode: runtimeProviderCancellationUnconfirmedCode,
+      runErrorDetail,
+      runOwnerId: state.ownerId,
+      runEpoch: state.epoch,
+      runLeaseExpiresAt: state.leaseExpiresAt,
+      attemptStatus: "failed",
+      attemptErrorCode: runtimeProviderCancellationUnconfirmedCode,
+      attemptOwnerId: state.ownerId,
+      attemptEpoch: state.epoch,
+      attemptLeaseExpiresAt: state.leaseExpiresAt,
+      providerCancellationOperationEpoch: state.operationEpoch,
+      providerCancellationOperationStartedAt: state.operationStartedAt,
+      providerCancellationOperationDeadlineAt: state.operationDeadlineAt,
+      providerCancellationResolutionId: state.resolutionId,
+      externalRunId,
+      providerIdempotencyKey: null,
+      submissionUnknownAt: now,
+      externalEventSequence: 0,
+      lastExternalEventId: null,
+      attempt: 1,
+    }]),
+    run: { updateMany },
+    runtimeAttempt: { updateMany },
+    runtimeProviderCancellationResolution: { create },
+  }));
+  return { create, transaction };
+}

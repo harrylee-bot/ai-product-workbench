@@ -31,7 +31,7 @@ export const runtimeArtifactOperationSchema = z.discriminatedUnion("kind", [
 
 const runtimeArtifactDraftBaseShape = {
   title: z.string().min(1).max(240),
-  citations: z.array(runtimeCitationSchema).max(1_000),
+  citations: z.array(runtimeCitationSchema).min(1).max(1_000),
 };
 
 type RuntimeArtifactDraftBase = {

@@ -23,12 +23,13 @@ type CandidateRow = {
 export class PrismaKnowledgeRetrievalStore implements KnowledgeRetrievalStore {
   constructor(private readonly db: PrismaClient) {}
 
-  async findScopedRelease(releaseId: string, workspaceId: string): Promise<KnowledgeReleasePin | null> {
+  async findScopedRelease(releaseId: string, workspaceId: string, projectId?: string): Promise<KnowledgeReleasePin | null> {
     const release = await this.db.knowledgeRelease.findFirst({
       where: {
         id: releaseId,
         status: { in: ["ready", "retired"] },
         OR: [{ workspaceId }, { workspaceId: null }],
+        AND: [{ OR: [{ projectId: null }, ...(projectId ? [{ projectId }] : [])] }],
       },
       select: {
         id: true,

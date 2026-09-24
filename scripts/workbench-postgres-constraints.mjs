@@ -2,9 +2,11 @@
 
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
+import { createHash } from "node:crypto";
 import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
+import canonicalize from "canonicalize";
 import pg from "pg";
 
 const { Client } = pg;
@@ -509,7 +511,7 @@ async function seedMinimumGraph(db) {
       (
         'version-a-ready', 'artifact-a', 'project-a', 1, 1, 'ready',
         '{"protocol":"workbench.prd.v1","citations":[]}'::jsonb, NULL,
-        repeat('a', 64), '[]'::jsonb, 'run-a', NULL
+        repeat('a', 64), '[]'::jsonb, NULL, NULL
       ),
       (
         'version-a-staging', 'artifact-a', 'project-a', 2, 1, 'staging',
@@ -523,22 +525,22 @@ async function seedMinimumGraph(db) {
       ),
       (
         'version-a-blob', 'artifact-a', 'project-a', 4, 1, 'ready',
-        NULL, 'blob-ready', repeat('d', 64), '[]'::jsonb, 'run-a', NULL
+        NULL, 'blob-ready', repeat('d', 64), '[]'::jsonb, NULL, NULL
       ),
       (
         'version-a-release', 'artifact-a', 'project-a', 5, 1, 'ready',
         '{"protocol":"workbench.prd.v1","citations":[]}'::jsonb, NULL,
-        repeat('e', 64), '[]'::jsonb, 'run-a', 'release-artifact-a'
+        repeat('e', 64), '[]'::jsonb, NULL, 'release-artifact-a'
       ),
       (
         'version-a-other-ready', 'artifact-a-other', 'project-a', 1, 1, 'ready',
         '{"protocol":"workbench.prd.v1","citations":[]}'::jsonb, NULL,
-        repeat('f', 64), '[]'::jsonb, 'run-a', NULL
+        repeat('f', 64), '[]'::jsonb, NULL, NULL
       ),
       (
         'version-b-ready', 'artifact-b', 'project-b', 1, 1, 'ready',
         '{"protocol":"workbench.prd.v1","citations":[]}'::jsonb, NULL,
-        repeat('9', 64), '[]'::jsonb, 'run-b', NULL
+        repeat('9', 64), '[]'::jsonb, NULL, NULL
       ),
       (
         'version-design-a-ready', 'artifact-design-a', 'project-a', 1, 1, 'ready',
@@ -568,8 +570,8 @@ async function seedMinimumGraph(db) {
       "knowledge_release_id"
     ) VALUES (
       'version-prototype-ready', 'artifact-prototype', 'project-a', 1, 1, 'staging',
-      '{"protocol":"workbench.prototype.v1","assets":[{"id":"hero-image","kind":"image","name":"Hero","blobId":"blob-prototype-image","mediaType":"image/png","byteSize":128,"sha256":"abababababababababababababababababababababababababababababababab","width":320,"height":180}]}'::jsonb,
-      NULL, repeat('8a', 32), '[]'::jsonb, 'run-a', NULL
+      '{"protocol":"workbench.prototype.v1","screens":[{"id":"screen-home"}],"assets":[{"id":"hero-image","kind":"image","name":"Hero","blobId":"blob-prototype-image","mediaType":"image/png","byteSize":128,"sha256":"abababababababababababababababababababababababababababababababab","width":320,"height":180}]}'::jsonb,
+      NULL, repeat('8a', 32), '[]'::jsonb, NULL, NULL
     );
 
     INSERT INTO "artifact_version_assets" (
@@ -679,6 +681,8 @@ async function seedMinimumGraph(db) {
       "release_id", "project_id", "position", "artifact_id", "artifact_version_id", "title", "kind"
     ) VALUES
       ('project-release-ready-a', 'project-a', 0, 'artifact-a', 'version-a-ready', 'Artifact A', 'prd'),
+      ('project-release-ready-a', 'project-a', 1, 'artifact-prototype', 'version-prototype-ready', 'Prototype Artifact', 'prototype'),
+      ('project-release-building-a', 'project-a', 0, 'artifact-prototype', 'version-prototype-ready', 'Prototype Artifact', 'prototype'),
       ('project-release-ready-b', 'project-b', 0, 'artifact-b', 'version-b-ready', 'Artifact B', 'prd');
 
     UPDATE "project_releases"
@@ -1202,7 +1206,7 @@ async function runConstraintChecks(db) {
 
   await expectReject(db, "Run cannot use a building KnowledgeRelease", async () => {
     await insertRun(db, { knowledgeReleaseId: "release-building-a" });
-  }, trigger("23514", "RUN_KNOWLEDGE_RELEASE_INVALID"));
+  }, trigger("23514", "RUN_KNOWLEDGE_SCOPE_INVALID"));
 
   await expectReject(db, "Run cannot use another Workspace KnowledgeRelease", async () => {
     await insertRun(db, { knowledgeReleaseId: "release-ready-b" });
@@ -1210,7 +1214,15 @@ async function runConstraintChecks(db) {
 
   await expectReject(db, "New Run cannot select a retired KnowledgeRelease", async () => {
     await insertRun(db, { knowledgeReleaseId: "release-retired-a" });
-  }, trigger("23514", "RUN_KNOWLEDGE_RELEASE_INVALID"));
+  }, trigger("23514", "RUN_KNOWLEDGE_SCOPE_INVALID"));
+
+  await expectReject(db, "New Run requires a KnowledgeRelease", async () => {
+    await insertRun(db, { knowledgeReleaseId: null });
+  }, trigger("23514", "KNOWLEDGE_RELEASE_REQUIRED"));
+
+  await expectReject(db, "New Run cannot skip retrieval by starting succeeded", async () => {
+    await insertRun(db, { status: "succeeded" });
+  }, trigger("23514", "KNOWLEDGE_RETRIEVAL_REQUIRED"));
 
   await expectReject(db, "Run request model must match the normalized model column", async () => {
     await insertRun(db, { request: typedRunRequest({ modelId: "forged-model" }) });
@@ -1558,7 +1570,7 @@ async function runConstraintChecks(db) {
           "lease_expires_at" = NULL,
           "response" = '{"protocol":"workbench.knowledge-retrieval-result.v1"}'::jsonb,
           "response_sha256" = repeat('9', 64),
-          "finished_at" = clock_timestamp(),
+          "finished_at" = "last_started_at",
           "updated_at" = clock_timestamp()
       WHERE "id" = 'candidate-knowledge-invocation'
     `);
@@ -1569,7 +1581,13 @@ async function runConstraintChecks(db) {
     `);
   }, trigger("23514", "KNOWLEDGE_RETRIEVAL_INVOCATION_TERMINAL_IMMUTABLE"));
 
+  await expectReject(db, "Run cannot finish after an empty successful retrieval", async () => {
+    await prepareSuccessfulKnowledgeRetrieval(db, []);
+    await db.query(`UPDATE "runs" SET "status" = 'succeeded', "progress" = 1 WHERE "id" = 'run-a'`);
+  }, trigger("23514", "KNOWLEDGE_RETRIEVAL_REQUIRED"));
+
   await expectAccept(db, "Pinned Run can finish after its KnowledgeRelease retires", async () => {
+    await prepareSuccessfulKnowledgeRetrieval(db);
     await db.query(`UPDATE "knowledge_releases" SET "status" = 'retired' WHERE "id" = 'release-ready-a'`);
     await db.query(`UPDATE "runs" SET "status" = 'succeeded', "progress" = 1 WHERE "id" = 'run-a'`);
     await insertVersion(db, {
@@ -1782,6 +1800,7 @@ async function runConstraintChecks(db) {
   await expectReject(db, "ProjectRelease ArtifactVersion must belong to its Project", async () => {
     await insertReleaseArtifactVersion(db, {
       projectId: "project-b",
+      position: 1,
       artifactId: "artifact-b",
       artifactVersionId: "version-b-ready",
     });
@@ -1914,6 +1933,27 @@ async function runConstraintChecks(db) {
     await insertShareGrant(db);
   });
 
+  await expectReject(db, "ShareGrant requires one pinned Prototype version", async () => {
+    await insertShareGrant(db, { artifactVersionId: null });
+  }, trigger("23514", "PROTOTYPE_SHARE_PIN_REQUIRED"));
+
+  await expectReject(db, "ShareGrant cannot expose a PRD instead of a Prototype", async () => {
+    await insertShareGrant(db, { artifactVersionId: "version-a-ready" });
+  }, trigger("23514", "PROTOTYPE_SHARE_PIN_REQUIRED"));
+
+  await expectReject(db, "Prototype ShareGrant must be read-only", async () => {
+    await insertShareGrant(db, { scope: "remix" });
+  }, trigger("23514", "PROTOTYPE_SHARE_PIN_REQUIRED"));
+
+  await expectReject(db, "ShareGrant cannot change its pinned Prototype version", async () => {
+    await insertShareGrant(db);
+    await db.query(`
+      UPDATE "share_grants"
+      SET "artifact_version_id" = 'version-a-ready', "revision" = "revision" + 1
+      WHERE "id" = 'candidate-share'
+    `);
+  }, trigger("23514", "SHARE_VERSION_PIN_IMMUTABLE"));
+
   await expectReject(db, "A Project cannot retain two active ShareGrants", async () => {
     await insertShareGrant(db);
     await insertShareGrant(db, {
@@ -1993,6 +2033,58 @@ async function runConstraintChecks(db) {
     await insertProjectPreview(db);
   });
 
+  await expectAccept(db, "ProjectPreview accepts an initial screen from its selected Prototype", async () => {
+    await insertProjectPreview(db, {
+      artifactPin: prototypePreviewArtifactPin(),
+      exportJobOverrides: {
+        selectionKind: "artifact",
+        selectionArtifactId: "artifact-prototype",
+        selectionArtifactVersionId: "version-prototype-ready",
+      },
+      initialScreenId: "screen-home",
+    });
+  });
+
+  await expectReject(db, "ProjectPreview initial screen must exist in its selected Prototype", async () => {
+    await insertProjectPreview(db, {
+      artifactPin: prototypePreviewArtifactPin(),
+      exportJobOverrides: {
+        selectionKind: "artifact",
+        selectionArtifactId: "artifact-prototype",
+        selectionArtifactVersionId: "version-prototype-ready",
+      },
+      initialScreenId: "screen-missing",
+    });
+  }, trigger("23514", "PROJECT_PREVIEW_INITIAL_SCREEN_INVALID"));
+
+  await expectReject(db, "ProjectPreview initial screen requires a Prototype Artifact", async () => {
+    await insertProjectPreview(db, {
+      artifactPin: previewArtifactPin(),
+      exportJobOverrides: {
+        selectionKind: "artifact",
+        selectionArtifactId: "artifact-a",
+        selectionArtifactVersionId: "version-a-ready",
+      },
+      initialScreenId: "screen-home",
+    });
+  }, trigger("23514", "PROJECT_PREVIEW_INITIAL_SCREEN_INVALID"));
+
+  await expectReject(db, "ProjectPreview initial screen requires an Artifact selection", async () => {
+    await insertProjectPreview(db, { initialScreenId: "screen-home" });
+  }, trigger("23514", "PROJECT_PREVIEW_INITIAL_SCREEN_SELECTION_INVALID"));
+
+  await expectReject(db, "ProjectPreview selection cannot crop the selected Prototype", async () => {
+    await insertProjectPreview(db, {
+      artifactPin: prototypePreviewArtifactPin(),
+      exportJobOverrides: {
+        selectionKind: "artifact",
+        selectionArtifactId: "artifact-prototype",
+        selectionArtifactVersionId: "version-prototype-ready",
+        selectionScreenId: "screen-home",
+      },
+    });
+  }, trigger("23514", "PROJECT_PREVIEW_SELECTION_SCREEN_CROP_FORBIDDEN"));
+
   await expectReject(db, "ProjectPreview cannot attach to a public ExportJob", async () => {
     await insertExportJob(db);
     await insertProjectPreviewRecord(db, { exportJobId: "candidate-export" });
@@ -2047,12 +2139,14 @@ async function runConstraintChecks(db) {
   }, trigger("23514", "PROJECT_PREVIEW_ARTIFACT_VERSION_MANIFEST_MISMATCH"));
 
   await expectReject(db, "ExportJob format is a closed enum", async () => {
-    await insertExportJob(db, { format: "pdf" });
+    await insertExportJob(db, { format: "keynote" });
   }, trigger("22P02", "invalid input value for enum"));
 
   for (const { format, packaging, label } of [
     { format: "html", packaging: "single_file", label: "HTML single-file" },
     { format: "html", packaging: "zip", label: "HTML ZIP" },
+    { format: "docx", packaging: "single_file", label: "Word document" },
+    { format: "pdf", packaging: "single_file", label: "PDF document" },
     { format: "react", packaging: "zip", label: "React ZIP" },
     { format: "figma", packaging: "zip", label: "Figma ZIP" },
     { format: "mcp", packaging: "zip", label: "MCP ZIP" },
@@ -2065,6 +2159,12 @@ async function runConstraintChecks(db) {
   for (const format of ["react", "figma", "mcp"]) {
     await expectReject(db, `ExportJob rejects ${format} single-file packaging`, async () => {
       await insertExportJob(db, { format, packaging: "single_file" });
+    }, constraint("23514", "export_jobs_format_packaging_check"));
+  }
+
+  for (const format of ["docx", "pdf"]) {
+    await expectReject(db, `ExportJob rejects ${format} ZIP packaging`, async () => {
+      await insertExportJob(db, { format, packaging: "zip" });
     }, constraint("23514", "export_jobs_format_packaging_check"));
   }
 
@@ -2745,7 +2845,7 @@ async function runConstraintChecks(db) {
     await db.query(`
       UPDATE "file_verification_attempts"
       SET "status" = 'succeeded', "file_status" = 'ready',
-          "finished_at" = clock_timestamp(), "updated_at" = clock_timestamp()
+          "finished_at" = "started_at", "updated_at" = clock_timestamp()
       WHERE "id" = 'candidate-file-verification-attempt'
     `);
     const result = await db.query(`
@@ -2780,12 +2880,14 @@ async function runConstraintChecks(db) {
 
   await expectReject(db, "FileVerificationAttempt terminal state requires matching evidence", async () => {
     await insertVerificationUpload(db);
-    await insertFileVerificationAttempt(db, {
-      status: "terminal_failed",
-      fileStatus: "ready",
-      failureCode: "FILE_VERIFICATION_RETRY_EXHAUSTED",
-      finishedAt: new Date(),
-    });
+    await insertFileVerificationAttempt(db);
+    await db.query(`
+      UPDATE "file_verification_attempts"
+      SET "status" = 'terminal_failed', "file_status" = 'ready',
+          "failure_code" = 'FILE_VERIFICATION_RETRY_EXHAUSTED',
+          "finished_at" = "started_at", "updated_at" = clock_timestamp()
+      WHERE "id" = 'candidate-file-verification-attempt'
+    `);
   }, constraint("23514", "file_verification_attempts_state_check"));
 
   await expectReject(db, "FileVerificationAttempt identity is immutable", async () => {
@@ -2804,7 +2906,7 @@ async function runConstraintChecks(db) {
     await db.query(`
       UPDATE "file_verification_attempts"
       SET "status" = 'retryable_failed', "failure_code" = 'SCANNER_TIMEOUT',
-          "finished_at" = clock_timestamp(), "updated_at" = clock_timestamp()
+          "finished_at" = "started_at", "updated_at" = clock_timestamp()
       WHERE "id" = 'candidate-file-verification-attempt'
     `);
     await db.query(`
@@ -4838,7 +4940,7 @@ async function insertVersion(db, overrides = {}) {
     contentBlobId: null,
     checksum: "0".repeat(64),
     citations: [],
-    createdByRunId: "run-a",
+    createdByRunId: null,
     knowledgeReleaseId: null,
     ...overrides,
   };
@@ -4948,7 +5050,7 @@ async function insertPrototypeCandidate(db, options = {}) {
       "content", "content_blob_id", "checksum", "citations", "created_by_run_id"
     ) VALUES (
       'candidate-prototype-version', 'candidate-prototype', 'project-a', 1, 1, $1,
-      $2::jsonb, NULL, repeat('ca', 32), '[]'::jsonb, 'run-a'
+      $2::jsonb, NULL, repeat('ca', 32), '[]'::jsonb, NULL
     )
   `, [options.initialStatus ?? "staging", JSON.stringify({
     protocol: "workbench.prototype.v1",
@@ -5015,7 +5117,7 @@ async function insertRun(db, overrides = {}) {
     threadId: "thread-a",
     retryOfRunId: null,
     createdById: "principal-a",
-    knowledgeReleaseId: null,
+    knowledgeReleaseId: "release-ready-a",
     designStyleArtifactVersionId: null,
     designStyleSnapshot: null,
     designStyleSnapshotSha256: null,
@@ -5025,7 +5127,7 @@ async function insertRun(db, overrides = {}) {
     request: typedRunRequest(),
     modelId: "test-model",
     traceId: "candidate-run-trace",
-    status: "succeeded",
+    status: "cancelled",
     ...overrides,
   };
   await db.query(`
@@ -5167,6 +5269,44 @@ async function prepareKnowledgeToolScope(db) {
     WHERE "id" = 'run-a'
   `);
   await insertRuntimeAttempt(db);
+}
+
+async function prepareSuccessfulKnowledgeRetrieval(db, items = [{
+  rank: 1, rrfScore: 0.03, rerankerScore: null,
+  citation: {
+    id: "constraint-citation", documentId: "constraint-document", chunkId: "constraint-chunk",
+    sourcePath: "00-rules/constraint.md", title: "Constraint knowledge", quote: "Constraint knowledge content",
+    locator: { heading: "Rules", startLine: null, endLine: null },
+  },
+}]) {
+  await prepareKnowledgeToolScope(db);
+  await insertKnowledgeToolBudget(db);
+  await insertKnowledgeToolGrant(db);
+  await db.query(`
+    UPDATE "knowledge_tool_budgets"
+    SET "window_starts" = 1, "total_starts" = 1, "updated_at" = clock_timestamp()
+    WHERE "runtime_attempt_id" = 'candidate-runtime-attempt'
+  `);
+  await insertKnowledgeInvocation(db);
+  const response = {
+    protocol: "workbench.knowledge-retrieval-result.v1",
+    evidence: {
+      schema: "workbench.knowledge-retrieval-evidence.v1", mode: "hybrid", routeScope: "production",
+      release: { id: "release-ready-a", key: "constraint-ready-a", version: 1 },
+      embeddingProfile: { id: "constraint-embedding-3-r1", specSha256: "d".repeat(64), dimension: 3 },
+      retrievalProfile: { id: "constraint-retrieval-r1", specSha256: "e".repeat(64) },
+      candidateCounts: { lexical: items.length, dense: items.length, fused: items.length },
+      fusion: { algorithm: "rrf", k: 60 }, reranker: { status: "not_needed" }, degraded: false,
+    },
+    items,
+  };
+  await db.query(`
+    UPDATE "knowledge_retrieval_invocations"
+    SET "status" = 'succeeded', "lease_token" = NULL, "lease_expires_at" = NULL,
+        "response" = $1::jsonb, "response_sha256" = $2,
+        "finished_at" = "last_started_at", "updated_at" = clock_timestamp()
+    WHERE "id" = 'candidate-knowledge-invocation'
+  `, [JSON.stringify(response), createHash("sha256").update(canonicalize(response)).digest("hex")]);
 }
 
 async function insertKnowledgeToolBudget(db, overrides = {}) {
@@ -5463,6 +5603,7 @@ async function insertShareGrant(db, overrides = {}) {
     id: "candidate-share",
     projectId: "project-a",
     releaseId: "project-release-ready-a",
+    artifactVersionId: "version-prototype-ready",
     createdById: "principal-a",
     idempotencyKey: "candidate-share-key",
     requestHash: "4".repeat(64),
@@ -5476,8 +5617,8 @@ async function insertShareGrant(db, overrides = {}) {
   await db.query(`
     INSERT INTO "share_grants" (
       "id", "project_id", "release_id", "created_by_id", "idempotency_key",
-      "request_hash", "token_hash", "scope", "status", "expires_at", "revoked_at", "updated_at"
-    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, clock_timestamp())
+      "request_hash", "token_hash", "scope", "status", "expires_at", "revoked_at", "artifact_version_id", "updated_at"
+    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, clock_timestamp())
   `, [
     share.id,
     share.projectId,
@@ -5490,6 +5631,7 @@ async function insertShareGrant(db, overrides = {}) {
     share.status,
     share.expiresAt,
     share.revokedAt,
+    share.artifactVersionId,
   ]);
 }
 
@@ -5658,8 +5800,23 @@ function previewArtifactPin(overrides = {}) {
   };
 }
 
-async function insertProjectPreview(db, { artifactPin = null, ...overrides } = {}) {
-  await insertPreviewExportJob(db);
+function prototypePreviewArtifactPin(overrides = {}) {
+  return previewArtifactPin({
+    artifactId: "artifact-prototype",
+    artifactVersionId: "version-prototype-ready",
+    title: "Prototype Artifact",
+    kind: "prototype",
+    checksum: "8a".repeat(32),
+    ...overrides,
+  });
+}
+
+async function insertProjectPreview(db, {
+  artifactPin = null,
+  exportJobOverrides = {},
+  ...overrides
+} = {}) {
+  await insertPreviewExportJob(db, exportJobOverrides);
   const artifactPins = artifactPin ? [artifactPin] : [];
   await insertProjectPreviewRecord(db, { artifactPins, ...overrides });
   if (artifactPin) await insertProjectPreviewArtifactPin(db, artifactPin);
@@ -5689,6 +5846,7 @@ async function insertProjectPreviewRecord(db, overrides = {}) {
     },
     boardChecksum: "c".repeat(64),
     artifactPins: [],
+    initialScreenId: null,
     exportJobId: "candidate-preview-export",
     createdById: "principal-a",
     idempotencyKey: "candidate-preview-key",
@@ -5709,10 +5867,11 @@ async function insertProjectPreviewRecord(db, overrides = {}) {
   await db.query(`
     INSERT INTO "project_previews" (
       "id", "project_id", "board_id", "board_revision", "board_snapshot",
-      "board_checksum", "manifest", "manifest_sha256", "export_job_id",
-      "created_by_id", "idempotency_key", "request_hash", "expires_at", "updated_at"
+      "board_checksum", "manifest", "manifest_sha256", "initial_screen_id",
+      "export_job_id", "created_by_id", "idempotency_key", "request_hash",
+      "expires_at", "updated_at"
     ) VALUES (
-      $1, $2, $3, $4, $5::jsonb, $6, $7::jsonb, $8, $9, $10, $11, $12,
+      $1, $2, $3, $4, $5::jsonb, $6, $7::jsonb, $8, $9, $10, $11, $12, $13,
       clock_timestamp() + interval '1 hour', clock_timestamp()
     )
   `, [
@@ -5724,6 +5883,7 @@ async function insertProjectPreviewRecord(db, overrides = {}) {
     preview.boardChecksum,
     JSON.stringify(manifest),
     "d".repeat(64),
+    preview.initialScreenId,
     preview.exportJobId,
     preview.createdById,
     preview.idempotencyKey,
@@ -5891,7 +6051,11 @@ async function expectReject(db, name, operation, expected) {
     assert.equal(databaseError.constraint, expected.constraint, `${name}: unexpected constraint`);
   }
   if (expected.message) {
-    assert.match(databaseError.message, new RegExp(escapeRegExp(expected.message)), `${name}: unexpected trigger error`);
+    assert.match(
+      databaseError.message,
+      new RegExp(escapeRegExp(expected.message)),
+      `${name}: unexpected trigger error (${databaseError.message})`,
+    );
   }
   checks.push({
     name,

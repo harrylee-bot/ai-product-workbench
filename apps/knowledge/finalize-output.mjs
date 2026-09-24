@@ -22,7 +22,8 @@ const PUBLISH_ROOTS = [
   "03-产品进化规划",
   "04-产品文档规范",
   "05-原型设计规范",
-  "06-历史案例库",
+  "06-案例库",
+  "07-来源资产索引",
 ];
 
 if (process.argv[2] === "run") {
@@ -277,6 +278,7 @@ async function assertSourceSnapshotStable(sourceRoot, expectedCandidates, expect
 }
 
 async function finalizeGeneratedOutput(outputRoot, basePath) {
+  await createReadmeRedirects(outputRoot);
   const htmlFiles = await collectHtmlFiles(outputRoot);
   if (!htmlFiles.length) {
     throw new Error(`No generated HTML files found under ${outputRoot}`);
@@ -297,6 +299,26 @@ async function finalizeGeneratedOutput(outputRoot, basePath) {
   }
 
   return { operation: "finalize", outputRoot, basePath, htmlFiles: htmlFiles.length, updated, redirects };
+}
+
+async function createReadmeRedirects(outputRoot) {
+  const redirectHtml = `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="refresh" content="0; url=./README">
+  <title>Redirecting</title>
+</head>
+<body>
+  <p><a href="./README">Continue</a></p>
+</body>
+</html>
+`;
+  for (const rootName of PUBLISH_ROOTS) {
+    const directory = path.join(outputRoot, rootName);
+    if (!await fileExists(path.join(directory, "README.html"))) continue;
+    await writeFile(path.join(directory, "readme.html"), redirectHtml, "utf8");
+  }
 }
 
 async function collectAllowedMarkdown(sourceRoot) {

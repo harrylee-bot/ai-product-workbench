@@ -33,6 +33,34 @@ const artifact = {
 };
 
 describe("Artifacts API contracts", () => {
+  it("queries and confirms one fixed version, then retries and withdraws its finalization", async () => {
+    const finalization = {
+      id: "finalization-1", artifactVersionId: "version-1", projectId: "project-1",
+      confirmedById: "principal-1", checksum, status: "ingesting", confirmedAt: createdAt,
+      withdrawnAt: null, ingestionJob: null,
+    };
+    const calls: Array<{ path: string; method: string }> = [];
+    const fetch = vi.fn(async (request: Request) => {
+      const path = new URL(request.url).pathname;
+      calls.push({ path, method: request.method });
+      if (request.method === "GET") return Response.json(null);
+      if (path.endsWith("/finalization")) expect(await request.json()).toEqual({ checksum });
+      return Response.json(finalization);
+    });
+    const service = createService(fetch);
+    expect(await service.getFinalization("artifact-1", "version-1")).toBeNull();
+    expect(await service.confirmFinalization("artifact-1", "version-1", checksum)).toEqual(finalization);
+    expect(await service.retryFinalization("artifact-1", "version-1")).toEqual(finalization);
+    expect(await service.withdrawFinalization("artifact-1", "version-1")).toEqual(finalization);
+    const base = "/api/v1/artifacts/artifact-1/versions/version-1/finalization";
+    expect(calls).toEqual([
+      { path: base, method: "GET" }, { path: base, method: "POST" },
+      { path: `${base}/retry`, method: "POST" }, { path: `${base}/withdraw`, method: "POST" },
+    ]);
+    await expect(service.confirmFinalization("artifact-1", "version-1", "invalid")).rejects.toThrow();
+    expect(fetch).toHaveBeenCalledTimes(4);
+  });
+
   it("lists project Artifacts with isolated filters and strict parsing", async () => {
     const responses = [
       { items: [artifact], nextCursor: "cursor-2" },

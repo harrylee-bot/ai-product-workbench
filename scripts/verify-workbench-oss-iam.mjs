@@ -28,6 +28,11 @@ const ROLE_PREFIXES = Object.freeze({
   preview: "WORKBENCH_PREVIEW_S3",
 });
 
+const ADMIN_CREDENTIAL_ENV = Object.freeze({
+  accessKeyId: "WORKBENCH_S3_ADMIN_ACCESS_KEY_ID",
+  secretAccessKey: "WORKBENCH_S3_ADMIN_SECRET_ACCESS_KEY",
+});
+
 const checks = [];
 const cleanupKeys = new Set();
 const openUploads = [];
@@ -43,16 +48,20 @@ async function main() {
     required("WORKBENCH_S3_BROWSER_UPLOAD_BUCKET_URL"),
     "browser upload bucket URL",
   );
-  const webOrigin = canonicalOrigin(required("WORKBENCH_OSS_WEB_ORIGIN"));
-  const evidenceOutput = required("WORKBENCH_OSS_VERIFICATION_EVIDENCE_OUTPUT");
+  const webOrigin = canonicalOrigin(required("WORKBENCH_WEB_ORIGIN"));
+  const evidenceOutput = required("WORKBENCH_S3_IAM_VERIFICATION_EVIDENCE_OUTPUT");
   const forcePathStyle = strictBoolean(required("WORKBENCH_S3_INTERNAL_FORCE_PATH_STYLE"));
+  const conditionalCreateMode = required("WORKBENCH_S3_CONDITIONAL_CREATE_MODE");
+  if (conditionalCreateMode !== "s3-if-none-match") {
+    throw new Error("S3 IAM verification requires WORKBENCH_S3_CONDITIONAL_CREATE_MODE=s3-if-none-match");
+  }
   const admin = createClient({
     region,
     endpoint,
     forcePathStyle,
     credentials: {
-      accessKeyId: required("ALIBABACLOUD_ACCESS_KEY_ID"),
-      secretAccessKey: required("ALIBABACLOUD_ACCESS_KEY_SECRET"),
+      accessKeyId: required(ADMIN_CREDENTIAL_ENV.accessKeyId),
+      secretAccessKey: required(ADMIN_CREDENTIAL_ENV.secretAccessKey),
     },
   });
   const clients = Object.fromEntries(Object.entries(ROLE_PREFIXES).map(([role, prefix]) => [
@@ -119,11 +128,12 @@ async function main() {
       bucket,
       keys.quarantine,
     );
-    await verifyOssConditionalCreate(
+    await verifyConditionalCreate(
       "file-pipeline.conditional-create",
       clients["file-pipeline"],
       bucket,
       keys.pipelineConditional,
+      conditionalCreateMode,
     );
     await expectDenied("file-pipeline.cross-prefix-write", () => clients["file-pipeline"].send(
       new PutObjectCommand({ Bucket: bucket, Key: keys.importDenied, Body: "denied" }),
@@ -131,11 +141,12 @@ async function main() {
 
     await putGetAllowed("import.pending-write-read", clients.import, bucket, keys.importPending);
     await putGetAllowed("import.ready-write-read", clients.import, bucket, keys.importBlob);
-    await verifyOssConditionalCreate(
+    await verifyConditionalCreate(
       "import.conditional-create",
       clients.import,
       bucket,
       keys.importConditional,
+      conditionalCreateMode,
     );
     await expectDenied("import.delete", () => clients.import.send(
       new DeleteObjectCommand({ Bucket: bucket, Key: keys.importPending }),
@@ -146,11 +157,12 @@ async function main() {
 
     await putGetDeleteAllowed("export.pending-crud", clients.export, bucket, keys.exportPending);
     await putGetDeleteAllowed("export.ready-crud", clients.export, bucket, keys.exportBlob);
-    await verifyOssConditionalCreate(
+    await verifyConditionalCreate(
       "export.conditional-create",
       clients.export,
       bucket,
       keys.exportConditional,
+      conditionalCreateMode,
     );
     await expectDenied("export.cross-prefix-write", () => clients.export.send(
       new PutObjectCommand({ Bucket: bucket, Key: keys.importExportDenied, Body: "denied" }),
@@ -177,7 +189,7 @@ async function main() {
   }
 
   const evidence = {
-    schemaVersion: "workbench.oss-iam-verification.v1",
+    schemaVersion: "workbench.s3-iam-verification.v1",
     startedAt,
     completedAt: new Date().toISOString(),
     runId,
@@ -195,8 +207,8 @@ async function main() {
     ...(failure ? { failure } : {}),
   };
   writeEvidence(evidenceOutput, evidence);
-  if (failure) throw new Error(`OSS IAM verification failed at ${failure.check}: ${failure.code}`);
-  process.stdout.write(`OSS IAM verification passed: ${checks.length} checks; evidence written mode 0600\n`);
+  if (failure) throw new Error(`S3 IAM verification failed at ${failure.check}: ${failure.code}`);
+  process.stdout.write(`S3 IAM verification passed: ${checks.length} checks; evidence written mode 0600\n`);
 }
 
 async function seedObjects(admin, bucket, keys) {
@@ -242,7 +254,7 @@ async function verifyMultipart({ client, browserBucketUrl, bucket, key, region, 
       Bucket: bucket,
       Key: key,
       ContentType: "text/plain",
-      Metadata: { verification: "oss-iam" },
+      Metadata: { verification: "s3-iam" },
     }));
   });
   if (!created.UploadId) throw verificationError("MULTIPART_UPLOAD_ID_MISSING");
@@ -388,16 +400,28 @@ async function putGetDeleteAllowed(name, client, bucket, key) {
   });
 }
 
-async function verifyOssConditionalCreate(name, client, bucket, key) {
+async function verifyConditionalCreate(name, client, bucket, key, mode) {
   const original = Buffer.from(`original:${key}`, "utf8");
   const replacement = Buffer.from(`replacement:${key}`, "utf8");
-  await allowed(`${name}.first-write`, () => sendOssCreateOnly(
+  await allowed(`${name}.first-write`, () => sendConditionalCreate(
     client,
-    new PutObjectCommand({ Bucket: bucket, Key: key, Body: original }),
+    new PutObjectCommand({
+      Bucket: bucket,
+      Key: key,
+      Body: original,
+      ...(mode === "s3-if-none-match" ? { IfNoneMatch: "*" } : {}),
+    }),
+    mode,
   ));
-  await expectOssObjectAlreadyExists(`${name}.duplicate-write`, () => sendOssCreateOnly(
+  await expectConditionalCreateConflict(`${name}.duplicate-write`, () => sendConditionalCreate(
     client,
-    new PutObjectCommand({ Bucket: bucket, Key: key, Body: replacement }),
+    new PutObjectCommand({
+      Bucket: bucket,
+      Key: key,
+      Body: replacement,
+      ...(mode === "s3-if-none-match" ? { IfNoneMatch: "*" } : {}),
+    }),
+    mode,
   ));
   await allowed(`${name}.identity-preserved`, async () => {
     const result = await client.send(new GetObjectCommand({ Bucket: bucket, Key: key }));
@@ -406,21 +430,10 @@ async function verifyOssConditionalCreate(name, client, bucket, key) {
   });
 }
 
-function sendOssCreateOnly(client, command) {
-  command.middlewareStack.add(
-    (next) => async (arguments_) => {
-      if (!arguments_.request || typeof arguments_.request !== "object") {
-        throw verificationError("OSS_HTTP_REQUEST_UNAVAILABLE");
-      }
-      const headers = arguments_.request.headers;
-      if (!headers || typeof headers !== "object") {
-        throw verificationError("OSS_HTTP_HEADERS_UNAVAILABLE");
-      }
-      headers["x-oss-forbid-overwrite"] = "true";
-      return next(arguments_);
-    },
-    { step: "build", name: "workbenchOssForbidOverwrite", priority: "low" },
-  );
+function sendConditionalCreate(client, command, mode) {
+  if (mode !== "s3-if-none-match") {
+    throw new Error("WORKBENCH_S3_CONDITIONAL_CREATE_MODE must be s3-if-none-match");
+  }
   return client.send(command);
 }
 
@@ -459,20 +472,21 @@ async function expectDenied(name, operation) {
   throw verificationError("EXPECTED_ACCESS_DENIED");
 }
 
-async function expectOssObjectAlreadyExists(name, operation) {
+async function expectConditionalCreateConflict(name, operation) {
   activeCheck = name;
   try {
     await operation();
   } catch (error) {
     const candidate = error && typeof error === "object" ? error : {};
     const code = candidate.name ?? candidate.Code ?? candidate.code;
-    if (code === "FileAlreadyExists" && candidate.$metadata?.httpStatusCode === 409) {
-      checks.push({ name, expectation: "FileAlreadyExists/409", result: "passed" });
+    if ((code === "PreconditionFailed" || code === "ConditionalRequestConflict")
+      && [409, 412].includes(candidate.$metadata?.httpStatusCode)) {
+      checks.push({ name, expectation: "S3 conditional-create conflict", result: "passed" });
       return;
     }
     throw error;
   }
-  throw verificationError("EXPECTED_FILE_ALREADY_EXISTS");
+  throw verificationError("EXPECTED_CONDITIONAL_CREATE_CONFLICT");
 }
 
 async function cleanupVerificationObjects(admin, bucket) {
@@ -566,7 +580,7 @@ function canonicalUrl(value, name) {
 function canonicalOrigin(value) {
   const url = new URL(value);
   if (url.origin !== value || url.protocol !== "https:") {
-    throw new Error("WORKBENCH_OSS_WEB_ORIGIN must be an HTTPS origin");
+    throw new Error("WORKBENCH_WEB_ORIGIN must be an HTTPS origin");
   }
   return value;
 }
@@ -639,8 +653,8 @@ function verificationError(code) {
 function writeEvidence(path, evidence) {
   const serialized = `${JSON.stringify(evidence, null, 2)}\n`;
   for (const secretName of [
-    "ALIBABACLOUD_ACCESS_KEY_ID",
-    "ALIBABACLOUD_ACCESS_KEY_SECRET",
+    ADMIN_CREDENTIAL_ENV.accessKeyId,
+    ADMIN_CREDENTIAL_ENV.secretAccessKey,
     ...Object.values(ROLE_PREFIXES).flatMap((prefix) => [
       `${prefix}_ACCESS_KEY_ID`,
       `${prefix}_SECRET_ACCESS_KEY`,

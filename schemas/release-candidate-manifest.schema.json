@@ -164,11 +164,10 @@
         "migrations",
         "ci",
         "deployment",
-        "hardCutDeletion",
         "brandAssets",
         "knowledgeVaultMarkdown",
         "knowledgeVaultConfiguration",
-        "remediationControl",
+        "systemContracts",
         "evidenceContracts"
       ],
       "properties": {
@@ -178,11 +177,10 @@
         "migrations": { "$ref": "#/$defs/artifactGroup" },
         "ci": { "$ref": "#/$defs/artifactGroup" },
         "deployment": { "$ref": "#/$defs/artifactGroup" },
-        "hardCutDeletion": { "$ref": "#/$defs/artifactGroup" },
         "brandAssets": { "$ref": "#/$defs/artifactGroup" },
         "knowledgeVaultMarkdown": { "$ref": "#/$defs/artifactGroup" },
         "knowledgeVaultConfiguration": { "$ref": "#/$defs/artifactGroup" },
-        "remediationControl": { "$ref": "#/$defs/artifactGroup" },
+        "systemContracts": { "$ref": "#/$defs/artifactGroup" },
         "evidenceContracts": { "$ref": "#/$defs/artifactGroup" }
       }
     },

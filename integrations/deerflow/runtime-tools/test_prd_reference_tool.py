@@ -144,7 +144,7 @@ class PrdReferenceToolTests(unittest.TestCase):
                 file_path=next(iter(REFERENCE_SOURCES)),
             )
 
-    def test_rejects_missing_malformed_non_prd_and_mixed_scope(self) -> None:
+    def test_rejects_missing_malformed_and_non_prd_scope(self) -> None:
         virtual_path = next(iter(REFERENCE_SOURCES))
         cases = (
             ({}, "WORKBENCH_RUNTIME_SCOPE_MISSING"),
@@ -161,10 +161,6 @@ class PrdReferenceToolTests(unittest.TestCase):
                 {"workbench": {"requestedArtifactKinds": ["prototype"]}},
                 "WORKBENCH_PRD_REFERENCE_TOOL_NOT_AUTHORIZED",
             ),
-            (
-                {"workbench": {"requestedArtifactKinds": ["prd", "prototype"]}},
-                "WORKBENCH_PRD_REFERENCE_TOOL_NOT_AUTHORIZED",
-            ),
         )
         for context, error_code in cases:
             with self.subTest(context=context):
@@ -175,6 +171,20 @@ class PrdReferenceToolTests(unittest.TestCase):
                         "Read a PRD reference",
                         virtual_path,
                     )
+
+    def test_allows_linked_prd_and_prototype_scope(self) -> None:
+        runtime = SimpleNamespace(
+            context={"workbench": {"requestedArtifactKinds": ["prd", "prototype"]}},
+        )
+        for virtual_path, source_path in REFERENCE_SOURCES.items():
+            content = source_path.read_bytes()
+            with patch.object(Path, "read_bytes", return_value=content):
+                self.assertEqual(
+                    prd_reference_tool.workbench_prd_reference_read.func(
+                        runtime, "Read the linked PRD reference", virtual_path,
+                    ),
+                    content.decode("utf-8"),
+                )
 
     def test_maps_missing_and_unreadable_files_to_stable_error_codes(self) -> None:
         virtual_path = next(iter(REFERENCE_SOURCES))

@@ -5,9 +5,9 @@
   "agent": {
     "path": "deerflow/agents/lead_agent/agent.py",
     "upstreamSha256": "9052cfadca31817a927e83ad2dff01bfe5afdf5acdae337cc8f30eb1a8d8469f",
-    "patchedSha256": "6d03a535d9d4f45d3a1725363ef80e943af5db934df2ec068f4427e6b0c8295d",
-    "anchor": "    # Hide deferred tool schemas from model binding until tool_search promotes them.\n",
-    "insertion": "    # Product Workbench tools are registered globally but scoped per Run.\n    from deerflow.agents.middlewares.workbench_tool_scope_middleware import (\n        WorkbenchToolScopeMiddleware,\n        workbench_canvas_policy_from_runnable_config,\n        workbench_knowledge_enabled_from_runnable_config,\n        workbench_requested_artifact_kinds_from_runnable_config,\n    )\n\n    middlewares.append(\n        WorkbenchToolScopeMiddleware(\n            workbench_canvas_policy_from_runnable_config(config),\n            workbench_requested_artifact_kinds_from_runnable_config(config),\n            workbench_knowledge_enabled_from_runnable_config(config),\n        )\n    )\n\n"
+    "patchedSha256": "fed67066e412add45163ff86267b563ec7fb5210e0d14fbb1701d19a8a41167c",
+    "anchor": "    # Coalesce every SystemMessage into a single leading one before the request\n",
+    "insertion": "    # Product Workbench tools are registered globally but scoped per Run.\n    from deerflow.agents.middlewares.workbench_tool_scope_middleware import (\n        WorkbenchToolScopeMiddleware,\n        workbench_canvas_policy_from_runnable_config,\n        workbench_knowledge_enabled_from_runnable_config,\n        workbench_requested_artifact_kinds_from_runnable_config,\n        workbench_run_scope_from_runnable_config,\n    )\n\n    middlewares.append(\n        WorkbenchToolScopeMiddleware(\n            workbench_canvas_policy_from_runnable_config(config),\n            workbench_requested_artifact_kinds_from_runnable_config(config),\n            workbench_knowledge_enabled_from_runnable_config(config),\n            workbench_run_scope_from_runnable_config(config),\n        )\n    )\n\n"
   },
   "deferredMiddleware": {
     "path": "deerflow/agents/middlewares/deferred_tool_filter_middleware.py",
@@ -15,7 +15,7 @@
   },
   "toolScopeMiddleware": {
     "path": "deerflow/agents/middlewares/workbench_tool_scope_middleware.py",
-    "sha256": "c1455bb83675b3b564f1ecd9498e191b9963b50a40b5e34c874aa477af00c863"
+    "sha256": "3c136a39e6cc4db50750327947d8407ab6f97da9f290344bd32829f848a36d17"
   },
   "additionalSources": [
     {
@@ -94,7 +94,7 @@
     "sha256": "2d18f25f77a489f17771550a32f06efc6e8e780e09ba789f2562d94a4b6bb2fb"
   },
   "contractTest": {
-    "sha256": "483ad7bf4576612a437e8701a8903cb1137b970598c78bf5cb3fd6b2d728cb4b"
+    "sha256": "d800675a3c65ef94eeb8328bd2a1f75b63cebed730f2d5614e109ffda1ffb0c2"
   },
   "requestContextTest": {
     "sha256": "a4cb17db889064abe9a6360e24aca1e861cfd9c99ee5b35298e0dd84beae2fe1"

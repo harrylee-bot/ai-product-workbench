@@ -4,6 +4,7 @@ import {
   startRunRequestSchema,
 } from "@workbench/workbench-contracts";
 import { Prisma, PrismaClient } from "@workbench/workbench-db";
+import { seedReadyKnowledge } from "../../../scripts/test-support/knowledge-fixture.mjs";
 
 const databaseUrl = process.env.WORKBENCH_TEST_DATABASE_URL;
 const describeWithPostgres = databaseUrl ? describe : describe.skip;
@@ -88,7 +89,7 @@ async function seedRetryFixture(db: PrismaClient) {
     },
   });
 
-  await db.$transaction(async (tx) => {
+  const knowledgeReleaseId = await db.$transaction(async (tx) => {
     await tx.principal.create({
       data: { id: principalId, issuer: `run-retry-${suffix}`, subject: principalId },
     });
@@ -112,8 +113,10 @@ async function seedRetryFixture(db: PrismaClient) {
     await tx.thread.create({
       data: { id: threadId, projectId, createdById: principalId, title: "Run retry invariant" },
     });
+    const knowledgeReleaseId = await seedReadyKnowledge(tx);
     await tx.run.create({
       data: {
+        knowledgeReleaseId,
         id: sourceRunId,
         projectId,
         threadId,
@@ -138,9 +141,10 @@ async function seedRetryFixture(db: PrismaClient) {
         errorRetryable: true,
       },
     });
+    return knowledgeReleaseId;
   });
 
-  return { principalId, workspaceId, projectId, threadId, sourceRunId, request, suffix };
+  return { principalId, workspaceId, projectId, threadId, sourceRunId, request, suffix, knowledgeReleaseId };
 }
 
 function retryData(
@@ -149,6 +153,7 @@ function retryData(
   request: RetryFixture["request"],
 ) {
   return {
+    knowledgeReleaseId: fixture.knowledgeReleaseId,
     id: `run_retry_${label}_${fixture.suffix}`,
     projectId: fixture.projectId,
     threadId: fixture.threadId,

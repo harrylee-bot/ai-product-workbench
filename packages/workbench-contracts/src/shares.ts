@@ -16,6 +16,7 @@ export const shareTokenHashSchema = sha256Schema;
 export const shareGrantSchema = z.object({
   id: opaqueIdSchema,
   releaseId: opaqueIdSchema,
+  artifactVersionId: opaqueIdSchema.nullable().optional(),
   createdById: opaqueIdSchema,
   scope: shareScopeSchema,
   status: shareStatusSchema,
@@ -50,6 +51,7 @@ export const shareGrantSchema = z.object({
 
 export const rotateShareGrantRequestSchema = z.object({
   releaseId: opaqueIdSchema,
+  artifactVersionId: opaqueIdSchema.optional(),
   scope: shareScopeSchema.default("view"),
   expiresAt: isoDateTimeSchema.nullable().default(null),
 }).strict();

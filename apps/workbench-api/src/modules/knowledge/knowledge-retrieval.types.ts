@@ -55,7 +55,7 @@ export type KnowledgeRetrievalCandidate = {
 };
 
 export interface KnowledgeRetrievalStore {
-  findScopedRelease(releaseId: string, workspaceId: string): Promise<KnowledgeReleasePin | null>;
+  findScopedRelease(releaseId: string, workspaceId: string, projectId?: string): Promise<KnowledgeReleasePin | null>;
   lexicalCandidates(input: {
     readonly releaseId: string;
     readonly routes: readonly QueryableKnowledgeRoute[];

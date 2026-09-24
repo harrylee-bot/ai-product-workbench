@@ -74,6 +74,7 @@ const artifactVersionDetailBaseShape = {
   citations: z.array(artifactCitationSchema).max(1_000),
   createdByRunId: opaqueIdSchema.nullable(),
   knowledgeReleaseId: opaqueIdSchema.nullable(),
+  sourcePrdVersionId: opaqueIdSchema.nullable().optional(),
   createdAt: isoDateTimeSchema,
 };
 
@@ -88,6 +89,7 @@ type ArtifactVersionDetailMetadata = ArtifactVersionReference & {
   citations: ArtifactCitation[];
   createdByRunId: string | null;
   knowledgeReleaseId: string | null;
+  sourcePrdVersionId?: string | null;
   createdAt: string;
 };
 

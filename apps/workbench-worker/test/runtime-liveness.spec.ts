@@ -4,6 +4,7 @@ vi.mock("@workbench/workbench-telemetry", () => ({ recordRuntimeLivenessMetric }
 
 import {
   RuntimeLivenessError,
+  RuntimeProviderCancellationBudget,
   RuntimeProviderLivenessBudget,
   RuntimeWallClockBudget,
   raceWithAbort,
@@ -21,7 +22,7 @@ describe("Runtime liveness budgets", () => {
   });
 
   it("keeps the 899ms boundary active and expires exactly at 900ms", async () => {
-    const budget = new RuntimeWallClockBudget(900, Date.now());
+    const budget = new RuntimeWallClockBudget(900, performance.now());
 
     await vi.advanceTimersByTimeAsync(899);
     expect(budget.signal.aborted).toBe(false);
@@ -82,7 +83,7 @@ describe("Runtime liveness budgets", () => {
   });
 
   it("preserves the original wall-clock deadline across lease takeover", async () => {
-    const originalStart = Date.now();
+    const originalStart = performance.now();
     await vi.advanceTimersByTimeAsync(700);
     const takeover = new RuntimeWallClockBudget(900, originalStart);
 
@@ -90,6 +91,18 @@ describe("Runtime liveness budgets", () => {
     expect(takeover.signal.aborted).toBe(false);
     await vi.advanceTimersByTimeAsync(1);
     expect(takeover.signal.reason).toBeInstanceOf(RuntimeLivenessError);
+  });
+
+  it("bounds provider cancellation at the configured deadline", async () => {
+    const budget = new RuntimeProviderCancellationBudget(900);
+
+    await vi.advanceTimersByTimeAsync(899);
+    expect(budget.signal.aborted).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(budget.signal.reason).toMatchObject({
+      code: "RUNTIME_PROVIDER_CANCEL_TIMEOUT",
+      retryable: true,
+    });
   });
 
   it("returns control when a provider ignores abort", async () => {
@@ -105,6 +118,22 @@ describe("Runtime liveness budgets", () => {
     await expect(raced).rejects.toMatchObject({
       code: "RUNTIME_EXECUTION_WALL_CLOCK_EXCEEDED",
     });
+  });
+
+  it("observes a provider rejection even when the signal was already aborted", async () => {
+    const controller = new AbortController();
+    const reason = new Error("WORKER_DISCONNECTED");
+    let rejectOperation!: (error: Error) => void;
+    const operation = new Promise<never>((_resolve, reject) => {
+      rejectOperation = reject;
+    });
+    controller.abort(reason);
+
+    const raced = raceWithAbort(operation, controller.signal);
+    await expect(raced).rejects.toBe(reason);
+
+    rejectOperation(new Error("LATE_PROVIDER_FAILURE"));
+    await Promise.resolve();
   });
 
   it("propagates worker disconnect abort independently of provider timers", async () => {

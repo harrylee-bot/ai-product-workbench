@@ -182,6 +182,49 @@ export function useWorkbenchArtifactVersionBatch(
   });
 }
 
+export function useWorkbenchArtifactFinalization(
+  projectId: string,
+  artifactId: string,
+  artifactVersionId: string,
+  enabled = true,
+) {
+  const api = useWorkbenchArtifactsApi();
+  return useQuery({
+    queryKey: [...workbenchQueryKeys.artifactVersion(projectId, artifactId, artifactVersionId), "finalization"],
+    queryFn: () => api.getFinalization(artifactId, artifactVersionId),
+    enabled: enabled && Boolean(projectId && artifactId && artifactVersionId),
+    refetchInterval: (query) => {
+      const status = query.state.data?.ingestionJob?.status;
+      return status && ["queued", "converting", "indexing", "publishing"].includes(status) ? 2_000 : false;
+    },
+  });
+}
+
+export function useUpdateWorkbenchArtifactFinalization(
+  projectId: string,
+  artifactId: string,
+  artifactVersionId: string,
+) {
+  const api = useWorkbenchArtifactsApi();
+  const queryClient = useQueryClient();
+  const queryKey = [...workbenchQueryKeys.artifactVersion(projectId, artifactId, artifactVersionId), "finalization"];
+  return useMutation({
+    mutationKey: [...queryKey, "update"],
+    mutationFn: (command: { kind: "confirm"; checksum: string } | { kind: "retry" | "withdraw" }) => {
+      if (command.kind === "confirm") return api.confirmFinalization(artifactId, artifactVersionId, command.checksum);
+      if (command.kind === "retry") return api.retryFinalization(artifactId, artifactVersionId);
+      return api.withdrawFinalization(artifactId, artifactVersionId);
+    },
+    async onSuccess(result) {
+      queryClient.setQueryData(queryKey, result);
+      await queryClient.invalidateQueries({ queryKey, exact: true });
+    },
+    async onError() {
+      await queryClient.invalidateQueries({ queryKey, exact: true });
+    },
+  });
+}
+
 export function useWorkbenchArtifactVersionPreference(
   principalCacheNamespace: string,
   projectId: string,

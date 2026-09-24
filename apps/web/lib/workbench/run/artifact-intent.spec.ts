@@ -74,9 +74,9 @@ describe("requestedArtifactKindsForPrompt", () => {
       .toEqual(["prototype"]);
   });
 
-  it("rejects mixed output kinds with a stable localized message", () => {
+  it("accepts linked PRD and Prototype, but rejects PRD with unsupported output kinds", () => {
     expect(() => assertRunnableArtifactRequest(["prd", "prototype"]))
-      .toThrow(WORKBENCH_MIXED_ARTIFACT_REQUEST_MESSAGE);
+      .not.toThrow();
     expect(() => assertRunnableArtifactRequest(["code", "prd"]))
       .toThrow(WORKBENCH_MIXED_ARTIFACT_REQUEST_MESSAGE);
     expect(() => assertRunnableArtifactRequest(["prd"]))

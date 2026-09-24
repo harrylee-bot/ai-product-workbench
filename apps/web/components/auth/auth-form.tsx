@@ -1,21 +1,62 @@
-import Form from "next/form";
+"use client";
+
+import {
+  createContext,
+  type FormEvent,
+  useContext,
+  useRef,
+  useState,
+} from "react";
 
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+
+import { authToast } from "./auth-toast";
+
+type AuthFormAction = (formData: FormData) => void | Promise<void>;
+
+const AuthFormPendingContext = createContext(false);
+
+export function useAuthFormPending() {
+  return useContext(AuthFormPendingContext);
+}
+
+export function useAuthFormSubmission(action: AuthFormAction) {
+  const [pending, setPending] = useState(false);
+  const submittingRef = useRef(false);
+
+  const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (submittingRef.current) return;
+    const formData = new FormData(event.currentTarget);
+    submittingRef.current = true;
+    setPending(true);
+    try {
+      await action(formData);
+    } catch {
+      authToast({ type: "error", description: "提交失败，请重试" });
+    } finally {
+      submittingRef.current = false;
+      setPending(false);
+    }
+  };
+
+  return { handleSubmit, pending };
+}
 
 export function AuthForm({
   action,
   children,
   defaultAccount = "",
 }: {
-  action: NonNullable<
-    string | ((formData: FormData) => void | Promise<void>) | undefined
-  >;
+  action: AuthFormAction;
   children: React.ReactNode;
   defaultAccount?: string;
 }) {
+  const { handleSubmit, pending } = useAuthFormSubmission(action);
+
   return (
-    <Form action={action} className="flex flex-col gap-4">
+    <form aria-busy={pending} className="flex flex-col gap-4" onSubmit={handleSubmit}>
       <div className="flex flex-col gap-2">
         <Label className="font-normal text-muted-foreground" htmlFor="account">
           用户名或邮箱
@@ -48,7 +89,9 @@ export function AuthForm({
         />
       </div>
 
-      {children}
-    </Form>
+      <AuthFormPendingContext.Provider value={pending}>
+        {children}
+      </AuthFormPendingContext.Provider>
+    </form>
   );
 }

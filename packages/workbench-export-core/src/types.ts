@@ -44,6 +44,7 @@ export type ExportBuildRequest = {
   format: ExportFormat;
   packaging: ExportPackaging;
   selection: ExportSelection;
+  initialScreenId?: string;
   options: Record<string, JsonValue>;
   source: ExportReleaseSource;
 };

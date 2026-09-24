@@ -1,6 +1,7 @@
 import { runtimeCancelQueue } from "@workbench/workbench-contracts";
 import type { PrismaClient } from "@workbench/workbench-db";
 import { recordRuntimeLivenessMetric } from "@workbench/workbench-telemetry";
+import { runtimeProviderCancellationUnconfirmedCode } from "./runtime-cancellation-state.js";
 
 type RuntimeCancelQueueSender = {
   send(
@@ -41,8 +42,21 @@ export class RuntimeCancellationReconciler {
     try {
       const candidates = await this.db.run.findMany({
         where: {
-          status: "cancelling",
           updatedAt: { lte: new Date(Date.now() - this.staleMs) },
+          OR: [
+            { status: "cancelling" },
+            {
+              status: "failed",
+              errorCode: runtimeProviderCancellationUnconfirmedCode,
+              runtimeAttempts: {
+                some: {
+                  status: "failed",
+                  errorCode: runtimeProviderCancellationUnconfirmedCode,
+                  providerCancellationResolution: { is: null },
+                },
+              },
+            },
+          ],
         },
         orderBy: [{ updatedAt: "asc" }, { id: "asc" }],
         take: this.batchSize,
@@ -51,16 +65,39 @@ export class RuntimeCancellationReconciler {
       for (const candidate of candidates) {
         const startedAt = performance.now();
         try {
-          await this.queue.send(
+          const jobId = await this.queue.send(
             runtimeCancelQueue,
             { runId: candidate.id },
             { singletonKey: candidate.id },
           );
-          recordRuntimeLivenessMetric({
-            operation: "reconcile",
-            outcome: "recovered",
-            durationMs: performance.now() - startedAt,
+          // Rotate queued or duplicate candidates behind untouched cleanup work.
+          await this.db.run.updateMany({
+            where: {
+              id: candidate.id,
+              OR: [
+                { status: "cancelling" },
+                {
+                  status: "failed",
+                  errorCode: runtimeProviderCancellationUnconfirmedCode,
+                  runtimeAttempts: {
+                    some: {
+                      status: "failed",
+                      errorCode: runtimeProviderCancellationUnconfirmedCode,
+                      providerCancellationResolution: { is: null },
+                    },
+                  },
+                },
+              ],
+            },
+            data: { updatedAt: new Date() },
           });
+          if (jobId !== null) {
+            recordRuntimeLivenessMetric({
+              operation: "reconcile",
+              outcome: "recovered",
+              durationMs: performance.now() - startedAt,
+            });
+          }
         } catch (error) {
           recordRuntimeLivenessMetric({
             operation: "reconcile",

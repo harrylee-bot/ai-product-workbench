@@ -1375,6 +1375,9 @@ function PrototypeNodeView({
       "aria-label": node.label,
       className: "h-full w-full border-0 bg-transparent px-[10px] outline-none",
       disabled: runtime.editable || !projection.enabled,
+      maxLength: ["text", "email", "password", "search", "textarea"].includes(node.inputType)
+        ? 10_000
+        : undefined,
       name: node.fieldName,
       onBlur: () => dispatch("blur"),
       onClick,
@@ -1836,7 +1839,8 @@ function nodeStyle(
     alignItems: layout.align === "start" ? "flex-start" : layout.align === "end" ? "flex-end" : layout.align,
     justifyContent: layout.justify === "spaceBetween" ? "space-between" : layout.justify === "spaceAround" ? "space-around" : layout.justify === "start" ? "flex-start" : layout.justify === "end" ? "flex-end" : layout.justify,
     gridTemplateColumns: layout.display === "grid" && layout.gridColumns ? `repeat(${layout.gridColumns}, minmax(0, 1fr))` : undefined,
-    backgroundColor: visual.fill ? stringValue(visual.fill, tokens) : undefined,
+    backgroundColor: node.kind !== "text" && visual.fill ? stringValue(visual.fill, tokens) : undefined,
+    color: node.kind === "text" && visual.fill ? stringValue(visual.fill, tokens) : undefined,
     borderColor: visual.stroke ? stringValue(visual.stroke.color, tokens) : undefined,
     borderStyle: visual.stroke?.style,
     borderWidth: visual.stroke ? numberValue(visual.stroke.width, tokens) : undefined,
@@ -1844,7 +1848,7 @@ function nodeStyle(
     fontFamily: visual.typography ? stringValue(visual.typography.fontFamily, tokens) : undefined,
     fontSize: visual.typography ? numberValue(visual.typography.fontSize, tokens) : undefined,
     fontWeight: visual.typography ? numberValue(visual.typography.fontWeight, tokens) : undefined,
-    lineHeight: visual.typography ? numberValue(visual.typography.lineHeight, tokens) : undefined,
+    lineHeight: visual.typography ? `${numberValue(visual.typography.lineHeight, tokens)}px` : undefined,
     letterSpacing: visual.typography ? numberValue(visual.typography.letterSpacing, tokens) : undefined,
     textAlign: visual.typography?.align,
     textTransform: visual.typography?.transform === "none" ? undefined : visual.typography?.transform,

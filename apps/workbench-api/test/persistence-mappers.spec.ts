@@ -102,6 +102,38 @@ describe("persisted JSON mappers", () => {
       failure: null,
       sources: [{ sourceId: "source_1", snapshot: { blobs: [{ blobId: "blob_1", byteSize: 123 }] } }],
     });
+    expect(mapRun({
+      ...persisted,
+      status: "failed",
+      errorCode: "RUNTIME_PROVIDER_CONTENT_FILTERED",
+      errorDetail: "PRIVATE_DIAGNOSTIC_MARKER https://internal.example.test/?token=secret",
+      errorRetryable: false,
+      finishedAt: now,
+    }).failure).toEqual({
+      code: "RUNTIME_PROVIDER_CONTENT_FILTERED",
+      message: "模型服务商拦截了本次输出，任务已停止。",
+      retryable: false,
+    });
+    expect(mapRun({
+      ...persisted,
+      status: "failed",
+      errorCode: "RUNTIME_EXECUTION_FAILED",
+      errorDetail: "PRIVATE_DIAGNOSTIC_MARKER https://internal.example.test/?token=secret",
+      errorRetryable: false,
+      finishedAt: now,
+    }).failure).toEqual({
+      code: "RUNTIME_EXECUTION_FAILED",
+      message: "RUNTIME_EXECUTION_FAILED",
+      retryable: false,
+    });
+    for (const incomplete of [
+      { errorCode: "RUNTIME_EXECUTION_FAILED" },
+      { errorDetail: "PRIVATE_DIAGNOSTIC_MARKER" },
+      { errorRetryable: false },
+    ]) {
+      expect(() => mapRun({ ...persisted, ...incomplete }))
+        .toThrow("Persisted Run failure snapshot is incomplete");
+    }
     expect(() => mapRun({
       ...persisted,
       request: { ...persisted.request, providerSecret: "must-not-pass" },

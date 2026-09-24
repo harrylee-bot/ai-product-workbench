@@ -76,6 +76,7 @@ type ShareSession = {
   projectId: string;
   shareId: string;
   url: string;
+  selectionKey: string;
 };
 
 type ActiveExportSession = {
@@ -320,14 +321,22 @@ export function useWorkbenchPublicationController({
     if (!canShare) throw new Error("This Project role cannot create Share grants");
     setShareOperationError(null);
     try {
+      const selectionKey = shareSelectionKey(boardController.store);
+      const selectedVersions = new Set(boardController.store?.getState().nodes
+        .filter((node) => node.selected)
+        .map((node) => node.workbench.artifactVersionId));
       const release = await ensureRelease();
+      const prototypes = release.artifactPins.filter((pin) => pin.kind === "prototype"
+        && (selectedVersions.size === 0 || selectedVersions.has(pin.artifactVersionId)));
+      if (prototypes.length !== 1) throw new Error("请选择一个已完成的原型进行分享");
       const result = await rotateShare.mutateAsync({
-        request: { releaseId: release.id, scope: "remix", expiresAt: null },
+        request: { releaseId: release.id, artifactVersionId: prototypes[0]!.artifactVersionId, scope: "view", expiresAt: null },
       });
       const sessionValue = {
         projectId,
         shareId: result.value.share.id,
         url: buildPublicShareUrl(result.value.token),
+        selectionKey,
       };
       if (session.isCurrent()) setShareSession(sessionValue);
       return sessionValue.url;
@@ -337,6 +346,7 @@ export function useWorkbenchPublicationController({
     }
   }, [
     canShare,
+    boardController,
     ensureRelease,
     projectId,
     rotateShare,
@@ -365,9 +375,10 @@ export function useWorkbenchPublicationController({
 
   const ensureShareLink = useCallback(async () => {
     if (!canShare) throw new Error("This Project role cannot create Share grants");
-    if (shareSession?.projectId === projectId) return shareSession.url;
+    if (shareSession?.projectId === projectId
+      && shareSession.selectionKey === shareSelectionKey(boardController.store)) return shareSession.url;
     return enableShare();
-  }, [canShare, enableShare, projectId, shareSession]);
+  }, [boardController.store, canShare, enableShare, projectId, shareSession]);
 
   const toggleShare = useCallback(async () => {
     if (!canShare) throw new Error("This Project role cannot manage Share grants");
@@ -633,9 +644,15 @@ export function useWorkbenchPublicationController({
 
       if (previewId) {
         const current = await exportOperations.getProjectPreview(previewId);
+        // Older responses store the opening screen outside the selection.
+        const currentSelection = current.selection.kind === "artifact"
+          && current.selection.screenId === undefined
+          && current.initialScreenId != null
+          ? { ...current.selection, screenId: current.initialScreenId }
+          : current.selection;
         if (current.boardId === board.id
           && current.boardRevision === board.revision
-          && exportSelectionsEqual(current.selection, selection)
+          && exportSelectionsEqual(currentSelection, selection)
           && current.status !== "failed"
           && current.status !== "cancelled"
           && current.status !== "expired") {
@@ -647,10 +664,18 @@ export function useWorkbenchPublicationController({
       }
 
       if (!preview) {
+        const previewSelection: ExportSelection = selection.kind === "artifact"
+          ? {
+              kind: "artifact",
+              artifactId: selection.artifactId,
+              artifactVersionId: selection.artifactVersionId,
+            }
+          : selection;
         preview = await exportOperations.createProjectPreview(projectId, {
           boardId: board.id,
           boardRevision: board.revision,
-          selection,
+          selection: previewSelection,
+          initialScreenId: selection.kind === "artifact" ? selection.screenId ?? null : null,
         });
         previewId = preview.id;
         previewIdsRef.current.set(cacheKey, previewId);
@@ -725,11 +750,21 @@ export function useWorkbenchPublicationController({
       ?? revokeProjectShares.error,
     shareStateError: sharesQuery.error,
     shareStatePending: canShare && (sharesQuery.isPending || sharesQuery.isPlaceholderData),
-    shareUrl: shareSession?.projectId === projectId ? shareSession.url : null,
+    shareUrl: shareSession?.projectId === projectId
+      && shareSession.selectionKey === shareSelectionKey(boardController.store) ? shareSession.url : null,
     startExport,
     prepareExternalDelivery,
     toggleShare,
   };
+}
+
+function shareSelectionKey(store: BoardStore | null): string {
+  const state = store?.getState();
+  return JSON.stringify([
+    state?.boardId, state?.serverRevision, state?.dirty, state?.saveStatus,
+    [...new Set(state?.nodes.filter((node) => node.selected)
+      .map((node) => node.workbench.artifactVersionId))].sort(),
+  ]);
 }
 
 export async function waitForPreviewExport(
@@ -876,6 +911,8 @@ export function exportTargetForFormat(
   if (format === "figma") return "Figma";
   if (format === "mcp") return "MCP";
   if (format === "react") return "React";
+  if (format === "docx") return "Download Word";
+  if (format === "pdf") return "Download PDF";
   return packaging === "zip" ? "Download .zip" : "Copy code";
 }
 

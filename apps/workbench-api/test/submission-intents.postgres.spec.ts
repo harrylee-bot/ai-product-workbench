@@ -9,6 +9,8 @@ import { RunsService } from "../src/modules/runs/runs.service.js";
 import { SubmissionIntentsService } from "../src/modules/submission-intents/submission-intents.service.js";
 import type { MultipartStoragePort } from "../src/platform/object-storage/object-storage.port.js";
 
+import { seedReadyKnowledge } from "../../../scripts/test-support/knowledge-fixture.mjs";
+
 const databaseUrl = process.env.WORKBENCH_TEST_DATABASE_URL;
 const describeWithPostgres = databaseUrl ? describe : describe.skip;
 
@@ -268,6 +270,7 @@ describeWithPostgres("SubmissionIntent PostgreSQL vertical slice", () => {
         item: { attachments: [{ fileAssetId: upload.file.id, fileStatus: "ready" }] },
       });
 
+      await db.$transaction((tx) => seedReadyKnowledge(tx));
       const [firstReceipt, secondReceipt] = await Promise.all([
         intents.submit(owner.id, created.id),
         refreshedIntents.submit(owner.id, created.id),

@@ -409,20 +409,6 @@
       "symbolicLink": false
     },
     {
-      "path": "storage/source-assets/legacy-knowledge-20260716/knowledge-categories.ndjson",
-      "mediaType": "application/octet-stream",
-      "byteSize": 2562,
-      "sha256": "088044c8671e7bdef25e8fd9441b69684c2a9dd76bcb9e0c230d90865261a2fa",
-      "symbolicLink": false
-    },
-    {
-      "path": "storage/source-assets/legacy-knowledge-20260716/knowledge-items.ndjson",
-      "mediaType": "application/octet-stream",
-      "byteSize": 775372,
-      "sha256": "c3c96b67600c545e95508dbca6670b2c9fddf5267e868a3fb471aa59e76d587b",
-      "symbolicLink": false
-    },
-    {
       "path": "storage/source-assets/prototype-html/html.zip",
       "mediaType": "application/zip",
       "byteSize": 113155768,

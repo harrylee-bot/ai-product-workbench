@@ -96,7 +96,9 @@ function mapFailure(run: {
   }
   return {
     code: run.errorCode,
-    message: run.errorDetail,
+    message: run.errorCode === "RUNTIME_PROVIDER_CONTENT_FILTERED"
+      ? "模型服务商拦截了本次输出，任务已停止。"
+      : run.errorCode,
     retryable: run.errorRetryable,
   };
 }

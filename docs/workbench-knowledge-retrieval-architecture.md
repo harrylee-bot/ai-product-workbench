@@ -1,6 +1,6 @@
 # 产品工作台知识检索与不可变 Profile 方案
 
-更新日期：2026-07-28
+更新日期：2026-09-24
 状态：仓库内主链已实现；生产模型采用仍取决于固定中文评测集
 
 ## 结论
@@ -22,8 +22,8 @@
 
 ## 当前事实
 
-- 当前 Vault 由 `npm run audit:knowledge-vault` 维护可校验闭包。本次清理后共有 40 个 Markdown（34 个发布条目、4 个来源索引、1 个收件箱说明、1 个模板），不再保留旧版镜像和导入记录。
-- 当前 `storage/` 只保留 62 个由 Vault 明确引用的原始来源资产，路径、byte size 和 SHA-256 全部校验通过；未引用文件、旧对话、烟测数据和临时派生物均不属于知识发布候选。
+- 2026-09-24 本地审计的 Vault 共 41 个 Markdown，40 个已索引、34 个发布条目，分层为 34 个主知识、6 个来源索引、1 个模板；数量取自审计输出，不作为测试硬编码基线。
+- 当前 `storage/` 保留 60 个由 Vault 明确引用的原始来源资产，路径、byte size 和 SHA-256 全部校验通过；未引用文件和临时派生物不属于知识发布候选。
 - 当前已完成 EmbeddingProfile、独立向量表、release profile pin、持久化 embedding batch、TEI adapter 和数据库完整性 finalizer；这些能力已通过模拟 provider 故障与真实 PostgreSQL 崩溃重放，但尚未用最终候选模型完成评测和生产验收。
 - `KnowledgeRelease` 通过五列复合外键同时固定 RetrievalProfile ID/spec SHA-256 与 embedding profile ID/spec SHA-256/dimension；manifest 固定同一身份，Run 和 ArtifactVersion 经不可变 release 保留传递 pin。
 - `EmbeddingProfile v1` 严格合同与 RFC 8785 `specSha256` 已实现；数据库已删除 `KnowledgeChunk.embeddingModel` 与临时 `vector(1536)`，改为独立、无 typmod 的 `KnowledgeChunkEmbedding`。
@@ -32,6 +32,7 @@
 - File Worker 已改为启动时加载本地 Hugging Face `tokenizer.json` + `tokenizer_config.json`，用两份文件的 canonical artifact SHA-256 与 EmbeddingProfile pin 做 fail-closed 校验；切分上限直接取 profile 的 `chunkMaximumTokens`，不再存在独立 token ceiling。TEI adapter 仍会调用 `/tokenize` 精确复核单条与整批 token 上限。
 - 产品工作台已有 citation-ready 检索 service、参数化 PostgreSQL lexical/dense candidate store、profile 驱动 RRF、TEI query embedding/reranker adapter、capability ledger 与 DeerFlow trusted citation tool。生产 adopted 模型、可达部署和质量评测未完成，因此仍不能宣称生产 dense 检索已验收。
 - `storage/` 是本地原始资产归档，不同步到外部知识库，也不整体发布；只有通过 Markdown 引用闭包的文件进入 KnowledgeRelease 构建输入。
+- 生成强制知识证据、联合 PRD/Prototype 和最终版自动入库的实现与验收边界见 `workbench-generation-knowledge-lifecycle.md`；这些本地改动不代表生产模型或网络 E2E 已验收。
 
 ## 已落地基础与验证
 
@@ -227,7 +228,7 @@ building -> chunks_ready -> embedding -> finalizing -> ready
 | bge-reranker-v2-m3 | Apache-2.0 | PoC 下载时锁定 commit | 独立 reranker，top 24 -> 8-12 | 首选 PoC |
 | TEI | Apache-2.0 | PoC 后固定 image digest | `/embed` 与 `/rerank` 独立实例/模型 | 服务首选 |
 
-本轮执行环境无法连接 Hugging Face 完成在线元数据复核，因此表内许可证按公开 model-card 信息作为候选记录，不作为最终法务证据。PoC 必须在可联网的受控环境下载权重、tokenizer/config，锁定 commit，登记逐文件许可证和 artifact SHA-256，并固定 TEI image digest；任一项未完成都保持 `candidate`。BGE-M3 的 sparse/ColBERT 能力不进入 v1，中文 lexical 继续由 Jieba + PostgreSQL FTS 负责。
+模型采用前必须在受控联网环境下载权重、tokenizer/config，锁定 commit，登记逐文件许可证和 artifact SHA-256，并固定 TEI image digest；任一项缺失都不能进入 `adopted`。BGE-M3 的 sparse/ColBERT 能力不进入 v1，中文 lexical 继续由 Jieba + PostgreSQL FTS 负责。
 
 第三方供应商通过同一 EmbeddingPort 接入。每个 provider 必须关闭 SDK 隐式重试，重试由 durable queue 管理；供应商请求/响应、计费 ID 和模型别名不得进入 KnowledgeRelease 领域合同。
 

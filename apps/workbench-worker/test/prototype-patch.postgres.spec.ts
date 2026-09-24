@@ -12,6 +12,8 @@ import { PrototypePatchService } from "../src/runs/prototype-patch.service.js";
 import { RunEventStore } from "../src/runs/run-event.store.js";
 import { RunProcessor } from "../src/runs/run-processor.js";
 
+import { seedReadyKnowledge, seedKnowledgeReceipt } from "../../../scripts/test-support/knowledge-fixture.mjs";
+
 const databaseUrl = process.env.WORKBENCH_TEST_DATABASE_URL;
 const describeWithPostgres = databaseUrl ? describe : describe.skip;
 
@@ -710,11 +712,16 @@ async function seedFixture(db: PrismaClient): Promise<Fixture> {
         threadId: fixture.threadId,
         adapter: "deerflow",
         externalThreadId: `external_thread_${suffix}`,
-        metadata: { workbenchThreadId: fixture.threadId },
+        metadata: {
+          workbenchProjectId: fixture.projectId,
+          workbenchThreadId: fixture.threadId,
+          workbenchPrincipalId: fixture.principalId,
+        },
       },
     });
     await tx.run.create({
       data: {
+        knowledgeReleaseId: await seedReadyKnowledge(tx),
         id: fixture.runId,
         projectId: fixture.projectId,
         threadId: fixture.threadId,
@@ -771,6 +778,8 @@ async function seedFixture(db: PrismaClient): Promise<Fixture> {
         title: "Prototype Patch test",
       },
     });
+    const citations = await seedKnowledgeReceipt(tx, fixture.runtimeAttemptId);
+    const run = await tx.run.findUniqueOrThrow({ where: { id: fixture.runId } });
     await tx.artifactVersion.create({
       data: {
         id: fixture.artifactVersionId,
@@ -781,7 +790,8 @@ async function seedFixture(db: PrismaClient): Promise<Fixture> {
         status: "staging",
         content: fixture.document as Prisma.InputJsonValue,
         checksum: sha256Canonical(fixture.document),
-        citations: [],
+        citations,
+        knowledgeReleaseId: run.knowledgeReleaseId,
         createdByRunId: fixture.runId,
         runtimeDraftSourceId: `checkpoint_${suffix}`,
         runtimeDraftIndex: 0,

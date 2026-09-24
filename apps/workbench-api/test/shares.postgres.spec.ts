@@ -1,8 +1,8 @@
 import { createHash } from "node:crypto";
-import { Prisma, PrismaClient } from "@workbench/workbench-db";
+import { PrismaClient } from "@workbench/workbench-db";
 import { canonicalJson } from "@workbench/workbench-contracts";
-import { canonicalSha256 } from "../src/modules/releases/release.mapper.js";
 import { hashShareToken, SharesService } from "../src/modules/shares/shares.service.js";
+import { seedPrototypeRelease } from "./prototype-release.fixture.js";
 
 const databaseUrl = process.env.WORKBENCH_TEST_DATABASE_URL;
 const describeWithPostgres = databaseUrl ? describe : describe.skip;
@@ -40,41 +40,8 @@ async function seedShareProject(db: PrismaClient, suffix: string) {
     const board = await tx.board.create({
       data: { projectId: project.id, viewport: { x: 0, y: 0, zoom: 1 } },
     });
-    const boardSnapshot = {
-      id: board.id,
-      projectId: project.id,
-      revision: 0,
-      viewport: { x: 0, y: 0, zoom: 1 },
-      nodes: [],
-      edges: [],
-    };
-    const manifest = {
-      protocol: "workbench.project-release.v1",
-      projectId: project.id,
-      releaseVersion: 1,
-      board: { id: board.id, revision: 0, checksum: canonicalSha256(boardSnapshot) },
-      artifacts: [],
-    };
-    const release = await tx.projectRelease.create({
-      data: {
-        projectId: project.id,
-        version: 1,
-        createdById: owner.id,
-        idempotencyKey: `release:${suffix}`,
-        requestHash: createHash("sha256").update(canonicalJson({ suffix })).digest("hex"),
-        boardId: board.id,
-        boardRevision: 0,
-        boardSnapshot: boardSnapshot as Prisma.InputJsonValue,
-        boardChecksum: canonicalSha256(boardSnapshot),
-        manifest: manifest as Prisma.InputJsonValue,
-        manifestSha256: canonicalSha256(manifest),
-      },
-    });
-    await tx.projectRelease.update({
-      where: { id: release.id },
-      data: { status: "ready", finishedAt: new Date() },
-    });
-    return { ownerId: owner.id, projectId: project.id, releaseId: release.id };
+    const release = await seedPrototypeRelease(tx, project.id, owner.id, board.id);
+    return { ownerId: owner.id, projectId: project.id, releaseId: release.id, artifactVersionId: release.artifactVersionId };
   });
 }
 
@@ -85,7 +52,7 @@ describeWithPostgres("Share rotation PostgreSQL transaction", () => {
     const right = new PrismaClient({ datasourceUrl: databaseUrl });
     const suffix = `${Date.now()}_${Math.random().toString(36).slice(2)}`;
     const fixture = await seedShareProject(setup, suffix);
-    const request = { releaseId: fixture.releaseId, scope: "remix" as const, expiresAt: null };
+    const request = { releaseId: fixture.releaseId, artifactVersionId: fixture.artifactVersionId, scope: "view" as const, expiresAt: null };
     const leftService = new SharesService(left as never, {} as never, objectStorage() as never);
     const rightService = new SharesService(right as never, {} as never, objectStorage() as never);
 
@@ -106,10 +73,10 @@ describeWithPostgres("Share rotation PostgreSQL transaction", () => {
       expect(results.some((result) => hashShareToken(result.token) === active[0]?.tokenHash)).toBe(true);
       await expect(setup.$executeRaw`
         INSERT INTO "share_grants" (
-          "id", "project_id", "release_id", "created_by_id", "idempotency_key",
+          "id", "project_id", "release_id", "artifact_version_id", "created_by_id", "idempotency_key",
           "request_hash", "token_hash", "scope", "status", "revision", "created_at", "updated_at"
         ) VALUES (
-          ${`share_duplicate_${suffix}`}, ${fixture.projectId}, ${fixture.releaseId}, ${fixture.ownerId},
+          ${`share_duplicate_${suffix}`}, ${fixture.projectId}, ${fixture.releaseId}, ${fixture.artifactVersionId}, ${fixture.ownerId},
           ${`share:duplicate:${suffix}`}, ${"a".repeat(64)}, ${"b".repeat(64)},
           'view', 'active', 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
         )

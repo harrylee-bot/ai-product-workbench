@@ -111,6 +111,23 @@ describe("RuntimeExecutionReconciler", () => {
     expect(queue.send).not.toHaveBeenCalled();
   });
 
+  it("does not report recovery when the exclusive queue rejects a duplicate job", async () => {
+    const transactionQueries = vi.fn(async () => [{ id: "run-1", threadId: "thread-1" }]);
+    const db = {
+      $queryRaw: vi.fn(async () => [{ id: "run-1" }]),
+      $transaction: vi.fn(async (
+        callback: (tx: { $queryRaw: typeof transactionQueries }) => Promise<unknown>,
+      ) => callback({ $queryRaw: transactionQueries })),
+    };
+    const queue = { send: vi.fn(async () => null) };
+    const reconciler = new RuntimeExecutionReconciler(db as never, queue, 25, 5_000);
+
+    await reconciler.runOnce();
+
+    expect(queue.send).toHaveBeenCalledTimes(1);
+    expect(recordRuntimeLivenessMetric).not.toHaveBeenCalled();
+  });
+
   it("does not overlap reconciliation scans", async () => {
     const gate = deferred<Array<{ id: string }>>();
     const db = {

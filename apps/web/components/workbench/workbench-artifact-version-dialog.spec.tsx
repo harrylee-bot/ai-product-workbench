@@ -1,6 +1,10 @@
 // @vitest-environment jsdom
 
-import type { ArtifactVersionDetail, ArtifactVersionListItem } from "@workbench/workbench-contracts";
+import type {
+  ArtifactFinalization,
+  ArtifactVersionDetail,
+  ArtifactVersionListItem,
+} from "@workbench/workbench-contracts";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -12,13 +16,34 @@ const mocks = vi.hoisted(() => ({
   artifactContent: vi.fn(),
   artifactVersion: vi.fn(),
   artifactVersions: vi.fn(),
+  finalization: vi.fn(),
+  updateFinalization: vi.fn(),
 }));
 
 vi.mock("@/lib/workbench/features", () => ({
   useInfiniteWorkbenchArtifactVersions: mocks.artifactVersions,
+  useUpdateWorkbenchArtifactFinalization: mocks.updateFinalization,
   useWorkbenchArtifact: mocks.artifact,
   useWorkbenchArtifactVersion: mocks.artifactVersion,
   useWorkbenchArtifactVersionContent: mocks.artifactContent,
+  useWorkbenchArtifactFinalization: mocks.finalization,
+}));
+
+vi.mock("@/components/ui/alert-dialog", () => ({
+  AlertDialog: ({ children, open }: { children: React.ReactNode; open: boolean }) => (
+    open ? <>{children}</> : null
+  ),
+  AlertDialogAction: ({ children, ...props }: React.ButtonHTMLAttributes<HTMLButtonElement>) => (
+    <button {...props}>{children}</button>
+  ),
+  AlertDialogCancel: ({ children, ...props }: React.ButtonHTMLAttributes<HTMLButtonElement>) => (
+    <button {...props}>{children}</button>
+  ),
+  AlertDialogContent: ({ children }: { children: React.ReactNode }) => <div role="alertdialog">{children}</div>,
+  AlertDialogDescription: ({ children }: { children: React.ReactNode }) => <p>{children}</p>,
+  AlertDialogFooter: ({ children }: { children: React.ReactNode }) => <footer>{children}</footer>,
+  AlertDialogHeader: ({ children }: { children: React.ReactNode }) => <header>{children}</header>,
+  AlertDialogTitle: ({ children }: { children: React.ReactNode }) => <h2>{children}</h2>,
 }));
 
 vi.mock("@/components/ui/dialog", () => ({
@@ -57,6 +82,11 @@ beforeEach(() => {
     items: [versionListItem("version-2", 2), versionListItem("version-1", 1)],
     nextCursor: null,
   }]));
+  mocks.finalization.mockReset().mockReturnValue(query(null));
+  mocks.updateFinalization.mockReset().mockReturnValue({
+    isPending: false,
+    mutateAsync: vi.fn(async () => null),
+  });
   mocks.artifactVersion.mockReset().mockImplementation((
     _projectId: string,
     _artifactId: string,
@@ -71,6 +101,7 @@ describe("Workbench ArtifactVersion dialog", () => {
     const onPinVersion = vi.fn(async () => undefined);
     render(
       <WorkbenchArtifactVersionDialog
+        canFinalize
         canPin
         onOpenChange={vi.fn()}
         onPinVersion={onPinVersion}
@@ -112,6 +143,7 @@ describe("Workbench ArtifactVersion dialog", () => {
     mocks.artifactVersions.mockReturnValue(infiniteQuery([{ items: [], nextCursor: null }]));
     render(
       <WorkbenchArtifactVersionDialog
+        canFinalize
         canPin
         onOpenChange={vi.fn()}
         onPinVersion={vi.fn()}
@@ -135,6 +167,7 @@ describe("Workbench ArtifactVersion dialog", () => {
     }]));
     render(
       <WorkbenchArtifactVersionDialog
+        canFinalize
         canPin
         onOpenChange={vi.fn()}
         onPinVersion={vi.fn()}
@@ -159,6 +192,7 @@ describe("Workbench ArtifactVersion dialog", () => {
     }], { fetchNextPage }));
     render(
       <WorkbenchArtifactVersionDialog
+        canFinalize
         canPin
         onOpenChange={vi.fn()}
         onPinVersion={vi.fn()}
@@ -173,6 +207,80 @@ describe("Workbench ArtifactVersion dialog", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "加载更早版本" }));
     expect(fetchNextPage).toHaveBeenCalledTimes(1);
+  });
+
+  it("confirms the selected ready version with its immutable checksum", async () => {
+    const mutateAsync = vi.fn(async () => finalizationState("ingesting"));
+    mocks.updateFinalization.mockReturnValue({ isPending: false, mutateAsync });
+    render(
+      <WorkbenchArtifactVersionDialog
+        canFinalize
+        canPin
+        onOpenChange={vi.fn()}
+        onPinVersion={vi.fn()}
+        open
+        reference={{
+          projectId: "project-1",
+          artifactId: "artifact-1",
+          artifactVersionId: "version-2",
+        }}
+      />,
+    );
+
+    expect(screen.getByText("知识库：尚未确认")).not.toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "确认最终版" }));
+    expect(screen.getByRole("alertdialog")).not.toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "确认入库" }));
+
+    await waitFor(() => expect(mutateAsync).toHaveBeenCalledWith({
+      kind: "confirm",
+      checksum: prdVersion("version-2", 2).checksum,
+    }));
+  });
+
+  it("offers retry for a failed ingestion and hides owner actions for non-owners", async () => {
+    mocks.finalization.mockReturnValue(query(finalizationState("rejected")));
+    const mutateAsync = vi.fn(async () => finalizationState("ingesting"));
+    mocks.updateFinalization.mockReturnValue({ isPending: false, mutateAsync });
+    const { rerender } = render(
+      <WorkbenchArtifactVersionDialog
+        canFinalize
+        canPin
+        onOpenChange={vi.fn()}
+        onPinVersion={vi.fn()}
+        open
+        reference={{
+          projectId: "project-1",
+          artifactId: "artifact-1",
+          artifactVersionId: "version-2",
+        }}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "重试入库" }));
+    await waitFor(() => expect(mutateAsync).toHaveBeenCalledWith({ kind: "retry" }));
+
+    rerender(
+      <WorkbenchArtifactVersionDialog
+        canFinalize={false}
+        canPin
+        onOpenChange={vi.fn()}
+        onPinVersion={vi.fn()}
+        open
+        reference={{
+          projectId: "project-1",
+          artifactId: "artifact-1",
+          artifactVersionId: "version-2",
+        }}
+      />,
+    );
+    expect(screen.queryByTestId("finalization-status")).toBeNull();
+    expect(mocks.finalization).toHaveBeenLastCalledWith(
+      "project-1",
+      "artifact-1",
+      "version-2",
+      false,
+    );
   });
 });
 
@@ -236,6 +344,30 @@ function prdVersion(artifactVersionId: string, version: number): ArtifactVersion
     content: {
       ...document,
       revision: { ...document.revision, number: version },
+    },
+  };
+}
+
+function finalizationState(
+  status: ArtifactFinalization["status"],
+): ArtifactFinalization {
+  return {
+    id: "finalization-1",
+    artifactVersionId: "version-2",
+    projectId: "project-1",
+    confirmedById: "principal-1",
+    checksum: prdVersion("version-2", 2).checksum,
+    status,
+    confirmedAt: "2026-09-24T00:00:00.000Z",
+    withdrawnAt: null,
+    ingestionJob: {
+      id: "ingestion-1",
+      status: status === "rejected" ? "failed" : status === "ingested" ? "published" : status === "withdrawn" ? "withdrawn" : "failed",
+      attempt: 1,
+      errorCode: status === "rejected" ? "INGESTION_FAILED" : null,
+      createdAt: "2026-09-24T00:00:00.000Z",
+      updatedAt: "2026-09-24T00:00:00.000Z",
+      releases: [],
     },
   };
 }

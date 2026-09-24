@@ -8,7 +8,11 @@ if command -v apk >/dev/null 2>&1; then
   for package in "$@"; do
     case "$package" in
       fonts-dejavu-core) package="font-dejavu" ;;
-      ca-certificates|chromium|coreutils|git|nginx|openssl|tini) ;;
+      fonts-noto-cjk) package="font-noto-cjk" ;;
+      python3-lxml) package="py3-lxml" ;;
+      python3-pillow) package="py3-pillow" ;;
+      python3-virtualenv) package="py3-virtualenv" ;;
+      ca-certificates|chromium|coreutils|git|libreoffice-writer|nginx|openssl|python3|tini) ;;
       *)
         echo "unsupported Alpine container package: $package" >&2
         exit 1
@@ -29,8 +33,19 @@ elif command -v apt-get >/dev/null 2>&1; then
       /etc/apt/sources.list.d/debian.sources
   fi
   if [ "$#" -gt 0 ]; then
+    debian_packages=""
+    for package in "$@"; do
+      case "$package" in
+        # The renderer uses portable package names in the Dockerfile. Debian
+        # calls Pillow's system package python3-pil.
+        python3-pillow) package="python3-pil" ;;
+      esac
+      debian_packages="${debian_packages}${debian_packages:+ }${package}"
+    done
     apt-get update
-    apt-get install -y --no-install-recommends "$@"
+    # Package names passed to this helper are fixed allowlisted image inputs.
+    # shellcheck disable=SC2086
+    apt-get install -y --no-install-recommends $debian_packages
     rm -rf /var/lib/apt/lists/* /var/cache/apt/*
   fi
 else

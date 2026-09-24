@@ -78,6 +78,7 @@ describe("Workbench publication Share rotation", () => {
           status: "ready",
           boardId: "board-1",
           boardRevision: 7,
+          artifactPins: [{ kind: "prototype", artifactVersionId: "version-1" }],
         }],
       },
     });
@@ -96,6 +97,7 @@ describe("Workbench publication Share rotation", () => {
           serverRevision: 7,
           dirty: false,
           saveStatus: "clean",
+          nodes: [],
         }),
       },
       save: vi.fn(),
@@ -115,7 +117,7 @@ describe("Workbench publication Share rotation", () => {
     expect(firstUrl).toBe(`${window.location.origin}/share/wbs_${"A".repeat(43)}`);
     expect(mocks.rotate).toHaveBeenCalledTimes(1);
     expect(mocks.rotate).toHaveBeenCalledWith({
-      request: { releaseId: "release-1", scope: "remix", expiresAt: null },
+      request: { releaseId: "release-1", artifactVersionId: "version-1", scope: "view", expiresAt: null },
     });
 
     await act(async () => {
@@ -123,6 +125,38 @@ describe("Workbench publication Share rotation", () => {
     });
     expect(mocks.rotate).toHaveBeenCalledTimes(1);
     expect(rendered.result.current.shareUrl).toBe(firstUrl);
+  });
+
+  it("rotates to the selected Prototype instead of reusing a different version's link", async () => {
+    const nodes = [
+      { selected: true, workbench: { artifactVersionId: "version-1" } },
+      { selected: false, workbench: { artifactVersionId: "version-2" } },
+    ];
+    mocks.releaseRefetch.mockResolvedValue({ data: { items: [{
+      id: "release-1", status: "ready", boardId: "board-1", boardRevision: 7,
+      artifactPins: nodes.map((node) => ({ kind: "prototype", artifactVersionId: node.workbench.artifactVersionId })),
+    }] } });
+    mocks.rotate.mockImplementation(async ({ request }) => ({
+      value: { share: { id: `share-${request.artifactVersionId}` }, token: `wbs_${request.artifactVersionId}`, revokedGrantCount: 1 },
+      etag: '"0"',
+    }));
+    const rendered = renderHook(() => useWorkbenchPublicationController({
+      boardController: {
+        store: { getState: () => ({ boardId: "board-1", serverRevision: 7, dirty: false, saveStatus: "clean", nodes }) },
+        save: vi.fn(),
+      } as never,
+      canExport: false, canPreview: false, canShare: true, projectId: "project-1",
+    }));
+    await act(async () => { await rendered.result.current.ensureShareLink(); });
+    nodes[0]!.selected = false;
+    nodes[1]!.selected = true;
+    rendered.rerender();
+    expect(rendered.result.current.shareUrl).toBeNull();
+    await act(async () => { await rendered.result.current.ensureShareLink(); });
+    expect(mocks.rotate).toHaveBeenCalledTimes(2);
+    expect(mocks.rotate).toHaveBeenLastCalledWith({
+      request: { releaseId: "release-1", artifactVersionId: "version-2", scope: "view", expiresAt: null },
+    });
   });
 
   it("keeps the existing toggle-off path as atomic revoke-all", async () => {
@@ -191,6 +225,7 @@ describe("Workbench publication Share rotation", () => {
           status: "ready",
           boardId: "board-1",
           boardRevision: 7,
+          artifactPins: [{ kind: "prototype", artifactVersionId: "version-1" }],
         }],
       },
     });
@@ -202,6 +237,7 @@ describe("Workbench publication Share rotation", () => {
           serverRevision: 7,
           dirty: false,
           saveStatus: "clean",
+          nodes: [],
         }),
       },
       save: vi.fn(),

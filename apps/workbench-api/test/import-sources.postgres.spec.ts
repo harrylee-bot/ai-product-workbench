@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { ConfigService } from "@nestjs/config";
 import { Prisma, PrismaClient } from "@workbench/workbench-db";
 import {
@@ -16,7 +16,148 @@ import {
 const databaseUrl = process.env.WORKBENCH_TEST_DATABASE_URL;
 const describeWithPostgres = databaseUrl ? describe : describe.skip;
 
-describeWithPostgres("Import Source PostgreSQL queue atomicity", () => {
+describeWithPostgres("Import Source PostgreSQL lifecycle and queue atomicity", () => {
+  it.each(["file", "design_md"] as const)(
+    "publishes a ready %s source without violating pending checksum or manifest constraints",
+    async (kind) => {
+      const db = new PrismaClient({ datasourceUrl: databaseUrl });
+      const suffix = randomUUID().replaceAll("-", "");
+      const principalId = `principal_import_${suffix}`;
+      const workspaceId = `workspace_import_${suffix}`;
+      const projectId = `project_import_${suffix}`;
+      const blobId = `blob_import_${suffix}`;
+      const fileId = `file_import_${suffix}`;
+      const bytes = Buffer.from(`# Local source ${suffix}\n`, "utf8");
+      const sha256 = createHash("sha256").update(bytes).digest("hex");
+      const verifiedAt = new Date();
+      const request = { kind, fileAssetId: fileId };
+      const queue = { sendInTransaction: vi.fn() };
+      const rollbackFixture = new Error("ROLLBACK_LOCAL_SOURCE_REGRESSION_FIXTURE");
+
+      try {
+        await expect(db.$transaction(async (tx) => {
+          await tx.principal.create({
+            data: { id: principalId, issuer: `import-${suffix}`, subject: principalId },
+          });
+          await tx.workspace.create({
+            data: {
+              id: workspaceId,
+              slug: `import-${suffix}`,
+              name: "Local source lifecycle",
+              createdById: principalId,
+            },
+          });
+          await tx.workspaceMember.create({
+            data: { workspaceId, principalId, role: "owner" },
+          });
+          await tx.project.create({
+            data: { id: projectId, workspaceId, createdById: principalId, title: "Local source" },
+          });
+          await tx.projectMember.create({
+            data: { projectId, workspaceId, principalId, role: "owner" },
+          });
+          await tx.blob.create({
+            data: {
+              id: blobId,
+              sha256,
+              generation: 1,
+              storageKey: `blobs/${sha256.slice(0, 2)}/${sha256.slice(2, 4)}/${sha256}/g1`,
+              mediaType: "text/markdown",
+              byteSize: BigInt(bytes.byteLength),
+              status: "ready",
+              verifiedAt,
+            },
+          });
+          await tx.blobScan.create({
+            data: {
+              blobId,
+              attempt: 1,
+              status: "clean",
+              scanner: "test-scanner",
+              scannerVersion: "1",
+              signatureVersion: "test-signatures",
+              evidence: { result: "clean" },
+              startedAt: verifiedAt,
+              finishedAt: verifiedAt,
+            },
+          });
+          await tx.fileAsset.create({
+            data: {
+              id: fileId,
+              projectId,
+              blobId,
+              uploadedById: principalId,
+              originalName: kind === "design_md" ? "DESIGN.md" : "reference.md",
+              declaredMediaType: "text/markdown",
+              detectedMediaType: "text/markdown",
+              byteSize: BigInt(bytes.byteLength),
+              status: "ready",
+              verifiedAt,
+            },
+          });
+          // Keep the actual database guard: weakening/removing it must not make
+          // this regression pass. Recover from the intentional constraint error
+          // with a savepoint so the fixture remains in a single rolled-back tx.
+          await tx.$executeRawUnsafe("SAVEPOINT invalid_pending_checksum");
+          await expect(tx.importSource.create({
+            data: {
+              id: `source_invalid_${suffix}`,
+              projectId,
+              createdById: principalId,
+              kind,
+              status: "pending",
+              label: "Invalid pending checksum",
+              request,
+              requestHash: "a".repeat(64),
+              idempotencyKey: `invalid-pending:${suffix}`,
+              checksum: sha256,
+            },
+          })).rejects.toThrow("import_sources_lifecycle_check");
+          await tx.$executeRawUnsafe("ROLLBACK TO SAVEPOINT invalid_pending_checksum");
+          await tx.$executeRawUnsafe("RELEASE SAVEPOINT invalid_pending_checksum");
+
+          const scopedDb = {
+            importSource: tx.importSource,
+            $transaction: (callback: (client: Prisma.TransactionClient) => unknown) => callback(tx),
+          };
+          const service = new ImportSourcesService(
+            scopedDb as never,
+            new AccessService(tx as never),
+            queue as never,
+          );
+          const idempotencyKey = `local-source:${suffix}`;
+          const source = await service.create(principalId, projectId, idempotencyKey, request);
+          expect(source).toMatchObject({
+            projectId,
+            createdById: principalId,
+            kind,
+            status: "ready",
+            checksum: sha256,
+            revision: 1,
+            descriptor: { kind, fileAssetId: fileId },
+          });
+          await expect(tx.importSourceBlob.findMany({
+            where: { importSourceId: source.id },
+          })).resolves.toEqual([
+            expect.objectContaining({
+              projectId, blobId, fileAssetId: fileId, position: 0, role: "primary", sha256,
+            }),
+          ]);
+          await expect(service.create(principalId, projectId, idempotencyKey, request))
+            .resolves.toEqual(source);
+          await expect(tx.importSource.count({ where: { projectId } })).resolves.toBe(1);
+          expect(queue.sendInTransaction).not.toHaveBeenCalled();
+          // Exercise the same deferred source/manifest guards as a real commit
+          // before rolling back the isolated fixture without disabling triggers.
+          await tx.$executeRawUnsafe("SET CONSTRAINTS ALL IMMEDIATE");
+          throw rollbackFixture;
+        })).rejects.toBe(rollbackFixture);
+      } finally {
+        await db.$disconnect();
+      }
+    },
+  );
+
   it("commits external Source, pg-boss job, and queued attempt together and rolls jobs back with Prisma", async () => {
     const db = new PrismaClient({ datasourceUrl: databaseUrl });
     const queue = new WorkbenchQueueService(new ConfigService({

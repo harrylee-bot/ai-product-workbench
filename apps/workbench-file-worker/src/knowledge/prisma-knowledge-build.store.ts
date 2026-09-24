@@ -34,6 +34,9 @@ const releaseSelect = {
   key: true,
   version: true,
   status: true,
+  parentReleaseId: true,
+  ingestionJobId: true,
+  ingestionJob: { include: { finalization: true } },
   embeddingProfileId: true,
   embeddingProfileSpecSha256: true,
   embeddingDimension: true,
@@ -104,6 +107,18 @@ export class PrismaKnowledgeBuildStore implements KnowledgeBuildStore {
       if (!release) return { kind: "terminal", outcome: "missing" };
       const terminal = terminalOutcome(release);
       if (terminal) return { kind: "terminal", outcome: terminal };
+      if (release.ingestionJob) {
+        const job = release.ingestionJob;
+        if (job.status === "withdrawn" || job.finalization.status === "withdrawn") {
+          await markFailed(tx, release, terminalFailure("KNOWLEDGE_SOURCE_WITHDRAWN"));
+          return { kind: "terminal", outcome: "failed" };
+        }
+        if (!release.parentReleaseId || createHash("sha256").update(job.markdown).digest("hex") !== job.checksum) {
+          await markFailed(tx, release, terminalFailure("KNOWLEDGE_INGESTION_SNAPSHOT_INVALID"));
+          return { kind: "terminal", outcome: "failed" };
+        }
+        await tx.knowledgeIngestionJob.update({ where: { id: job.id }, data: { status: "converting" } });
+      }
       let profiles: {
         embeddingProfile: CanonicalEmbeddingProfileV1;
         retrievalProfile: CanonicalRetrievalProfileV1;
@@ -140,6 +155,14 @@ export class PrismaKnowledgeBuildStore implements KnowledgeBuildStore {
           releaseVersion: release.version,
           leaseToken,
           chunksReady: release.chunksReadyAt !== null,
+          ...(release.ingestionJob && release.parentReleaseId ? { ingestion: {
+            parentReleaseId: release.parentReleaseId,
+            sourcePath: release.ingestionJob.sourcePath,
+            markdown: release.ingestionJob.markdown,
+            checksum: release.ingestionJob.checksum,
+            artifactVersionId: release.ingestionJob.finalization.artifactVersionId,
+            artifactChecksum: release.ingestionJob.finalization.checksum,
+          } } : {}),
           ...profiles,
           delivery,
         },
@@ -168,11 +191,11 @@ export class PrismaKnowledgeBuildStore implements KnowledgeBuildStore {
       const release = await tx.knowledgeRelease.findUnique({ where: { id: command.releaseId }, select: releaseSelect });
       const outcome = releaseOutcomeForCommand(release, command);
       if (outcome) {
-        if (outcome === "ready" && release?.manifestSha256 !== bundle.manifestChecksum) replayConflict();
+        if (outcome === "ready") await assertStagedBundle(tx, release!, command, bundle);
         return outcome;
       }
       if (release!.chunksReadyAt) {
-        if (release!.manifestSha256 !== bundle.manifestChecksum) replayConflict();
+        await assertStagedBundle(tx, release!, command, bundle);
         return "staged";
       }
 
@@ -210,7 +233,7 @@ export class PrismaKnowledgeBuildStore implements KnowledgeBuildStore {
           data: {
             id: documentId,
             releaseId: command.releaseId,
-            sourceKind: "vault_markdown",
+            sourceKind: command.ingestion ? "artifact_version" : "vault_markdown",
             sourcePath: document.sourcePath,
             title: document.title,
             checksum: document.sourceChecksum,
@@ -230,6 +253,14 @@ export class PrismaKnowledgeBuildStore implements KnowledgeBuildStore {
             }),
           },
         });
+        if (command.ingestion) {
+          if (document.route !== "production" || !documentChunks.length) {
+            throw new TerminalKnowledgeBuildError("KNOWLEDGE_INGESTION_NOT_INDEXABLE", "Finalized content produced no production knowledge chunks");
+          }
+          await tx.knowledgeDocumentSource.create({ data: {
+            documentId, artifactVersionId: command.ingestion.artifactVersionId, checksum: command.ingestion.artifactChecksum,
+          } });
+        }
         if (chunkRows.length > 0) await tx.knowledgeChunk.createMany({ data: chunkRows });
       }
 
@@ -244,13 +275,61 @@ export class PrismaKnowledgeBuildStore implements KnowledgeBuildStore {
         `);
       }
 
+      let manifest = JSON.parse(bundle.manifestCanonicalJson) as Prisma.InputJsonValue;
+      let manifestSha256 = bundle.manifestChecksum;
+      if (command.ingestion) {
+        const parent = await tx.knowledgeRelease.findUniqueOrThrow({
+          where: { id: command.ingestion.parentReleaseId },
+          include: { documents: { include: { chunks: { orderBy: { sequence: "asc" } }, source: true }, orderBy: { sourcePath: "asc" } } },
+        });
+        if (parent.status !== "ready" || canonicalSha256(parent.manifest as JsonValue) !== parent.manifestSha256
+          || parent.embeddingProfileSpecSha256 !== command.embeddingProfile.specSha256
+          || parent.retrievalProfileSpecSha256 !== command.retrievalProfile.specSha256) {
+          throw new TerminalKnowledgeBuildError("KNOWLEDGE_INGESTION_PARENT_INVALID", "The immutable parent knowledge release is not available");
+        }
+        // Copy the immutable parent, not today's filesystem: ingestion must never silently drop old sources.
+        for (const document of parent.documents) {
+          const documentId = stableRecordId("kdoc", command.releaseId, document.sourcePath);
+          const chunkIds = new Map(document.chunks.map((chunk) => [chunk.id, stableRecordId("kchunk", command.releaseId, chunk.id)]));
+          const metadata = JSON.parse(JSON.stringify(document.metadata)) as Record<string, unknown>;
+          if (Array.isArray(metadata.chunkIdentities)) {
+            metadata.chunkIdentities = metadata.chunkIdentities.map((identity: { databaseId: string }) => ({
+              ...identity, databaseId: chunkIds.get(identity.databaseId) ?? identity.databaseId,
+            }));
+          }
+          await tx.knowledgeDocument.create({ data: {
+            id: documentId, releaseId: command.releaseId, sourceKind: document.sourceKind, sourcePath: document.sourcePath,
+            title: document.title, checksum: document.checksum, route: document.route, sourceBlobId: document.sourceBlobId,
+            metadata: metadata as Prisma.InputJsonValue,
+          } });
+          if (document.source) await tx.knowledgeDocumentSource.create({ data: {
+            documentId, artifactVersionId: document.source.artifactVersionId, checksum: document.source.checksum,
+          } });
+          for (const chunk of document.chunks) {
+            const id = chunkIds.get(chunk.id)!;
+            await tx.knowledgeChunk.create({ data: {
+              id, documentId, releaseId: command.releaseId, sequence: chunk.sequence, headingPath: chunk.headingPath as Prisma.InputJsonValue,
+              content: chunk.content, tokenCount: chunk.tokenCount,
+            } });
+            await tx.$executeRaw(Prisma.sql`
+              UPDATE knowledge_chunks SET search_vector = source.search_vector
+              FROM knowledge_chunks source WHERE knowledge_chunks.id = ${id} AND source.id = ${chunk.id}
+            `);
+            embeddingRows.push({ id, content: chunk.content, tokenCount: chunk.tokenCount });
+          }
+        }
+        const merged = mergeIngestionManifest(parent.manifest, bundle.manifest);
+        manifest = JSON.parse(canonicalJson(merged as unknown as JsonValue)) as Prisma.InputJsonValue;
+        manifestSha256 = canonicalSha256(merged as unknown as JsonValue);
+        await tx.knowledgeIngestionJob.update({ where: { id: release!.ingestionJobId! }, data: { status: "indexing" } });
+      }
       const batches = createBatches(command, embeddingRows);
       if (batches.length > 0) await tx.knowledgeEmbeddingBatch.createMany({ data: batches });
       await tx.knowledgeRelease.update({
         where: { id: command.releaseId },
         data: {
-          manifest: JSON.parse(bundle.manifestCanonicalJson) as Prisma.InputJsonValue,
-          manifestSha256: bundle.manifestChecksum,
+          manifest,
+          manifestSha256,
           chunksReadyAt: new Date(),
           updatedAt: new Date(),
         },
@@ -387,6 +466,9 @@ export class PrismaKnowledgeBuildStore implements KnowledgeBuildStore {
       const release = await tx.knowledgeRelease.findUnique({ where: { id: command.releaseId }, select: releaseSelect });
       const outcome = releaseOutcomeForCommand(release, command);
       if (outcome) return outcome;
+      if (release!.ingestionJobId) {
+        await tx.knowledgeIngestionJob.update({ where: { id: release!.ingestionJobId }, data: { status: "publishing" } });
+      }
       await tx.knowledgeRelease.update({
         where: { id: command.releaseId },
         data: {
@@ -397,6 +479,10 @@ export class PrismaKnowledgeBuildStore implements KnowledgeBuildStore {
           updatedAt: new Date(),
         },
       });
+      if (release!.ingestionJobId) {
+        const job = await tx.knowledgeIngestionJob.update({ where: { id: release!.ingestionJobId }, data: { status: "published", errorCode: null } });
+        await tx.artifactFinalization.update({ where: { id: job.finalizationId }, data: { status: "ingested" } });
+      }
       return "ready";
     }, { maxWait: 10_000, timeout: 30_000 });
   }
@@ -663,6 +749,36 @@ function validateBundle(command: KnowledgeBuildCommand, bundle: KnowledgeRelease
   }
 }
 
+function mergeIngestionManifest(parentValue: Prisma.JsonValue, manifest: KnowledgeReleaseBundle["manifest"]) {
+  const parent = parentValue as unknown as KnowledgeReleaseBundle["manifest"];
+  return {
+    ...manifest,
+    documents: [...parent.documents, ...manifest.documents].sort((a, b) => a.sourcePath.localeCompare(b.sourcePath)),
+    assetClosure: parent.assetClosure,
+    issues: [...parent.issues, ...manifest.issues],
+  };
+}
+
+async function assertStagedBundle(
+  tx: Prisma.TransactionClient,
+  release: ReleaseRow,
+  command: KnowledgeBuildCommand,
+  bundle: KnowledgeReleaseBundle,
+) {
+  let checksum = bundle.manifestChecksum;
+  if (command.ingestion) {
+    if (release.parentReleaseId !== command.ingestion.parentReleaseId) replayConflict();
+    const parent = await tx.knowledgeRelease.findUnique({
+      where: { id: command.ingestion.parentReleaseId },
+      select: { manifest: true, manifestSha256: true },
+    });
+    if (!parent || canonicalSha256(parent.manifest as JsonValue) !== parent.manifestSha256) replayConflict();
+    // The published identity includes the immutable parent, not just the added document.
+    checksum = canonicalSha256(mergeIngestionManifest(parent.manifest, bundle.manifest) as unknown as JsonValue);
+  }
+  if (release.manifestSha256 !== checksum) replayConflict();
+}
+
 function releaseOutcomeForCommand(
   release: ReleaseRow | null,
   command: KnowledgeBuildCommand,
@@ -738,6 +854,9 @@ async function markFailed(
   const detail = failureObject
     ? String(failureObject.detail ?? "Knowledge release failed")
     : "Knowledge release failed";
+  if (release.ingestionJobId && release.ingestionJob?.status !== "withdrawn") {
+    await tx.knowledgeIngestionJob.update({ where: { id: release.ingestionJobId }, data: { status: "failed", errorCode: cleanText(code, 120) } });
+  }
   await tx.knowledgeEmbeddingBatch.updateMany({
     where: { releaseId: release.id, status: { in: ["pending", "running"] } },
     data: {

@@ -6,6 +6,7 @@ import {
   type PrototypeDocument,
 } from "@workbench/workbench-contracts";
 import { Prisma, PrismaClient } from "@workbench/workbench-db";
+import { seedReadyKnowledge } from "../../../scripts/test-support/knowledge-fixture.mjs";
 import { PrototypePatchCheckpointsService } from "../src/modules/prototype-patches/prototype-patch-checkpoints.service.js";
 
 const databaseUrl = process.env.WORKBENCH_TEST_DATABASE_URL;
@@ -109,6 +110,7 @@ async function seedCheckpoint(tx: Prisma.TransactionClient) {
   });
   await tx.run.create({
     data: {
+      knowledgeReleaseId: await seedReadyKnowledge(tx),
       id: runId,
       projectId,
       threadId,

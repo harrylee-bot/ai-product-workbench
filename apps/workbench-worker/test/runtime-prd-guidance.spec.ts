@@ -39,6 +39,11 @@ describe("runtimePrdResultGuidance", () => {
     expect(guidance).not.toContain("prd-runtime-result.example.json");
     expect(guidance).not.toContain("<workbench_prd_result_starter>");
     expect(guidance).not.toContain(JSON.stringify(runtimePrdResultFixture));
+    expect(guidance).toContain("artifact_index 0");
+    expect(guidance).toContain("trusted Runtime submits the exact normalized Draft once");
+    expect(guidance).toContain("repair only the reported paths");
+    expect(guidance).toContain("Never replace objects with positional arrays");
+    expect(guidance).toContain("never an acceptance-table row ID");
   });
 
   it("keeps Worker guidance aligned with the installed requirement-document semantics", () => {
@@ -92,13 +97,13 @@ describe("runtimePrdResultGuidance", () => {
     expect(prdStructureSource).toContain("every Runtime `targetSurface` value, including `app` and `web`, is not source evidence");
   });
 
-  it("fails fast if an invalid mixed PRD and Prototype request reaches Worker guidance", () => {
+  it("generates linked PRD then Prototype in one Run without premature auto-submission", () => {
     const guidance = runtimePrdResultGuidance(["prd", "prototype"], "generate") ?? "";
 
-    expect(guidance).toContain("Invalid Runtime input");
-    expect(guidance).toContain("two sequential Runs");
-    expect(guidance).toContain("Do not use clarification to resume this Run");
-    expect(guidance).not.toContain("workbench_artifact_draft_publish");
+    expect(guidance).toContain("artifact_index 0");
+    expect(guidance).toContain("artifact_index 1");
+    expect(guidance).toContain("one complete Result");
+    expect(guidance).not.toContain("trusted Runtime submits the exact normalized Draft once");
   });
 
   it("preserves the targeted protocol for edits without injecting a create starter", () => {

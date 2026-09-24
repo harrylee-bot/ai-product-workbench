@@ -54,7 +54,7 @@ const cutoverScopeIds = Object.freeze({
 });
 
 export async function validateHardCutManifest({
-  manifestPath = path.join(defaultRepoRoot, "docs/workbench-hard-cut-deletion-manifest.json"),
+  manifestPath = null,
   root = defaultRepoRoot,
   enforce = false,
   expectedCandidateId,
@@ -71,6 +71,9 @@ export async function validateHardCutManifest({
   expectedTrustPolicySha256,
   now = new Date(),
 } = {}) {
+  if (typeof manifestPath !== "string" || manifestPath.trim() === "") {
+    throw new Error("manifestPath is required");
+  }
   const repoRoot = path.resolve(root);
   const resolvedManifestPath = path.resolve(repoRoot, manifestPath);
   const manifest = JSON.parse(await readFile(resolvedManifestPath, "utf8"));
@@ -809,7 +812,7 @@ async function fileExists(filePath) {
 function parseCli(argv) {
   const options = {
     root: defaultRepoRoot,
-    manifestPath: "docs/workbench-hard-cut-deletion-manifest.json",
+    manifestPath: null,
     enforce: process.env.WORKBENCH_HARD_CUT === "1",
     now: new Date(),
   };
@@ -842,6 +845,7 @@ function parseCli(argv) {
     options[field] = field === "now" ? new Date(value) : value;
     index += 1;
   }
+  if (!options.manifestPath) throw new Error("--manifest is required");
   if (!Number.isFinite(options.now.getTime())) throw new Error("--now must be a valid timestamp");
   return options;
 }

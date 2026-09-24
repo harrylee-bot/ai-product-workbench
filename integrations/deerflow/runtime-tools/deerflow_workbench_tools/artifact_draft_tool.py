@@ -88,9 +88,94 @@ def workbench_artifact_draft_publish(
         "protocol": "workbench.runtime.artifact-draft-ack.v1",
         "ok": validation["ok"],
         "artifactIndex": artifact_index,
+        "candidateChecksum": validation["candidateChecksum"],
         "issues": validation["issues"],
     }
+    if validation["ok"] is False:
+        response["repairInstruction"] = _artifact_draft_repair_instruction(
+            draft, validation["issues"],
+        )
     return json.dumps(response, ensure_ascii=False, separators=(",", ":")), artifact
+
+
+def _artifact_draft_repair_instruction(candidate: Any, issues: list[Any]) -> str:
+    if _has_prd_shape_failure(candidate, issues):
+        return (
+            "Repair the invalid top-level PRD structure using the workbench.prd.v2 "
+            "contract: revision, cover, tableOfContents, and sections are objects; "
+            "versionHistory and assumptions are arrays of complete objects; "
+            "tableOfContents.entries is the directory entries array. "
+            "Preserve all valid requested content and publish the complete repaired "
+            "draft again. Do not resubmit the unchanged candidate or use placeholders."
+        )
+    instruction = (
+        "Edit only the returned issue paths in the immediately preceding complete "
+        "draft argument, preserve every other field, and publish that complete draft "
+        "again. Do not discard valid sections for a local content or reference error. "
+        "No draft was accepted. Do not resubmit an unchanged candidate: the same "
+        "candidateChecksum will produce the same validation issues. Correct an "
+        "identified field before publishing again; if the same issue persists, "
+        "re-read its contract and compare the named field's value and type."
+    )
+    if _has_checkbox_initial_value_failure(candidate, issues):
+        instruction += (
+            " For checkbox inputs, repair the referenced "
+            "content.variables[index].initialValue using a JSON boolean true or "
+            'false, never the strings "true" or "false". Preserve the intended '
+            "checked state and existing binding ids; do not choose a new default."
+        )
+    return instruction
+
+
+def _has_checkbox_initial_value_failure(candidate: Any, issues: list[Any]) -> bool:
+    if not isinstance(candidate, dict) or candidate.get("kind") != "prototype":
+        return False
+    for issue in issues:
+        if not isinstance(issue, dict) or issue.get("code") != "custom":
+            continue
+        path = issue.get("path")
+        message = issue.get("message")
+        if (
+            isinstance(path, list)
+            and len(path) == 4
+            and path[:2] == ["content", "variables"]
+            and isinstance(path[2], int)
+            and not isinstance(path[2], bool)
+            and path[3] == "initialValue"
+            and isinstance(message, str)
+            and message.startswith("checkbox input variable ")
+        ):
+            return True
+    return False
+
+
+def _has_prd_shape_failure(candidate: Any, issues: list[Any]) -> bool:
+    if (
+        not isinstance(candidate, dict)
+        or candidate.get("kind") != "prd"
+        or candidate.get("schemaVersion") != 2
+    ):
+        return False
+    shape_roots = {
+        "revision", "cover", "versionHistory", "tableOfContents", "assumptions",
+        "sections",
+    }
+    for issue in issues:
+        if not isinstance(issue, dict) or issue.get("code") != "invalid_type":
+            continue
+        path = issue.get("path")
+        # Nested type and semantic errors need local repairs. Even an error at
+        # ["content", "sections"] is not a shape failure unless its type is wrong.
+        if path == ["content"]:
+            return True
+        if (
+            isinstance(path, list)
+            and len(path) == 2
+            and path[0] == "content"
+            and path[1] in shape_roots
+        ):
+            return True
+    return False
 
 
 def _required_identifier(

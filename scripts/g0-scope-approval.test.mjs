@@ -77,7 +77,7 @@ test("keeps the repository example explicitly NOT RUN and never reports gate PAS
   assert.equal(report.candidateManifestVerified, false);
 });
 
-test("requires every current remediation finding through D-051", async (t) => {
+test("requires every current governance finding through D-051", async (t) => {
   assert.deepEqual(
     G0_FINDING_IDS.filter((id) => id.startsWith("D-")).slice(-18),
     ["D-034", "D-035", "D-036", "D-037", "D-038", "D-039", "D-040", "D-041", "D-042", "D-043", "D-044", "D-045", "D-046", "D-047", "D-048", "D-049", "D-050", "D-051"],
@@ -728,11 +728,10 @@ function candidateManifest() {
       migrations: criticalArtifact(),
       ci: criticalArtifact(),
       deployment: criticalArtifact(),
-      hardCutDeletion: criticalArtifact(),
       brandAssets: criticalArtifact(),
       knowledgeVaultMarkdown: criticalArtifact(),
       knowledgeVaultConfiguration: criticalArtifact(),
-      remediationControl: criticalArtifact(),
+      systemContracts: criticalArtifact(),
       evidenceContracts: criticalArtifact(),
     },
     knowledgeStorage: {

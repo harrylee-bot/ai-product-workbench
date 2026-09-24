@@ -30,6 +30,8 @@ import {
   recordReadyObjectIntegrityFailure,
 } from "../src/platform/object-storage/ready-object-integrity.js";
 
+import { seedReadyKnowledge } from "../../../scripts/test-support/knowledge-fixture.mjs";
+
 const databaseUrl = process.env.WORKBENCH_TEST_DATABASE_URL;
 const describeWithPostgres = databaseUrl ? describe : describe.skip;
 const secret = Buffer.alloc(32, 29);
@@ -778,6 +780,7 @@ async function createFixture(options: { expiredSession?: boolean } = {}) {
   });
   const run = await admin.run.create({
     data: {
+      knowledgeReleaseId: await admin.$transaction((tx) => seedReadyKnowledge(tx)),
       projectId: project.id,
       threadId: thread.id,
       createdById: principal.id,

@@ -26,11 +26,17 @@ describe("Runtime result publication contract", () => {
         schemaVersion: 1,
         title: "Notes",
         operation: { kind: "create" as const },
-        citations: [],
+        citations: [{
+          id: "citation-1", documentId: "doc-1", chunkId: "chunk-1", sourcePath: "00-rules/notes.md",
+          title: "Notes", quote: "notes", locator: { heading: "Notes", startLine: null, endLine: null },
+        }],
         content: { text: "notes" },
       }],
     };
     expect(runtimeResultSchema.parse(create)).toEqual(create);
+    expect(runtimeResultSchema.safeParse({
+      ...create, artifacts: [{ ...create.artifacts[0], citations: [] }],
+    }).success).toBe(false);
     expect(runtimeResultSchema.safeParse({
       ...create,
       artifacts: create.artifacts.map(({ operation: _operation, ...artifact }) => artifact),

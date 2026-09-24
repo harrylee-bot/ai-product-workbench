@@ -256,4 +256,57 @@ describe("Prototype HTML export runtime", () => {
       await browser.close();
     }
   }, 30_000);
+
+  for (const viewport of [{ width: 1280, height: 900 }, { width: 390, height: 844 }]) {
+    it.runIf(chromiumAvailable)(`keeps all screens navigable from the requested initial screen at ${viewport.width}px`, async () => {
+      const request = interactiveExportRequest();
+      const artifact = request.source.artifacts[0]!;
+      request.selection = {
+        kind: "artifact",
+        artifactId: artifact.artifactId,
+        artifactVersionId: artifact.artifactVersionId,
+      };
+      request.initialScreenId = "screen-success";
+      const browser = await chromium.launch({
+        executablePath,
+        headless: true,
+        chromiumSandbox: false,
+        args: ["--disable-background-networking", "--no-sandbox"],
+      });
+      const context = await browser.newContext({
+        javaScriptEnabled: true,
+        serviceWorkers: "block",
+        viewport,
+      });
+      const network: string[] = [];
+      const errors: string[] = [];
+      await context.route(/^(?:https?|wss?):/i, (route) => {
+        network.push(route.request().url());
+        return route.abort("blockedbyclient");
+      });
+      const page = await context.newPage();
+      page.on("pageerror", (error) => errors.push(error.message));
+
+      try {
+        await page.setContent(renderExportHtml(request).document, { waitUntil: "load" });
+        expect(await page.locator("[data-wb-screen]").count()).toBe(2);
+        await expect.poll(() => page.locator('[data-wb-screen="screen-success"]').isVisible()).toBe(true);
+        await expect.poll(() => page.locator('[data-wb-screen="screen-home"]').isHidden()).toBe(true);
+        expect(await page.locator('[data-wb-screen-target="screen-success"]').getAttribute("aria-selected")).toBe("true");
+
+        await page.locator('[data-wb-screen-target="screen-home"]').click();
+        await expect.poll(() => page.locator('[data-wb-screen="screen-home"]').isVisible()).toBe(true);
+        await page.locator('[data-wb-node="input-email"]').fill("preview@example.test");
+        await expect.poll(() => page.locator('[data-wb-node="text-mirror"]').textContent()).toBe("preview@example.test");
+        await page.locator('[data-wb-node="button-navigate"]').click();
+        await expect.poll(() => page.locator('[data-wb-screen="screen-success"]').isVisible()).toBe(true);
+        await expect.poll(() => page.locator('[data-wb-screen="screen-home"]').isHidden()).toBe(true);
+        expect(network).toEqual([]);
+        expect(errors).toEqual([]);
+      } finally {
+        await context.close();
+        await browser.close();
+      }
+    }, 30_000);
+  }
 });

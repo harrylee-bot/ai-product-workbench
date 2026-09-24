@@ -1,9 +1,17 @@
-import { isSafePrototypeOpenUrl } from "@workbench/workbench-contracts";
+import {
+  evaluatePrototypeExpression,
+  isSafePrototypeOpenUrl,
+  prototypeExpressionVariablePaths,
+} from "@workbench/workbench-contracts";
 
 const safePrototypeOpenUrlRuntimeSource = isSafePrototypeOpenUrl.toString();
+const evaluatePrototypeExpressionRuntimeSource = evaluatePrototypeExpression.toString();
+const prototypeExpressionVariablePathsRuntimeSource = prototypeExpressionVariablePaths.toString();
 
 export const browserRuntimeSource = String.raw`(() => {
   ${safePrototypeOpenUrlRuntimeSource}
+  ${evaluatePrototypeExpressionRuntimeSource}
+  ${prototypeExpressionVariablePathsRuntimeSource}
   const dataNode = document.getElementById("workbench-export-data");
   const root = document.getElementById("workbench-export-root");
   if (!dataNode || !root) return;
@@ -23,6 +31,14 @@ export const browserRuntimeSource = String.raw`(() => {
     const screens = new Map((model.screens || []).map((screen) => [screen.id, screen]));
     const states = new Map((model.states || []).map((state) => [state.id, state]));
     const bindings = new Map((model.bindings || []).map((binding) => [binding.id, binding]));
+    const bindingVariablePaths = new Map([...bindings.values()].map((binding) => [
+      binding.id,
+      new Set(binding.source.kind === "variable"
+        ? [binding.source.path]
+        : binding.source.kind === "expression"
+          ? prototypeExpressionVariablePaths(binding.source.expression)
+          : []),
+    ]));
     const initialVariables = new Map((model.variables || []).map((variable) => [variable.path, variable.initialValue]));
     const variables = new Map(initialVariables);
     const imageAssets = new Map((model.imageAssets || []).map((asset) => [asset.id, asset.src]));
@@ -69,6 +85,9 @@ export const browserRuntimeSource = String.raw`(() => {
     const resolveBinding = (binding) => {
       if (binding.source.kind === "literal") return binding.source.value;
       if (binding.source.kind === "variable") return variables.get(binding.source.path);
+      if (binding.source.kind === "expression") {
+        return evaluatePrototypeExpression(binding.source.expression, (path) => variables.get(path));
+      }
       const state = states.get(binding.source.stateId);
       if (!state || activeStates.get(state.screenId) !== state.id) return undefined;
       return state.values[binding.source.field];
@@ -86,7 +105,7 @@ export const browserRuntimeSource = String.raw`(() => {
       for (const binding of model.bindings || []) {
         const element = byNode(binding.nodeId);
         if (!element || (screenId && screenIdFor(element) !== screenId)) continue;
-        if (variablePath && (binding.source.kind !== "variable" || binding.source.path !== variablePath)) continue;
+        if (variablePath && !bindingVariablePaths.get(binding.id)?.has(variablePath)) continue;
         applyBinding(binding);
       }
     };
@@ -380,8 +399,8 @@ export const browserRuntimeSource = String.raw`(() => {
   function readControl(element) {
     if (element instanceof HTMLInputElement && element.type === "checkbox") return element.checked;
     if (element instanceof HTMLInputElement && element.type === "radio") return element.checked ? element.value : null;
-    if (element instanceof HTMLInputElement && element.type === "number" && element.value !== "" && Number.isFinite(element.valueAsNumber)) {
-      return element.valueAsNumber;
+    if (element instanceof HTMLInputElement && element.type === "number") {
+      return element.value !== "" && Number.isFinite(element.valueAsNumber) ? element.valueAsNumber : null;
     }
     return element.value;
   }

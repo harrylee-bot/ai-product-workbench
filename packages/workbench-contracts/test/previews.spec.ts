@@ -6,6 +6,30 @@ import {
 } from "../src/previews.js";
 
 describe("Project Preview contracts", () => {
+  it("reads existing API responses that carry a separate opening screen", () => {
+    const preview = {
+      id: "preview-legacy",
+      projectId: "project-1",
+      boardId: "board-1",
+      boardRevision: 4,
+      selection: {
+        kind: "artifact",
+        artifactId: "artifact-1",
+        artifactVersionId: "version-1",
+      },
+      initialScreenId: "screen-1",
+      status: "succeeded",
+      revision: 1,
+      failure: null,
+      createdAt: "2026-07-15T00:00:00.000Z",
+      expiresAt: "2026-07-15T00:15:00.000Z",
+      updatedAt: "2026-07-15T00:01:00.000Z",
+    };
+    expect(projectPreviewSchema.parse(preview).initialScreenId).toBe("screen-1");
+    expect(projectPreviewSchema.parse({ ...preview, initialScreenId: null }).initialScreenId).toBeNull();
+    expect(projectPreviewSchema.safeParse({ ...preview, initialScreenId: 42 }).success).toBe(false);
+  });
+
   it("accepts only an immutable Release selection and a bounded lifecycle projection", () => {
     expect(createProjectPreviewRequestSchema.parse({
       boardId: "board-1",
@@ -14,9 +38,9 @@ describe("Project Preview contracts", () => {
         kind: "artifact",
         artifactId: "artifact-1",
         artifactVersionId: "version-1",
-        screenId: "screen-1",
       },
-    })).toMatchObject({ boardId: "board-1", boardRevision: 4 });
+      initialScreenId: "screen-1",
+    })).toMatchObject({ boardId: "board-1", boardRevision: 4, initialScreenId: "screen-1" });
 
     expect(projectPreviewSchema.parse({
       id: "preview-1",
@@ -31,6 +55,30 @@ describe("Project Preview contracts", () => {
       expiresAt: "2026-07-15T00:15:00.000Z",
       updatedAt: "2026-07-15T00:00:00.000Z",
     }).status).toBe("queued");
+  });
+
+  it("rejects screen cropping and an opening screen without an Artifact selection", () => {
+    expect(createProjectPreviewRequestSchema.safeParse({
+      boardId: "board-1",
+      boardRevision: 4,
+      selection: {
+        kind: "artifact",
+        artifactId: "artifact-1",
+        artifactVersionId: "version-1",
+        screenId: "screen-1",
+      },
+    }).success).toBe(false);
+    expect(createProjectPreviewRequestSchema.safeParse({
+      boardId: "board-1",
+      boardRevision: 4,
+      selection: { kind: "board" },
+      initialScreenId: "screen-1",
+    }).success).toBe(false);
+    expect(createProjectPreviewRequestSchema.safeParse({
+      boardId: "board-1",
+      boardRevision: 4,
+      selection: { kind: "board" },
+    }).success).toBe(true);
   });
 
   it("does not accept Export format, options, output, or download identity", () => {

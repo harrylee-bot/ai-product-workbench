@@ -1,0 +1,11 @@
+[Unit]
+Description=Check Workbench filesystem capacity every five minutes
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=5min
+RandomizedDelaySec=30s
+Unit=workbench-capacity-check.service
+
+[Install]
+WantedBy=timers.target

@@ -33,6 +33,7 @@ import { AccessService, projectMembershipFilter } from "../access/access.service
 import { assertProjectCapability, lockActiveProject } from "../projects/project-lock.js";
 import {
   mapProjectRelease,
+  projectPrototypeShareRelease,
   orderedReleaseArtifactPins,
   projectPublicProjectRelease,
   type ReleaseRecord,
@@ -101,6 +102,7 @@ export class SharesService {
     request: RotateShareGrantRequest,
   ): Promise<RotateShareGrantResponse> {
     validateIdempotencyKey(idempotencyKey);
+    if (request.scope !== "view") throw validationProblem("Prototype shares are read-only");
     const expiresAt = request.expiresAt ? new Date(request.expiresAt) : null;
     if (expiresAt && expiresAt.getTime() <= Date.now() + 1_000) {
       throw validationProblem("expiresAt must be at least one second in the future");
@@ -138,6 +140,9 @@ export class SharesService {
           });
           if (!release) throw notFoundProblem("Ready Project release");
           mapProjectRelease(release as ReleaseRecord);
+          const pins = release.artifactPins.filter((pin) => pin.kind === "prototype"
+            && (!request.artifactVersionId || pin.artifactVersionId === request.artifactVersionId));
+          if (pins.length !== 1) throw validationProblem("Select exactly one pinned Prototype version to share");
 
           const now = new Date();
           await tx.shareGrant.updateMany({
@@ -156,6 +161,7 @@ export class SharesService {
             data: {
               projectId,
               releaseId: release.id,
+              artifactVersionId: pins[0]!.artifactVersionId,
               createdById: principalId,
               idempotencyKey,
               requestHash,
@@ -508,14 +514,14 @@ export class SharesService {
         release: { include: { artifactPins: orderedReleaseArtifactPins } },
       },
     });
-    if (!row || row.status !== "active" || row.release.status !== "ready") {
+    if (!row || row.status !== "active" || row.release.status !== "ready" || !row.artifactVersionId || row.scope !== "view") {
       throw notFoundProblem("Share");
     }
     if (row.expiresAt && row.expiresAt.getTime() <= Date.now()) {
       await this.expireIfNeeded(row);
       throw notFoundProblem("Share");
     }
-    return { row, release: mapProjectRelease(row.release as ReleaseRecord) };
+    return { row, release: projectPrototypeShareRelease(mapProjectRelease(row.release as ReleaseRecord), row.artifactVersionId) };
   }
 
   private async findAuthorized(principalId: string, shareId: string) {

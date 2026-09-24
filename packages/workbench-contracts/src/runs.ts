@@ -187,11 +187,11 @@ export function refineRunWorkflowArtifactTargets(
       message: "Requested artifact kinds must be unique",
     });
   }
-  if (requestsPrd && request.requestedArtifactKinds.some((kind) => kind !== "prd")) {
+  if (requestsPrd && request.requestedArtifactKinds.some((kind) => kind !== "prd" && kind !== "prototype")) {
     context.addIssue({
       code: z.ZodIssueCode.custom,
       path: ["requestedArtifactKinds"],
-      message: "PRD must be requested in its own Run: complete the PRD Run before requesting other artifact kinds",
+      message: "PRD can be requested alone or together with Prototype",
     });
   }
 
@@ -437,7 +437,8 @@ export const runInputSubmittedEventSchema = event("run.input.submitted", z.objec
   decision: z.enum(["approve", "reject", "submit"]),
 }));
 export const messageStartedEventSchema = event("message.started", z.object({ entryId: opaqueIdSchema }));
-export const messageDeltaEventSchema = event("message.delta", z.object({ entryId: opaqueIdSchema, delta: z.string().max(32_000) }));
+export const messageDeltaMaxLength = 32_000;
+export const messageDeltaEventSchema = event("message.delta", z.object({ entryId: opaqueIdSchema, delta: z.string().max(messageDeltaMaxLength) }));
 export const messageCompletedEventSchema = event("message.completed", z.object({ entryId: opaqueIdSchema }));
 export const activityChangedEventSchema = event("activity.changed", z.object({
   activityId: opaqueIdSchema,

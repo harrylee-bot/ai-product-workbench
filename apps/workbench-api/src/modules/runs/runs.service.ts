@@ -25,6 +25,7 @@ import {
 import {
   activeRunConflictProblem,
   idempotencyConflictProblem,
+  knowledgeRetrievalUnavailableProblem,
   notFoundProblem,
   runImportSourceStateConflictProblem,
   runDesignStyleStateConflictProblem,
@@ -174,12 +175,22 @@ export class RunsService {
         const requestHash = runRequestHash(request, designStyle.snapshotSha256);
 
         const knowledgeRelease = await tx.knowledgeRelease.findFirst({
+          where: { status: "ready", projectId: thread.projectId },
+          orderBy: [{ version: "desc" }],
+        }) ?? await tx.knowledgeRelease.findFirst({
           where: {
             status: "ready",
+            projectId: null,
             OR: [{ workspaceId: thread.project.workspaceId }, { workspaceId: null }],
           },
           orderBy: [{ version: "desc" }, { createdAt: "desc" }],
         });
+        if (!knowledgeRelease) {
+          throw knowledgeRetrievalUnavailableProblem(
+            "KNOWLEDGE_RELEASE_REQUIRED",
+            "No ready knowledge release is available. Publish project knowledge before generating artifacts.",
+          );
+        }
         const sequencedThread = await tx.thread.update({
           where: { id: threadId },
           data: { entrySequence: { increment: 1 }, revision: { increment: 1 } },
@@ -205,7 +216,7 @@ export class RunsService {
             threadId,
             retryOfRunId,
             createdById: principalId,
-            knowledgeReleaseId: knowledgeRelease?.id,
+            knowledgeReleaseId: knowledgeRelease.id,
             designStyleArtifactVersionId: designStyle.artifactVersionId,
             designStyleSnapshot: designStyle.snapshot as Prisma.InputJsonValue | undefined,
             designStyleSnapshotSha256: designStyle.snapshotSha256,

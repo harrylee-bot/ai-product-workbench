@@ -1,6 +1,6 @@
 # 产品工作台开源复用与自研边界
 
-更新日期：2026-07-28
+更新日期：2026-09-23
 状态：绿地接入方案的强制选型约束
 
 ## 结论
@@ -193,7 +193,7 @@ Uppy Golden Retriever、Pragmatic Drag and Drop 和 CodeMirror merge 尚未接�
 
 | 能力 | 首选开源项目 | 许可证 | 采用方式 |
 |---|---|---|---|
-| Node 模块格式 | Node 22 ESM + TypeScript NodeNext | MIT/Apache-2.0 | 新 Workbench 的 API、Contracts 和 Worker 在 Foundation 统一迁移；旧应用不跟迁，不以 CommonJS 兼容为由长期锁死 ESM-only 开源库 |
+| Node 模块格式 | Node 22 ESM + TypeScript NodeNext | MIT/Apache-2.0 | Workbench API、Contracts 和 Worker 统一使用 ESM；不为 ESM-only 开源库维护 CommonJS 兼容胶水 |
 | Schema 与运行时校验 | Zod | MIT | Contracts 中定义稳定 DTO、事件和 Artifact schema |
 | 合同生成 | `@asteasolutions/zod-to-openapi` | MIT | Zod schema + route registry 是唯一人工维护源；OpenAPI 3.1 YAML 由 CI 确定性生成，禁止再手写同一字段两遍 |
 | 规范 JSON 与摘要输入 | canonicalize（RFC 8785/JCS）+ Node crypto | Apache-2.0/Node 标准库 | 统一幂等请求、Artifact manifest 和运行时 option ID 的 canonical bytes；项目定义 `jcs-sha256-v1` 覆盖范围和算法标识，不再维护多套排序 JSON |
@@ -429,7 +429,7 @@ Dify 的修改版 Apache 条款、Open WebUI 的品牌/用户规模条款、tldr
 
 ## 执行状态边界
 
-本策略只维护采用边界、许可证和退出条件，不维护历史工时估算、剩余人日或一次性测试计数。当前整改状态以两份现行执行规格为准，实际完成度只由 CI、runbook 和同一候选的生产证据判定。
+本策略只维护采用边界、许可证和退出条件。实际完成度由 CI、runbook 和同一候选的生产证据判定。
 
 ## 从当前状态继续的落地顺序
 
@@ -437,7 +437,7 @@ Dify 的修改版 Apache 条款、Open WebUI 的品牌/用户规模条款、tldr
 2. 在选定的真实 S3/IAM 与 clamd 上完成断网、刷新、浏览器崩溃、过期 session、取消失败、EICAR、Export Worker 和下载恢复。
 3. 使用已完成的 Knowledge Profile 与 AdoptionReceipt 治理，以真实模型、TEI/reranker、生产 DeerFlow trusted tool 和固定中文评测集完成 adopted 决策。
 4. 在选定生产环境完成 OIDC/KMS、真实 DeerFlow、外部 OTLP collector、双 HTTPS Preview origin、Figma Desktop、Docker 镜像和全服务网络 E2E。
-5. 使用 hard-cut acceptance package v3 与 receipt v2 一次切流并物理删除旧系统，写入删除回执并运行 `--enforce`；不保留兼容、双写或旧版回退。
+5. 使用 hard-cut acceptance package v3 与 receipt v2 完成一次切流和资源收敛，写入执行回执并运行 `--enforce`；不启用兼容、双写或回退入口。
 
 每一步都必须复用已经通过的契约、集成和浏览器门禁，再补目标生产环境证据；不能把已经完成的开源接线重复包装成新工作量，也不能把跨 feature 状态堆回持久 Scene 或任一聚合 controller。
 

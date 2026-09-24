@@ -1,4 +1,9 @@
 import {
+  evaluatePrototypeExpression,
+  prototypeExpressionVariablePaths,
+  type PrototypeDocument,
+} from "@workbench/workbench-contracts";
+import {
   classifyCanvasPublicationIntents,
   planCanvasDirectIntentsOverRuntimeResult,
   type CanvasMutationInvocationRow,
@@ -52,6 +57,50 @@ describe("staged Canvas mutation intents", () => {
     expect(first.duplicateEffects[0]?.nodeKey).toBe(replay.duplicateEffects[0]?.nodeKey);
     expect(first.document).toEqual(replay.document);
     expect(first.originalDraft.content.screens[0]?.name).toBe("AI Home");
+  });
+
+  it("duplicates computed filter variables without linking the copy to the source screen", () => {
+    const result = runtimeResult();
+    const content: PrototypeDocument = result.artifacts[0]!.content;
+    content.variables.push({ path: "search.query", initialValue: "" }, { path: "search.category", initialValue: "all" });
+    content.nodes[0]!.bindingIds.push("binding-filter");
+    content.bindings.push({
+      id: "binding-filter",
+      nodeId: "frame-home",
+      property: "visible",
+      source: {
+        kind: "expression",
+        expression: {
+          kind: "and",
+          operands: [
+            { kind: "contains", left: { kind: "literal", value: "Design systems" }, right: { kind: "variable", path: "search.query" } },
+            { kind: "or", operands: [
+              { kind: "equals", left: { kind: "variable", path: "search.category" }, right: { kind: "literal", value: "all" } },
+              { kind: "not", operand: { kind: "equals", left: { kind: "variable", path: "search.category" }, right: { kind: "literal", value: "engineering" } } },
+            ] },
+          ],
+        },
+      },
+    });
+    const plan = planCanvasDirectIntentsOverRuntimeResult(request, result, directIntents([
+      invocation("duplicate_screen", 1, { target }),
+    ]));
+    const copy = plan.duplicateEffects[0]!.screen;
+    const copiedBinding = plan.document.bindings.find((binding) => binding.nodeId === copy.rootNodeId)!;
+    expect(copiedBinding.source.kind).toBe("expression");
+    if (copiedBinding.source.kind !== "expression") throw new Error("missing computed binding");
+    const paths = prototypeExpressionVariablePaths(copiedBinding.source.expression);
+    expect(paths).toHaveLength(2);
+    expect(paths).not.toContain("search.query");
+    expect(paths).not.toContain("search.category");
+    const variables = new Map(plan.document.variables.map((variable) => [variable.path, variable.initialValue]));
+    variables.set("search.query", "unmatched source value");
+    expect(evaluatePrototypeExpression(copiedBinding.source.expression, (path) => variables.get(path))).toBe(true);
+    const copiedQueryPath = paths.find((path) => variables.get(path) === "");
+    expect(copiedQueryPath).toBeDefined();
+    variables.set(copiedQueryPath!, "missing copied value");
+    expect(evaluatePrototypeExpression(copiedBinding.source.expression, (path) => variables.get(path))).toBe(false);
+    expect(plan.document.bindings.find((binding) => binding.id === "binding-filter")).toEqual(content.bindings[0]);
   });
 
   it("rejects quick_edit mixed with direct intents", () => {

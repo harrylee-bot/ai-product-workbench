@@ -6,6 +6,7 @@ import type { NestExpressApplication } from "@nestjs/platform-express";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ProblemDetailsFilter } from "../src/common/problem-details.filter.js";
+import { notFoundProblem } from "../src/common/problem-details.js";
 import { IdentityService } from "../src/modules/identity/identity.service.js";
 import type { AuthenticatedPrincipal } from "../src/modules/identity/identity.types.js";
 import { WorkbenchAuthGuard } from "../src/modules/identity/workbench-auth.guard.js";
@@ -84,7 +85,7 @@ describe("SubmissionIntent authenticated HTTP mixed-request boundary", () => {
     expectNoSideEffects(harness.probe);
   });
 
-  it("returns stable ProblemDetails for authenticated idempotent replay with zero side effects", async () => {
+  it("accepts mixed requests through validation and still conceals an inaccessible Thread", async () => {
     const harness = await httpHarness(applications);
     const endpoint = harness.endpoint("thread_private_1");
     const idempotencyKey = "submission:http:mixed-replay:12345678";
@@ -98,19 +99,14 @@ describe("SubmissionIntent authenticated HTTP mixed-request boundary", () => {
 
     const expectedProblem = {
       type: "about:blank",
-      title: "Invalid request",
-      status: 400,
-      detail: "The request body does not match the contract",
+      title: "Resource not found",
+      status: 404,
+      detail: "Thread was not found",
       instance: "/api/v1/threads/thread_private_1/submission-intents",
-      code: "VALIDATION_ERROR",
-      errors: {
-        "request.requestedArtifactKinds": [
-          "PRD must be requested in its own Run: complete the PRD Run before requesting other artifact kinds",
-        ],
-      },
+      code: "RESOURCE_NOT_FOUND",
     };
     expect(first).toMatchObject({
-      status: 400,
+      status: 404,
       contentType: expect.stringMatching(/^application\/problem\+json\b/u),
       body: expectedProblem,
     });
@@ -122,7 +118,11 @@ describe("SubmissionIntent authenticated HTTP mixed-request boundary", () => {
       email: undefined,
       displayName: undefined,
     });
-    expectNoSideEffects(harness.probe);
+    expect(harness.probe.submissionIntentCreate).toHaveBeenCalledTimes(2);
+    expect(harness.probe.access).toHaveBeenCalledTimes(2);
+    expect(harness.probe.queuePublish).not.toHaveBeenCalled();
+    expect(harness.probe.runStart).not.toHaveBeenCalled();
+    for (const operation of Object.values(harness.probe.persistence)) expect(operation).not.toHaveBeenCalled();
   });
 });
 
@@ -168,6 +168,7 @@ async function httpHarness(applications: NestExpressApplication[]) {
     findThread: probe.access,
     findRun: vi.fn(),
   };
+  probe.access.mockRejectedValue(notFoundProblem("Thread"));
   const events = {
     append: probe.runEventAppend,
   };

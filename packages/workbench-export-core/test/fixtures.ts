@@ -4,6 +4,7 @@ import {
   canonicalJson,
   type DesignSystemDocument,
   type PrototypeDocument,
+  type PrototypeExpression,
 } from "@workbench/workbench-contracts";
 import type { ExportBuildRequest } from "../src/index.js";
 
@@ -350,6 +351,198 @@ export function interactiveExportRequest(
   request.source.manifest.artifacts[0]!.title = content.title;
   request.source.boardSnapshot.nodes[0]!.data.title = content.title;
   request.source.boardSnapshot.nodes[0]!.size = { width: 390, height: 680 };
+  return request;
+}
+
+export function numericExpressionExportRequest(
+  format: ExportBuildRequest["format"] = "html",
+): ExportBuildRequest {
+  const request = interactiveExportRequest(format);
+  const content = request.source.artifacts[0]!.content as PrototypeDocument;
+  const input = content.nodes.find((node) => node.id === "input-email");
+  if (input?.kind !== "input") throw new Error("Numeric expression fixture input is missing");
+  input.inputType = "number";
+  content.variables.find((variable) => variable.path === "form.email")!.initialValue = 1;
+  const binding = content.bindings.find((candidate) => candidate.id === "binding-mirror")!;
+  binding.property = "visible";
+  binding.source = {
+    kind: "expression",
+    expression: {
+      kind: "equals",
+      left: { kind: "variable", path: "form.email" },
+      right: { kind: "literal", value: 1 },
+    },
+  };
+  const checksum = createHash("sha256").update(canonicalJson(content)).digest("hex");
+  request.source.artifacts[0]!.checksum = checksum;
+  request.source.manifest.artifacts[0]!.checksum = checksum;
+  return request;
+}
+
+export function cataloguePrototypeFixture(): PrototypeDocument {
+  const screenId = "screen-catalogue";
+  const at = (id: string, parentId: string | null, y: number, width = 300, height = 36) => {
+    const node = base(id, screenId, parentId, width, height);
+    return { ...node, layout: { ...node.layout, y: literal(y) } };
+  };
+  const query: PrototypeExpression = { kind: "variable", path: "filter.query" };
+  const category: PrototypeExpression = { kind: "variable", path: "filter.category" };
+  const entries = [
+    { id: "entry-network", title: "计算机网络", category: "technology" },
+    { id: "entry-typescript", title: "Learning TypeScript", category: "technology" },
+    { id: "entry-design", title: "设计心理学", category: "design" },
+  ];
+  const matches = entries.map((entry): PrototypeExpression => ({
+    kind: "and",
+    operands: [
+      { kind: "contains", left: { kind: "literal", value: entry.title }, right: query },
+      {
+        kind: "or",
+        operands: [
+          { kind: "equals", left: category, right: { kind: "literal", value: "all" } },
+          { kind: "equals", left: category, right: { kind: "literal", value: entry.category } },
+        ],
+      },
+    ],
+  }));
+  const input = (id: string, y: number, inputType: "text" | "select", fieldName: string) => ({
+    ...at(id, "form-filter", y),
+    kind: "input" as const,
+    inputType,
+    fieldName,
+    label: fieldName,
+    placeholder: fieldName,
+    optionValue: null,
+    options: inputType === "select" ? [
+      { value: "all", label: "全部分类", disabled: false },
+      { value: "technology", label: "技术", disabled: false },
+      { value: "design", label: "设计", disabled: false },
+    ] : [],
+    required: false,
+    disabled: false,
+    bindingIds: [`binding-${fieldName}`],
+  });
+  const document: PrototypeDocument = {
+    protocol: "workbench.prototype.v1",
+    documentId: "catalogue-document",
+    title: "Catalogue filters",
+    revision: 1,
+    screens: [{
+      id: screenId,
+      name: "Catalogue",
+      route: "/",
+      rootNodeId: "root-catalogue",
+      initialStateId: null,
+      viewport: { width: 390, height: 500 },
+    }],
+    nodes: [
+      {
+        ...at("root-catalogue", null, 0, 390, 500),
+        kind: "frame",
+        childIds: ["form-filter", ...entries.map((entry) => entry.id), "text-empty", "text-query"],
+        clipContent: true,
+      },
+      {
+        ...at("form-filter", "root-catalogue", 0, 350, 160),
+        kind: "form",
+        childIds: ["input-query", "input-category", "button-filter-reset"],
+      },
+      input("input-query", 0, "text", "query"),
+      input("input-category", 45, "select", "category"),
+      {
+        ...at("button-filter-reset", "form-filter", 90, 140),
+        kind: "button",
+        label: "重置",
+        buttonType: "reset",
+        childIds: [],
+        disabled: false,
+        bindingIds: ["binding-reset-enabled"],
+      },
+      ...entries.map((entry, index) => ({
+        ...at(entry.id, "root-catalogue", 170 + index * 45),
+        kind: "text" as const,
+        text: entry.title,
+        maxLines: 1,
+        bindingIds: [`binding-${entry.id}`],
+      })),
+      {
+        ...at("text-empty", "root-catalogue", 310),
+        kind: "text",
+        text: "没有匹配的结果",
+        maxLines: 1,
+        bindingIds: ["binding-empty"],
+      },
+      {
+        ...at("text-query", "root-catalogue", 355),
+        kind: "text",
+        text: "Query placeholder",
+        maxLines: 1,
+        bindingIds: ["binding-query-label"],
+      },
+    ],
+    variables: [
+      { path: "filter.query", initialValue: "" },
+      { path: "filter.category", initialValue: "all" },
+    ],
+    tokens: [],
+    assets: [],
+    states: [],
+    actions: [],
+    bindings: [
+      { id: "binding-query", nodeId: "input-query", property: "value", source: { kind: "variable", path: "filter.query" } },
+      { id: "binding-category", nodeId: "input-category", property: "value", source: { kind: "variable", path: "filter.category" } },
+      ...entries.map((entry, index) => ({
+        id: `binding-${entry.id}`,
+        nodeId: entry.id,
+        property: "visible" as const,
+        source: { kind: "expression" as const, expression: matches[index]! },
+      })),
+      {
+        id: "binding-empty",
+        nodeId: "text-empty",
+        property: "visible",
+        source: { kind: "expression", expression: { kind: "not", operand: { kind: "or", operands: matches } } },
+      },
+      {
+        id: "binding-query-label",
+        nodeId: "text-query",
+        property: "text",
+        source: { kind: "expression", expression: query },
+      },
+      {
+        id: "binding-reset-enabled",
+        nodeId: "button-filter-reset",
+        property: "enabled",
+        source: {
+          kind: "expression",
+          expression: {
+            kind: "not",
+            operand: {
+              kind: "and",
+              operands: [
+                { kind: "equals", left: query, right: { kind: "literal", value: "" } },
+                { kind: "equals", left: category, right: { kind: "literal", value: "all" } },
+              ],
+            },
+          },
+        },
+      },
+    ],
+    motions: [],
+  };
+  return document;
+}
+
+export function catalogueExportRequest(
+  format: ExportBuildRequest["format"] = "html",
+): ExportBuildRequest {
+  const request = exportRequest(format);
+  const content = cataloguePrototypeFixture();
+  const checksum = createHash("sha256").update(canonicalJson(content)).digest("hex");
+  Object.assign(request.source.artifacts[0]!, { content, checksum, title: content.title });
+  Object.assign(request.source.manifest.artifacts[0]!, { checksum, title: content.title });
+  request.source.boardSnapshot.nodes[0]!.data.title = content.title;
+  request.source.boardSnapshot.nodes[0]!.size = { width: 390, height: 500 };
   return request;
 }
 

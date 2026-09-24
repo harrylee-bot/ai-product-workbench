@@ -2096,6 +2096,25 @@
             "value"
           ],
           "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "expression"
+              ]
+            },
+            "expression": {
+              "$ref": "#/$defs/PrototypeExpression"
+            }
+          },
+          "required": [
+            "kind",
+            "expression"
+          ],
+          "additionalProperties": false
         }
       ]
     },
@@ -2359,6 +2378,1166 @@
       ],
       "additionalProperties": false,
       "description": "Prototype screens, nodes, states, actions, bindings, assets, tokens, and motions form a valid semantic graph; enforced by the runtime Zod contract."
+    },
+    "PrototypeExpression": {
+      "type": "object",
+      "description": "Prototype expressions use only the declared operators, at most eight levels and 64 total nodes, and one to sixteen operands per and/or. A bounded pre-parse walk enforces tree limits before structural parsing; variable references and operand/result types are checked by the Prototype document contract.",
+      "allOf": [
+        {
+          "$ref": "#/$defs/PrototypeExpressionDepth8"
+        }
+      ]
+    },
+    "PrototypeExpressionDepth1": {
+      "type": "object",
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "literal"
+              ]
+            },
+            "value": {
+              "$ref": "#/$defs/PrototypeRuntimeValue"
+            }
+          },
+          "required": [
+            "kind",
+            "value"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "variable"
+              ]
+            },
+            "path": {
+              "type": "string",
+              "pattern": "^[A-Za-z][A-Za-z0-9_]*(?:\\.[A-Za-z][A-Za-z0-9_]*)*$",
+              "maxLength": 500
+            }
+          },
+          "required": [
+            "kind",
+            "path"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "PrototypeExpressionDepth2": {
+      "type": "object",
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "literal"
+              ]
+            },
+            "value": {
+              "$ref": "#/$defs/PrototypeRuntimeValue"
+            }
+          },
+          "required": [
+            "kind",
+            "value"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "variable"
+              ]
+            },
+            "path": {
+              "type": "string",
+              "pattern": "^[A-Za-z][A-Za-z0-9_]*(?:\\.[A-Za-z][A-Za-z0-9_]*)*$",
+              "maxLength": 500
+            }
+          },
+          "required": [
+            "kind",
+            "path"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "contains"
+              ]
+            },
+            "left": {
+              "$ref": "#/$defs/PrototypeExpressionDepth1"
+            },
+            "right": {
+              "$ref": "#/$defs/PrototypeExpressionDepth1"
+            }
+          },
+          "required": [
+            "kind",
+            "left",
+            "right"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "equals"
+              ]
+            },
+            "left": {
+              "$ref": "#/$defs/PrototypeExpressionDepth1"
+            },
+            "right": {
+              "$ref": "#/$defs/PrototypeExpressionDepth1"
+            }
+          },
+          "required": [
+            "kind",
+            "left",
+            "right"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "and"
+              ]
+            },
+            "operands": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/PrototypeExpressionDepth1"
+              },
+              "minItems": 1,
+              "maxItems": 16
+            }
+          },
+          "required": [
+            "kind",
+            "operands"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "or"
+              ]
+            },
+            "operands": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/PrototypeExpressionDepth1"
+              },
+              "minItems": 1,
+              "maxItems": 16
+            }
+          },
+          "required": [
+            "kind",
+            "operands"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "not"
+              ]
+            },
+            "operand": {
+              "$ref": "#/$defs/PrototypeExpressionDepth1"
+            }
+          },
+          "required": [
+            "kind",
+            "operand"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "PrototypeExpressionDepth3": {
+      "type": "object",
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "literal"
+              ]
+            },
+            "value": {
+              "$ref": "#/$defs/PrototypeRuntimeValue"
+            }
+          },
+          "required": [
+            "kind",
+            "value"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "variable"
+              ]
+            },
+            "path": {
+              "type": "string",
+              "pattern": "^[A-Za-z][A-Za-z0-9_]*(?:\\.[A-Za-z][A-Za-z0-9_]*)*$",
+              "maxLength": 500
+            }
+          },
+          "required": [
+            "kind",
+            "path"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "contains"
+              ]
+            },
+            "left": {
+              "$ref": "#/$defs/PrototypeExpressionDepth2"
+            },
+            "right": {
+              "$ref": "#/$defs/PrototypeExpressionDepth2"
+            }
+          },
+          "required": [
+            "kind",
+            "left",
+            "right"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "equals"
+              ]
+            },
+            "left": {
+              "$ref": "#/$defs/PrototypeExpressionDepth2"
+            },
+            "right": {
+              "$ref": "#/$defs/PrototypeExpressionDepth2"
+            }
+          },
+          "required": [
+            "kind",
+            "left",
+            "right"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "and"
+              ]
+            },
+            "operands": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/PrototypeExpressionDepth2"
+              },
+              "minItems": 1,
+              "maxItems": 16
+            }
+          },
+          "required": [
+            "kind",
+            "operands"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "or"
+              ]
+            },
+            "operands": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/PrototypeExpressionDepth2"
+              },
+              "minItems": 1,
+              "maxItems": 16
+            }
+          },
+          "required": [
+            "kind",
+            "operands"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "not"
+              ]
+            },
+            "operand": {
+              "$ref": "#/$defs/PrototypeExpressionDepth2"
+            }
+          },
+          "required": [
+            "kind",
+            "operand"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "PrototypeExpressionDepth4": {
+      "type": "object",
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "literal"
+              ]
+            },
+            "value": {
+              "$ref": "#/$defs/PrototypeRuntimeValue"
+            }
+          },
+          "required": [
+            "kind",
+            "value"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "variable"
+              ]
+            },
+            "path": {
+              "type": "string",
+              "pattern": "^[A-Za-z][A-Za-z0-9_]*(?:\\.[A-Za-z][A-Za-z0-9_]*)*$",
+              "maxLength": 500
+            }
+          },
+          "required": [
+            "kind",
+            "path"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "contains"
+              ]
+            },
+            "left": {
+              "$ref": "#/$defs/PrototypeExpressionDepth3"
+            },
+            "right": {
+              "$ref": "#/$defs/PrototypeExpressionDepth3"
+            }
+          },
+          "required": [
+            "kind",
+            "left",
+            "right"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "equals"
+              ]
+            },
+            "left": {
+              "$ref": "#/$defs/PrototypeExpressionDepth3"
+            },
+            "right": {
+              "$ref": "#/$defs/PrototypeExpressionDepth3"
+            }
+          },
+          "required": [
+            "kind",
+            "left",
+            "right"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "and"
+              ]
+            },
+            "operands": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/PrototypeExpressionDepth3"
+              },
+              "minItems": 1,
+              "maxItems": 16
+            }
+          },
+          "required": [
+            "kind",
+            "operands"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "or"
+              ]
+            },
+            "operands": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/PrototypeExpressionDepth3"
+              },
+              "minItems": 1,
+              "maxItems": 16
+            }
+          },
+          "required": [
+            "kind",
+            "operands"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "not"
+              ]
+            },
+            "operand": {
+              "$ref": "#/$defs/PrototypeExpressionDepth3"
+            }
+          },
+          "required": [
+            "kind",
+            "operand"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "PrototypeExpressionDepth5": {
+      "type": "object",
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "literal"
+              ]
+            },
+            "value": {
+              "$ref": "#/$defs/PrototypeRuntimeValue"
+            }
+          },
+          "required": [
+            "kind",
+            "value"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "variable"
+              ]
+            },
+            "path": {
+              "type": "string",
+              "pattern": "^[A-Za-z][A-Za-z0-9_]*(?:\\.[A-Za-z][A-Za-z0-9_]*)*$",
+              "maxLength": 500
+            }
+          },
+          "required": [
+            "kind",
+            "path"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "contains"
+              ]
+            },
+            "left": {
+              "$ref": "#/$defs/PrototypeExpressionDepth4"
+            },
+            "right": {
+              "$ref": "#/$defs/PrototypeExpressionDepth4"
+            }
+          },
+          "required": [
+            "kind",
+            "left",
+            "right"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "equals"
+              ]
+            },
+            "left": {
+              "$ref": "#/$defs/PrototypeExpressionDepth4"
+            },
+            "right": {
+              "$ref": "#/$defs/PrototypeExpressionDepth4"
+            }
+          },
+          "required": [
+            "kind",
+            "left",
+            "right"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "and"
+              ]
+            },
+            "operands": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/PrototypeExpressionDepth4"
+              },
+              "minItems": 1,
+              "maxItems": 16
+            }
+          },
+          "required": [
+            "kind",
+            "operands"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "or"
+              ]
+            },
+            "operands": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/PrototypeExpressionDepth4"
+              },
+              "minItems": 1,
+              "maxItems": 16
+            }
+          },
+          "required": [
+            "kind",
+            "operands"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "not"
+              ]
+            },
+            "operand": {
+              "$ref": "#/$defs/PrototypeExpressionDepth4"
+            }
+          },
+          "required": [
+            "kind",
+            "operand"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "PrototypeExpressionDepth6": {
+      "type": "object",
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "literal"
+              ]
+            },
+            "value": {
+              "$ref": "#/$defs/PrototypeRuntimeValue"
+            }
+          },
+          "required": [
+            "kind",
+            "value"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "variable"
+              ]
+            },
+            "path": {
+              "type": "string",
+              "pattern": "^[A-Za-z][A-Za-z0-9_]*(?:\\.[A-Za-z][A-Za-z0-9_]*)*$",
+              "maxLength": 500
+            }
+          },
+          "required": [
+            "kind",
+            "path"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "contains"
+              ]
+            },
+            "left": {
+              "$ref": "#/$defs/PrototypeExpressionDepth5"
+            },
+            "right": {
+              "$ref": "#/$defs/PrototypeExpressionDepth5"
+            }
+          },
+          "required": [
+            "kind",
+            "left",
+            "right"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "equals"
+              ]
+            },
+            "left": {
+              "$ref": "#/$defs/PrototypeExpressionDepth5"
+            },
+            "right": {
+              "$ref": "#/$defs/PrototypeExpressionDepth5"
+            }
+          },
+          "required": [
+            "kind",
+            "left",
+            "right"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "and"
+              ]
+            },
+            "operands": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/PrototypeExpressionDepth5"
+              },
+              "minItems": 1,
+              "maxItems": 16
+            }
+          },
+          "required": [
+            "kind",
+            "operands"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "or"
+              ]
+            },
+            "operands": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/PrototypeExpressionDepth5"
+              },
+              "minItems": 1,
+              "maxItems": 16
+            }
+          },
+          "required": [
+            "kind",
+            "operands"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "not"
+              ]
+            },
+            "operand": {
+              "$ref": "#/$defs/PrototypeExpressionDepth5"
+            }
+          },
+          "required": [
+            "kind",
+            "operand"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "PrototypeExpressionDepth7": {
+      "type": "object",
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "literal"
+              ]
+            },
+            "value": {
+              "$ref": "#/$defs/PrototypeRuntimeValue"
+            }
+          },
+          "required": [
+            "kind",
+            "value"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "variable"
+              ]
+            },
+            "path": {
+              "type": "string",
+              "pattern": "^[A-Za-z][A-Za-z0-9_]*(?:\\.[A-Za-z][A-Za-z0-9_]*)*$",
+              "maxLength": 500
+            }
+          },
+          "required": [
+            "kind",
+            "path"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "contains"
+              ]
+            },
+            "left": {
+              "$ref": "#/$defs/PrototypeExpressionDepth6"
+            },
+            "right": {
+              "$ref": "#/$defs/PrototypeExpressionDepth6"
+            }
+          },
+          "required": [
+            "kind",
+            "left",
+            "right"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "equals"
+              ]
+            },
+            "left": {
+              "$ref": "#/$defs/PrototypeExpressionDepth6"
+            },
+            "right": {
+              "$ref": "#/$defs/PrototypeExpressionDepth6"
+            }
+          },
+          "required": [
+            "kind",
+            "left",
+            "right"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "and"
+              ]
+            },
+            "operands": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/PrototypeExpressionDepth6"
+              },
+              "minItems": 1,
+              "maxItems": 16
+            }
+          },
+          "required": [
+            "kind",
+            "operands"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "or"
+              ]
+            },
+            "operands": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/PrototypeExpressionDepth6"
+              },
+              "minItems": 1,
+              "maxItems": 16
+            }
+          },
+          "required": [
+            "kind",
+            "operands"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "not"
+              ]
+            },
+            "operand": {
+              "$ref": "#/$defs/PrototypeExpressionDepth6"
+            }
+          },
+          "required": [
+            "kind",
+            "operand"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "PrototypeExpressionDepth8": {
+      "type": "object",
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "literal"
+              ]
+            },
+            "value": {
+              "$ref": "#/$defs/PrototypeRuntimeValue"
+            }
+          },
+          "required": [
+            "kind",
+            "value"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "variable"
+              ]
+            },
+            "path": {
+              "type": "string",
+              "pattern": "^[A-Za-z][A-Za-z0-9_]*(?:\\.[A-Za-z][A-Za-z0-9_]*)*$",
+              "maxLength": 500
+            }
+          },
+          "required": [
+            "kind",
+            "path"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "contains"
+              ]
+            },
+            "left": {
+              "$ref": "#/$defs/PrototypeExpressionDepth7"
+            },
+            "right": {
+              "$ref": "#/$defs/PrototypeExpressionDepth7"
+            }
+          },
+          "required": [
+            "kind",
+            "left",
+            "right"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "equals"
+              ]
+            },
+            "left": {
+              "$ref": "#/$defs/PrototypeExpressionDepth7"
+            },
+            "right": {
+              "$ref": "#/$defs/PrototypeExpressionDepth7"
+            }
+          },
+          "required": [
+            "kind",
+            "left",
+            "right"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "and"
+              ]
+            },
+            "operands": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/PrototypeExpressionDepth7"
+              },
+              "minItems": 1,
+              "maxItems": 16
+            }
+          },
+          "required": [
+            "kind",
+            "operands"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "or"
+              ]
+            },
+            "operands": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/PrototypeExpressionDepth7"
+              },
+              "minItems": 1,
+              "maxItems": 16
+            }
+          },
+          "required": [
+            "kind",
+            "operands"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "not"
+              ]
+            },
+            "operand": {
+              "$ref": "#/$defs/PrototypeExpressionDepth7"
+            }
+          },
+          "required": [
+            "kind",
+            "operand"
+          ],
+          "additionalProperties": false
+        }
+      ]
     },
     "PrototypeFontAsset": {
       "type": "object",
@@ -4985,6 +6164,7 @@
           "items": {
             "$ref": "#/$defs/ArtifactCitation"
           },
+          "minItems": 1,
           "maxItems": 1000
         },
         "kind": {
@@ -5062,6 +6242,7 @@
           "items": {
             "$ref": "#/$defs/ArtifactCitation"
           },
+          "minItems": 1,
           "maxItems": 1000
         },
         "kind": {
@@ -5139,6 +6320,7 @@
           "items": {
             "$ref": "#/$defs/ArtifactCitation"
           },
+          "minItems": 1,
           "maxItems": 1000
         },
         "kind": {
@@ -5216,6 +6398,7 @@
           "items": {
             "$ref": "#/$defs/ArtifactCitation"
           },
+          "minItems": 1,
           "maxItems": 1000
         },
         "kind": {
@@ -5303,6 +6486,7 @@
           "items": {
             "$ref": "#/$defs/ArtifactCitation"
           },
+          "minItems": 1,
           "maxItems": 1000
         },
         "kind": {
@@ -5363,6 +6547,7 @@
           "items": {
             "$ref": "#/$defs/ArtifactCitation"
           },
+          "minItems": 1,
           "maxItems": 1000
         },
         "kind": {
@@ -5442,6 +6627,7 @@
           "items": {
             "$ref": "#/$defs/ArtifactCitation"
           },
+          "minItems": 1,
           "maxItems": 1000
         },
         "kind": {

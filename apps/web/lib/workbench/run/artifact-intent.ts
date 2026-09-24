@@ -1,7 +1,7 @@
 import type { StartRunRequest } from "@workbench/workbench-contracts";
 
 export const WORKBENCH_MIXED_ARTIFACT_REQUEST_MESSAGE =
-  "一次运行只能生成需求文档或原型。请先完成需求文档，再发起原型生成。";
+  "需求文档可与原型一起生成，其他产物类型请单独发起。";
 
 const artifactOutputAction = "(?:生成|创建|编写|撰写|输出|产出|制作|整理|写|create|write|build|produce)";
 const prdArtifactTerm = "(?:需求(?:文档|说明书|说明)|需求规格(?:说明书)?|\\bprd\\b|product\\s+requirements?\\s+document)";
@@ -87,7 +87,7 @@ export function assertRunnableArtifactRequest(
 ): void {
   const requestsPrd = requestedArtifactKinds.includes("prd");
   const requestsPrototypeWork = requestedArtifactKinds.some(
-    (kind) => kind === "prototype" || kind === "code",
+    (kind) => kind !== "prd" && kind !== "prototype",
   );
   if (requestsPrd && requestsPrototypeWork) {
     throw new Error(WORKBENCH_MIXED_ARTIFACT_REQUEST_MESSAGE);

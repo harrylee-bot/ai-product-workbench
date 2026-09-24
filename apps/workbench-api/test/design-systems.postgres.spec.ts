@@ -11,6 +11,8 @@ import { DesignSystemsService } from "../src/modules/design-systems/design-syste
 import { RunEventStore } from "../src/modules/runs/run-event.store.js";
 import { RunsService } from "../src/modules/runs/runs.service.js";
 
+import { seedReadyKnowledge } from "../../../scripts/test-support/knowledge-fixture.mjs";
+
 const databaseUrl = process.env.WORKBENCH_TEST_DATABASE_URL;
 const describeWithPostgres = databaseUrl ? describe : describe.skip;
 
@@ -51,6 +53,7 @@ describeWithPostgres("Design System PostgreSQL vertical slice", () => {
 
     try {
       await root.$transaction(async (tx) => {
+        await seedReadyKnowledge(tx);
         const owner = await tx.principal.create({
           data: { issuer: `design-system-test-${suffix}`, subject: `owner-${suffix}` },
         });

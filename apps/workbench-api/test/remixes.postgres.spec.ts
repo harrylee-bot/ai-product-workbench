@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { Prisma, PrismaClient } from "@workbench/workbench-db";
 import { boardNodeProtocol, canonicalJson } from "@workbench/workbench-contracts";
 import { hashShareToken, RemixesService } from "../src/modules/remixes/remixes.service.js";
+import { seedPrototypeRelease } from "./prototype-release.fixture.js";
 
 const databaseUrl = process.env.WORKBENCH_TEST_DATABASE_URL;
 const describeWithPostgres = databaseUrl ? describe : describe.skip;
@@ -60,50 +61,17 @@ async function seedRemixRaceFixture(db: PrismaClient, token: string, suffix: str
     const board = await tx.board.create({
       data: { projectId: sourceProject.id, viewport: { x: 0, y: 0, zoom: 1 } },
     });
-    const boardSnapshot = {
-      id: board.id,
-      projectId: sourceProject.id,
-      revision: 0,
-      viewport: { x: 0, y: 0, zoom: 1 },
-      nodes: [],
-      edges: [],
-    };
-    const boardChecksum = sha256(boardSnapshot);
-    const manifest = {
-      protocol: "workbench.project-release.v1",
-      projectId: sourceProject.id,
-      releaseVersion: 1,
-      board: { id: board.id, revision: 0, checksum: boardChecksum },
-      artifacts: [],
-    };
-    const release = await tx.projectRelease.create({
-      data: {
-        projectId: sourceProject.id,
-        version: 1,
-        createdById: sourceOwner.id,
-        idempotencyKey: `remix-race:${suffix}`,
-        requestHash: "e".repeat(64),
-        boardId: board.id,
-        boardRevision: 0,
-        boardSnapshot: boardSnapshot as Prisma.InputJsonValue,
-        boardChecksum,
-        manifest: manifest as Prisma.InputJsonValue,
-        manifestSha256: sha256(manifest),
-      },
-    });
-    await tx.projectRelease.update({
-      where: { id: release.id },
-      data: { status: "ready", finishedAt: new Date() },
-    });
+    const release = await seedPrototypeRelease(tx, sourceProject.id, sourceOwner.id, board.id);
     const share = await tx.shareGrant.create({
       data: {
         projectId: sourceProject.id,
         releaseId: release.id,
+        artifactVersionId: release.artifactVersionId,
         createdById: sourceOwner.id,
         idempotencyKey: `share-rotate:${suffix}`,
         requestHash: "f".repeat(64),
         tokenHash: hashShareToken(token),
-        scope: "remix",
+        scope: "view",
       },
     });
     return {
@@ -116,7 +84,7 @@ async function seedRemixRaceFixture(db: PrismaClient, token: string, suffix: str
 }
 
 describeWithPostgres("Project remix PostgreSQL transaction", () => {
-  it("commits a complete remapped Project graph and immutable lineage in one transaction", async () => {
+  it("rejects a whole-project remix grant even when its release graph is complete", async () => {
     const db = new PrismaClient({ datasourceUrl: databaseUrl });
     const suffix = `${Date.now()}_${Math.random().toString(36).slice(2)}`;
     const token = `wbs_${"B".repeat(43)}`;
@@ -274,7 +242,7 @@ describeWithPostgres("Project remix PostgreSQL transaction", () => {
           where: { id: release.id },
           data: { status: "ready", finishedAt: new Date() },
         });
-        const share = await tx.shareGrant.create({
+        await expect(tx.shareGrant.create({
           data: {
             projectId: sourceProject.id,
             releaseId: release.id,
@@ -284,77 +252,7 @@ describeWithPostgres("Project remix PostgreSQL transaction", () => {
             tokenHash: hashShareToken(token),
             scope: "remix",
           },
-        });
-
-        const service = new RemixesService({
-          $transaction: (callback: (client: typeof tx) => unknown) => callback(tx),
-        } as never);
-        const result = await service.create(principal.id, token, `remix:${suffix}`, {
-          workspaceId: workspace.id,
-          title: "Target",
-        });
-        await tx.shareGrant.update({
-          where: { id: share.id },
-          data: {
-            status: "revoked",
-            revokedAt: new Date(),
-            revision: { increment: 1 },
-          },
-        });
-        const replay = await service.create(principal.id, token, `remix:${suffix}`, {
-          workspaceId: workspace.id,
-          title: "Target",
-        });
-        expect(replay.project.id).toBe(result.project.id);
-        const target = await tx.project.findUniqueOrThrow({
-          where: { id: result.project.id },
-          include: {
-            threads: true,
-            boards: { include: { nodes: true, edges: true } },
-            artifacts: { include: { versions: true } },
-            lineage: true,
-          },
-        });
-
-        expect(target.id).not.toBe(sourceProject.id);
-        expect(target.threads).toHaveLength(1);
-        expect(target.threads[0]?.title).toBe("Main");
-        expect(target.boards).toHaveLength(1);
-        expect(target.artifacts).toHaveLength(1);
-        const targetArtifact = target.artifacts[0];
-        const targetVersion = targetArtifact?.versions[0];
-        expect(targetArtifact?.id).not.toBe(sourceArtifact.id);
-        expect(targetArtifact?.currentVersionId).toBe(targetVersion?.id);
-        expect(targetVersion).toMatchObject({
-          version: 1,
-          status: "ready",
-          checksum: sourceVersion.checksum,
-          contentBlobId: null,
-          createdByRunId: null,
-          knowledgeReleaseId: null,
-        });
-        expect(targetVersion?.content).toEqual({ rows: [1, 2, 3] });
-        expect(target.boards[0]?.nodes[0]).toMatchObject({
-          nodeKey: "source-node",
-          sortOrder: 0,
-          artifactId: targetArtifact?.id,
-          artifactVersionId: targetVersion?.id,
-          data: {
-            protocol: boardNodeProtocol,
-            nodeType: "artifact",
-            title: "Pinned data",
-            artifactKind: "data",
-            route: `/versions/${sourceVersion.id}`,
-          },
-        });
-        expect(target.lineage).toMatchObject({
-          targetProjectId: target.id,
-          sourceReleaseId: release.id,
-          sourceShareId: share.id,
-          createdById: principal.id,
-          workspaceId: workspace.id,
-        });
-
+        })).rejects.toThrow(/PROTOTYPE_SHARE_PIN_REQUIRED/u);
         verified = true;
         throw rollback;
       });
@@ -364,6 +262,22 @@ describeWithPostgres("Project remix PostgreSQL transaction", () => {
       await db.$disconnect();
     }
     expect(verified).toBe(true);
+  }, 20_000);
+
+  it("does not turn a read-only Prototype share into a copy of the entire Project", async () => {
+    const db = new PrismaClient({ datasourceUrl: databaseUrl });
+    const suffix = `${Date.now()}_${Math.random().toString(36).slice(2)}`;
+    try {
+      const fixture = await seedRemixRaceFixture(db, shareToken(suffix), suffix);
+      const service = new RemixesService(db as never);
+      await expect(service.create(fixture.requesterId, fixture.token, `remix:${suffix}`, {
+        workspaceId: fixture.targetWorkspaceId, title: "Forbidden copy",
+      })).rejects.toMatchObject({ status: 404 });
+      expect(await db.project.count({ where: { workspaceId: fixture.targetWorkspaceId } })).toBe(0);
+      expect(await db.projectLineage.count({ where: { sourceShareId: fixture.shareId } })).toBe(0);
+    } finally {
+      await db.$disconnect();
+    }
   }, 20_000);
 
   it("does not remix a Share revoked while the command waits for its lock", async () => {

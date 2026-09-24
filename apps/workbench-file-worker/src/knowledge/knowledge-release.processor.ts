@@ -34,7 +34,9 @@ export class KnowledgeReleaseProcessor {
       this.assertRetrievalProfile(command);
       this.tokenizer.assertProfile(command.embeddingProfile);
       if (!command.chunksReady) {
-        const snapshot = await this.reader.readSnapshot(signal);
+        const snapshot = command.ingestion
+          ? { sources: [{ path: command.ingestion.sourcePath, content: command.ingestion.markdown }], assets: [] }
+          : await this.reader.readSnapshot(signal);
         throwIfAborted(signal);
         const bundle = buildKnowledgeRelease({
           releaseKey: command.releaseKey,

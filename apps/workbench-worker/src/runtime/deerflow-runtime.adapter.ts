@@ -67,6 +67,7 @@ import {
 } from "./runtime-liveness.js";
 import { runtimePrdResultGuidance } from "./runtime-prd-guidance.js";
 import { assertPrdReferenceReadEvidence } from "./runtime-prd-reference-evidence.js";
+import { RuntimeProviderContentFilterError } from "./runtime-provider-content-filter-error.js";
 
 export {
   assistantTextDelta,
@@ -90,6 +91,9 @@ const PRD_GENERATION_STAGE_SEQUENCE = [
 ] as const;
 const RUN_PAGE_SIZE = 100;
 const MAX_RUN_RECOVERY_PAGES = 100;
+const TERMINAL_RESULT_STREAM_GRACE_MS = 1_000;
+const TERMINAL_RESULT_STATE_SETTLE_MS = 10_000;
+const TERMINAL_RESULT_STATE_POLL_MS = 250;
 const KNOWLEDGE_GRANT_TOKEN = /wbkg1\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]{43}/u;
 const CANVAS_GRANT_TOKEN = /wbct1\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]{43}/u;
 const TERMINAL_EXTERNAL_RUN_STATUSES = new Set<Run["status"]>(["error", "success", "timeout", "interrupted"]);
@@ -284,9 +288,7 @@ export class DeerFlowRuntimeAdapter implements RuntimePort {
   ): Promise<RuntimeOutcome> {
     if (
       execution.request.requestedArtifactKinds.includes("prd")
-      && execution.request.requestedArtifactKinds.some((kind) => (
-        kind === "prototype" || kind === "code"
-      ))
+      && execution.request.requestedArtifactKinds.some((kind) => kind !== "prd" && kind !== "prototype")
     ) {
       throw new Error("RUNTIME_ARTIFACT_PRD_MIXED_REQUEST_INVALID");
     }
@@ -320,7 +322,10 @@ export class DeerFlowRuntimeAdapter implements RuntimePort {
     let baselineState = submission.mode === "reconcile"
       ? null
       : prototypePatchBaselineState(execution.prototypePatchBaselines);
-    const client = this.client(execution.principalId, submission.providerIdempotencyKey);
+    const client = this.client(
+      execution.runtimeTransportOwnerId,
+      submission.providerIdempotencyKey,
+    );
     let recovered: Run | null;
     try {
       recovered = submission.mode === "join"
@@ -360,6 +365,117 @@ export class DeerFlowRuntimeAdapter implements RuntimePort {
     baselineState ??= prototypePatchBaselineState(execution.prototypePatchBaselines);
 
     let externalRunPersistence: Promise<void> | null = externalRunId ? Promise.resolve() : null;
+    // Keep stream lifetime separate from the execution signal. A terminal
+    // provider status must be able to close an SSE response that stays open
+    // after the Run has finished without cancelling final result persistence.
+    const streamAbortController = new AbortController();
+    const streamSignal = AbortSignal.any([signal, streamAbortController.signal]);
+    const providerTerminalStreamAbort = new Error(
+      "AbortError: DEERFLOW_PROVIDER_TERMINAL_STREAM_ABORT",
+    );
+    providerTerminalStreamAbort.name = "AbortError";
+    const terminalResultStreamAbort = new Error(
+      "AbortError: DEERFLOW_TERMINAL_RESULT_STREAM_ABORT",
+    );
+    terminalResultStreamAbort.name = "AbortError";
+    const providerHeartbeatAbort = new Error("AbortError: DEERFLOW_PROVIDER_HEARTBEAT_STOP");
+    providerHeartbeatAbort.name = "AbortError";
+    const providerHeartbeatAbortController = new AbortController();
+    const abortProviderHeartbeat = () => {
+      providerHeartbeatAbortController.abort(providerHeartbeatAbort);
+    };
+    if (signal.aborted) abortProviderHeartbeat();
+    else signal.addEventListener("abort", abortProviderHeartbeat, { once: true });
+    const providerHeartbeatSignal = providerHeartbeatAbortController.signal;
+    const isProviderTerminalStreamAbort = (error: unknown) => {
+      return terminalProviderStatus !== null
+        && !signal.aborted
+        && streamSignal.aborted
+        && streamSignal.reason === providerTerminalStreamAbort
+        && (error === providerTerminalStreamAbort || isNamedAbortError(error));
+    };
+    let providerHeartbeatTimer: NodeJS.Timeout | null = null;
+    let providerHeartbeatInFlight: Promise<void> | null = null;
+    let lastProviderStatus: Run["status"] | null = recovered?.status ?? null;
+    let terminalProviderStatus: Run["status"] | null = lastProviderStatus !== null
+      && TERMINAL_EXTERNAL_RUN_STATUSES.has(lastProviderStatus)
+      ? lastProviderStatus
+      : null;
+    let providerHeartbeatStopped = terminalProviderStatus !== null;
+    if (terminalProviderStatus) {
+      abortProviderHeartbeat();
+      streamAbortController.abort(providerTerminalStreamAbort);
+    }
+    const providerHeartbeatIntervalMs = Math.min(
+      30_000,
+      Math.max(5_000, Math.floor(this.config.deerFlowIdleTimeoutMs / 3)),
+    );
+    const haltProviderHeartbeat = () => {
+      providerHeartbeatStopped = true;
+      if (providerHeartbeatTimer) clearInterval(providerHeartbeatTimer);
+      providerHeartbeatTimer = null;
+      signal.removeEventListener("abort", abortProviderHeartbeat);
+      abortProviderHeartbeat();
+    };
+    const stopProviderHeartbeat = async () => {
+      const pending = providerHeartbeatInFlight;
+      haltProviderHeartbeat();
+      await pending;
+    };
+    const pollProviderHeartbeat = () => {
+      if (
+        providerHeartbeatInFlight
+        || providerHeartbeatStopped
+        || providerHeartbeatSignal.aborted
+        || !externalRunId
+      ) return;
+      const candidateExternalRunId = externalRunId;
+      const operation = (async () => {
+        try {
+          const providerRun = await client.runs.get(
+            execution.externalThreadId,
+            candidateExternalRunId,
+            { signal: providerHeartbeatSignal },
+          );
+          if (providerHeartbeatStopped || providerHeartbeatSignal.aborted) return;
+          lastProviderStatus = providerRun.status;
+          // SSE comments are intentionally discarded by the SDK. A successful
+          // status probe is still provider activity and must keep the outer idle
+          // budget alive while a model/tool call is doing useful work.
+          onProviderActivity();
+          if (TERMINAL_EXTERNAL_RUN_STATUSES.has(providerRun.status)) {
+            terminalProviderStatus = providerRun.status;
+            haltProviderHeartbeat();
+            streamAbortController.abort(providerTerminalStreamAbort);
+          }
+        } catch (error) {
+          // A missing provider Run cannot recover: DeerFlow has already
+          // discarded the stream's source of truth. Treat a 404 as a terminal
+          // provider error so a heartbeat-only SSE connection cannot leave the
+          // Workbench Run stuck in `running` forever.
+          if (isSdkHttpStatus(error, 404)) {
+            lastProviderStatus = "error";
+            terminalProviderStatus = "error";
+            haltProviderHeartbeat();
+            streamAbortController.abort(providerTerminalStreamAbort);
+            return;
+          }
+          // The stream remains authoritative. Transient status-probe failures
+          // must not turn a healthy provider run into a synthetic failure.
+        }
+      })();
+      providerHeartbeatInFlight = operation;
+      void operation.then(() => {
+        if (providerHeartbeatInFlight === operation) providerHeartbeatInFlight = null;
+      });
+    };
+    const startProviderHeartbeat = () => {
+      if (providerHeartbeatTimer || providerHeartbeatStopped || !externalRunId) return;
+      providerHeartbeatTimer = setInterval(() => {
+        pollProviderHeartbeat();
+      }, providerHeartbeatIntervalMs);
+      providerHeartbeatTimer.unref?.();
+    };
     const registerExternalRun = (candidate: string) => {
       if (externalRunId && externalRunId !== candidate) {
         externalRunPersistence = Promise.reject(new Error("RUNTIME_EXTERNAL_RUN_ID_CONFLICT"));
@@ -367,24 +483,57 @@ export class DeerFlowRuntimeAdapter implements RuntimePort {
       }
       externalRunId = candidate;
       externalRunPersistence ??= observer.onExternalRunCreated(candidate);
+      startProviderHeartbeat();
     };
+    startProviderHeartbeat();
 
     let stream: AsyncGenerator<{ id?: string; event: string; data: unknown }>;
     let submissionMayHaveBeenAccepted = false;
-    const streamIdleReconnect = Math.min(
-      30_000,
-      Math.max(1_000, Math.floor(this.config.deerFlowIdleTimeoutMs / 2)),
-    );
-    if (externalRunId) {
-      stream = client.runs.joinStream(execution.externalThreadId, externalRunId, {
-        signal,
+    let terminalResultStreamTimer: NodeJS.Timeout | null = null;
+    const isTerminalResultStreamAbort = (error: unknown) => {
+      return (resultToolCallId !== null || inputRequired !== null)
+        && !signal.aborted
+        && streamSignal.aborted
+        && streamSignal.reason === terminalResultStreamAbort
+        && (error === terminalResultStreamAbort || isNamedAbortError(error));
+    };
+    const scheduleTerminalResultStreamAbort = () => {
+      if (terminalResultStreamTimer || streamSignal.aborted) return;
+      terminalResultStreamTimer = setTimeout(() => {
+        terminalResultStreamTimer = null;
+        if (!signal.aborted && !streamSignal.aborted && (resultToolCallId !== null || inputRequired !== null)) {
+          streamAbortController.abort(terminalResultStreamAbort);
+        }
+      }, TERMINAL_RESULT_STREAM_GRACE_MS);
+      terminalResultStreamTimer.unref?.();
+    };
+    const joinExternalStream = (lastEventId?: string) => {
+      if (!externalRunId) throw new Error("RUNTIME_EXTERNAL_RUN_ID_MISSING");
+      return client.runs.joinStream(execution.externalThreadId, externalRunId, {
+        signal: streamSignal,
         cancelOnDisconnect: false,
-        lastEventId: submission.mode === "join"
-          ? submission.lastExternalEventId ?? undefined
-          : undefined,
-        streamMode: this.streamMode(execution.request.requestedArtifactKinds),
+        lastEventId,
+        streamMode,
         streamIdleReconnect,
       });
+    };
+    const streamMode = this.streamMode(execution.request.requestedArtifactKinds);
+    // Values streams can legitimately stay quiet while DeerFlow is running a
+    // long model or subagent call. The provider heartbeat still keeps the
+    // outer liveness budget alive and aborts this stream once the provider
+    // reports a terminal state, so forcing the SDK's five-retry idle watchdog
+    // here would turn a healthy long-running Run into a false failure.
+    // Other stream modes retain the reconnect watchdog for half-open sockets.
+    const streamIdleReconnect = streamMode === "values"
+      ? 0
+      : Math.min(
+          30_000,
+          Math.max(1_000, Math.floor(this.config.deerFlowIdleTimeoutMs / 2)),
+        );
+    if (externalRunId) {
+      stream = joinExternalStream(
+        submission.mode === "join" ? submission.lastExternalEventId ?? undefined : undefined,
+      );
     } else {
       if (submission.mode === "reconcile") {
         throw new RuntimeSubmissionUnknownError();
@@ -411,9 +560,10 @@ export class DeerFlowRuntimeAdapter implements RuntimePort {
         this.config.deerFlowAssistantId,
         {
           ...runRequest,
-          signal,
+          signal: streamSignal,
           onDisconnect: "continue",
           streamIdleReconnect,
+          streamMode,
           onRunCreated: ({ run_id }) => registerExternalRun(run_id),
         },
       );
@@ -736,88 +886,158 @@ export class DeerFlowRuntimeAdapter implements RuntimePort {
         resultToolCallId = event.submission.toolCallId;
       }
     };
+    let lastExternalEventId = submission.mode === "join"
+      ? submission.lastExternalEventId ?? null
+      : null;
+    let streamBodyFailed = false;
     try {
-      for await (const part of stream) {
-        onProviderActivity();
-        // The SDK retains the previous SSE ID across comment-only heartbeat
-        // frames and exposes them as an empty event. They carry no business
-        // data and must not advance the durable provider cursor.
-        if (!part.event && part.data === null) continue;
-        // DeerFlow terminates its Redis-backed stream with an un-ID'd end/null
-        // sentinel. The SDK carries the previous SSE ID onto that frame, so it
-        // must not enter the durable business-event inbox or advance the cursor.
-        if (part.event === "end") {
-          if (part.data !== null) throw new Error("DEERFLOW_STREAM_END_INVALID");
-          continue;
-        }
-        partEffects = [];
-        const metadataRunId = externalRunIdFromEvent(part.event, part.data);
-        if (metadataRunId) registerExternalRun(metadataRunId);
-        if (!externalRunId || !externalRunPersistence) {
-          throw new Error("RUNTIME_EXTERNAL_RUN_ID_MISSING");
-        }
-        await externalRunPersistence;
-        if (signal?.aborted) throw abortError(signal);
-        const externalPart = part.id
-          ? {
-              externalRunId,
-              externalEventId: part.id,
-              event: part.event,
-              payload: jsonValueSchema.parse(part.data),
+      while (true) {
+        let streamReadFailed = false;
+        let streamReadFailure: unknown;
+        while (true) {
+          let next: IteratorResult<{ id?: string; event: string; data: unknown }>;
+          try {
+            next = await stream.next();
+          } catch (error) {
+            if (isProviderTerminalStreamAbort(error) || isTerminalResultStreamAbort(error)) break;
+            streamReadFailed = true;
+            streamReadFailure = error;
+            break;
+          }
+          if (next.done) break;
+          const part = next.value;
+          onProviderActivity();
+          // The SDK retains the previous SSE ID across comment-only heartbeat
+          // frames and exposes them as an empty event. They carry no business
+          // data and must not advance the durable provider cursor.
+          if (!part.event && part.data === null) continue;
+          // DeerFlow terminates its Redis-backed stream with an un-ID'd end/null
+          // sentinel. The SDK carries the previous SSE ID onto that frame, so it
+          // must not enter the durable business-event inbox or advance the cursor.
+          if (part.event === "end") {
+            if (part.data !== null) throw new Error("DEERFLOW_STREAM_END_INVALID");
+            // The sentinel closes the current retained stream segment, but it
+            // does not prove that the provider Run is terminal. The status
+            // probe below decides whether to finalize or rejoin from the
+            // durable cursor.
+            break;
+          }
+          partEffects = [];
+          const metadataRunId = externalRunIdFromEvent(part.event, part.data);
+          if (metadataRunId) registerExternalRun(metadataRunId);
+          if (!externalRunId || !externalRunPersistence) {
+            throw new Error("RUNTIME_EXTERNAL_RUN_ID_MISSING");
+          }
+          await externalRunPersistence;
+          if (signal?.aborted) throw abortError(signal);
+          const externalPart = part.id
+            ? {
+                externalRunId,
+                externalEventId: part.id,
+                event: part.event,
+                payload: jsonValueSchema.parse(part.data),
+              }
+            : null;
+          if (part.id) lastExternalEventId = part.id;
+          if (externalPart && await observer.isExternalEventProcessed(externalPart)) {
+            partEffects = null;
+            continue;
+          }
+
+          const node = extractNode(part.data);
+          if (node && collapsePrdActivity && !requestActivityStarted) {
+            // Raw graph nodes remain in the persisted provider event above. PRD
+            // activity is request-scoped so middleware names never reach the UI.
+            await emitEvent(requestActivityEvent(execution, "running"));
+            requestActivityStarted = true;
+          } else if (node && !collapsePrdActivity && node !== activeNode) {
+            if (activeNode) {
+              await emitEvent(activityEvent(activeNode, "succeeded"));
             }
-          : null;
-        if (externalPart && await observer.isExternalEventProcessed(externalPart)) {
+            activeNode = node;
+            await emitEvent(activityEvent(node, "running"));
+          }
+
+          if (part.event === "error") {
+            assertNoProviderContentFilter(finalState);
+            throw new Error("DEERFLOW_RUN_ERROR");
+          }
+          if (part.event === "values") {
+            finalState = part.data;
+            inputRequired = extractRuntimeInputRequired(part.data) ?? inputRequired;
+            await processArtifactState(part.data);
+          }
+          const incoming = extractAssistantTextFrame(part.event, part.data);
+          if (incoming) {
+            const delta = assistantTextDelta(assistantText, incoming.text, incoming.kind);
+            assistantText += delta;
+            const visibleDelta = capabilityOutput.push(delta);
+            if (visibleDelta) {
+              if (prototypeRequested && resultToolCallId && visibleDelta.trim()) {
+                await emitStage(
+                  "summarizing",
+                  runtimeToolSourceId(execution.runtimeAttemptId, "assistant-summary", resultToolCallId),
+                );
+              }
+              await emitEvent({ type: "text.delta", delta: visibleDelta });
+            }
+          }
+          const effects = partEffects;
           partEffects = null;
-          continue;
+          if (!part.id) {
+            if (effects.length > 0) throw new Error("RUNTIME_EXTERNAL_EVENT_ID_MISSING");
+            assertNoProviderContentFilter(finalState);
+            continue;
+          }
+          await observer.onExternalEvent(externalPart!, effects);
+          visibleAssistantText += visibleTextDeltaFromEffects(effects);
+          // Persist the provider evidence before stopping. A later transport
+          // error or idle timeout must not replace an explicit refusal.
+          assertNoProviderContentFilter(finalState);
+          // A trusted result or input-required interrupt is the terminal
+          // Workbench state. Some DeerFlow deployments keep the SSE response
+          // open after the provider Run has already completed, so close the
+          // reader now and continue finalization without waiting for EOF.
+          if (resultToolCallId !== null || inputRequired !== null) scheduleTerminalResultStreamAbort();
         }
 
-        const node = extractNode(part.data);
-        if (node && collapsePrdActivity && !requestActivityStarted) {
-          // Raw graph nodes remain in the persisted provider event above. PRD
-          // activity is request-scoped so middleware names never reach the UI.
-          await emitEvent(requestActivityEvent(execution, "running"));
-          requestActivityStarted = true;
-        } else if (node && !collapsePrdActivity && node !== activeNode) {
-          if (activeNode) {
-            await emitEvent(activityEvent(activeNode, "succeeded"));
-          }
-          activeNode = node;
-          await emitEvent(activityEvent(node, "running"));
-        }
+        if (signal.aborted) throw abortError(signal);
+        if (terminalProviderStatus) break;
+        if (!externalRunId) throw new Error("RUNTIME_EXTERNAL_RUN_ID_MISSING");
+        if (resultToolCallId || inputRequired) break;
 
-        if (part.event === "error") {
-          throw new Error(`DEERFLOW_RUN_ERROR:${boundedDiagnostic(part.data)}`);
+        // A few DeerFlow deployments close an otherwise healthy SSE response
+        // at an infrastructure boundary without sending the explicit end
+        // sentinel. Treat normal EOF and exhausted SDK transport retries as a
+        // reconnect point while the provider Run is still active; otherwise the
+        // last checkpoint would be mistaken for the terminal result.
+        let providerStatus: Run["status"] | null = lastProviderStatus;
+        try {
+          const providerRun = await client.runs.get(
+            execution.externalThreadId,
+            externalRunId,
+            { signal },
+          );
+          providerStatus = providerRun.status;
+          lastProviderStatus = providerStatus;
+          onProviderActivity();
+        } catch {
+          if (streamReadFailed) throw streamReadFailure;
+          // Preserve the historical EOF behavior when a status probe is not
+          // available (for example, an older provider test double).
+          break;
         }
-        if (part.event === "values") {
-          finalState = part.data;
-          inputRequired = extractRuntimeInputRequired(part.data) ?? inputRequired;
-          await processArtifactState(part.data);
+        if (providerStatus && TERMINAL_EXTERNAL_RUN_STATUSES.has(providerStatus)) {
+          terminalProviderStatus = providerStatus;
+          haltProviderHeartbeat();
+          break;
         }
-        const incoming = extractAssistantTextFrame(part.event, part.data);
-        if (incoming) {
-          const delta = assistantTextDelta(assistantText, incoming.text, incoming.kind);
-          assistantText += delta;
-          const visibleDelta = capabilityOutput.push(delta);
-          if (visibleDelta) {
-            if (prototypeRequested && resultToolCallId && visibleDelta.trim()) {
-              await emitStage(
-                "summarizing",
-                runtimeToolSourceId(execution.runtimeAttemptId, "assistant-summary", resultToolCallId),
-              );
-            }
-            await emitEvent({ type: "text.delta", delta: visibleDelta });
-          }
-        }
-        const effects = partEffects;
-        partEffects = null;
-        if (!part.id) {
-          if (effects.length > 0) throw new Error("RUNTIME_EXTERNAL_EVENT_ID_MISSING");
-          continue;
-        }
-        await observer.onExternalEvent(externalPart!, effects);
-        visibleAssistantText += visibleTextDeltaFromEffects(effects);
+        await new Promise<void>((resolve) => setTimeout(resolve, 250));
+        if (signal.aborted) throw abortError(signal);
+        stream = joinExternalStream(lastExternalEventId ?? undefined);
       }
     } catch (error) {
+      streamBodyFailed = true;
       let persistenceError: unknown = null;
       if (externalRunPersistence) {
         try {
@@ -862,14 +1082,76 @@ export class DeerFlowRuntimeAdapter implements RuntimePort {
       }
       if (persistenceError) throw persistenceError;
       throw error;
+    } finally {
+      if (terminalResultStreamTimer) clearTimeout(terminalResultStreamTimer);
+      terminalResultStreamTimer = null;
+      const heartbeatCleanup = stopProviderHeartbeat();
+      if (!streamAbortController.signal.aborted) streamAbortController.abort();
+      const [heartbeatResult, streamResult] = await Promise.allSettled([
+        heartbeatCleanup,
+        stream.return(undefined),
+      ]);
+      if (!streamBodyFailed && heartbeatResult.status === "rejected") {
+        throw heartbeatResult.reason;
+      }
+      if (
+        !streamBodyFailed
+        && streamResult.status === "rejected"
+        && !(streamSignal.aborted && isNamedAbortError(streamResult.reason))
+      ) {
+        throw streamResult.reason;
+      }
     }
 
+    if (terminalProviderStatus === "error" || terminalProviderStatus === "timeout") {
+      assertNoProviderContentFilter(finalState);
+      if (terminalProviderStatus === "error") {
+        try {
+          const terminalState = await client.threads.getState(
+            execution.externalThreadId,
+            undefined,
+            { signal },
+          );
+          assertNoProviderContentFilter(terminalState);
+          if (containsProviderFallbackMessage(terminalState)) {
+            throw new Error("RUNTIME_PROVIDER_TEMPORARILY_UNAVAILABLE");
+          }
+        } catch (error) {
+          if (error instanceof RuntimeProviderContentFilterError
+            || (error instanceof Error && error.message === "RUNTIME_PROVIDER_TEMPORARILY_UNAVAILABLE")) throw error;
+          // A missing checkpoint must not hide the authoritative terminal error.
+        }
+      }
+      throw new Error("DEERFLOW_RUN_ERROR");
+    }
     if (!externalRunId || !externalRunPersistence) throw new Error("RUNTIME_EXTERNAL_RUN_ID_MISSING");
     await externalRunPersistence;
-    if (finalState === undefined) {
-      finalState = await client.threads.getState(execution.externalThreadId, undefined, { signal });
+    if (finalState === undefined || terminalProviderStatus !== null) {
+      const settleDeadline = performance.now() + TERMINAL_RESULT_STATE_SETTLE_MS;
+      while (true) {
+        finalState = await client.threads.getState(execution.externalThreadId, undefined, { signal });
+        assertNoProviderContentFilter(finalState);
+        if (
+          terminalProviderStatus !== "success"
+          || inputRequired !== null
+          || extractRuntimeInputRequired(finalState) !== null
+        ) break;
+        try {
+          resolveRuntimeResult(finalState, execution.request.requestedArtifactKinds, execution);
+          break;
+        } catch (error) {
+          if (!isRuntimeResultSubmissionMissing(error)) throw error;
+        }
+        const remainingMs = settleDeadline - performance.now();
+        if (remainingMs <= 0) break;
+        await delayWithAbort(Math.min(TERMINAL_RESULT_STATE_POLL_MS, remainingMs), signal);
+      }
     }
 
+    // Inspect the persisted terminal state before accepting a result or an
+    // interrupt. Some providers finish the graph normally after filtering an
+    // assistant response; missing output must retain that explicit cause.
+    assertNoProviderContentFilter(finalState);
     inputRequired ??= extractRuntimeInputRequired(finalState);
     partEffects = [];
     await processArtifactState(finalState);
@@ -939,23 +1221,68 @@ export class DeerFlowRuntimeAdapter implements RuntimePort {
     onExternalRunRecovered: (externalRunId: string) => Promise<void>,
     signal?: AbortSignal,
   ): Promise<RuntimeCancellationResult> {
-    const client = this.client(cancellation.principalId);
-    const run = cancellation.externalRunId
-      ? await client.runs.get(cancellation.externalThreadId, cancellation.externalRunId, { signal })
-      : await this.findExternalRun(
-          client,
+    const client = this.client(cancellation.runtimeTransportOwnerId);
+    let run: Run | null;
+    if (cancellation.externalRunId) {
+      try {
+        run = await client.runs.get(
           cancellation.externalThreadId,
-          cancellation.runtimeAttemptId,
-          undefined,
-          signal,
+          cancellation.externalRunId,
+          { signal },
         );
-    if (!run) return { externalRunId: null, externalStatus: null, found: false };
+      } catch (error) {
+        if (!isSdkHttpStatus(error, 404)) throw error;
+        return {
+          disposition: "external_run_absent",
+          externalRunId: cancellation.externalRunId,
+          externalStatus: null,
+        };
+      }
+    } else {
+      run = await this.findExternalRun(
+        client,
+        cancellation.externalThreadId,
+        cancellation.runtimeAttemptId,
+        undefined,
+        signal,
+      );
+    }
+    if (!run) {
+      return {
+        disposition: "not_found",
+        externalRunId: null,
+        externalStatus: null,
+      };
+    }
     if (!cancellation.externalRunId) await onExternalRunRecovered(run.run_id);
     if (!TERMINAL_EXTERNAL_RUN_STATUSES.has(run.status)) {
-      await client.runs.cancel(cancellation.externalThreadId, run.run_id, true, "interrupt", { signal });
-      return { externalRunId: run.run_id, externalStatus: "interrupted", found: true };
+      try {
+        await client.runs.cancel(
+          cancellation.externalThreadId,
+          run.run_id,
+          true,
+          "interrupt",
+          { signal },
+        );
+      } catch (error) {
+        if (!isSdkHttpStatus(error, 404)) throw error;
+        return {
+          disposition: "external_run_absent",
+          externalRunId: cancellation.externalRunId ?? run.run_id,
+          externalStatus: null,
+        };
+      }
+      return {
+        disposition: "cancelled",
+        externalRunId: run.run_id,
+        externalStatus: "interrupted",
+      };
     }
-    return { externalRunId: run.run_id, externalStatus: run.status, found: true };
+    return {
+      disposition: "already_terminal",
+      externalRunId: run.run_id,
+      externalStatus: run.status,
+    };
   }
 
   private buildRunRequest(
@@ -1143,10 +1470,13 @@ export class DeerFlowRuntimeAdapter implements RuntimePort {
       return mode as StreamMode;
     });
     if (modes.length === 0) throw new Error("DEERFLOW_STREAM_MODE_MISSING");
-    // A PRD is delivered through durable stage/draft/result tools found in
-    // values snapshots. Persisting every token-sized messages event creates
-    // enough backpressure to outrun DeerFlow's retained stream buffer.
-    if (requestedArtifactKinds.length === 1 && requestedArtifactKinds[0] === "prd") {
+    // PRD and Prototype artifacts are delivered through durable stage/draft/result
+    // tools found in values snapshots. Persisting every token-sized messages event
+    // creates enough backpressure to outrun DeerFlow's retained stream buffer.
+    if (
+      requestedArtifactKinds.length === 1
+      && (requestedArtifactKinds[0] === "prd" || requestedArtifactKinds[0] === "prototype")
+    ) {
       return "values";
     }
     return modes.length === 1 ? modes[0]! : modes;
@@ -1189,7 +1519,7 @@ export class DeerFlowRuntimeAdapter implements RuntimePort {
       if (signal?.aborted) throw signal.reason ?? new Error("RUNTIME_ABORTED");
       const original = await this.uploadContent(
         execution.externalThreadId,
-        execution.principalId,
+        execution.runtimeTransportOwnerId,
         source.originalName,
         source.original,
         signal,
@@ -1201,7 +1531,7 @@ export class DeerFlowRuntimeAdapter implements RuntimePort {
           ? original
           : await this.uploadContent(
               execution.externalThreadId,
-              execution.principalId,
+              execution.runtimeTransportOwnerId,
               extractionFileName(source),
               content,
               signal,
@@ -1240,7 +1570,7 @@ export class DeerFlowRuntimeAdapter implements RuntimePort {
       if (!handle) {
         handle = await this.uploadContent(
           execution.externalThreadId,
-          execution.principalId,
+          execution.runtimeTransportOwnerId,
           designAssetFileName(asset, position),
           asset.content,
           signal,
@@ -1277,7 +1607,7 @@ export class DeerFlowRuntimeAdapter implements RuntimePort {
       }
       const handle = await this.uploadContent(
         execution.externalThreadId,
-        execution.principalId,
+        execution.runtimeTransportOwnerId,
         fileName,
         locator,
         signal,
@@ -1316,7 +1646,7 @@ export class DeerFlowRuntimeAdapter implements RuntimePort {
 
   private async uploadContent(
     externalThreadId: string,
-    principalId: string,
+    runtimeTransportOwnerId: string,
     fileName: string,
     locator: RuntimeContentLocator,
     signal?: AbortSignal,
@@ -1343,7 +1673,7 @@ export class DeerFlowRuntimeAdapter implements RuntimePort {
         {
           method: "POST",
           headers: {
-            ...this.identityHeaders(principalId),
+            ...this.identityHeaders(runtimeTransportOwnerId),
             "content-type": multipart.contentType,
             "content-length": String(multipart.contentLength),
             accept: "application/json",
@@ -1358,7 +1688,8 @@ export class DeerFlowRuntimeAdapter implements RuntimePort {
       throw error;
     }
     if (!response.ok) {
-      throw new Error(`DEERFLOW_UPLOAD_FAILED:${response.status}:${await safeResponseText(response)}`);
+      await response.body?.cancel().catch(() => undefined);
+      throw new Error("DEERFLOW_UPLOAD_FAILED");
     }
     const payload = gatewayUploadResponseSchema.parse(
       JSON.parse(await boundedResponseText(response, MAX_GATEWAY_RESPONSE_SIZE)),
@@ -1381,19 +1712,19 @@ export class DeerFlowRuntimeAdapter implements RuntimePort {
     return this.fetchFromBase(this.config.deerFlowGatewayUrl, path, init, signal);
   }
 
-  private client(principalId: string, providerIdempotencyKey?: string) {
+  private client(runtimeTransportOwnerId: string, providerIdempotencyKey?: string) {
     return new Client({
       apiUrl: this.config.deerFlowLangGraphUrl,
       apiKey: null,
       timeoutMs: this.config.deerFlowTimeoutMs,
       callerOptions: {
         maxRetries: 0,
-        fetch: (input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => (
-          tracedFetch(input, init)
+        fetch: async (input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => (
+          withLangGraphStreamReconnectLocation(await tracedFetch(input, init))
         ),
       },
       defaultHeaders: {
-        ...this.jsonHeaders(principalId),
+        ...this.jsonHeaders(runtimeTransportOwnerId),
         ...(providerIdempotencyKey ? { "Idempotency-Key": providerIdempotencyKey } : {}),
       },
       streamProtocol: "legacy",
@@ -1422,25 +1753,48 @@ export class DeerFlowRuntimeAdapter implements RuntimePort {
     }
   }
 
-  private jsonHeaders(principalId?: string) {
+  private jsonHeaders(runtimeTransportOwnerId?: string) {
     const headers: Record<string, string> = {
       "content-type": "application/json",
       accept: "application/json, text/event-stream",
       Cookie: `csrf_token=${this.csrfToken}`,
       "X-CSRF-Token": this.csrfToken,
     };
-    Object.assign(headers, this.identityHeaders(principalId));
+    Object.assign(headers, this.identityHeaders(runtimeTransportOwnerId));
     return headers;
   }
 
-  private identityHeaders(principalId?: string) {
+  private identityHeaders(runtimeTransportOwnerId?: string) {
     const headers: Record<string, string> = {};
-    if (principalId) headers["X-DeerFlow-Owner-User-Id"] = principalId;
+    if (runtimeTransportOwnerId) {
+      headers["X-DeerFlow-Owner-User-Id"] = runtimeTransportOwnerId;
+    }
     if (this.config.deerFlowInternalToken) {
       headers["X-DeerFlow-Internal-Token"] = this.config.deerFlowInternalToken;
     }
     return headers;
   }
+}
+
+function withLangGraphStreamReconnectLocation(response: Response): Response {
+  if (
+    response.headers.has("location")
+    || !response.headers.get("content-type")?.toLowerCase().startsWith("text/event-stream")
+  ) return response;
+
+  const contentLocation = response.headers.get("content-location");
+  if (
+    !contentLocation
+    || !/^\/(?:threads\/[^/?#]+\/)?runs\/[^/?#]+\/?$/u.test(contentLocation)
+  ) return response;
+
+  const headers = new Headers(response.headers);
+  headers.set("location", `${contentLocation.replace(/\/$/u, "")}/stream`);
+  return new Response(response.body, {
+    headers,
+    status: response.status,
+    statusText: response.statusText,
+  });
 }
 
 function assertNoKnowledgeGrant<T>(value: T): T {
@@ -1555,6 +1909,39 @@ function abortError(signal?: AbortSignal) {
   return signal?.reason instanceof Error ? signal.reason : new Error("RUNTIME_ABORTED");
 }
 
+function isRuntimeResultSubmissionMissing(error: unknown) {
+  return error instanceof Error && error.message === "RUNTIME_RESULT_SUBMISSION_MISSING";
+}
+
+function delayWithAbort(delayMs: number, signal: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    let timer: NodeJS.Timeout | null = null;
+    const cleanup = () => {
+      if (timer) clearTimeout(timer);
+      signal.removeEventListener("abort", abort);
+    };
+    const abort = () => {
+      cleanup();
+      reject(abortError(signal));
+    };
+    if (signal.aborted) {
+      abort();
+      return;
+    }
+    signal.addEventListener("abort", abort, { once: true });
+    timer = setTimeout(() => {
+      cleanup();
+      resolve();
+    }, delayMs);
+  });
+}
+
+function isNamedAbortError(error: unknown) {
+  if (!error || typeof error !== "object") return false;
+  const candidate = error as { name?: unknown; message?: unknown };
+  return candidate.name === "AbortError" || candidate.message === "AbortError";
+}
+
 function extractionFileName(source: RuntimeSource) {
   const content = source.extraction?.content;
   if (!content) throw new Error("RUNTIME_SOURCE_EXTRACTION_MISSING");
@@ -1644,6 +2031,7 @@ export function resolveRuntimeResult(
   requestedKinds: string[],
   execution: Pick<RuntimeExecution, "runId" | "runtimeAttemptId">,
 ): RuntimeResult {
+  assertNoProviderContentFilter(finalState);
   const submissions = validatedRuntimeSubmissions(finalState, execution);
   if (submissions.length === 0) throw new Error("RUNTIME_RESULT_SUBMISSION_MISSING");
   if (submissions.length !== 1) throw new Error("RUNTIME_RESULT_SUBMISSION_MULTIPLE");
@@ -1660,6 +2048,29 @@ export function resolveRuntimeResult(
     throw new Error(`RUNTIME_ARTIFACTS_UNREQUESTED:${unrequested.join(",")}`);
   }
   return result;
+}
+
+function assertNoProviderContentFilter(finalState: unknown) {
+  const messages = runtimeMessages(finalState);
+  const currentTurnStart = currentTurnStartIndex(messages);
+  if (currentTurnStart < 0) return;
+  for (const value of messages.slice(currentTurnStart + 1)) {
+    const message = asRecord(value);
+    if (!message) continue;
+    const role = messageField(message, "role")?.toLowerCase();
+    const type = messageField(message, "type")?.toLowerCase();
+    const constructor = messageConstructor(message);
+    if (
+      !["assistant", "ai"].includes(role ?? "")
+      && !["ai", "assistant", "aimessage", "aimessagechunk"].includes(type ?? "")
+      && constructor !== "aimessage"
+      && constructor !== "aimessagechunk"
+    ) continue;
+    const metadata = asRecord(messageValue(message, "response_metadata"));
+    if (metadata?.finish_reason === "content_filter") {
+      throw new RuntimeProviderContentFilterError();
+    }
+  }
 }
 
 function validatedRuntimeSubmissions(
@@ -1827,15 +2238,22 @@ function assertRuntimeResultCheckpoints(
 ) {
   for (const [artifactIndex, checkpoint] of latestCheckpoints) {
     const finalDraft = result.artifacts[artifactIndex];
-    if (!finalDraft || canonicalJson(finalDraft) !== canonicalJson(checkpoint)) {
+    if (!finalDraft) {
+      throw new Error("RUNTIME_ARTIFACT_DRAFT_FINAL_MISMATCH");
+    }
+    // Prototype checkpoints are incremental previews. The validated terminal
+    // result may legitimately refine one after the last streamed checkpoint;
+    // its scope and checksum validation make the final result authoritative.
+    if (finalDraft.kind === "prototype") continue;
+    if (canonicalJson(finalDraft) !== canonicalJson(checkpoint)) {
       throw new Error("RUNTIME_ARTIFACT_DRAFT_FINAL_MISMATCH");
     }
   }
   for (const [artifactIndex, finalDraft] of result.artifacts.entries()) {
-    if (
-      (finalDraft.kind === "prd" || finalDraft.kind === "prototype")
-      && !latestCheckpoints.has(artifactIndex)
-    ) {
+    // A validated Prototype result is a usable initial draft when the provider
+    // did not emit an optional streaming checkpoint. Existing checkpoints stay
+    // binding above, and Prototype patches still require their own checkpoint.
+    if (finalDraft.kind === "prd" && !latestCheckpoints.has(artifactIndex)) {
       throw new Error("RUNTIME_ARTIFACT_DRAFT_CHECKPOINT_MISSING");
     }
   }
@@ -1846,6 +2264,7 @@ function assertPrdGenerationStagesComplete(
   observed: ReadonlyArray<Extract<RuntimeProgressEvent, { type: "generation.stage" }>["stage"]>,
 ) {
   if (draft.kind !== "prd") return;
+  observed = observed.filter((stage) => (PRD_GENERATION_STAGE_SEQUENCE as readonly string[]).includes(stage));
   if (
     observed.length !== PRD_GENERATION_STAGE_SEQUENCE.length
     || observed.some((stage, index) => stage !== PRD_GENERATION_STAGE_SEQUENCE[index])
@@ -2183,7 +2602,8 @@ export function assertCanvasToolCausality(
 }
 
 function messageToolCalls(message: Record<string, unknown>) {
-  const rawCalls = messageValue(message, "tool_calls");
+  const additionalKwargs = asRecord(messageValue(message, "additional_kwargs"));
+  const rawCalls = messageValue(message, "tool_calls") ?? additionalKwargs?.tool_calls;
   if (!Array.isArray(rawCalls)) return [];
   return rawCalls.flatMap((rawCall) => {
     const call = asRecord(rawCall);
@@ -2420,8 +2840,9 @@ function runtimeMessages(finalState: unknown) {
 function isAssistant(message: Record<string, unknown>) {
   const role = messageField(message, "role")?.toLowerCase();
   const type = messageField(message, "type")?.toLowerCase();
-  if (asRecord(message.additional_kwargs)?.hide_from_ui === true) return false;
-  return role === "assistant" || role === "ai" || ["ai", "assistant", "aimessage", "aimessagechunk"].includes(type ?? "");
+  if (asRecord(messageValue(message, "additional_kwargs"))?.hide_from_ui === true) return false;
+  return role === "assistant" || role === "ai" || ["ai", "assistant", "aimessage", "aimessagechunk"].includes(type ?? "")
+    || ["aimessage", "aimessagechunk"].includes(messageConstructor(message) ?? "");
 }
 
 function isHuman(message: Record<string, unknown>) {
@@ -2504,6 +2925,30 @@ function asRecord(value: unknown): Record<string, unknown> | null {
     : null;
 }
 
+function containsProviderFallbackMessage(value: unknown) {
+  const messages = runtimeMessages(value);
+  const turnStart = currentTurnStartIndex(messages);
+  if (turnStart < 0) return false;
+  return messages.slice(turnStart + 1).some((message) => {
+    const candidate = asRecord(message);
+    if (!candidate) return false;
+    // Fallbacks may be hidden from the UI, but must still be current-turn AI metadata.
+    const type = messageField(candidate, "type")?.toLowerCase();
+    const role = messageField(candidate, "role")?.toLowerCase();
+    const assistant = role === "assistant" || role === "ai"
+      || ["ai", "assistant", "aimessage", "aimessagechunk"].includes(type ?? "")
+      || ["aimessage", "aimessagechunk"].includes(messageConstructor(candidate) ?? "");
+    return assistant && asRecord(messageValue(candidate, "additional_kwargs"))?.deerflow_error_fallback === true;
+  });
+}
+
+function isSdkHttpStatus(error: unknown, status: number) {
+  return error instanceof Error
+    && "status" in error
+    && typeof error.status === "number"
+    && error.status === status;
+}
+
 function stringValue(value: unknown) {
   return typeof value === "string" && value.trim() ? value : undefined;
 }
@@ -2516,16 +2961,4 @@ function externalRunIdFromEvent(event: string, data: unknown) {
 
 export function runtimeThreadUuid(workbenchThreadId: string) {
   return uuidV5(`workbench:deerflow-thread:v1:${workbenchThreadId}`, uuidV5.URL);
-}
-
-function boundedDiagnostic(value: unknown) {
-  try {
-    return canonicalJson(value).slice(0, 800);
-  } catch {
-    return String(value).slice(0, 800);
-  }
-}
-
-async function safeResponseText(response: Response) {
-  return (await boundedResponseText(response, 8_192).catch(() => "")).trim().slice(0, 800);
 }

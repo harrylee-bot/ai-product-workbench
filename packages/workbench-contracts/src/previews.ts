@@ -26,7 +26,23 @@ export const createProjectPreviewRequestSchema = z.object({
   boardId: opaqueIdSchema,
   boardRevision: revisionSchema,
   selection: exportSelectionSchema,
-}).strict();
+  initialScreenId: opaqueIdSchema.nullable().optional(),
+}).strict().superRefine((preview, context) => {
+  if (preview.selection.kind === "artifact" && preview.selection.screenId !== undefined) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "Project Preview selection cannot crop a Prototype to one screen",
+      path: ["selection", "screenId"],
+    });
+  }
+  if (preview.initialScreenId != null && preview.selection.kind !== "artifact") {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "initialScreenId requires an Artifact selection",
+      path: ["initialScreenId"],
+    });
+  }
+});
 
 export const projectPreviewSchema = z.object({
   id: opaqueIdSchema,
@@ -34,6 +50,8 @@ export const projectPreviewSchema = z.object({
   boardId: opaqueIdSchema,
   boardRevision: revisionSchema,
   selection: exportSelectionSchema,
+  // Older API deployments return the opening screen separately from selection.
+  initialScreenId: opaqueIdSchema.nullable().optional(),
   status: previewStatusSchema,
   revision: revisionSchema,
   failure: exportFailureSchema.nullable(),

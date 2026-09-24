@@ -5,6 +5,8 @@ import { AccessService } from "../src/modules/access/access.service.js";
 import { RunEventStore } from "../src/modules/runs/run-event.store.js";
 import { RunsService } from "../src/modules/runs/runs.service.js";
 
+import { seedReadyKnowledge } from "../../../scripts/test-support/knowledge-fixture.mjs";
+
 const databaseUrl = process.env.WORKBENCH_TEST_DATABASE_URL;
 const describeWithPostgres = databaseUrl ? describe : describe.skip;
 
@@ -161,9 +163,11 @@ async function seedFixture(db: PrismaClient) {
         data: { id, projectId, createdById: principalId, title: `Cancel Run ${position + 1}` },
       });
     }
+    const knowledgeReleaseId = await seedReadyKnowledge(tx);
     for (const [position, id] of [runId, otherRunId].entries()) {
       await tx.run.create({
         data: {
+          knowledgeReleaseId,
           id,
           projectId,
           threadId: position === 0 ? threadId : otherThreadId,

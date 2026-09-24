@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { act, cleanup, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { toast as sonnerToast } from "sonner";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
@@ -73,6 +73,68 @@ describe("auth-owned presentation components", () => {
       "focus:bg-muted",
     );
   });
+
+  it("submits through the client handler instead of a Next Server Action", async () => {
+    const action = vi.fn();
+    const { container } = render(
+      <AuthForm action={action} defaultAccount="owner">
+        <button type="submit">登录</button>
+      </AuthForm>,
+    );
+    const form = container.querySelector("form")!;
+
+    await act(async () => {
+      fireEvent.submit(form);
+    });
+
+    expect(action).toHaveBeenCalledTimes(1);
+    expect(action.mock.calls[0]?.[0]).toBeInstanceOf(FormData);
+  });
+
+  it.each(["resolve", "reject"] as const)(
+    "blocks duplicate submissions while awaiting the request and recovers after %s",
+    async (outcome) => {
+      let resolveRequest!: () => void;
+      let rejectRequest!: (error: Error) => void;
+      const request = new Promise<void>((resolve, reject) => {
+        resolveRequest = resolve;
+        rejectRequest = reject;
+      });
+      const action = vi.fn().mockReturnValueOnce(request).mockResolvedValue(undefined);
+      const { container } = render(
+        <AuthForm action={action} defaultAccount="owner">
+          <AuthSubmitButton isSuccessful={false}>登录</AuthSubmitButton>
+        </AuthForm>,
+      );
+      const form = container.querySelector("form")!;
+      const button = screen.getByRole("button", { name: /登录/ }) as HTMLButtonElement;
+
+      act(() => {
+        fireEvent.submit(form);
+        fireEvent.submit(form);
+      });
+
+      expect(action).toHaveBeenCalledTimes(1);
+      expect(button.disabled).toBe(true);
+      expect(button.getAttribute("aria-disabled")).toBe("true");
+      expect(form.getAttribute("aria-busy")).toBe("true");
+      expect(screen.getByText("加载中")).toBeTruthy();
+
+      await act(async () => {
+        if (outcome === "resolve") resolveRequest();
+        else rejectRequest(new Error("expected request failure"));
+      });
+
+      expect(button.disabled).toBe(false);
+      expect(form.getAttribute("aria-busy")).toBe("false");
+      expect(screen.getByText("提交表单")).toBeTruthy();
+
+      await act(async () => {
+        fireEvent.submit(form);
+      });
+      expect(action).toHaveBeenCalledTimes(2);
+    },
+  );
 
   it("preserves the submit button success state and loader animation", () => {
     const { container, rerender } = render(

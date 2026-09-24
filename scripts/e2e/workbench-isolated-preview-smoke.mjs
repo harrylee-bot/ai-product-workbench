@@ -260,6 +260,8 @@ await context.route("**/api/v1/**", async (route) => {
           reasonCode: "EXPORT_FIGMA_UNAVAILABLE",
         },
         mcp: available,
+        docx: available,
+        pdf: available,
       },
       packaging: { single_file: available, zip: available },
       external: {
@@ -290,8 +292,11 @@ await context.route("**/api/v1/**", async (route) => {
     const requestBody = request.postDataJSON();
     assert(requestBody.boardId === board.id, "ProjectPreview must pin the persisted Board identity");
     assert(requestBody.boardRevision === board.revision, "ProjectPreview must pin the persisted Board revision");
+    assert(!("screenId" in requestBody.selection), "ProjectPreview must retain the complete Prototype");
+    const pin = artifactPins.find((candidate) => candidate.artifactId === requestBody.selection.artifactId);
+    assert(pin && requestBody.initialScreenId === pin.screenId, "ProjectPreview must pin its initial screen separately");
     const id = `preview-${++projectPreviewCount}`;
-    const preview = projectPreview(id, requestBody.selection);
+    const preview = projectPreview(id, requestBody.selection, requestBody.initialScreenId);
     projectPreviews.set(id, preview);
     return json(route, preview, { location: `/api/v1/previews/${id}` }, 202);
   }
@@ -536,13 +541,14 @@ function prototypeDocument(position) {
   };
 }
 
-function projectPreview(id, selection) {
+function projectPreview(id, selection, initialScreenId) {
   return {
     id,
     projectId: project.id,
     boardId: board.id,
     boardRevision: board.revision,
     selection,
+    initialScreenId,
     status: "succeeded",
     revision: 0,
     failure: null,

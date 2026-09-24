@@ -1,6 +1,6 @@
 # 产品工作台第三方依赖台账
 
-更新日期：2026-07-28
+更新日期：2026-09-23
 
 本台账记录产品工作台生产主链的开源内核及已批准候选。状态必须按证据使用，不能把“已选名字”写成“已经验证”：
 
@@ -13,7 +13,7 @@
 
 表内 npm 版本是 lockfile 当前解析版本。应用依赖由 `npm ci`、lockfile integrity 和受审依赖更新 PR 固定；高风险 PoC、私有协议转换器和协议 SDK 在 manifest 中也必须使用精确版本。独立服务必须固定镜像 digest 和上游 commit，只有 major/minor 名称不能进入 `adopted`。
 
-上游项目 URL 与许可证据统一列在 `docs/workbench-open-source-reuse-strategy.md` 的“官方项目索引”，npm tarball integrity 以根 `package-lock.json` 为准；独立服务 digest 必须回填到对应行后才能升为 `adopted`。本轮 lockfile 与许可证健康复核日为 2026-07-28，下次季度复核不晚于 2026-10-28。测试数量、模块数量和一次性 PASS 快照不在本台账固化；当前结果只以 CI 和实际门禁命令输出为准。
+上游项目 URL 与许可证据统一列在 `docs/workbench-open-source-reuse-strategy.md` 的“官方项目索引”，npm tarball integrity 以根 `package-lock.json` 为准；独立服务 digest 必须回填到对应行后才能升为 `adopted`。测试数量、模块数量和一次性 PASS 快照不在本台账固化；当前结果只以 CI 和实际门禁命令输出为准。
 
 通用规则：浏览器和 Node 高危漏洞在 7 日内完成升级或隔离决定，直接处理不可信内容、身份、上传、解析、预览和导出的高危漏洞在 72 小时内完成决定。季度复核维护活跃度、许可证和商业条款；Cloud/Pro/Enterprise 能力不得进入内部合同。
 

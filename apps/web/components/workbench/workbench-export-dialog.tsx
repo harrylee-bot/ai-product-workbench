@@ -14,6 +14,7 @@ import {
   CloudUploadIcon,
   Code2Icon,
   DownloadIcon,
+  FileTextIcon,
   Grid3X3Icon,
   RefreshCwIcon,
   StarsIcon,
@@ -31,6 +32,7 @@ import {
   type WorkbenchExportTarget,
 } from "@/lib/workbench/features";
 import { drawerTransition } from "./workbench-motion";
+import type { DocumentExportSelection } from "@/lib/workbench/features/document-export-selection";
 
 export function ExportDialog({
   activeExport,
@@ -40,6 +42,7 @@ export function ExportDialog({
   capabilities,
   capabilitiesError,
   capabilitiesPending,
+  documentExport,
   error,
   hasSelection,
   onCancelExport,
@@ -63,6 +66,7 @@ export function ExportDialog({
   capabilities: ExportCapabilities | null;
   capabilitiesError: unknown;
   capabilitiesPending: boolean;
+  documentExport?: DocumentExportSelection;
   error: unknown;
   hasSelection: boolean;
   onCancelExport: () => Promise<unknown>;
@@ -85,6 +89,8 @@ export function ExportDialog({
     label: WorkbenchExportTarget;
     meta: string;
   }> = [
+    { icon: FileTextIcon, label: "Download Word", meta: "下载 PRD 需求文档 .docx" },
+    { icon: FileTextIcon, label: "Download PDF", meta: "下载 PRD 需求文档 .pdf" },
     { icon: StarsIcon, label: "AI Studio", meta: "发布到 AI Studio" },
     { icon: Grid3X3Icon, label: "Figma", meta: "下载 Figma 导入包" },
     { icon: BotIcon, label: "MCP", meta: "下载 MCP 资源包" },
@@ -100,10 +106,18 @@ export function ExportDialog({
     if (!open) setSelectedTarget("Download .zip");
   }, [open]);
 
+  const documentSelectionReady = Boolean(documentExport?.selection);
+  useEffect(() => {
+    if (open && !hasSelection && documentSelectionReady) {
+      setSelectedTarget((current) => current === "Download .zip" ? "Download Word" : current);
+    }
+  }, [documentSelectionReady, hasSelection, open]);
+
   const restoredTarget = open
     && activeExport
     && activeExportSelection
-    && exportSelectionsEqual(activeExportSelection, selection)
+    && (exportSelectionsEqual(activeExportSelection, selection)
+      || (documentExport?.selection && exportSelectionsEqual(activeExportSelection, documentExport.selection)))
     ? activeExternalDelivery?.exportJobId === activeExport.id
       ? exportTargetForExternalDelivery(activeExternalDelivery.target)
       : exportTargetForFormat(activeExport.format, activeExport.packaging)
@@ -128,25 +142,47 @@ export function ExportDialog({
   }, [restoredFromExternalDelivery, restoredTarget]);
 
   const descriptor = exportTargetDescriptor(selectedTarget);
+  const isDocumentExport = descriptor.format === "docx" || descriptor.format === "pdf";
+  const effectiveSelection = isDocumentExport ? documentExport?.selection ?? selection : selection;
+  const targetAvailability = (target: WorkbenchExportTarget) => {
+    if (capabilitiesError) return { available: false, reason: "导出能力检查失败" };
+    const capability = exportTargetAvailability(capabilities, target);
+    if (!capability.available) return capability;
+    const format = exportTargetDescriptor(target).format;
+    if (format === "docx" || format === "pdf") {
+      return documentExport?.selection
+        ? { available: true, reason: null }
+        : { available: false, reason: documentExport?.reason ?? "请选择一个已完成的 PRD 需求文档" };
+    }
+    return hasSelection ? capability : { available: false, reason: "请先选择画布上的产物" };
+  };
+  const selectedAvailability = targetAvailability(selectedTarget);
+  const showOptions = hasSelection || Boolean(documentExport);
   const activeExportMatches = activeExport?.format === descriptor.format
     && activeExport.packaging === descriptor.packaging
-    && exportSelectionsEqual(activeExportSelection, selection);
+    && exportSelectionsEqual(activeExportSelection, effectiveSelection);
   const exportRunning = activeExportMatches
     && (activeExport.status === "queued" || activeExport.status === "running");
   const exportSucceeded = activeExportMatches && activeExport.status === "succeeded";
+  const downloadReady = exportSucceeded && descriptor.delivery === "download";
+  const downloadFailed = downloadReady && Boolean(error);
   const externalDeliveryMatches = descriptor.externalTarget !== null
     && activeExternalDelivery?.target === descriptor.externalTarget
     && activeExternalDelivery.exportJobId === activeExport?.id;
-  const selectionTitle = selection.kind === "artifact"
+  const selectionTitle = isDocumentExport && documentExport?.title
+    ? documentExport.title
+    : effectiveSelection.kind === "artifact"
     ? "当前产物版本"
-    : selection.kind === "board_nodes" ? "当前选择" : "当前项目画布";
-  const selectionMeta = selection.kind === "artifact"
+    : effectiveSelection.kind === "board_nodes" ? "当前选择" : "当前项目画布";
+  const selectionMeta = effectiveSelection.kind === "artifact"
     ? "已固定 1 个产物版本"
-    : selection.kind === "board_nodes"
-      ? `已固定 ${selection.nodeIds.length} 个画布节点`
+    : effectiveSelection.kind === "board_nodes"
+      ? `已固定 ${effectiveSelection.nodeIds.length} 个画布节点`
       : "按当前画布选择范围导出";
   const exportButtonLabel = busy
-    ? exportRunning ? `正在取消 ${selectedTarget}...` : "正在发布当前版本..."
+    ? exportRunning
+      ? `正在取消 ${selectedTarget}...`
+      : downloadReady ? "正在下载文件..." : "正在发布当前版本..."
     : externalDeliveryMatches && activeExternalDelivery?.status === "pending_confirmation"
       ? `确认发布至 ${selectedTarget}`
       : externalDeliveryMatches && activeExternalDelivery?.status === "cancelling"
@@ -164,7 +200,7 @@ export function ExportDialog({
                     ? "复制代码"
                     : descriptor.delivery === "external"
                       ? `准备发布至 ${selectedTarget}`
-                      : `下载 ${selectedTarget}`
+                      : downloadFailed ? "重试下载文件" : `下载 ${selectedTarget}`
                   : error || (activeExportMatches && activeExport.status === "failed")
                     ? `重试导出 ${selectedTarget}`
                     : descriptor.delivery === "external"
@@ -178,7 +214,7 @@ export function ExportDialog({
           animate={{ opacity: 1, scale: 1, x: 0 }}
           aria-label="导出"
           className="workbench-dialog-panel fixed bottom-[80px] right-[72px] top-[80px] z-50 flex w-[280px] max-w-[calc(100vw-88px)] origin-top-right flex-col overflow-hidden rounded-[24px] border border-white/[0.12] bg-[#1c1d1f] text-[#e8eaed] shadow-[0_20px_58px_-32px_rgba(0,0,0,0.72)] max-md:bottom-0 max-md:left-0 max-md:right-0 max-md:top-0 max-md:h-full max-md:max-h-none max-md:w-full max-md:max-w-none max-md:rounded-none"
-          data-export-state={hasSelection ? "selected" : "empty"}
+          data-export-state={showOptions ? "selected" : "empty"}
           data-workbench-global-panel
           data-workbench-export-panel
           exit={{ opacity: 0, scale: 0.994, x: 18 }}
@@ -196,7 +232,7 @@ export function ExportDialog({
               <XIcon className="size-[17px]" />
             </button>
           </div>
-          {hasSelection ? (
+          {showOptions ? (
             <>
               <div className="min-h-0 flex-1 overflow-y-auto px-[14px] pb-[12px] pt-[8px] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
                 <div className="mb-[14px] rounded-[12px] border border-white/[0.10] bg-[#222327] p-[10px]">
@@ -229,9 +265,7 @@ export function ExportDialog({
                   {exportTargets.map((target) => {
                     const Icon = target.icon;
                     const active = selectedTarget === target.label;
-                    const availability = capabilitiesError
-                      ? { available: false, reason: "导出能力检查失败" }
-                      : exportTargetAvailability(capabilities, target.label);
+                    const availability = targetAvailability(target.label);
                     return (
                       <button
                         aria-pressed={active}
@@ -256,7 +290,7 @@ export function ExportDialog({
                         </span>
                         <span className="min-w-0 flex-1">
                           <span className="block truncate text-[12px] font-semibold">{target.label}</span>
-                          <span className="mt-[1px] block truncate text-[10px] text-[#aeb3bb]">{availability.reason ?? target.meta}</span>
+                          <span className="mt-[1px] block truncate text-[10px] text-[#aeb3bb]" title={availability.reason ?? target.meta}>{availability.reason ?? target.meta}</span>
                         </span>
                         {active && <CheckCircle2Icon className="size-[14px] shrink-0 text-[#d8dce2]" />}
                       </button>
@@ -276,9 +310,16 @@ export function ExportDialog({
                 )}
               </div>
               <div className="border-t border-white/[0.12] p-[12px]">
+                {downloadFailed && !busy && (
+                  <p className="mb-[8px] text-[11px] leading-[16px] text-[#f2a7a7]" role="alert">
+                    文件下载失败，请重试。
+                  </p>
+                )}
                 <button
+                  aria-busy={busy}
                   className="h-[32px] w-full rounded-full bg-[#c9b3ff] text-[12px] font-semibold text-[#241832]"
-                  disabled={busy || (externalDeliveryMatches && (
+                  disabled={busy || ((!exportRunning && !exportSucceeded && !externalDeliveryMatches)
+                    && (!selectedAvailability.available || capabilitiesPending)) || (externalDeliveryMatches && (
                     activeExternalDelivery?.status === "succeeded"
                     || activeExternalDelivery?.status === "cancelling"
                   ))}
@@ -299,7 +340,8 @@ export function ExportDialog({
                     } else if (exportSucceeded) {
                       operation = onDownload();
                     } else {
-                      operation = onStartExport(selectedTarget, selection);
+                      if (!selectedAvailability.available || capabilitiesPending) return;
+                      operation = onStartExport(selectedTarget, effectiveSelection);
                     }
                     void operation.catch(() => undefined);
                   }}

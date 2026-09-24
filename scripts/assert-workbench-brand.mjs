@@ -44,14 +44,6 @@ const forbidden = [
   {
     label: "legacy ai-product-workbench identifier",
     pattern: /ai[_-]product[_-]workbench/i,
-    allowedFiles: new Set(["docs/workbench-hard-cut-deletion-manifest.json"]),
-    allowLine: (line, relativePath) => (
-      relativePath === "docs/workbench-hard-cut-deletion-manifest.json" && (
-        /"(?:path|evidenceReference)":\s*"(?:git status --short -- )?integrations\/deerflow\/skills\/ai-product-workbench"/iu.test(line)
-        || /^\s*"(?:database=ai_product_workbench;schema=public|ai-product-workbench(?:-(?:api|web|knowledge|postgres|storage))?(?::uploads\/)?|container=ai-product-workbench-(?:api|web))",?\s*$/iu.test(line)
-        || /^\s*"targets":\s*\[.*\],?\s*$/iu.test(line)
-      )
-    ),
   },
   { label: "legacy product-workbench identifier", pattern: /(?<!ai[_-])product[_-]workbench/i },
 ];

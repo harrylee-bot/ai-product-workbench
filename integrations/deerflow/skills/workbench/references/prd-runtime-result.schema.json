@@ -1834,6 +1834,7 @@
           "items": {
             "$ref": "#/$defs/ArtifactCitation"
           },
+          "minItems": 1,
           "maxItems": 1000
         },
         "kind": {

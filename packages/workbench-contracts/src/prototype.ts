@@ -380,6 +380,151 @@ const prototypeRuntimePathSchema = z.string()
   .regex(/^[A-Za-z][A-Za-z0-9_]*(?:\.[A-Za-z][A-Za-z0-9_]*)*$/)
   .max(500);
 
+export type PrototypeExpression =
+  | { kind: "literal"; value: PrototypeRuntimeValue }
+  | { kind: "variable"; path: string }
+  | { kind: "contains" | "equals"; left: PrototypeExpression; right: PrototypeExpression }
+  | { kind: "and" | "or"; operands: PrototypeExpression[] }
+  | { kind: "not"; operand: PrototypeExpression };
+
+export const PROTOTYPE_EXPRESSION_MAX_DEPTH = 8;
+export const PROTOTYPE_EXPRESSION_MAX_NODES = 64;
+export const PROTOTYPE_EXPRESSION_MAX_OPERANDS = 16;
+
+function prototypeExpressionLevelSchema(child?: z.ZodType<PrototypeExpression>): z.ZodType<PrototypeExpression> {
+  const literal = z.object({ kind: z.literal("literal"), value: prototypeRuntimeValueSchema }).strict();
+  const variable = z.object({ kind: z.literal("variable"), path: prototypeRuntimePathSchema }).strict();
+  if (!child) return z.discriminatedUnion("kind", [literal, variable]);
+  return z.discriminatedUnion("kind", [
+    literal,
+    variable,
+    z.object({ kind: z.literal("contains"), left: child, right: child }).strict(),
+    z.object({ kind: z.literal("equals"), left: child, right: child }).strict(),
+    z.object({ kind: z.literal("and"), operands: z.array(child).min(1).max(PROTOTYPE_EXPRESSION_MAX_OPERANDS) }).strict(),
+    z.object({ kind: z.literal("or"), operands: z.array(child).min(1).max(PROTOTYPE_EXPRESSION_MAX_OPERANDS) }).strict(),
+    z.object({ kind: z.literal("not"), operand: child }).strict(),
+  ]);
+}
+
+// Named, acyclic levels let OpenAPI reuse references instead of expanding a
+// recursive or exponentially duplicated schema. The root counts as depth one.
+export const prototypeExpressionDepth1Schema = prototypeExpressionLevelSchema();
+export const prototypeExpressionDepth2Schema = prototypeExpressionLevelSchema(prototypeExpressionDepth1Schema);
+export const prototypeExpressionDepth3Schema = prototypeExpressionLevelSchema(prototypeExpressionDepth2Schema);
+export const prototypeExpressionDepth4Schema = prototypeExpressionLevelSchema(prototypeExpressionDepth3Schema);
+export const prototypeExpressionDepth5Schema = prototypeExpressionLevelSchema(prototypeExpressionDepth4Schema);
+export const prototypeExpressionDepth6Schema = prototypeExpressionLevelSchema(prototypeExpressionDepth5Schema);
+export const prototypeExpressionDepth7Schema = prototypeExpressionLevelSchema(prototypeExpressionDepth6Schema);
+export const prototypeExpressionDepth8Schema = prototypeExpressionLevelSchema(prototypeExpressionDepth7Schema);
+
+export const prototypeExpressionSchema = z.preprocess((input, context) => {
+  try {
+    // Bound the walk before Zod parses a potentially broad expression tree.
+    prototypeExpressionVariablePaths(input as PrototypeExpression);
+  } catch {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "expression must use supported nodes with depth <= 8, at most 64 nodes and 1-16 operands per and/or",
+      fatal: true,
+    });
+    return z.NEVER;
+  }
+  return input;
+// The guard never transforms accepted input. Preserve that input type for the
+// explicitly typed Artifact/Run envelope schemas that contain this expression.
+}, prototypeExpressionDepth8Schema) as z.ZodEffects<z.ZodType<PrototypeExpression>, PrototypeExpression, PrototypeExpression>;
+
+/** Self-contained so the same bounded evaluator can be embedded in exports. */
+export function evaluatePrototypeExpression(
+  expression: PrototypeExpression,
+  resolveVariable: (path: string) => PrototypeRuntimeValue | undefined,
+): PrototypeRuntimeValue {
+  let count = 0;
+  const scalar = (value: unknown): value is PrototypeRuntimeValue => (
+    value === null || typeof value === "boolean"
+    || typeof value === "string"
+    || (typeof value === "number" && Number.isFinite(value))
+  );
+  const visit = (node: PrototypeExpression, depth: number): PrototypeRuntimeValue => {
+    count += 1;
+    // Keep these limits local: Function#toString consumers must need no globals.
+    if (depth > 8 || count > 64) throw new Error("PROTOTYPE_EXPRESSION_LIMIT_EXCEEDED");
+    if (!node || typeof node !== "object") throw new Error("PROTOTYPE_EXPRESSION_INVALID");
+    if (node.kind === "literal") {
+      if (!scalar(node.value)) throw new Error("PROTOTYPE_EXPRESSION_TYPE_INVALID");
+      return node.value;
+    }
+    if (node.kind === "variable") {
+      if (typeof node.path !== "string") throw new Error("PROTOTYPE_EXPRESSION_INVALID");
+      const value = resolveVariable(node.path);
+      if (value === undefined) throw new Error("PROTOTYPE_EXPRESSION_VARIABLE_UNRESOLVED");
+      if (!scalar(value)) throw new Error("PROTOTYPE_EXPRESSION_TYPE_INVALID");
+      return value;
+    }
+    if (node.kind === "contains" || node.kind === "equals") {
+      const left = visit(node.left, depth + 1);
+      const right = visit(node.right, depth + 1);
+      if (node.kind === "contains") {
+        if (typeof left !== "string" || typeof right !== "string") throw new Error("PROTOTYPE_EXPRESSION_TYPE_INVALID");
+        return left.toLowerCase().includes(right.trim().toLowerCase());
+      }
+      return left === right;
+    }
+    if (node.kind === "not") {
+      const value = visit(node.operand, depth + 1);
+      if (typeof value !== "boolean") throw new Error("PROTOTYPE_EXPRESSION_TYPE_INVALID");
+      return !value;
+    }
+    if (node.kind === "and" || node.kind === "or") {
+      if (!Array.isArray(node.operands) || node.operands.length < 1 || node.operands.length > 16) {
+        throw new Error("PROTOTYPE_EXPRESSION_LIMIT_EXCEEDED");
+      }
+      // Visit every operand so short-circuiting cannot hide bad types or paths.
+      const values = node.operands.map((operand) => visit(operand, depth + 1));
+      if (values.some((value) => typeof value !== "boolean")) throw new Error("PROTOTYPE_EXPRESSION_TYPE_INVALID");
+      return node.kind === "and" ? values.every((value) => value === true) : values.some((value) => value === true);
+    }
+    throw new Error("PROTOTYPE_EXPRESSION_INVALID");
+  };
+  return visit(expression, 1);
+}
+
+/** Return every dependency, including operands that currently short-circuit. */
+export function prototypeExpressionVariablePaths(expression: PrototypeExpression): string[] {
+  const paths = new Set<string>();
+  let count = 0;
+  const visit = (node: PrototypeExpression, depth: number): void => {
+    count += 1;
+    if (depth > 8 || count > 64) throw new Error("PROTOTYPE_EXPRESSION_LIMIT_EXCEEDED");
+    if (!node || typeof node !== "object") throw new Error("PROTOTYPE_EXPRESSION_INVALID");
+    if (node.kind === "literal") return;
+    if (node.kind === "variable") {
+      if (typeof node.path !== "string") throw new Error("PROTOTYPE_EXPRESSION_INVALID");
+      paths.add(node.path);
+      return;
+    }
+    if (node.kind === "contains" || node.kind === "equals") {
+      visit(node.left, depth + 1);
+      visit(node.right, depth + 1);
+      return;
+    }
+    if (node.kind === "not") {
+      visit(node.operand, depth + 1);
+      return;
+    }
+    if (node.kind === "and" || node.kind === "or") {
+      if (!Array.isArray(node.operands) || node.operands.length < 1 || node.operands.length > 16) {
+        throw new Error("PROTOTYPE_EXPRESSION_LIMIT_EXCEEDED");
+      }
+      node.operands.forEach((operand) => visit(operand, depth + 1));
+      return;
+    }
+    throw new Error("PROTOTYPE_EXPRESSION_INVALID");
+  };
+  visit(expression, 1);
+  return [...paths].sort();
+}
+
 export const prototypeVariableSchema = z.object({
   path: prototypeRuntimePathSchema,
   initialValue: prototypeRuntimeValueSchema,
@@ -519,6 +664,10 @@ export const prototypeBindingSourceSchema = z.discriminatedUnion("kind", [
     kind: z.literal("literal"),
     value: prototypeRuntimeValueSchema,
   }).strict(),
+  z.object({
+    kind: z.literal("expression"),
+    expression: prototypeExpressionSchema,
+  }).strict(),
 ]);
 
 export const prototypeBindingSchema = z.object({
@@ -600,6 +749,9 @@ function bindingSourceValue(
 ) {
   if (binding.source.kind === "literal") return binding.source.value;
   if (binding.source.kind === "variable") return variables.get(binding.source.path)?.initialValue;
+  if (binding.source.kind === "expression") {
+    return evaluatePrototypeExpression(binding.source.expression, (path) => variables.get(path)?.initialValue);
+  }
   return states.get(binding.source.stateId)?.values[binding.source.field];
 }
 
@@ -660,6 +812,7 @@ function refinePrototypeDocument(
   const bindings = new Map(document.bindings.map((binding) => [binding.id, binding]));
   const motions = new Map(document.motions.map((motion) => [motion.id, motion]));
   const variables = new Map(document.variables.map((variable) => [variable.path, variable]));
+  const variableIndexes = new Map(document.variables.map((variable, index) => [variable.path, index]));
   const nearestFormId = (nodeId: string) => {
     const visited = new Set<string>();
     let current = nodes.get(nodeId);
@@ -783,7 +936,9 @@ function refinePrototypeDocument(
           "every input requires exactly one variable-backed value binding",
         );
       } else {
-        const initialValue = variables.get(valueBindings[0].source.path)?.initialValue;
+        const variablePath = valueBindings[0].source.path;
+        const variableIndex = variableIndexes.get(variablePath);
+        const initialValue = variables.get(variablePath)?.initialValue;
         const initialTypeAllowed = node.inputType === "checkbox"
           ? typeof initialValue === "boolean"
           : node.inputType === "radio"
@@ -794,12 +949,22 @@ function refinePrototypeDocument(
                 ? isCanonicalPrototypeDateInputValue(initialValue)
                 : typeof initialValue === "string";
         if (!initialTypeAllowed) {
+          const expectedType = node.inputType === "checkbox"
+            ? "boolean"
+            : node.inputType === "radio"
+              ? "string or null"
+              : node.inputType === "number"
+                ? "number or null"
+                : node.inputType === "date"
+                  ? "an empty string or a canonical YYYY-MM-DD calendar date"
+                  : "string";
+          const receivedType = initialValue === null ? "null" : typeof initialValue;
           addIssue(
             context,
-            ["nodes", nodeIndex, "bindingIds"],
-            node.inputType === "date"
-              ? "date input requires an empty string or a canonical YYYY-MM-DD calendar date"
-              : `${node.inputType} input has an incompatible initial variable value`,
+            variableIndex === undefined
+              ? ["nodes", nodeIndex, "bindingIds"]
+              : ["variables", variableIndex, "initialValue"],
+            `${node.inputType} input variable ${variablePath} initialValue must be ${expectedType}; received ${receivedType}`,
           );
         }
         if (
@@ -1033,7 +1198,38 @@ function refinePrototypeDocument(
     } else if (binding.source.kind === "variable" && !variables.has(binding.source.path)) {
       addIssue(context, ["bindings", bindingIndex, "source", "path"], `unknown variable: ${binding.source.path}`);
     }
-    const sourceValue = bindingSourceValue(binding, variables, states);
+    if (binding.source.kind === "expression") {
+      if (!["text", "visible", "enabled"].includes(binding.property)) {
+        addIssue(context, ["bindings", bindingIndex, "property"], "expression bindings may target only text, visible, or enabled");
+        continue;
+      }
+      const missingPaths = prototypeExpressionVariablePaths(binding.source.expression)
+        .filter((path) => !variables.has(path));
+      if (missingPaths.length > 0) {
+        for (const path of missingPaths) {
+          addIssue(context, ["bindings", bindingIndex, "source", "expression"], `unknown expression variable: ${path}`);
+        }
+        continue;
+      }
+    }
+    let sourceValue: PrototypeRuntimeValue | undefined;
+    try {
+      sourceValue = bindingSourceValue(binding, variables, states);
+    } catch {
+      addIssue(
+        context,
+        ["bindings", bindingIndex, "source", "expression"],
+        "expression operands have incompatible types: contains requires strings and and/or/not require booleans",
+      );
+      continue;
+    }
+    if (
+      binding.source.kind === "expression"
+      && typeof sourceValue !== (binding.property === "text" ? "string" : "boolean")
+    ) {
+      addIssue(context, ["bindings", bindingIndex, "source", "expression"], `${binding.property} expression must evaluate to ${binding.property === "text" ? "string" : "boolean"}`);
+      continue;
+    }
     if (!bindingValueAllowedForProperty(binding.property, sourceValue)) {
       addIssue(context, ["bindings", bindingIndex, "source"], `${binding.property} binding has an incompatible value type`);
     }

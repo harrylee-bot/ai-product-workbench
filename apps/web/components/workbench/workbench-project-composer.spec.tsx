@@ -215,6 +215,20 @@ describe("Project Composer PRD context", () => {
     expect(onCloseModel).toHaveBeenCalledOnce();
   });
 
+  it("forwards the selected target surface from the project composer", () => {
+    const onTargetSurfaceChange = vi.fn();
+    render(projectComposerElement({
+      choice: createChoice,
+      editArtifactTargets: [],
+      onSubmitPrompt: vi.fn(async () => "run-1"),
+      onTargetSurfaceChange,
+    }));
+
+    expect(screen.getByRole("button", { name: "Web" }).getAttribute("aria-pressed")).toBe("true");
+    fireEvent.click(screen.getByRole("button", { name: "应用" }));
+    expect(onTargetSurfaceChange).toHaveBeenCalledWith("app");
+  });
+
   it("switches an Edit selection back to Generate for artifact output", () => {
     const onSelectModel = vi.fn();
     render(projectComposerElement({
@@ -373,6 +387,7 @@ function projectComposerElement({
   onCloseModel,
   onSubmitPrompt,
   onSelectModel = vi.fn(),
+  onTargetSurfaceChange,
   onToggleModel = vi.fn(),
   projectId = "project-1",
   prompt = "Change the selected screens",
@@ -388,6 +403,7 @@ function projectComposerElement({
   onCloseModel?: () => void;
   onSubmitPrompt: (submission: Parameters<Parameters<typeof ProjectComposer>[0]["onSubmitPrompt"]>[0]) => Promise<string | null>;
   onSelectModel?: (model: string) => void;
+  onTargetSurfaceChange?: (surface: "app" | "web") => void;
   onToggleModel?: () => void;
   projectId?: string;
   prompt?: string;
@@ -413,7 +429,7 @@ function projectComposerElement({
     onRetryModels={vi.fn()}
     onSelectModel={onSelectModel}
     onSubmitPrompt={onSubmitPrompt}
-    onTargetSurfaceChange={vi.fn()}
+    onTargetSurfaceChange={onTargetSurfaceChange ?? vi.fn()}
     onToggleModel={onToggleModel}
     projectDesignSystemChoices={[]}
     projectId={projectId}

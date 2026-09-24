@@ -2,6 +2,11 @@ name: workbench-runtime
 
 services:
   deerflow:
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "5"
     image: ${WORKBENCH_DEERFLOW_IMAGE_REF:?WORKBENCH_DEERFLOW_IMAGE_REF must be an immutable OCI digest reference}
     pull_policy: never
     restart: unless-stopped

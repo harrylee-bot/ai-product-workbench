@@ -1,30 +1,17 @@
-# Workbench Runtime Provider-State Rollout And Alerts
+# Workbench Runtime Provider State 运维
 
-## Scope And Ownership
+本 runbook 定义 Provider State、Runtime liveness、Knowledge 工具可见性和队列执行的运维步骤。
 
-This runbook is the operational source of truth for the Provider State projection version 2 rollout, Runtime liveness telemetry, and Knowledge tool visibility controls. It defines the required phase order, evidence boundary, rollback posture, alert ownership, and release-gate behavior; no separate remediation specification is required to execute it.
+## 执行顺序
 
-| Area | Primary owner | Required independent reviewer |
-|---|---|---|
-| Projection schema, backfill, repair | Data | Operations |
-| Worker canary, liveness, alerts | Operations | Release |
-| Knowledge visibility | Security | Operations |
-| Candidate and image binding | Release | Security |
+1. 应用数据库迁移并检查 schema、projection version、索引和约束。
+2. 使用 migrator 按 attempt 执行有界 backfill，验证覆盖率、sequence、hash 和 finalization。
+3. 以 verify-only 模式检查 projection 与 append-only event 的一致性。
+4. 启动 canary Worker，确认 provider-state、liveness、queue lease 和 Knowledge visibility 指标正常。
+5. 切换到 projection-required，继续观察 transaction timeout、projection lag、terminal drift 和 lease takeover。
+6. 将同一 source commit、镜像 digest 和配置推广到全部 Worker。
 
-No operator may manufacture an observation or receipt. A rollout receipt records already collected, sanitized evidence; it is not approval and does not make a staging or production gate pass by itself.
-
-## Rollout Sequence
-
-The only supported order is:
-
-1. Expand the schema without deleting legacy data.
-2. Run the bounded backfill and verify 100% coverage.
-3. Run `shadow-verify` long enough to satisfy the independently approved observation reference, with zero mismatch and zero invariant errors.
-4. Deploy the same candidate and immutable Worker image to a canary in `shadow-verify` mode.
-5. Switch the canary to `projection-required` and observe it.
-6. Roll the same immutable image and configuration to all Workers, with zero legacy Worker count and zero legacy-read traffic.
-
-Record each completed phase with `scripts/workbench-runtime-provider-state-rollout.mjs`. Run without `--execute` first. For staging and production, `--receipts-dir` must be an access-controlled location outside the repository. The command rejects a missing predecessor, a changed candidate/environment, non-zero mismatch/lag/P2028 counts, mutable image references, incomplete readiness, receipt tampering, and residual legacy traffic.
+执行命令：
 
 ```sh
 node scripts/workbench-runtime-provider-state-rollout.mjs \
@@ -36,46 +23,40 @@ node scripts/workbench-runtime-provider-state-rollout.mjs \
   --receipts-dir /restricted/receipts/runtime-provider-state
 ```
 
-After review, repeat with `--execute`. Never put a database URL, token, prompt, provider text, payload, external ID, Run ID, attempt ID, or principal ID in the observation, evidence descriptor, metric label, or receipt.
+证据文件只记录候选、镜像 digest、环境、稳定错误码、操作、计数和时间，不记录数据库 URL、token、prompt、provider text、payload、外部 ID、Run ID、attempt ID 或 principal ID。
 
-## Rollback And Forward Repair
+## Provider State P2028
 
-Do not roll back schema or delete projections/events. Stop Runtime queue producers and consumers, retain the append-only inbox, and keep the last schema-compatible candidate available. Before cutover, return Workers to `shadow-verify` or `legacy-read` only under the approved change. After cutover, prefer forward repair: fence affected attempts, repair or rebuild the projection with the migrator role, re-run coverage and shadow verification, then issue a new receipt chain. A previous Worker may be used only when it understands projection version 2 and the expanded schema.
-
-## Provider-State P2028
-
-Owner: Operations, with Data escalation. Stop canary/full rollout immediately. Capture only candidate, image digest, environment, stable error code, operation, counts, and UTC. Check projection lag and invariant alerts, database saturation, and the backfill receipt chain. Do not increase the transaction timeout as the remedy. Fence affected attempts and use forward repair; resume only after PostgreSQL coverage and shadow verification are clean.
+停止受影响的 Worker cohort，检查 projection lag、数据库负载、lease 和 transaction duration。不要只增加 timeout。修复 projection 或数据库瓶颈后，以 verify-only 模式重新检查，再恢复队列。
 
 ## Projection Invariant
 
-Owner: Data. Any missing/version/hash/gap/draft/CAS error is fail-closed. Stop the affected Worker cohort, preserve the inbox and projection rows, hash the controlled evidence file, and identify the last valid sequence. Never fall back silently to historical replay in `projection-required`. Repair with the migrator role and restart the receipt chain at backfill.
+缺失、版本不匹配、hash 不匹配、sequence gap、draft 冲突或 CAS 错误都必须 fail closed。保留事件和 projection 行，定位最后一个有效 sequence，通过 migrator 修复并重新执行完整校验。
 
 ## Projection Lag
 
-Owner: Operations. Confirm the alert is not delayed telemetry by checking the current projection and attempt sequence through the approved read-only query. Sustained lag blocks cutover. Stop the cohort if lag grows, inspect lease ownership and database health, and escalate to Data for projection repair.
+确认 projection sequence 与 attempt event sequence，检查 lease owner、数据库连接池和 Worker heartbeat。持续 lag 阻止推广；修复后必须重新验证覆盖率和事件一致性。
 
 ## Backfill Conflict
 
-Owner: Data. The operator must stop on pending events, a sequence gap, payload hash mismatch, draft conflict, invalid finalization, or unknown projection version. Do not skip the attempt. Drain Runtime participants, repair the append-only history or projection through an approved forward migration, resume from the last sanitized checkpoint, and re-run verify-only coverage.
+发现 pending event、sequence gap、payload hash mismatch、draft conflict、无效 finalization 或未知 projection version 时停止当前 attempt，不跳过记录。修复数据或 projection 后从受控 checkpoint 继续。
 
 ## Wall Clock
 
-Owner: Operations. The warning threshold is tied to the approved `1800000 ms` deployment value and must change with that configuration. On submission, stream-idle, or wall-clock timeout, verify that I/O was aborted, provider cancellation/reconciliation was bounded, leases were released/fenced, the queue job terminalized, and the Run converged. Keep the independent 900-second finding open until same-candidate staging kill/restart and long-duration evidence passes.
-
-The OTLP duration instrument uses unit `ms`. With the standard suffix-enabled Prometheus translation, its histogram series is `workbench_runtime_liveness_duration_milliseconds_bucket`. A collector configured to suppress unit suffixes must update this alert rule and its contract test in the same candidate.
+提交、流式 idle 或 wall-clock timeout 时，确认 provider I/O 已 abort、queue job 已 terminalize、lease 已释放或 fencing、Run 已收敛。`runtime.execute` 的 900 秒边界由 queue、provider、heartbeat、abort signal 和 reconciler 共同执行。
 
 ## Terminal Run Drift
 
-Owner: Operations. Stop new Runtime submissions if a terminal job leaves a Run active. Record the stable state tuple without IDs, inspect the execution reconciler and lease, and converge the Run atomically before resuming. Escalate repeated drift to Release because it blocks G8/G10.
+当 job 已 terminal 但 Run 仍 active 时，停止新提交，检查 execution reconciler、lease 和 Run 状态，在同一事务中收敛状态后再恢复。
 
 ## Lease Takeover
 
-Owner: Operations. A small number of successful takeovers is recovery; a burst suggests Worker death, heartbeat delay, or database contention. Compare heartbeat and lease durations, check SIGTERM/SIGKILL events, and ensure the expired owner cannot write. Do not lengthen the lease without capacity evidence.
+少量 takeover 表示恢复路径正常；连续增长表示 Worker 退出、heartbeat 延迟或数据库争用。检查 lease、heartbeat、SIGTERM/SIGKILL 和 fencing，确认过期 owner 不能继续写入。
 
 ## Knowledge Visibility
 
-Owner: Security. An unauthorized execution attempt means the request-scoped catalog or middleware boundary failed. Disable the affected Runtime cohort, preserve only stable error-code/count evidence, and verify null-release requests expose no Knowledge tool to the main agent or subagents. Do not treat a missing capability token error as an adequate visibility control.
+未授权 Run 不得看到或调用 Knowledge tool。发现 unauthorized execution attempt 时停止受影响 cohort，检查 request-scoped catalog、middleware、release pin 和 capability 签发边界。仅返回 missing capability 错误不满足可见性要求。
 
-## Evidence And Gate Boundary
+## 观测与回滚
 
-The repository can prove schemas, deterministic tests, alert syntax, receipt chaining, redaction, and isolated PostgreSQL behavior. Linux CI, staging observation, production deployment, restore/kill drills, alert delivery, G0 approvals, formal G10, and G12 remain `NOT RUN` or `BLOCKED` until independent evidence exists. Never convert a local or mocked result into those approvals.
+告警覆盖 provider-state failure、projection lag、transaction timeout、liveness、execution timeout、terminal drift、lease takeover 和 Knowledge visibility。Schema、事件和 projection 不通过回退删除；优先停止队列、修复 projection、重新验证并发布新候选。

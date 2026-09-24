@@ -71,11 +71,18 @@ function requiresPositiveInteger(schema) {
 
 if (contract.openapi !== "3.1.0") throw new Error("The Workbench contract must use OpenAPI 3.1.0");
 if (!contract.paths || Object.keys(contract.paths).length === 0) throw new Error("The Workbench contract has no paths");
-assert(Object.keys(contract.paths).length === 93, "Workbench v1 must expose exactly 93 resource paths including Canvas visual capture and Import Sources");
+assert(Object.keys(contract.paths).length === 96, "Workbench v1 must expose exactly 96 resource paths including Artifact finalization");
 const operationCount = Object.values(contract.paths).reduce((count, pathItem) => (
   count + ["get", "post", "put", "patch", "delete"].filter((method) => pathItem?.[method]).length
 ), 0);
-assert(operationCount === 114, "Workbench v1 must expose exactly 114 generated operations including Canvas visual capture and Import Sources");
+assert(operationCount === 118, "Workbench v1 must expose exactly 118 generated operations including Artifact finalization");
+for (const [path, methods] of [
+  ["/artifacts/{artifactId}/versions/{artifactVersionId}/finalization", ["get", "post"]],
+  ["/artifacts/{artifactId}/versions/{artifactVersionId}/finalization/retry", ["post"]],
+  ["/artifacts/{artifactId}/versions/{artifactVersionId}/finalization/withdraw", ["post"]],
+]) {
+  for (const method of methods) assert(contract.paths[path]?.[method], `Artifact finalization requires ${method} ${path}`);
+}
 if (!contract.components?.schemas?.ProblemDetails) throw new Error("ProblemDetails is required");
 if (contract.paths["/threads/{threadId}/runs"]?.post) throw new Error("Direct Run creation must remain behind SubmissionIntent submission");
 if (!contract.paths["/threads/{threadId}/runs"]?.get) throw new Error("Thread Run discovery is required");

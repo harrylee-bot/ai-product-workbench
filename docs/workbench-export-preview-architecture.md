@@ -1,6 +1,6 @@
 # 产品工作台 Export Worker 与 Preview Origin
 
-更新日期：2026-07-28
+更新日期：2026-09-23
 
 ## 1. 结论
 

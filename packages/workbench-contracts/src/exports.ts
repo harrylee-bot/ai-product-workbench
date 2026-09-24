@@ -235,14 +235,20 @@ export const createExportJobRequestSchema = z.object({
       message: "Figma Export does not accept client options",
     });
   }
-  if (request.format !== "html" && request.packaging !== "zip") {
+  const requiredPackaging = requiredExportPackaging(request.format);
+  if (requiredPackaging !== null && request.packaging !== requiredPackaging) {
     context.addIssue({
       code: z.ZodIssueCode.custom,
       path: ["packaging"],
-      message: `${request.format} exports must use zip packaging`,
+      message: `${request.format} exports must use ${requiredPackaging} packaging`,
     });
   }
 });
+
+export function requiredExportPackaging(format: ExportFormat): ExportPackaging | null {
+  if (format === "html") return null;
+  return format === "docx" || format === "pdf" ? "single_file" : "zip";
+}
 
 export const externalExportPayloadSnapshotSchema = z.object({
   exportJobId: opaqueIdSchema,

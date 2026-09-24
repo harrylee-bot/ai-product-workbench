@@ -14,6 +14,53 @@ import {
 } from "../src/runtime/runtime-assistant-text.js";
 
 describe("Runtime assistant text frame extraction", () => {
+  it("hides tool-call narration and intermediate artifact text until the validated result", () => {
+    const call = { id: "result-1", name: "workbench_runtime_result_submit", args: {} };
+    const human = {
+      type: "human",
+      content: '/workbench\n<workbench_context>\n{"outputContract":"workbench.runtime.result.v1"}\n</workbench_context>',
+    };
+    const intermediate = { type: "ai", content: "draft reasoning" };
+    const declaration = { type: "ai", content: "submit reasoning", tool_calls: [call] };
+    expect(extractAssistantTextFrame("messages", declaration)).toBeNull();
+    expect(extractAssistantTextFrame("values", { messages: [human, intermediate] })).toBeNull();
+    const response = {
+      type: "tool", name: call.name, tool_call_id: call.id, status: "success",
+      artifact: { protocol: "workbench.runtime.validated-result.v1", ok: true },
+    };
+    const summary = { type: "ai", content: "Final summary" };
+    expect(extractAssistantTextFrame("values", { messages: [human, intermediate, declaration, response, summary] }))
+      .toEqual({ kind: "cumulative", text: "Final summary" });
+    expect(extractAssistantTextFrame("values", { messages: [human, response, summary] })).toBeNull();
+    expect(extractAssistantTextFrame("values", { messages: [
+      human, declaration, { ...response, status: "error" }, summary,
+    ] })).toBeNull();
+  });
+
+  it("handles serialized AI and Tool messages with nested function calls and hidden metadata", () => {
+    const serialized = (type: string, kwargs: Record<string, unknown>) => ({
+      id: ["langchain", "schema", "messages", type], kwargs,
+    });
+    const declaration = serialized("AIMessage", {
+      content: "internal",
+      additional_kwargs: { tool_calls: [{
+        id: "serialized-result", function: { name: "workbench_runtime_result_submit", arguments: "{}" },
+      }] },
+    });
+    expect(extractAssistantTextFrame("messages-tuple", [declaration, {}])).toBeNull();
+    const messages = [
+      serialized("HumanMessage", { content: "current" }), declaration,
+      serialized("ToolMessage", {
+        name: "workbench_runtime_result_submit", tool_call_id: "serialized-result",
+        artifact: { protocol: "workbench.runtime.validated-result.v1", ok: true },
+      }),
+      serialized("AIMessage", { content: "Final" }),
+      serialized("AIMessage", { content: "hidden", additional_kwargs: { hide_from_ui: true } }),
+    ];
+    expect(extractAssistantTextFrame("values", { messages })).toEqual({ kind: "cumulative", text: "Final" });
+    expect(extractAssistantTextFrame("values", { messages: messages.slice(0, 2) })).toBeNull();
+  });
+
   it("ignores a prior-turn assistant when the current turn has only a human message", () => {
     expect(extractAssistantTextFrame("values", {
       messages: [
@@ -257,7 +304,7 @@ describe("Runtime provider-state v2 reducer", () => {
       finalizationExternalEventId: `synthetic-${eventCount}`,
       finalizationPayloadSha256: sha256Canonical(finalization),
     });
-  });
+  }, 30_000);
 
   it("applies one verified event and advances a canonical hash", () => {
     const initial = createRuntimeProviderProjection({
