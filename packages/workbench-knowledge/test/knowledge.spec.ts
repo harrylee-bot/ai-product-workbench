@@ -350,15 +350,17 @@ async function readVaultAssets(sources: readonly VaultSourceInput[]) {
     raw: normalizeMarkdownInput(source.content),
   })));
   expect(declarations.issues).toEqual([]);
-  // Keep large raw assets outside source candidates; the committed snapshot supplies clean-source metadata.
+  // Validate the clean-checkout fixture even when local source assets are available.
+  const fixtureAssets = await readVaultAssetClosureFixture(declarations.assets);
   const configuredStorageRoot = process.env.KNOWLEDGE_STORAGE_ROOT?.trim();
-  if (configuredStorageRoot) {
-    return readVerifiedVaultAssets(declarations.assets, resolve(configuredStorageRoot));
-  }
-  if (await isDirectory(storageRoot)) {
-    return readVerifiedVaultAssets(declarations.assets, storageRoot);
-  }
-  return readVaultAssetClosureFixture(declarations.assets);
+  const availableStorageRoot = configuredStorageRoot
+    ? resolve(configuredStorageRoot)
+    : await isDirectory(storageRoot) ? storageRoot : undefined;
+  if (!availableStorageRoot) return fixtureAssets;
+
+  const verifiedAssets = await readVerifiedVaultAssets(declarations.assets, availableStorageRoot);
+  expect(verifiedAssets).toEqual(fixtureAssets);
+  return verifiedAssets;
 }
 
 async function readVerifiedVaultAssets(

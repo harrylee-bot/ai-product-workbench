@@ -16,6 +16,8 @@ const DIGEST_PATTERN = /^sha256:[a-f0-9]{64}$/u;
 const COMMIT_PATTERN = /^[a-f0-9]{40}$/u;
 const SHA256_PATTERN = /^[a-f0-9]{64}$/u;
 const CHAIN_ID_PATTERN = /^sha256:[a-f0-9]{64}$/u;
+const MANUAL_RELEASE_CONDITION = "github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && inputs.release == true";
+const CI_CERTIFICATE_IDENTITY = "https://github.com/${{ github.repository }}/.github/workflows/workbench-ci.yml@refs/heads/main";
 // The prior signed candidate predates the Validator Node build input; no other
 // candidate is allowed to omit the runtime binding.
 const LEGACY_DEERFLOW_VALIDATOR_NODE_ROLLBACK_COMMITS = new Set([
@@ -237,6 +239,7 @@ export function assertProductionImageContract({ inventory = loadProductionImageI
   const releaseChainJob = ci.jobs?.["release-chain"];
   assert(releaseChainJob, "release-chain job is required before G3/G4 jobs");
   assertProductionWorkflowPermissions(ci);
+  assertManualProductionReleaseWorkflow(ci);
   assert(
     String(releaseChainJob.outputs?.chain_id).includes("steps.verify_release_chain.outputs.chain_id"),
     "release-chain job must expose the verified chain ID",
@@ -327,8 +330,8 @@ export function assertProductionImageContract({ inventory = loadProductionImageI
     "production image manifest verification must use an exact certificate identity",
   );
   assert(
-    String(manifestSignatureStep.env?.CERTIFICATE_IDENTITY).endsWith("@refs/heads/production"),
-    "production image manifest signer identity must bind the production branch workflow",
+    manifestSignatureStep.env?.CERTIFICATE_IDENTITY === CI_CERTIFICATE_IDENTITY,
+    "production image manifest signer identity must bind the exact main branch workflow",
   );
   const imageSignatureStep = ci.jobs?.["production-images"]?.steps?.find(
     (step) => step.name === "Sign and verify immutable image",
@@ -340,19 +343,76 @@ export function assertProductionImageContract({ inventory = loadProductionImageI
     "production image signature verification must use an exact certificate identity",
   );
   assert(
-    String(imageSignatureStep.env?.CERTIFICATE_IDENTITY).endsWith("@refs/heads/production"),
-    "production image signer identity must bind the production branch workflow",
+    imageSignatureStep.env?.CERTIFICATE_IDENTITY === CI_CERTIFICATE_IDENTITY,
+    "production image signer identity must bind the exact main branch workflow",
   );
   assertProductionImageMatrix({ ci, inventory, ids, workflowSource });
   assertPullRequestProductionImageMatrix({ ci, inventory, ids });
   const acceptance = readYaml(".github/workflows/workbench-production-acceptance.yml");
   const acceptanceSource = readText(".github/workflows/workbench-production-acceptance.yml");
   assertProductionAcceptanceImageWorkflow({ workflow: acceptance, workflowSource: acceptanceSource });
+  const observation = readYaml(".github/workflows/workbench-production-observation.yml");
+  assertPinnedWorkflowActions(observation);
+  assertProductionEvidenceSourceWorkflow({ workflow: observation, jobId: "collect-production-observations" });
   return inventory;
+}
+
+export function assertManualProductionReleaseWorkflow(ci) {
+  assertDeepEqual(Object.keys(ci.on ?? {}).sort(), ["pull_request", "push", "workflow_dispatch"],
+    "CI must accept only PR, main push, and explicit manual dispatch events");
+  assertDeepEqual(ci.on.push?.branches, ["main"], "CI pushes must target the single main branch");
+  const release = ci.on.workflow_dispatch?.inputs?.release;
+  assert(release?.type === "boolean" && release.default === false,
+    "manual release input must be a boolean defaulting to false");
+  assert(ci.concurrency?.group === `workbench-ci-\${{ github.ref }}-\${{ ${MANUAL_RELEASE_CONDITION} && 'release' || 'checks' }}`,
+    "manual release concurrency must be isolated from ordinary checks");
+  assert(ci.concurrency?.["cancel-in-progress"] === `\${{ !(${MANUAL_RELEASE_CONDITION}) }}`,
+    "manual releases must not be cancelled by a newer workflow run");
+  for (const name of [
+    "Require immutable production base image inputs",
+    "Download and hash approved G0-G2 artifacts",
+    "Verify approved G0-G2 release chain",
+    "Upload release chain for production-only signing",
+  ]) {
+    const step = ci.jobs?.["release-chain"]?.steps?.find((candidate) => candidate.name === name);
+    const condition = name.startsWith("Upload ") ? `success() && ${MANUAL_RELEASE_CONDITION}` : MANUAL_RELEASE_CONDITION;
+    assert(step?.if === condition, `${name} must use the explicit manual release condition`);
+  }
+  assert(ci.jobs?.quality?.services?.postgres?.image
+    === `\${{ ${MANUAL_RELEASE_CONDITION} && vars.WORKBENCH_CI_POSTGRES_IMAGE || 'pgvector/pgvector:pg16' }}`,
+  "manual release quality checks must use the approved immutable PostgreSQL image");
+  for (const step of ci.jobs?.["deployment-config"]?.steps ?? []) {
+    if (step.env?.NGINX_IMAGE === undefined) continue;
+    assert(step.env.NGINX_IMAGE
+      === `\${{ ${MANUAL_RELEASE_CONDITION} && vars.WORKBENCH_NGINX_IMAGE || 'nginx:stable-alpine' }}`,
+    "manual release deployment checks must use the approved immutable Nginx image");
+  }
+  const production = ci.jobs?.["production-images"];
+  const build = production?.steps?.find((step) => step.id === "build");
+  assert(build?.with?.push === true && build.with.load === false
+    && build.with.provenance === "mode=max" && build.with.sbom === true,
+  "manual production builds must publish immutable images with maximum provenance and SBOM");
+  const inputGuard = production?.steps?.find((step) => step.name === "Require approved production build inputs");
+  assert(inputGuard && inputGuard.if === undefined, "every manual production build must validate approved inputs");
+  for (const entry of production?.strategy?.matrix?.include ?? []) {
+    assert(!/example\.test|node:22-alpine|nginx:stable-alpine|github\.ref|\|\|/u.test(entry.build_args ?? ""),
+      `${entry.name} production build inputs must not fall back to test origins or mutable base images`);
+  }
+  for (const job of Object.values(ci.jobs ?? {})) {
+    for (const step of job.steps ?? []) {
+      if (step.env?.CERTIFICATE_IDENTITY === undefined) continue;
+      assert(step.env.CERTIFICATE_IDENTITY === CI_CERTIFICATE_IDENTITY,
+        "CI signatures must bind the exact main branch workflow identity");
+    }
+  }
+  return true;
 }
 
 export function assertProductionWorkflowPermissions(ci) {
   const privilegedPermissions = new Set(["id-token", "packages", "attestations"]);
+  for (const permission of privilegedPermissions) {
+    assert(ci.permissions?.[permission] !== "write", "workflow-wide token permissions must remain unprivileged");
+  }
   const productionOnlyJobs = new Set([
     "release-chain-signing",
     "production-images",
@@ -367,8 +427,8 @@ export function assertProductionWorkflowPermissions(ci) {
     assert(productionOnlyJobs.has(jobId), `${jobId} must not receive privileged GitHub token permissions`);
     const condition = String(job.if ?? "");
     assert(
-      condition.includes("github.event_name == 'push'") && condition.includes("github.ref == 'refs/heads/production'"),
-      `${jobId} privileged permissions must be guarded by a production-only job condition`,
+      condition === MANUAL_RELEASE_CONDITION,
+      `${jobId} privileged permissions must be guarded by the explicit manual production-only job condition`,
     );
   }
   for (const jobId of ["release-chain", "quality", "deployment-config"]) {
@@ -387,6 +447,36 @@ export function assertProductionWorkflowPermissions(ci) {
       && ci.jobs?.["production-images"]?.permissions?.["id-token"] === "write",
     "production image publication must own packages, attestations, and OIDC permissions",
   );
+  return true;
+}
+
+export function assertProductionEvidenceSourceWorkflow({ workflow, jobId }) {
+  const steps = workflow.jobs?.[jobId]?.steps ?? [];
+  const resolveRun = steps.find((step) => step.name === "Resolve successful production CI run");
+  for (const marker of [
+    'test "$GITHUB_REF" = "refs/heads/main"',
+    "event: 'workflow_dispatch'",
+    "head_branch: 'main'",
+    "status: 'completed'",
+    "conclusion: 'success'",
+    "path: '.github/workflows/workbench-ci.yml'",
+    "run.head_repository?.full_name !== process.env.GITHUB_REPOSITORY",
+    "Number.isSafeInteger(run.run_attempt)",
+  ]) {
+    assert(String(resolveRun?.run).includes(marker), `${jobId} selected manual release run binding is missing ${marker}`);
+  }
+  const source = steps.map((step) => step.run ?? "").join("\n");
+  for (const artifact of ["verified-release-chain", "production-image-manifest", "production-deployment-config"]) {
+    assert(source.includes(`--name "${artifact}-$RELEASE_CHAIN_RUN_ATTEMPT"`),
+      `${jobId} must require signed release artifacts from the selected run attempt`);
+  }
+  assert(source.includes('--certificate-identity "$CERTIFICATE_IDENTITY"') && !source.includes("--certificate-identity-regexp"),
+    `${jobId} must verify the exact CI signing identity`);
+  for (const step of steps) {
+    if (step.env?.CERTIFICATE_IDENTITY === undefined) continue;
+    assert(step.env.CERTIFICATE_IDENTITY === CI_CERTIFICATE_IDENTITY,
+      `${jobId} must trust only the exact main branch workflow identity`);
+  }
   return true;
 }
 
@@ -439,6 +529,7 @@ export function assertProductionAcceptanceImageWorkflow({ workflow, workflowSour
   ]) {
     assert(workflowSource.includes(marker), `production acceptance selected-run binding is missing ${marker}`);
   }
+  assertProductionEvidenceSourceWorkflow({ workflow, jobId: "production-acceptance" });
   return true;
 }
 

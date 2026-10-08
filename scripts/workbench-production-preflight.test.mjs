@@ -180,7 +180,7 @@ function runPreflight(overrides) {
     WORKBENCH_KNOWLEDGE_TOKENIZER_HOST_DIR: "/srv/tokenizer",
     WORKBENCH_IMAGE_INVENTORY_PATH: "/srv/image-manifest.json",
     WORKBENCH_IMAGE_INVENTORY_BUNDLE_PATH: "/srv/image-manifest.bundle.json",
-    WORKBENCH_COSIGN_CERTIFICATE_IDENTITY: "https://github.com/example/workbench/.github/workflows/workbench-ci.yml@refs/heads/production",
+    WORKBENCH_COSIGN_CERTIFICATE_IDENTITY: "https://github.com/example/workbench/.github/workflows/workbench-ci.yml@refs/heads/main",
     WORKBENCH_COSIGN_OIDC_ISSUER: "https://token.actions.githubusercontent.com",
     WORKBENCH_SOURCE_COMMIT: "a".repeat(40),
     WORKBENCH_FILE_SCAN_MODE: "clamav",

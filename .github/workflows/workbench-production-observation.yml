@@ -48,7 +48,7 @@ jobs:
           VERIFIER_COMMIT: ${{ vars.WORKBENCH_ACCEPTANCE_VERIFIER_COMMIT }}
         run: |
           set -euo pipefail
-          test "$GITHUB_REF" = "refs/heads/production"
+          test "$GITHUB_REF" = "refs/heads/main"
           printf '%s' "$RELEASE_CHAIN_RUN_ID" | grep -Eq '^[1-9][0-9]*$'
           printf '%s' "$VERIFIER_COMMIT" | grep -Eq '^[a-f0-9]{40}$'
           root="$RUNNER_TEMP/workbench-observation-ci"
@@ -59,8 +59,8 @@ jobs:
           import fs from 'node:fs';
           const run = JSON.parse(fs.readFileSync(process.env.RUN_METADATA, 'utf8'));
           const expected = {
-            event: 'push',
-            head_branch: 'production',
+            event: 'workflow_dispatch',
+            head_branch: 'main',
             status: 'completed',
             conclusion: 'success',
             path: '.github/workflows/workbench-ci.yml',
@@ -158,7 +158,7 @@ jobs:
           RELEASE_CHAIN_ID: ${{ steps.release_chain.outputs.chain_id }}
           RELEASE_CHAIN_RUN_ID: ${{ inputs.release_chain_run_id }}
           RELEASE_CHAIN_RUN_ATTEMPT: ${{ steps.ci_run.outputs.run_attempt }}
-          CERTIFICATE_IDENTITY: https://github.com/${{ github.repository }}/.github/workflows/workbench-ci.yml@refs/heads/production
+          CERTIFICATE_IDENTITY: https://github.com/${{ github.repository }}/.github/workflows/workbench-ci.yml@refs/heads/main
           CERTIFICATE_OIDC_ISSUER: https://token.actions.githubusercontent.com
         run: |
           set -euo pipefail

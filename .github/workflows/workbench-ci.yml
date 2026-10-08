@@ -5,11 +5,17 @@ on:
   push:
     branches:
       - main
-      - production
+  workflow_dispatch:
+    inputs:
+      release:
+        description: "Publish approved main candidate after G0-G4 verification"
+        required: false
+        default: false
+        type: boolean
 
 concurrency:
-  group: workbench-ci-${{ github.ref }}
-  cancel-in-progress: true
+  group: workbench-ci-${{ github.ref }}-${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && inputs.release == true && 'release' || 'checks' }}
+  cancel-in-progress: ${{ !(github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && inputs.release == true) }}
 
 permissions:
   contents: read
@@ -46,7 +52,7 @@ jobs:
         run: npm run deployment:release-chain:test
 
       - name: Require immutable production base image inputs
-        if: github.event_name == 'push' && github.ref == 'refs/heads/production'
+        if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && inputs.release == true
         env:
           NODE_IMAGE: ${{ vars.WORKBENCH_NODE_IMAGE }}
           DEERFLOW_NODE_IMAGE: ${{ vars.WORKBENCH_DEERFLOW_NODE_IMAGE_REF }}
@@ -78,7 +84,7 @@ jobs:
           require_digest WORKBENCH_DEX_IMAGE "$DEX_IMAGE"
 
       - name: Download and hash approved G0-G2 artifacts
-        if: github.event_name == 'push' && github.ref == 'refs/heads/production'
+        if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && inputs.release == true
         env:
           G0_URL: ${{ vars.WORKBENCH_G0_APPROVAL_URL }}
           G0_SHA256: ${{ vars.WORKBENCH_G0_APPROVAL_SHA256 }}
@@ -115,7 +121,7 @@ jobs:
           g2_path="$(download_evidence g2-receipt.json "$G2_URL" "$G2_SHA256")"
 
       - name: Verify approved G0-G2 release chain
-        if: github.event_name == 'push' && github.ref == 'refs/heads/production'
+        if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && inputs.release == true
         id: verify_release_chain
         env:
           SIGNED_TAG: ${{ vars.WORKBENCH_RELEASE_SIGNED_TAG }}
@@ -150,7 +156,7 @@ jobs:
           cp "$evidence_dir/g2-receipt.json" "$artifact_dir/g2-receipt.json"
 
       - name: Upload release chain for production-only signing
-        if: success() && github.event_name == 'push' && github.ref == 'refs/heads/production'
+        if: success() && github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && inputs.release == true
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: release-chain-to-sign-${{ github.run_attempt }}
@@ -159,7 +165,7 @@ jobs:
 
   release-chain-signing:
     name: Sign verified G0-G2 release chain
-    if: github.event_name == 'push' && github.ref == 'refs/heads/production'
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && inputs.release == true
     needs: [release-chain]
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -178,7 +184,7 @@ jobs:
 
       - name: Sign and verify G0-G2 release chain
         env:
-          CERTIFICATE_IDENTITY: https://github.com/${{ github.repository }}/.github/workflows/workbench-ci.yml@refs/heads/production
+          CERTIFICATE_IDENTITY: https://github.com/${{ github.repository }}/.github/workflows/workbench-ci.yml@refs/heads/main
           CERTIFICATE_OIDC_ISSUER: https://token.actions.githubusercontent.com
         run: |
           set -euo pipefail
@@ -208,7 +214,7 @@ jobs:
       pr_production_image_matrix: ${{ steps.affected_production_images.outputs.matrix }}
     services:
       postgres:
-        image: ${{ github.ref == 'refs/heads/production' && vars.WORKBENCH_CI_POSTGRES_IMAGE || 'pgvector/pgvector:pg16' }}
+        image: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && inputs.release == true && vars.WORKBENCH_CI_POSTGRES_IMAGE || 'pgvector/pgvector:pg16' }}
         env:
           POSTGRES_DB: workbench_test
           POSTGRES_PASSWORD: postgres
@@ -477,7 +483,7 @@ jobs:
 
       - name: Validate primary gateway configuration
         env:
-          NGINX_IMAGE: ${{ github.ref == 'refs/heads/production' && vars.WORKBENCH_NGINX_IMAGE || 'nginx:stable-alpine' }}
+          NGINX_IMAGE: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && inputs.release == true && vars.WORKBENCH_NGINX_IMAGE || 'nginx:stable-alpine' }}
         run: >-
           docker run --rm
           --add-host workbench-web:127.0.0.1
@@ -488,7 +494,7 @@ jobs:
 
       - name: Validate isolated Preview gateway configuration
         env:
-          NGINX_IMAGE: ${{ github.ref == 'refs/heads/production' && vars.WORKBENCH_NGINX_IMAGE || 'nginx:stable-alpine' }}
+          NGINX_IMAGE: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && inputs.release == true && vars.WORKBENCH_NGINX_IMAGE || 'nginx:stable-alpine' }}
         run: >-
           docker run --rm
           --add-host workbench-preview:127.0.0.1
@@ -690,7 +696,7 @@ jobs:
 
   production-images:
     name: Production image / ${{ matrix.name }}
-    if: github.event_name == 'push' && github.ref == 'refs/heads/production'
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && inputs.release == true
     needs: [release-chain, release-chain-signing, quality, deployment-config]
     runs-on: ubuntu-latest
     timeout-minutes: 45
@@ -707,56 +713,56 @@ jobs:
             dockerfile: apps/web/Dockerfile
             target: runner
             build_args: |
-              WORKBENCH_PREVIEW_ORIGIN=${{ github.ref == 'refs/heads/production' && vars.WORKBENCH_PREVIEW_ORIGIN || 'https://preview.workbench.example.test' }}
-              WORKBENCH_S3_BROWSER_UPLOAD_BUCKET_URL=${{ github.ref == 'refs/heads/production' && vars.WORKBENCH_S3_BROWSER_UPLOAD_BUCKET_URL || 'https://uploads.workbench.example.test/workbench' }}
-              NEXT_PUBLIC_KNOWLEDGE_APP_URL=${{ github.ref == 'refs/heads/production' && format('https://{0}', vars.WORKBENCH_KNOWLEDGE_BASE_URL) || 'https://workbench.example.test/knowledge' }}
-              NEXT_PUBLIC_WORKBENCH_FEEDBACK_URL=${{ github.ref == 'refs/heads/production' && vars.NEXT_PUBLIC_WORKBENCH_FEEDBACK_URL || '' }}
-              NEXT_PUBLIC_WORKBENCH_FORUM_URL=${{ github.ref == 'refs/heads/production' && vars.NEXT_PUBLIC_WORKBENCH_FORUM_URL || '' }}
-              NEXT_PUBLIC_WORKBENCH_PRIVACY_URL=${{ github.ref == 'refs/heads/production' && vars.NEXT_PUBLIC_WORKBENCH_PRIVACY_URL || '' }}
-              NODE_IMAGE=${{ github.ref == 'refs/heads/production' && vars.WORKBENCH_NODE_IMAGE || 'node:22-alpine' }}
+              WORKBENCH_PREVIEW_ORIGIN=${{ vars.WORKBENCH_PREVIEW_ORIGIN }}
+              WORKBENCH_S3_BROWSER_UPLOAD_BUCKET_URL=${{ vars.WORKBENCH_S3_BROWSER_UPLOAD_BUCKET_URL }}
+              NEXT_PUBLIC_KNOWLEDGE_APP_URL=${{ format('https://{0}', vars.WORKBENCH_KNOWLEDGE_BASE_URL) }}
+              NEXT_PUBLIC_WORKBENCH_FEEDBACK_URL=${{ vars.NEXT_PUBLIC_WORKBENCH_FEEDBACK_URL }}
+              NEXT_PUBLIC_WORKBENCH_FORUM_URL=${{ vars.NEXT_PUBLIC_WORKBENCH_FORUM_URL }}
+              NEXT_PUBLIC_WORKBENCH_PRIVACY_URL=${{ vars.NEXT_PUBLIC_WORKBENCH_PRIVACY_URL }}
+              NODE_IMAGE=${{ vars.WORKBENCH_NODE_IMAGE }}
           - name: api
             dockerfile: apps/workbench-api/Dockerfile
             target: runner
             build_args: |
-              NODE_IMAGE=${{ github.ref == 'refs/heads/production' && vars.WORKBENCH_NODE_IMAGE || 'node:22-alpine' }}
+              NODE_IMAGE=${{ vars.WORKBENCH_NODE_IMAGE }}
           - name: api-migrator
             dockerfile: apps/workbench-api/Dockerfile
             target: migrator
             build_args: |
-              NODE_IMAGE=${{ github.ref == 'refs/heads/production' && vars.WORKBENCH_NODE_IMAGE || 'node:22-alpine' }}
+              NODE_IMAGE=${{ vars.WORKBENCH_NODE_IMAGE }}
           - name: runtime-worker
             dockerfile: apps/workbench-worker/Dockerfile
             target: runner
             build_args: |
-              NODE_IMAGE=${{ github.ref == 'refs/heads/production' && vars.WORKBENCH_NODE_IMAGE || 'node:22-alpine' }}
+              NODE_IMAGE=${{ vars.WORKBENCH_NODE_IMAGE }}
           - name: file-worker
             dockerfile: apps/workbench-file-worker/Dockerfile
             target: runner
             build_args: |
-              NODE_IMAGE=${{ github.ref == 'refs/heads/production' && vars.WORKBENCH_NODE_IMAGE || 'node:22-alpine' }}
+              NODE_IMAGE=${{ vars.WORKBENCH_NODE_IMAGE }}
           - name: import-worker
             dockerfile: apps/workbench-import-worker/Dockerfile
             target: runner
             build_args: |
-              NODE_IMAGE=${{ github.ref == 'refs/heads/production' && vars.WORKBENCH_NODE_IMAGE || 'node:22-alpine' }}
+              NODE_IMAGE=${{ vars.WORKBENCH_NODE_IMAGE }}
           - name: export-worker
             dockerfile: apps/workbench-export-worker/Dockerfile
             target: runner
             build_args: |
-              NODE_IMAGE=${{ github.ref == 'refs/heads/production' && vars.WORKBENCH_NODE_IMAGE || 'node:22-alpine' }}
+              NODE_IMAGE=${{ vars.WORKBENCH_NODE_IMAGE }}
           - name: preview
             dockerfile: apps/workbench-preview/Dockerfile
             target: runner
             build_args: |
-              NODE_IMAGE=${{ github.ref == 'refs/heads/production' && vars.WORKBENCH_NODE_IMAGE || 'node:22-alpine' }}
+              NODE_IMAGE=${{ vars.WORKBENCH_NODE_IMAGE }}
           - name: quartz
             dockerfile: apps/knowledge/Dockerfile
             target: immutable-runner
             build_args: |
-              QUARTZ_BASE_URL=${{ github.ref == 'refs/heads/production' && vars.WORKBENCH_KNOWLEDGE_BASE_URL || 'workbench.example.test/knowledge' }}
-              KNOWLEDGE_WEB_URL=${{ github.ref == 'refs/heads/production' && vars.WORKBENCH_WEB_ORIGIN || 'https://workbench.example.test' }}
-              NODE_IMAGE=${{ github.ref == 'refs/heads/production' && vars.WORKBENCH_NODE_IMAGE || 'node:22-alpine' }}
-              NGINX_IMAGE=${{ github.ref == 'refs/heads/production' && vars.WORKBENCH_NGINX_IMAGE || 'nginx:stable-alpine' }}
+              QUARTZ_BASE_URL=${{ vars.WORKBENCH_KNOWLEDGE_BASE_URL }}
+              KNOWLEDGE_WEB_URL=${{ vars.WORKBENCH_WEB_ORIGIN }}
+              NODE_IMAGE=${{ vars.WORKBENCH_NODE_IMAGE }}
+              NGINX_IMAGE=${{ vars.WORKBENCH_NGINX_IMAGE }}
           - name: deerflow
             dockerfile: integrations/deerflow/Dockerfile
             target: runtime
@@ -773,7 +779,6 @@ jobs:
         uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
 
       - name: Require approved production build inputs
-        if: github.ref == 'refs/heads/production'
         env:
           WORKBENCH_WEB_ORIGIN: ${{ vars.WORKBENCH_WEB_ORIGIN }}
           WORKBENCH_PREVIEW_ORIGIN: ${{ vars.WORKBENCH_PREVIEW_ORIGIN }}
@@ -793,7 +798,6 @@ jobs:
           case "$WORKBENCH_PUBLIC_REGISTRATION_ENABLED" in true|false) ;; *) exit 1 ;; esac
 
       - name: Login to GitHub Container Registry
-        if: github.ref == 'refs/heads/production'
         uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
         with:
           registry: ghcr.io
@@ -801,7 +805,7 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Require fixed DeerFlow source and base image pins
-        if: matrix.name == 'deerflow' && github.ref == 'refs/heads/production'
+        if: matrix.name == 'deerflow'
         env:
           DEERFLOW_BASE_IMAGE: ${{ vars.WORKBENCH_DEERFLOW_BASE_IMAGE_REF }}
           DEERFLOW_NODE_IMAGE: ${{ vars.WORKBENCH_DEERFLOW_NODE_IMAGE_REF }}
@@ -817,7 +821,6 @@ jobs:
         run: mkdir -p output
 
       - name: Freeze public image build configuration
-        if: matrix.name != 'deerflow' || github.ref == 'refs/heads/production'
         id: build-configuration
         env:
           WORKBENCH_IMAGE_BUILD_ARGS: ${{ matrix.build_args }}
@@ -835,7 +838,6 @@ jobs:
           echo "sha256=$sha256" >> "$GITHUB_OUTPUT"
 
       - name: Build ${{ matrix.name }} production image
-        if: matrix.name != 'deerflow' || github.ref == 'refs/heads/production'
         id: build
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
         with:
@@ -847,26 +849,24 @@ jobs:
             org.opencontainers.image.revision=${{ github.sha }}
             io.workbench.build-configuration-sha256=${{ steps.build-configuration.outputs.sha256 }}
           tags: ghcr.io/${{ github.repository_owner }}/workbench-${{ matrix.name }}:${{ github.sha }}
-          push: ${{ github.ref == 'refs/heads/production' }}
-          load: ${{ github.ref != 'refs/heads/production' }}
-          provenance: ${{ github.ref == 'refs/heads/production' && 'mode=max' || false }}
-          sbom: ${{ github.ref == 'refs/heads/production' }}
+          push: true
+          load: false
+          provenance: mode=max
+          sbom: true
           metadata-file: output/build-metadata.json
           cache-from: type=gha,scope=workbench-${{ matrix.name }}
           cache-to: type=gha,mode=max,scope=workbench-${{ matrix.name }},ignore-error=true
 
       - name: Resolve image reference
-        if: matrix.name != 'deerflow' || github.ref == 'refs/heads/production'
         id: image
         run: |
           ref="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/workbench-${{ matrix.name }}:${GITHUB_SHA}"
-          if [ "$GITHUB_REF" = "refs/heads/production" ]; then
-            ref="$ref@${{ steps.build.outputs.digest }}"
-          fi
+          digest="${{ steps.build.outputs.digest }}"
+          printf '%s' "$digest" | grep -Eq '^sha256:[a-f0-9]{64}$'
+          ref="$ref@$digest"
           echo "ref=$ref" >> "$GITHUB_OUTPUT"
 
       - name: Generate SPDX SBOM
-        if: matrix.name != 'deerflow' || github.ref == 'refs/heads/production'
         uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0
         with:
           image: ${{ steps.image.outputs.ref }}
@@ -874,7 +874,6 @@ jobs:
           output-file: output/sbom-${{ matrix.name }}.spdx.json
 
       - name: Scan image for release-blocking vulnerabilities
-        if: matrix.name != 'deerflow' || github.ref == 'refs/heads/production'
         uses: aquasecurity/trivy-action@6c175e9c4083a92bbca2f9724c8a5e33bc2d97a5 # v0.30.0
         with:
           image-ref: ${{ steps.image.outputs.ref }}
@@ -884,7 +883,6 @@ jobs:
           exit-code: "1"
 
       - name: Publish signed build provenance attestation
-        if: github.ref == 'refs/heads/production'
         id: provenance
         uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2
         with:
@@ -893,7 +891,6 @@ jobs:
           push-to-registry: true
 
       - name: Capture signed build provenance bundle
-        if: github.ref == 'refs/heads/production'
         env:
           PROVENANCE_BUNDLE: ${{ steps.provenance.outputs.bundle-path }}
         run: |
@@ -901,7 +898,6 @@ jobs:
           cp "$PROVENANCE_BUNDLE" "output/provenance-${{ matrix.name }}.bundle.json"
 
       - name: Publish signed SBOM attestation
-        if: github.ref == 'refs/heads/production'
         id: sbom_attestation
         uses: actions/attest-sbom@bd218ad0dbcb3e146bd073d1d9c6d78e08aa8a0b # v2
         with:
@@ -911,7 +907,6 @@ jobs:
           push-to-registry: true
 
       - name: Capture signed SBOM attestation bundle
-        if: github.ref == 'refs/heads/production'
         env:
           SBOM_ATTESTATION_BUNDLE: ${{ steps.sbom_attestation.outputs.bundle-path }}
         run: |
@@ -919,14 +914,12 @@ jobs:
           cp "$SBOM_ATTESTATION_BUNDLE" "output/sbom-attestation-${{ matrix.name }}.bundle.json"
 
       - name: Install Cosign
-        if: github.ref == 'refs/heads/production'
         uses: sigstore/cosign-installer@dc72c7d5c4d10cd6bcb8cf6e3fd625a9e5e537da # v3.7.0
 
       - name: Sign and verify immutable image
-        if: github.ref == 'refs/heads/production'
         env:
           IMAGE_REF: ${{ steps.image.outputs.ref }}
-          CERTIFICATE_IDENTITY: https://github.com/${{ github.repository }}/.github/workflows/workbench-ci.yml@refs/heads/production
+          CERTIFICATE_IDENTITY: https://github.com/${{ github.repository }}/.github/workflows/workbench-ci.yml@refs/heads/main
         run: |
           cosign sign --yes --bundle "output/cosign-${{ matrix.name }}.bundle.json" "$IMAGE_REF"
           cosign verify \
@@ -936,7 +929,6 @@ jobs:
             "$IMAGE_REF"
 
       - name: Write immutable image evidence record
-        if: github.ref == 'refs/heads/production'
         env:
           IMAGE_REF: ${{ steps.image.outputs.ref }}
           IMAGE_DIGEST: ${{ steps.build.outputs.digest }}
@@ -956,7 +948,7 @@ jobs:
             > "output/image-record-${{ matrix.name }}.json"
 
       - name: Upload image evidence
-        if: always() && (matrix.name != 'deerflow' || github.ref == 'refs/heads/production')
+        if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: production-image-evidence-${{ github.run_attempt }}-${{ matrix.name }}
@@ -965,7 +957,7 @@ jobs:
 
   image-evidence:
     name: Assemble signed production image inventory
-    if: github.event_name == 'push' && github.ref == 'refs/heads/production'
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && inputs.release == true
     needs: [production-images, release-chain, release-chain-signing]
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -1010,7 +1002,7 @@ jobs:
 
       - name: Sign and verify candidate image manifest
         env:
-          CERTIFICATE_IDENTITY: https://github.com/${{ github.repository }}/.github/workflows/workbench-ci.yml@refs/heads/production
+          CERTIFICATE_IDENTITY: https://github.com/${{ github.repository }}/.github/workflows/workbench-ci.yml@refs/heads/main
           CERTIFICATE_OIDC_ISSUER: https://token.actions.githubusercontent.com
         run: |
           cosign sign-blob --yes \
@@ -1034,7 +1026,7 @@ jobs:
 
   deployment-config-evidence:
     name: Sign candidate-bound production deployment configuration
-    if: github.event_name == 'push' && github.ref == 'refs/heads/production'
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && inputs.release == true
     needs: [release-chain, release-chain-signing, image-evidence]
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -1107,7 +1099,7 @@ jobs:
 
       - name: Sign and verify deployment configuration
         env:
-          CERTIFICATE_IDENTITY: https://github.com/${{ github.repository }}/.github/workflows/workbench-ci.yml@refs/heads/production
+          CERTIFICATE_IDENTITY: https://github.com/${{ github.repository }}/.github/workflows/workbench-ci.yml@refs/heads/main
           CERTIFICATE_OIDC_ISSUER: https://token.actions.githubusercontent.com
         run: |
           set -euo pipefail

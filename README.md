@@ -38,6 +38,8 @@ docker compose --env-file deploy/workbench.env \
 
 空数据库须先完成下面的首次知识初始化。Web 可在 API 启动后提供登录，API 的业务就绪检查仍要求有效知识发布和真实检索服务。主页面与预览使用独立访问来源。数据库迁移、事件与产物合同位于 `packages/workbench-db/`、`packages/workbench-contracts/`；机器验收合同位于 `schemas/`。
 
+代码只维护 `main`。普通推送运行 CI 检查；发布镜像须在 `main` 手动运行「产品工作台 CI」并勾选 `release`（默认关闭）。发布继续校验同一提交的审批、固定镜像和签名证据。部署端的 Cosign 身份须指向 `workbench-ci.yml@refs/heads/main`，验收校验器引用须支持该合同。
+
 ## 产品工作台 DeerFlow 部署合同
 
 DeerFlow 使用固定镜像和 `lead_agent`。镜像必须携带 `integrations/deerflow/skills/` 中的两个 public skill、受信工具与对应 source patch；工具、模板和返回结构由现有合同检查约束。请求级能力凭证只进入受控 secret channel，不能进入模型上下文、事件或日志。

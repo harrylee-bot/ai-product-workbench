@@ -239,7 +239,7 @@ function runPreflight(providerEnvSource, ownership = null, overrides = {}) {
     `WORKBENCH_DEERFLOW_IMAGE_REF=registry.example.test/workbench/deerflow@sha256:${"c".repeat(64)}`,
     `WORKBENCH_IMAGE_INVENTORY_PATH=${join(releaseDir, "production-image-manifest.json")}`,
     `WORKBENCH_IMAGE_INVENTORY_BUNDLE_PATH=${join(releaseDir, "production-image-manifest.bundle.json")}`,
-    "WORKBENCH_COSIGN_CERTIFICATE_IDENTITY=https://github.com/example/workbench/.github/workflows/workbench-ci.yml@refs/heads/production",
+    "WORKBENCH_COSIGN_CERTIFICATE_IDENTITY=https://github.com/example/workbench/.github/workflows/workbench-ci.yml@refs/heads/main",
     "WORKBENCH_COSIGN_OIDC_ISSUER=https://token.actions.githubusercontent.com",
     `WORKBENCH_DEERFLOW_SECRET_CHANNEL_ATTESTATION_PATH=${join(etcDir, "request-scoped-secrets.attestation.json")}`,
     "",

@@ -7,14 +7,17 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
+import { runInNewContext } from "node:vm";
 
 import YAML from "yaml";
 
 import {
   affectedProductionImageMatrix,
   assembleProductionImageManifest,
+  assertManualProductionReleaseWorkflow,
   assertPinnedWorkflowActions,
   assertProductionAcceptanceImageWorkflow,
+  assertProductionEvidenceSourceWorkflow,
   assertProductionWorkflowPermissions,
   changedPathsForGitRange,
   loadProductionImageDigestBinding,
@@ -28,7 +31,7 @@ import {
 import { createProductionBuildConfiguration } from "./write-production-build-configuration.mjs";
 
 const commit = "a".repeat(40);
-const certificateIdentity = "https://github.com/example/workbench/.github/workflows/workbench-ci.yml@refs/heads/production";
+const certificateIdentity = "https://github.com/example/workbench/.github/workflows/workbench-ci.yml@refs/heads/main";
 const certificateOidcIssuer = "https://token.actions.githubusercontent.com";
 
 test("assembles only the exact candidate image inventory", () => {
@@ -133,6 +136,103 @@ test("keeps PR and quality jobs unprivileged and confines token writes to produc
     () => assertProductionWorkflowPermissions(unguardedPublisher),
     /production-only job condition/u,
   );
+
+  const broadGuard = structuredClone(workflow);
+  broadGuard.jobs["production-images"].if += " || true";
+  assert.throws(() => assertProductionWorkflowPermissions(broadGuard), /explicit manual production-only/u);
+
+  const inheritedWrite = structuredClone(workflow);
+  inheritedWrite.permissions["id-token"] = "write";
+  assert.throws(() => assertProductionWorkflowPermissions(inheritedWrite), /workflow-wide token/u);
+});
+
+test("only explicit main dispatch enables publication and ordinary pushes cannot cancel it", () => {
+  const workflow = YAML.parse(readFileSync(new URL("../.github/workflows/workbench-ci.yml", import.meta.url), "utf8"));
+  assert.equal(assertManualProductionReleaseWorkflow(workflow), true);
+  const cases = [
+    { event: "push", ref: "refs/heads/main", release: true, publishes: false },
+    { event: "pull_request", ref: "refs/pull/1/merge", release: true, publishes: false },
+    { event: "workflow_dispatch", ref: "refs/heads/main", release: undefined, publishes: false },
+    { event: "workflow_dispatch", ref: "refs/heads/main", release: false, publishes: false },
+    { event: "workflow_dispatch", ref: "refs/heads/main", release: "false", publishes: false },
+    { event: "workflow_dispatch", ref: "refs/heads/other", release: true, publishes: false },
+    { event: "workflow_dispatch", ref: "refs/tags/1.0.0", release: true, publishes: false },
+    { event: "workflow_dispatch", ref: "refs/heads/main", release: true, publishes: true },
+  ];
+  const groups = [];
+  for (const entry of cases) {
+    const context = { github: { event_name: entry.event, ref: entry.ref }, inputs: { release: entry.release } };
+    for (const jobId of ["release-chain-signing", "production-images", "image-evidence", "deployment-config-evidence"]) {
+      assert.equal(runInNewContext(workflow.jobs[jobId].if, context), entry.publishes, `${jobId}: ${JSON.stringify(entry)}`);
+    }
+    const evaluate = (template) => template.replace(/\$\{\{\s*([\s\S]*?)\s*\}\}/gu,
+      (_match, expression) => String(runInNewContext(expression, context)));
+    groups.push(evaluate(workflow.concurrency.group));
+    assert.equal(evaluate(workflow.concurrency["cancel-in-progress"]), String(!entry.publishes));
+  }
+  assert.notEqual(groups[0], groups.at(-1), "a main push must never share the running release concurrency group");
+});
+
+test("release contract rejects implicit publishing, mutable build fallbacks, and stale signing identities", () => {
+  const workflow = YAML.parse(readFileSync(new URL("../.github/workflows/workbench-ci.yml", import.meta.url), "utf8"));
+  for (const [mutate, error] of [
+    [(value) => { value.on.workflow_dispatch.inputs.release.default = true; }, /boolean defaulting to false/u],
+    [(value) => { value.on.workflow_dispatch.inputs.release.type = "string"; }, /boolean defaulting to false/u],
+    [(value) => { value.concurrency.group = "workbench-ci-${{ github.ref }}"; }, /isolated from ordinary checks/u],
+    [(value) => { value.concurrency["cancel-in-progress"] = true; }, /must not be cancelled/u],
+    [(value) => {
+      value.jobs["release-chain"].steps.find((step) => step.id === "verify_release_chain").if = "github.ref == 'refs/heads/main'";
+    }, /explicit manual release condition/u],
+    [(value) => { value.jobs.quality.services.postgres.image = "pgvector/pgvector:pg16"; }, /immutable PostgreSQL/u],
+    [(value) => {
+      value.jobs["production-images"].strategy.matrix.include[0].build_args += "\nNODE_IMAGE=node:22-alpine";
+    }, /must not fall back/u],
+    [(value) => {
+      value.jobs["release-chain-signing"].steps.find((step) => step.env?.CERTIFICATE_IDENTITY)
+        .env.CERTIFICATE_IDENTITY = "https://github.com/${{ github.repository }}/.github/workflows/untrusted.yml@refs/heads/main";
+    }, /exact main branch workflow identity/u],
+  ]) {
+    const changed = structuredClone(workflow);
+    mutate(changed);
+    assert.throws(() => assertManualProductionReleaseWorkflow(changed), error);
+  }
+});
+
+test("acceptance and observation accept only successful manual main CI runs with same-attempt signed artifacts", async (t) => {
+  const root = await mkdtemp(path.join(tmpdir(), "workbench-manual-release-test-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const metadataPath = path.join(root, "run.json");
+  const outputPath = path.join(root, "outputs");
+  for (const [filename, jobId] of [
+    ["workbench-production-acceptance.yml", "production-acceptance"],
+    ["workbench-production-observation.yml", "collect-production-observations"],
+  ]) {
+    const workflow = YAML.parse(readFileSync(new URL(`../.github/workflows/${filename}`, import.meta.url), "utf8"));
+    assert.equal(assertProductionEvidenceSourceWorkflow({ workflow, jobId }), true);
+    const steps = workflow.jobs[jobId].steps;
+    const script = steps.find((step) => step.name === "Resolve successful production CI run")
+      .run.match(/<<'NODE'\n([\s\S]+?)\nNODE/u)?.[1];
+    assert(script, "exercise the actual selected-run metadata check embedded in the workflow");
+    const validRun = {
+      event: "workflow_dispatch", head_branch: "main", status: "completed", conclusion: "success",
+      path: ".github/workflows/workbench-ci.yml", head_repository: { full_name: "example/workbench" },
+      head_sha: commit, run_attempt: 2,
+    };
+    for (const patch of [{}, { event: "push" }, { head_branch: "other" }, { conclusion: "failure" },
+      { head_repository: { full_name: "untrusted/fork" } }, { run_attempt: null }]) {
+      await writeFile(metadataPath, JSON.stringify({ ...validRun, ...patch }));
+      const result = spawnSync(process.execPath, ["--input-type=module", "-", outputPath], {
+        input: script, encoding: "utf8",
+        env: { ...process.env, RUN_METADATA: metadataPath, GITHUB_REPOSITORY: "example/workbench" },
+      });
+      assert.equal(result.status === 0, Object.keys(patch).length === 0, `${filename}: ${JSON.stringify(patch)}: ${result.stderr}`);
+    }
+    // A successful dispatch with release=false has no signed release artifacts;
+    // accepting event/branch metadata alone must never make it a release.
+    const missingArtifacts = structuredClone(workflow);
+    missingArtifacts.jobs[jobId].steps = steps.filter((step) => !String(step.run).includes('gh run download "$RELEASE_CHAIN_RUN_ID"'));
+    assert.throws(() => assertProductionEvidenceSourceWorkflow({ workflow: missingArtifacts, jobId }), /signed release artifacts/u);
+  }
 });
 
 test("computes affected production images from target build inputs and shared packages", () => {

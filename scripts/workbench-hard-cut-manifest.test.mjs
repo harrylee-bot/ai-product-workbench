@@ -71,7 +71,7 @@ test("production acceptance derives identity from signed CI evidence and externa
   for (const marker of [
     "gh api",
     ".github/workflows/workbench-ci.yml",
-    "head_branch: 'production'",
+    "head_branch: 'main'",
     "conclusion: 'success'",
   ]) assert.match(resolveRun, new RegExp(marker.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "u"));
   assert.match(steps.find((step) => step.name === "Download CI-owned verified release chain").run, /gh run download/u);
@@ -662,7 +662,7 @@ async function createAcceptancePackage({ forgeFailingObservation = false } = {})
       expectedProductionImageManifestSha256: productionImageManifestSha256,
       deploymentConfigManifestPath,
       deploymentConfigBundlePath,
-      deploymentConfigCertificateIdentity: "https://github.com/example/workbench/.github/workflows/workbench-ci.yml@refs/heads/production",
+      deploymentConfigCertificateIdentity: "https://github.com/example/workbench/.github/workflows/workbench-ci.yml@refs/heads/main",
       deploymentConfigCertificateOidcIssuer: "https://token.actions.githubusercontent.com",
       expectedDeploymentConfigGithubRunId: "81234",
       expectedDeploymentConfigGithubRunAttempt: 1,

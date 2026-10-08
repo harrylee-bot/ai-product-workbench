@@ -25,7 +25,7 @@ const candidateId = `sha256:${"b".repeat(64)}`;
 const releaseChainId = `sha256:${"c".repeat(64)}`;
 const signedTag = "workbench-v1.0.0";
 const imageManifestSha256 = "d".repeat(64);
-const certificateIdentity = "https://github.com/example/workbench/.github/workflows/workbench-ci.yml@refs/heads/production";
+const certificateIdentity = "https://github.com/example/workbench/.github/workflows/workbench-ci.yml@refs/heads/main";
 const certificateOidcIssuer = "https://token.actions.githubusercontent.com";
 
 test("binds G1/G4/run attempt to the effective production topology without validation-only images", () => {
