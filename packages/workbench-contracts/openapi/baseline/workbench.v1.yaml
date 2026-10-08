@@ -659,6 +659,12 @@ components:
             - "null"
           minLength: 1
           maxLength: 128
+        sourcePrdVersionId:
+          type:
+            - string
+            - "null"
+          minLength: 1
+          maxLength: 128
         createdAt:
           type: string
           format: date-time
@@ -783,6 +789,253 @@ components:
         - revision
         - checksum
       additionalProperties: false
+    Sha256:
+      type: string
+      pattern: ^[a-f0-9]{64}$
+    ArtifactFinalization:
+      type: object
+      properties:
+        id:
+          type: string
+          minLength: 1
+          maxLength: 128
+        artifactVersionId:
+          type: string
+          minLength: 1
+          maxLength: 128
+        projectId:
+          type: string
+          minLength: 1
+          maxLength: 128
+        confirmedById:
+          type: string
+          minLength: 1
+          maxLength: 128
+        checksum:
+          type: string
+          pattern: ^[a-f0-9]{64}$
+        status:
+          type: string
+          enum:
+            - confirmed
+            - ingesting
+            - ingested
+            - rejected
+            - withdrawn
+        confirmedAt:
+          type: string
+          format: date-time
+        withdrawnAt:
+          type:
+            - string
+            - "null"
+          format: date-time
+        ingestionJob:
+          type:
+            - object
+            - "null"
+          properties:
+            id:
+              type: string
+              minLength: 1
+              maxLength: 128
+            status:
+              type: string
+              enum:
+                - queued
+                - converting
+                - indexing
+                - publishing
+                - published
+                - failed
+                - withdrawn
+            attempt:
+              type: integer
+              minimum: 0
+            errorCode:
+              type:
+                - string
+                - "null"
+            createdAt:
+              type: string
+              format: date-time
+            updatedAt:
+              type: string
+              format: date-time
+            releases:
+              type: array
+              items:
+                type: object
+                properties:
+                  id:
+                    type: string
+                    minLength: 1
+                    maxLength: 128
+                  version:
+                    type: integer
+                    exclusiveMinimum: 0
+                  status:
+                    type: string
+                    enum:
+                      - building
+                      - ready
+                      - failed
+                      - retired
+                  parentReleaseId:
+                    type:
+                      - string
+                      - "null"
+                    minLength: 1
+                    maxLength: 128
+                required:
+                  - id
+                  - version
+                  - status
+                  - parentReleaseId
+                additionalProperties: false
+          required:
+            - id
+            - status
+            - attempt
+            - errorCode
+            - createdAt
+            - updatedAt
+            - releases
+          additionalProperties: false
+      required:
+        - id
+        - artifactVersionId
+        - projectId
+        - confirmedById
+        - checksum
+        - status
+        - confirmedAt
+        - withdrawnAt
+        - ingestionJob
+      additionalProperties: false
+    ArtifactFinalizationState:
+      type:
+        - object
+        - "null"
+      properties:
+        id:
+          type: string
+          minLength: 1
+          maxLength: 128
+        artifactVersionId:
+          type: string
+          minLength: 1
+          maxLength: 128
+        projectId:
+          type: string
+          minLength: 1
+          maxLength: 128
+        confirmedById:
+          type: string
+          minLength: 1
+          maxLength: 128
+        checksum:
+          type: string
+          pattern: ^[a-f0-9]{64}$
+        status:
+          type: string
+          enum:
+            - confirmed
+            - ingesting
+            - ingested
+            - rejected
+            - withdrawn
+        confirmedAt:
+          type: string
+          format: date-time
+        withdrawnAt:
+          type:
+            - string
+            - "null"
+          format: date-time
+        ingestionJob:
+          type:
+            - object
+            - "null"
+          properties:
+            id:
+              type: string
+              minLength: 1
+              maxLength: 128
+            status:
+              type: string
+              enum:
+                - queued
+                - converting
+                - indexing
+                - publishing
+                - published
+                - failed
+                - withdrawn
+            attempt:
+              type: integer
+              minimum: 0
+            errorCode:
+              type:
+                - string
+                - "null"
+            createdAt:
+              type: string
+              format: date-time
+            updatedAt:
+              type: string
+              format: date-time
+            releases:
+              type: array
+              items:
+                type: object
+                properties:
+                  id:
+                    type: string
+                    minLength: 1
+                    maxLength: 128
+                  version:
+                    type: integer
+                    exclusiveMinimum: 0
+                  status:
+                    type: string
+                    enum:
+                      - building
+                      - ready
+                      - failed
+                      - retired
+                  parentReleaseId:
+                    type:
+                      - string
+                      - "null"
+                    minLength: 1
+                    maxLength: 128
+                required:
+                  - id
+                  - version
+                  - status
+                  - parentReleaseId
+                additionalProperties: false
+          required:
+            - id
+            - status
+            - attempt
+            - errorCode
+            - createdAt
+            - updatedAt
+            - releases
+          additionalProperties: false
+      required:
+        - id
+        - artifactVersionId
+        - projectId
+        - confirmedById
+        - checksum
+        - status
+        - confirmedAt
+        - withdrawnAt
+        - ingestionJob
+      additionalProperties: false
     ArtifactList:
       type: object
       properties:
@@ -831,6 +1084,12 @@ components:
           minLength: 1
           maxLength: 128
         knowledgeReleaseId:
+          type:
+            - string
+            - "null"
+          minLength: 1
+          maxLength: 128
+        sourcePrdVersionId:
           type:
             - string
             - "null"
@@ -943,6 +1202,12 @@ components:
             - "null"
           minLength: 1
           maxLength: 128
+        sourcePrdVersionId:
+          type:
+            - string
+            - "null"
+          minLength: 1
+          maxLength: 128
         createdAt:
           type: string
           format: date-time
@@ -1005,6 +1270,12 @@ components:
           minLength: 1
           maxLength: 128
         knowledgeReleaseId:
+          type:
+            - string
+            - "null"
+          minLength: 1
+          maxLength: 128
+        sourcePrdVersionId:
           type:
             - string
             - "null"
@@ -1546,6 +1817,12 @@ components:
             - "null"
           minLength: 1
           maxLength: 128
+        sourcePrdVersionId:
+          type:
+            - string
+            - "null"
+          minLength: 1
+          maxLength: 128
         createdAt:
           type: string
           format: date-time
@@ -1614,6 +1891,12 @@ components:
             - "null"
           minLength: 1
           maxLength: 128
+        sourcePrdVersionId:
+          type:
+            - string
+            - "null"
+          minLength: 1
+          maxLength: 128
         createdAt:
           type: string
           format: date-time
@@ -1676,6 +1959,12 @@ components:
           minLength: 1
           maxLength: 128
         knowledgeReleaseId:
+          type:
+            - string
+            - "null"
+          minLength: 1
+          maxLength: 128
+        sourcePrdVersionId:
           type:
             - string
             - "null"
@@ -2566,6 +2855,12 @@ components:
             - "null"
           minLength: 1
           maxLength: 128
+        sourcePrdVersionId:
+          type:
+            - string
+            - "null"
+          minLength: 1
+          maxLength: 128
         createdAt:
           type: string
           format: date-time
@@ -2943,6 +3238,761 @@ components:
         - type: boolean
         - type: "null"
         - type: "null"
+    PrototypeExpressionDepth1:
+      type: object
+      oneOf:
+        - type: object
+          properties:
+            kind:
+              type: string
+              enum:
+                - literal
+            value:
+              $ref: "#/components/schemas/PrototypeRuntimeValue"
+          required:
+            - kind
+            - value
+          additionalProperties: false
+        - type: object
+          properties:
+            kind:
+              type: string
+              enum:
+                - variable
+            path:
+              type: string
+              pattern: ^[A-Za-z][A-Za-z0-9_]*(?:\.[A-Za-z][A-Za-z0-9_]*)*$
+              maxLength: 500
+          required:
+            - kind
+            - path
+          additionalProperties: false
+    PrototypeExpressionDepth2:
+      type: object
+      oneOf:
+        - type: object
+          properties:
+            kind:
+              type: string
+              enum:
+                - literal
+            value:
+              $ref: "#/components/schemas/PrototypeRuntimeValue"
+          required:
+            - kind
+            - value
+          additionalProperties: false
+        - type: object
+          properties:
+            kind:
+              type: string
+              enum:
+                - variable
+            path:
+              type: string
+              pattern: ^[A-Za-z][A-Za-z0-9_]*(?:\.[A-Za-z][A-Za-z0-9_]*)*$
+              maxLength: 500
+          required:
+            - kind
+            - path
+          additionalProperties: false
+        - type: object
+          properties:
+            kind:
+              type: string
+              enum:
+                - contains
+            left:
+              $ref: "#/components/schemas/PrototypeExpressionDepth1"
+            right:
+              $ref: "#/components/schemas/PrototypeExpressionDepth1"
+          required:
+            - kind
+            - left
+            - right
+          additionalProperties: false
+        - type: object
+          properties:
+            kind:
+              type: string
+              enum:
+                - equals
+            left:
+              $ref: "#/components/schemas/PrototypeExpressionDepth1"
+            right:
+              $ref: "#/components/schemas/PrototypeExpressionDepth1"
+          required:
+            - kind
+            - left
+            - right
+          additionalProperties: false
+        - type: object
+          properties:
+            kind:
+              type: string
+              enum:
+                - and
+            operands:
+              type: array
+              items:
+                $ref: "#/components/schemas/PrototypeExpressionDepth1"
+              minItems: 1
+              maxItems: 16
+          required:
+            - kind
+            - operands
+          additionalProperties: false
+        - type: object
+          properties:
+            kind:
+              type: string
+              enum:
+                - or
+            operands:
+              type: array
+              items:
+                $ref: "#/components/schemas/PrototypeExpressionDepth1"
+              minItems: 1
+              maxItems: 16
+          required:
+            - kind
+            - operands
+          additionalProperties: false
+        - type: object
+          properties:
+            kind:
+              type: string
+              enum:
+                - not
+            operand:
+              $ref: "#/components/schemas/PrototypeExpressionDepth1"
+          required:
+            - kind
+            - operand
+          additionalProperties: false
+    PrototypeExpressionDepth3:
+      type: object
+      oneOf:
+        - type: object
+          properties:
+            kind:
+              type: string
+              enum:
+                - literal
+            value:
+              $ref: "#/components/schemas/PrototypeRuntimeValue"
+          required:
+            - kind
+            - value
+          additionalProperties: false
+        - type: object
+          properties:
+            kind:
+              type: string
+              enum:
+                - variable
+            path:
+              type: string
+              pattern: ^[A-Za-z][A-Za-z0-9_]*(?:\.[A-Za-z][A-Za-z0-9_]*)*$
+              maxLength: 500
+          required:
+            - kind
+            - path
+          additionalProperties: false
+        - type: object
+          properties:
+            kind:
+              type: string
+              enum:
+                - contains
+            left:
+              $ref: "#/components/schemas/PrototypeExpressionDepth2"
+            right:
+              $ref: "#/components/schemas/PrototypeExpressionDepth2"
+          required:
+            - kind
+            - left
+            - right
+          additionalProperties: false
+        - type: object
+          properties:
+            kind:
+              type: string
+              enum:
+                - equals
+            left:
+              $ref: "#/components/schemas/PrototypeExpressionDepth2"
+            right:
+              $ref: "#/components/schemas/PrototypeExpressionDepth2"
+          required:
+            - kind
+            - left
+            - right
+          additionalProperties: false
+        - type: object
+          properties:
+            kind:
+              type: string
+              enum:
+                - and
+            operands:
+              type: array
+              items:
+                $ref: "#/components/schemas/PrototypeExpressionDepth2"
+              minItems: 1
+              maxItems: 16
+          required:
+            - kind
+            - operands
+          additionalProperties: false
+        - type: object
+          properties:
+            kind:
+              type: string
+              enum:
+                - or
+            operands:
+              type: array
+              items:
+                $ref: "#/components/schemas/PrototypeExpressionDepth2"
+              minItems: 1
+              maxItems: 16
+          required:
+            - kind
+            - operands
+          additionalProperties: false
+        - type: object
+          properties:
+            kind:
+              type: string
+              enum:
+                - not
+            operand:
+              $ref: "#/components/schemas/PrototypeExpressionDepth2"
+          required:
+            - kind
+            - operand
+          additionalProperties: false
+    PrototypeExpressionDepth4:
+      type: object
+      oneOf:
+        - type: object
+          properties:
+            kind:
+              type: string
+              enum:
+                - literal
+            value:
+              $ref: "#/components/schemas/PrototypeRuntimeValue"
+          required:
+            - kind
+            - value
+          additionalProperties: false
+        - type: object
+          properties:
+            kind:
+              type: string
+              enum:
+                - variable
+            path:
+              type: string
+              pattern: ^[A-Za-z][A-Za-z0-9_]*(?:\.[A-Za-z][A-Za-z0-9_]*)*$
+              maxLength: 500
+          required:
+            - kind
+            - path
+          additionalProperties: false
+        - type: object
+          properties:
+            kind:
+              type: string
+              enum:
+                - contains
+            left:
+              $ref: "#/components/schemas/PrototypeExpressionDepth3"
+            right:
+              $ref: "#/components/schemas/PrototypeExpressionDepth3"
+          required:
+            - kind
+            - left
+            - right
+          additionalProperties: false
+        - type: object
+          properties:
+            kind:
+              type: string
+              enum:
+                - equals
+            left:
+              $ref: "#/components/schemas/PrototypeExpressionDepth3"
+            right:
+              $ref: "#/components/schemas/PrototypeExpressionDepth3"
+          required:
+            - kind
+            - left
+            - right
+          additionalProperties: false
+        - type: object
+          properties:
+            kind:
+              type: string
+              enum:
+                - and
+            operands:
+              type: array
+              items:
+                $ref: "#/components/schemas/PrototypeExpressionDepth3"
+              minItems: 1
+              maxItems: 16
+          required:
+            - kind
+            - operands
+          additionalProperties: false
+        - type: object
+          properties:
+            kind:
+              type: string
+              enum:
+                - or
+            operands:
+              type: array
+              items:
+                $ref: "#/components/schemas/PrototypeExpressionDepth3"
+              minItems: 1
+              maxItems: 16
+          required:
+            - kind
+            - operands
+          additionalProperties: false
+        - type: object
+          properties:
+            kind:
+              type: string
+              enum:
+                - not
+            operand:
+              $ref: "#/components/schemas/PrototypeExpressionDepth3"
+          required:
+            - kind
+            - operand
+          additionalProperties: false
+    PrototypeExpressionDepth5:
+      type: object
+      oneOf:
+        - type: object
+          properties:
+            kind:
+              type: string
+              enum:
+                - literal
+            value:
+              $ref: "#/components/schemas/PrototypeRuntimeValue"
+          required:
+            - kind
+            - value
+          additionalProperties: false
+        - type: object
+          properties:
+            kind:
+              type: string
+              enum:
+                - variable
+            path:
+              type: string
+              pattern: ^[A-Za-z][A-Za-z0-9_]*(?:\.[A-Za-z][A-Za-z0-9_]*)*$
+              maxLength: 500
+          required:
+            - kind
+            - path
+          additionalProperties: false
+        - type: object
+          properties:
+            kind:
+              type: string
+              enum:
+                - contains
+            left:
+              $ref: "#/components/schemas/PrototypeExpressionDepth4"
+            right:
+              $ref: "#/components/schemas/PrototypeExpressionDepth4"
+          required:
+            - kind
+            - left
+            - right
+          additionalProperties: false
+        - type: object
+          properties:
+            kind:
+              type: string
+              enum:
+                - equals
+            left:
+              $ref: "#/components/schemas/PrototypeExpressionDepth4"
+            right:
+              $ref: "#/components/schemas/PrototypeExpressionDepth4"
+          required:
+            - kind
+            - left
+            - right
+          additionalProperties: false
+        - type: object
+          properties:
+            kind:
+              type: string
+              enum:
+                - and
+            operands:
+              type: array
+              items:
+                $ref: "#/components/schemas/PrototypeExpressionDepth4"
+              minItems: 1
+              maxItems: 16
+          required:
+            - kind
+            - operands
+          additionalProperties: false
+        - type: object
+          properties:
+            kind:
+              type: string
+              enum:
+                - or
+            operands:
+              type: array
+              items:
+                $ref: "#/components/schemas/PrototypeExpressionDepth4"
+              minItems: 1
+              maxItems: 16
+          required:
+            - kind
+            - operands
+          additionalProperties: false
+        - type: object
+          properties:
+            kind:
+              type: string
+              enum:
+                - not
+            operand:
+              $ref: "#/components/schemas/PrototypeExpressionDepth4"
+          required:
+            - kind
+            - operand
+          additionalProperties: false
+    PrototypeExpressionDepth6:
+      type: object
+      oneOf:
+        - type: object
+          properties:
+            kind:
+              type: string
+              enum:
+                - literal
+            value:
+              $ref: "#/components/schemas/PrototypeRuntimeValue"
+          required:
+            - kind
+            - value
+          additionalProperties: false
+        - type: object
+          properties:
+            kind:
+              type: string
+              enum:
+                - variable
+            path:
+              type: string
+              pattern: ^[A-Za-z][A-Za-z0-9_]*(?:\.[A-Za-z][A-Za-z0-9_]*)*$
+              maxLength: 500
+          required:
+            - kind
+            - path
+          additionalProperties: false
+        - type: object
+          properties:
+            kind:
+              type: string
+              enum:
+                - contains
+            left:
+              $ref: "#/components/schemas/PrototypeExpressionDepth5"
+            right:
+              $ref: "#/components/schemas/PrototypeExpressionDepth5"
+          required:
+            - kind
+            - left
+            - right
+          additionalProperties: false
+        - type: object
+          properties:
+            kind:
+              type: string
+              enum:
+                - equals
+            left:
+              $ref: "#/components/schemas/PrototypeExpressionDepth5"
+            right:
+              $ref: "#/components/schemas/PrototypeExpressionDepth5"
+          required:
+            - kind
+            - left
+            - right
+          additionalProperties: false
+        - type: object
+          properties:
+            kind:
+              type: string
+              enum:
+                - and
+            operands:
+              type: array
+              items:
+                $ref: "#/components/schemas/PrototypeExpressionDepth5"
+              minItems: 1
+              maxItems: 16
+          required:
+            - kind
+            - operands
+          additionalProperties: false
+        - type: object
+          properties:
+            kind:
+              type: string
+              enum:
+                - or
+            operands:
+              type: array
+              items:
+                $ref: "#/components/schemas/PrototypeExpressionDepth5"
+              minItems: 1
+              maxItems: 16
+          required:
+            - kind
+            - operands
+          additionalProperties: false
+        - type: object
+          properties:
+            kind:
+              type: string
+              enum:
+                - not
+            operand:
+              $ref: "#/components/schemas/PrototypeExpressionDepth5"
+          required:
+            - kind
+            - operand
+          additionalProperties: false
+    PrototypeExpressionDepth7:
+      type: object
+      oneOf:
+        - type: object
+          properties:
+            kind:
+              type: string
+              enum:
+                - literal
+            value:
+              $ref: "#/components/schemas/PrototypeRuntimeValue"
+          required:
+            - kind
+            - value
+          additionalProperties: false
+        - type: object
+          properties:
+            kind:
+              type: string
+              enum:
+                - variable
+            path:
+              type: string
+              pattern: ^[A-Za-z][A-Za-z0-9_]*(?:\.[A-Za-z][A-Za-z0-9_]*)*$
+              maxLength: 500
+          required:
+            - kind
+            - path
+          additionalProperties: false
+        - type: object
+          properties:
+            kind:
+              type: string
+              enum:
+                - contains
+            left:
+              $ref: "#/components/schemas/PrototypeExpressionDepth6"
+            right:
+              $ref: "#/components/schemas/PrototypeExpressionDepth6"
+          required:
+            - kind
+            - left
+            - right
+          additionalProperties: false
+        - type: object
+          properties:
+            kind:
+              type: string
+              enum:
+                - equals
+            left:
+              $ref: "#/components/schemas/PrototypeExpressionDepth6"
+            right:
+              $ref: "#/components/schemas/PrototypeExpressionDepth6"
+          required:
+            - kind
+            - left
+            - right
+          additionalProperties: false
+        - type: object
+          properties:
+            kind:
+              type: string
+              enum:
+                - and
+            operands:
+              type: array
+              items:
+                $ref: "#/components/schemas/PrototypeExpressionDepth6"
+              minItems: 1
+              maxItems: 16
+          required:
+            - kind
+            - operands
+          additionalProperties: false
+        - type: object
+          properties:
+            kind:
+              type: string
+              enum:
+                - or
+            operands:
+              type: array
+              items:
+                $ref: "#/components/schemas/PrototypeExpressionDepth6"
+              minItems: 1
+              maxItems: 16
+          required:
+            - kind
+            - operands
+          additionalProperties: false
+        - type: object
+          properties:
+            kind:
+              type: string
+              enum:
+                - not
+            operand:
+              $ref: "#/components/schemas/PrototypeExpressionDepth6"
+          required:
+            - kind
+            - operand
+          additionalProperties: false
+    PrototypeExpressionDepth8:
+      type: object
+      oneOf:
+        - type: object
+          properties:
+            kind:
+              type: string
+              enum:
+                - literal
+            value:
+              $ref: "#/components/schemas/PrototypeRuntimeValue"
+          required:
+            - kind
+            - value
+          additionalProperties: false
+        - type: object
+          properties:
+            kind:
+              type: string
+              enum:
+                - variable
+            path:
+              type: string
+              pattern: ^[A-Za-z][A-Za-z0-9_]*(?:\.[A-Za-z][A-Za-z0-9_]*)*$
+              maxLength: 500
+          required:
+            - kind
+            - path
+          additionalProperties: false
+        - type: object
+          properties:
+            kind:
+              type: string
+              enum:
+                - contains
+            left:
+              $ref: "#/components/schemas/PrototypeExpressionDepth7"
+            right:
+              $ref: "#/components/schemas/PrototypeExpressionDepth7"
+          required:
+            - kind
+            - left
+            - right
+          additionalProperties: false
+        - type: object
+          properties:
+            kind:
+              type: string
+              enum:
+                - equals
+            left:
+              $ref: "#/components/schemas/PrototypeExpressionDepth7"
+            right:
+              $ref: "#/components/schemas/PrototypeExpressionDepth7"
+          required:
+            - kind
+            - left
+            - right
+          additionalProperties: false
+        - type: object
+          properties:
+            kind:
+              type: string
+              enum:
+                - and
+            operands:
+              type: array
+              items:
+                $ref: "#/components/schemas/PrototypeExpressionDepth7"
+              minItems: 1
+              maxItems: 16
+          required:
+            - kind
+            - operands
+          additionalProperties: false
+        - type: object
+          properties:
+            kind:
+              type: string
+              enum:
+                - or
+            operands:
+              type: array
+              items:
+                $ref: "#/components/schemas/PrototypeExpressionDepth7"
+              minItems: 1
+              maxItems: 16
+          required:
+            - kind
+            - operands
+          additionalProperties: false
+        - type: object
+          properties:
+            kind:
+              type: string
+              enum:
+                - not
+            operand:
+              $ref: "#/components/schemas/PrototypeExpressionDepth7"
+          required:
+            - kind
+            - operand
+          additionalProperties: false
+    PrototypeExpression:
+      type: object
+      description: Prototype expressions use only the declared operators, at most eight levels and 64 total nodes, and one to sixteen operands per and/or. A bounded pre-parse walk enforces tree limits before structural parsing; variable references and operand/result types are checked by the Prototype document contract.
+      allOf:
+        - $ref: "#/components/schemas/PrototypeExpressionDepth8"
     PrototypeBindingSource:
       oneOf:
         - type: object
@@ -2989,6 +4039,18 @@ components:
           required:
             - kind
             - value
+          additionalProperties: false
+        - type: object
+          properties:
+            kind:
+              type: string
+              enum:
+                - expression
+            expression:
+              $ref: "#/components/schemas/PrototypeExpression"
+          required:
+            - kind
+            - expression
           additionalProperties: false
     PrototypeBinding:
       type: object
@@ -4947,6 +6009,12 @@ components:
             - "null"
           minLength: 1
           maxLength: 128
+        sourcePrdVersionId:
+          type:
+            - string
+            - "null"
+          minLength: 1
+          maxLength: 128
         createdAt:
           type: string
           format: date-time
@@ -4998,6 +6066,24 @@ components:
           code: "#/components/schemas/ArtifactVersionInlineCodeDetail"
           document: "#/components/schemas/ArtifactVersionInlineDocumentDetail"
           data: "#/components/schemas/ArtifactVersionInlineDataDetail"
+    PrdAdditionalBusinessSection:
+      type: object
+      properties:
+        title:
+          type: string
+          minLength: 5
+          maxLength: 240
+          pattern: ^2\.(?:[5-9]|[1-9]\d+)\s+\S
+        blocks:
+          type: array
+          items:
+            $ref: "#/components/schemas/PrdBlock"
+          minItems: 1
+          maxItems: 500
+      required:
+        - title
+        - blocks
+      additionalProperties: false
     PrdChannelRow:
       type: object
       properties:
@@ -5229,7 +6315,7 @@ components:
                 minLength: 1
                 maxLength: 240
               minItems: 11
-              maxItems: 11
+              maxItems: 61
           required:
             - title
             - entries
@@ -5413,6 +6499,12 @@ components:
                     - title
                     - blocks
                   additionalProperties: false
+                additionalSections:
+                  type: array
+                  items:
+                    $ref: "#/components/schemas/PrdAdditionalBusinessSection"
+                  maxItems: 50
+                  default: []
               required:
                 - title
                 - summary
@@ -5514,6 +6606,12 @@ components:
           minLength: 1
           maxLength: 128
         knowledgeReleaseId:
+          type:
+            - string
+            - "null"
+          minLength: 1
+          maxLength: 128
+        sourcePrdVersionId:
           type:
             - string
             - "null"
@@ -6125,6 +7223,27 @@ components:
         - nodes
         - edges
       additionalProperties: false
+    BusinessDocument:
+      type: object
+      properties:
+        protocol:
+          type: string
+          enum:
+            - workbench.document.v1
+        title:
+          type: string
+          minLength: 1
+          maxLength: 240
+        text:
+          type: string
+          minLength: 1
+          maxLength: 1000000
+        markdown:
+          type: string
+          minLength: 1
+          maxLength: 1000000
+      additionalProperties: false
+      description: A business document contains exactly one nonempty text or Markdown body; enforced by the runtime Zod contract.
     CanvasAgentCapability:
       type: string
       enum:
@@ -9432,9 +10551,6 @@ components:
         - partNumber
         - etag
       additionalProperties: false
-    Sha256:
-      type: string
-      pattern: ^[a-f0-9]{64}$
     CompleteFileUploadRequest:
       type: object
       properties:
@@ -9895,6 +11011,15 @@ components:
         - file
         - upload
       additionalProperties: false
+    ConfirmArtifactFinalizationRequest:
+      type: object
+      properties:
+        checksum:
+          type: string
+          pattern: ^[a-f0-9]{64}$
+      required:
+        - checksum
+      additionalProperties: false
     CreateImageArtifactRequest:
       type: object
       properties:
@@ -10016,6 +11141,8 @@ components:
         - react
         - figma
         - mcp
+        - docx
+        - pdf
     ExportPackaging:
       type: string
       enum:
@@ -10370,11 +11497,18 @@ components:
           $ref: "#/components/schemas/Revision"
         selection:
           $ref: "#/components/schemas/ExportSelection"
+        initialScreenId:
+          type:
+            - string
+            - "null"
+          minLength: 1
+          maxLength: 128
       required:
         - boardId
         - boardRevision
         - selection
       additionalProperties: false
+      description: Project Preview keeps initial-screen intent separate from single-screen Export cropping, and only Artifact selections can name an initial screen.
     CreateProjectReleaseRequest:
       type: object
       properties:
@@ -11668,11 +12802,17 @@ components:
               $ref: "#/components/schemas/AvailableExportCapability"
             mcp:
               $ref: "#/components/schemas/AvailableExportCapability"
+            docx:
+              $ref: "#/components/schemas/AvailableExportCapability"
+            pdf:
+              $ref: "#/components/schemas/AvailableExportCapability"
           required:
             - html
             - react
             - figma
             - mcp
+            - docx
+            - pdf
           additionalProperties: false
         packaging:
           type: object
@@ -14392,6 +15532,12 @@ components:
           $ref: "#/components/schemas/Revision"
         selection:
           $ref: "#/components/schemas/ExportSelection"
+        initialScreenId:
+          type:
+            - string
+            - "null"
+          minLength: 1
+          maxLength: 128
         status:
           $ref: "#/components/schemas/PreviewStatus"
         revision:
@@ -16559,6 +17705,10 @@ components:
           type: string
           minLength: 1
           maxLength: 128
+        artifactVersionId:
+          type: string
+          minLength: 1
+          maxLength: 128
         scope:
           allOf:
             - $ref: "#/components/schemas/ShareScope"
@@ -16587,6 +17737,12 @@ components:
           maxLength: 128
         releaseId:
           type: string
+          minLength: 1
+          maxLength: 128
+        artifactVersionId:
+          type:
+            - string
+            - "null"
           minLength: 1
           maxLength: 128
         createdById:
@@ -16723,6 +17879,10 @@ components:
       type: string
       enum:
         - thinking
+        - collecting-prd-context
+        - structuring-prd
+        - drafting-prd
+        - validating-prd
         - design-system
         - mapping-components
         - creating-flows
@@ -17014,7 +18174,17 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/ArtifactCitation"
+          minItems: 1
           maxItems: 1000
+        kind:
+          type: string
+          enum:
+            - code
+        schemaVersion:
+          type: integer
+          exclusiveMinimum: 0
+        content:
+          $ref: "#/components/schemas/JsonValue"
         operation:
           oneOf:
             - type: object
@@ -17038,22 +18208,13 @@ components:
                 - kind
                 - target
               additionalProperties: false
-        kind:
-          type: string
-          enum:
-            - code
-        schemaVersion:
-          type: integer
-          exclusiveMinimum: 0
-        content:
-          $ref: "#/components/schemas/JsonValue"
       required:
         - title
         - citations
-        - operation
         - kind
         - schemaVersion
         - content
+        - operation
       additionalProperties: false
     RuntimeArtifactDraftData:
       type: object
@@ -17066,7 +18227,17 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/ArtifactCitation"
+          minItems: 1
           maxItems: 1000
+        kind:
+          type: string
+          enum:
+            - data
+        schemaVersion:
+          type: integer
+          exclusiveMinimum: 0
+        content:
+          $ref: "#/components/schemas/JsonValue"
         operation:
           oneOf:
             - type: object
@@ -17090,22 +18261,13 @@ components:
                 - kind
                 - target
               additionalProperties: false
-        kind:
-          type: string
-          enum:
-            - data
-        schemaVersion:
-          type: integer
-          exclusiveMinimum: 0
-        content:
-          $ref: "#/components/schemas/JsonValue"
       required:
         - title
         - citations
-        - operation
         - kind
         - schemaVersion
         - content
+        - operation
       additionalProperties: false
     RuntimeArtifactDraftDocument:
       type: object
@@ -17118,7 +18280,17 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/ArtifactCitation"
+          minItems: 1
           maxItems: 1000
+        kind:
+          type: string
+          enum:
+            - document
+        schemaVersion:
+          type: integer
+          exclusiveMinimum: 0
+        content:
+          $ref: "#/components/schemas/JsonValue"
         operation:
           oneOf:
             - type: object
@@ -17142,22 +18314,13 @@ components:
                 - kind
                 - target
               additionalProperties: false
-        kind:
-          type: string
-          enum:
-            - document
-        schemaVersion:
-          type: integer
-          exclusiveMinimum: 0
-        content:
-          $ref: "#/components/schemas/JsonValue"
       required:
         - title
         - citations
-        - operation
         - kind
         - schemaVersion
         - content
+        - operation
       additionalProperties: false
     RuntimeArtifactDraftImage:
       type: object
@@ -17170,7 +18333,17 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/ArtifactCitation"
+          minItems: 1
           maxItems: 1000
+        kind:
+          type: string
+          enum:
+            - image
+        schemaVersion:
+          type: integer
+          exclusiveMinimum: 0
+        content:
+          $ref: "#/components/schemas/JsonValue"
         operation:
           oneOf:
             - type: object
@@ -17194,24 +18367,15 @@ components:
                 - kind
                 - target
               additionalProperties: false
-        kind:
-          type: string
-          enum:
-            - image
-        schemaVersion:
-          type: integer
-          exclusiveMinimum: 0
-        content:
-          $ref: "#/components/schemas/JsonValue"
       required:
         - title
         - citations
-        - operation
         - kind
         - schemaVersion
         - content
+        - operation
       additionalProperties: false
-    RuntimeArtifactDraftPrd:
+    RuntimeArtifactDraftPrdV1Revision:
       type: object
       properties:
         title:
@@ -17222,7 +18386,62 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/ArtifactCitation"
+          minItems: 1
           maxItems: 1000
+        kind:
+          type: string
+          enum:
+            - prd
+        schemaVersion:
+          type: number
+          enum:
+            - 1
+        content:
+          $ref: "#/components/schemas/PrdDocumentV1"
+        operation:
+          type: object
+          properties:
+            kind:
+              type: string
+              enum:
+                - revise
+            target:
+              $ref: "#/components/schemas/RunArtifactTarget"
+          required:
+            - kind
+            - target
+          additionalProperties: false
+      required:
+        - title
+        - citations
+        - kind
+        - schemaVersion
+        - content
+        - operation
+      additionalProperties: false
+    RuntimeArtifactDraftPrdV2:
+      type: object
+      properties:
+        title:
+          type: string
+          minLength: 1
+          maxLength: 240
+        citations:
+          type: array
+          items:
+            $ref: "#/components/schemas/ArtifactCitation"
+          minItems: 1
+          maxItems: 1000
+        kind:
+          type: string
+          enum:
+            - prd
+        schemaVersion:
+          type: number
+          enum:
+            - 2
+        content:
+          $ref: "#/components/schemas/PrdDocumentV2"
         operation:
           oneOf:
             - type: object
@@ -17246,28 +18465,18 @@ components:
                 - kind
                 - target
               additionalProperties: false
-        kind:
-          type: string
-          enum:
-            - prd
-        schemaVersion:
-          anyOf:
-            - type: number
-              enum:
-                - 1
-            - type: number
-              enum:
-                - 2
-        content:
-          $ref: "#/components/schemas/PrdDocument"
       required:
         - title
         - citations
-        - operation
         - kind
         - schemaVersion
         - content
+        - operation
       additionalProperties: false
+    RuntimeArtifactDraftPrd:
+      anyOf:
+        - $ref: "#/components/schemas/RuntimeArtifactDraftPrdV1Revision"
+        - $ref: "#/components/schemas/RuntimeArtifactDraftPrdV2"
     RuntimeArtifactDraftPrototype:
       type: object
       properties:
@@ -17279,7 +18488,18 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/ArtifactCitation"
+          minItems: 1
           maxItems: 1000
+        kind:
+          type: string
+          enum:
+            - prototype
+        schemaVersion:
+          type: number
+          enum:
+            - 1
+        content:
+          $ref: "#/components/schemas/PrototypeDocument"
         operation:
           oneOf:
             - type: object
@@ -17303,25 +18523,16 @@ components:
                 - kind
                 - target
               additionalProperties: false
-        kind:
-          type: string
-          enum:
-            - prototype
-        schemaVersion:
-          type: number
-          enum:
-            - 1
-        content:
-          $ref: "#/components/schemas/PrototypeDocument"
       required:
         - title
         - citations
-        - operation
         - kind
         - schemaVersion
         - content
+        - operation
       additionalProperties: false
     RuntimeArtifactDraft:
+      description: A PRD draft's top-level citations exactly match its content citations; enforced by the runtime Zod contract.
       oneOf:
         - $ref: "#/components/schemas/RuntimeArtifactDraftPrd"
         - $ref: "#/components/schemas/RuntimeArtifactDraftPrototype"
@@ -17329,16 +18540,6 @@ components:
         - $ref: "#/components/schemas/RuntimeArtifactDraftCode"
         - $ref: "#/components/schemas/RuntimeArtifactDraftDocument"
         - $ref: "#/components/schemas/RuntimeArtifactDraftData"
-      discriminator:
-        propertyName: kind
-        mapping:
-          prd: "#/components/schemas/RuntimeArtifactDraftPrd"
-          prototype: "#/components/schemas/RuntimeArtifactDraftPrototype"
-          image: "#/components/schemas/RuntimeArtifactDraftImage"
-          code: "#/components/schemas/RuntimeArtifactDraftCode"
-          document: "#/components/schemas/RuntimeArtifactDraftDocument"
-          data: "#/components/schemas/RuntimeArtifactDraftData"
-      description: A PRD draft's top-level citations exactly match its content citations; enforced by the runtime Zod contract.
     RuntimeDesignAsset:
       type: object
       properties:
@@ -17636,7 +18837,6 @@ components:
         - message
         - artifacts
       additionalProperties: false
-      description: A Runtime result revises each target Artifact at most once; enforced by the runtime Zod contract.
     SetProjectMemberRoleRequest:
       type: object
       properties:
@@ -21163,6 +22363,81 @@ paths:
                 $ref: "#/components/schemas/ArtifactVersionDetail"
         "304":
           description: Immutable Artifact version manifest has not changed
+        "404":
+          $ref: "#/components/responses/Problem"
+  /artifacts/{artifactId}/versions/{artifactVersionId}/finalization:
+    get:
+      operationId: getArtifactFinalization
+      summary: Owner-visible finalization and ingestion state
+      parameters:
+        - $ref: "#/components/parameters/ArtifactId"
+        - $ref: "#/components/parameters/ArtifactVersionId"
+      responses:
+        "200":
+          description: Owner-visible finalization and ingestion state
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ArtifactFinalizationState"
+        "404":
+          $ref: "#/components/responses/Problem"
+    post:
+      operationId: confirmArtifactFinalization
+      summary: Idempotent immutable-version confirmation and queued project knowledge ingestion
+      parameters:
+        - $ref: "#/components/parameters/ArtifactId"
+        - $ref: "#/components/parameters/ArtifactVersionId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ConfirmArtifactFinalizationRequest"
+      responses:
+        "200":
+          description: Idempotent immutable-version confirmation and queued project knowledge ingestion
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ArtifactFinalizationState"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+  /artifacts/{artifactId}/versions/{artifactVersionId}/finalization/retry:
+    post:
+      operationId: retryArtifactFinalization
+      summary: Retry the existing ingestion job using a new release version
+      parameters:
+        - $ref: "#/components/parameters/ArtifactId"
+        - $ref: "#/components/parameters/ArtifactVersionId"
+      responses:
+        "200":
+          description: Retry the existing ingestion job using a new release version
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ArtifactFinalizationState"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+  /artifacts/{artifactId}/versions/{artifactVersionId}/finalization/withdraw:
+    post:
+      operationId: withdrawArtifactFinalization
+      summary: Withdraw this source and retire all derived knowledge releases
+      parameters:
+        - $ref: "#/components/parameters/ArtifactId"
+        - $ref: "#/components/parameters/ArtifactVersionId"
+      responses:
+        "200":
+          description: Withdraw this source and retire all derived knowledge releases
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ArtifactFinalizationState"
+        "400":
+          $ref: "#/components/responses/Problem"
         "404":
           $ref: "#/components/responses/Problem"
   /artifacts/{artifactId}/versions/{artifactVersionId}/preference:

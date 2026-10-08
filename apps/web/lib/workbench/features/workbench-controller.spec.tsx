@@ -13,7 +13,6 @@ import {
   submissionIntentRunRequest,
   useWorkbenchController,
 } from "./workbench-controller";
-import { WORKBENCH_MIXED_ARTIFACT_REQUEST_MESSAGE } from "../run";
 
 const mocks = vi.hoisted(() => ({
   archiveProject: vi.fn(),
@@ -145,7 +144,7 @@ afterEach(() => {
 });
 
 describe("Workbench Home Run boundary", () => {
-  it("rejects mixed PRD and Prototype work before a Home submission can create a Project", () => {
+  it("accepts linked PRD and Prototype work in one Home submission", () => {
     expect(() => resolveHomeSubmissionModel({
       prompt: "Create a PRD and a prototype",
       modelChoiceKey: "model:quality",
@@ -157,7 +156,7 @@ describe("Workbench Home Run boundary", () => {
       label: "Quality",
       modelId: "quality",
       workflow: "generate",
-    }])).toThrow(WORKBENCH_MIXED_ARTIFACT_REQUEST_MESSAGE);
+    }])).not.toThrow();
   });
 
   it("rejects Edit and any Artifact targets before creating a Project", () => {

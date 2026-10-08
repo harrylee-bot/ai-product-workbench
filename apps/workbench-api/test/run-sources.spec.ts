@@ -350,7 +350,7 @@ function createHarness(options: {
         }],
       }),
     },
-    knowledgeRelease: { findFirst: vi.fn().mockResolvedValue(null) },
+    knowledgeRelease: { findFirst: vi.fn().mockResolvedValue({ id: "knowledge_1" }) },
     thread: { update: vi.fn().mockResolvedValue({ entrySequence: 1 }) },
     threadEntry: { create: vi.fn().mockResolvedValue({ id: "entry_1" }) },
   };
@@ -396,6 +396,15 @@ function createHarness(options: {
 }
 
 describe("Run model catalog validation", () => {
+  it("does not create an executable Run, entry or queue job without ready knowledge", async () => {
+    const harness = createHarness();
+    harness.tx.knowledgeRelease.findFirst.mockResolvedValue(null as never);
+    await expect(harness.service.start("principal_1", "thread_1", "run:missing-knowledge:12345678", request))
+      .rejects.toMatchObject({ response: expect.objectContaining({ code: "KNOWLEDGE_RELEASE_REQUIRED" }) });
+    expect(harness.tx.run.create).not.toHaveBeenCalled();
+    expect(harness.tx.threadEntry.create).not.toHaveBeenCalled();
+    expect(harness.queue.sendInTransaction).not.toHaveBeenCalled();
+  });
   it("rejects an unknown model before opening the write transaction", async () => {
     const runtimeModels = { assertAvailable: vi.fn().mockRejectedValue(runtimeModelNotFoundProblem()) };
     const harness = createHarness({ runtimeModels });
@@ -590,12 +599,15 @@ describe("Run immutable Import Source snapshots", () => {
     expect(harness.tx.run.create).not.toHaveBeenCalled();
   });
 
-  it("rejects retry for a source failure that the server marked terminal", async () => {
+  it.each([
+    { code: "INVALID_OUTPUT", detail: "Invalid output" },
+    { code: "RUNTIME_PROVIDER_CONTENT_FILTERED", detail: "模型服务商拦截了本次输出，任务已停止。" },
+  ])("rejects retry for terminal source failure $code", async ({ code, detail }) => {
     const harness = createHarness();
     harness.access.findRun = vi.fn().mockResolvedValue(persistedRun({
       status: "failed",
-      errorCode: "INVALID_OUTPUT",
-      errorDetail: "Invalid output",
+      errorCode: code,
+      errorDetail: detail,
       errorRetryable: false,
       finishedAt: now,
     }));

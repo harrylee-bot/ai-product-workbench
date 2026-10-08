@@ -117,7 +117,7 @@ export type RuntimeExecution = {
   attempt: number;
   projectId: string;
   threadId: string;
-  principalId: string;
+  runtimeTransportOwnerId: string;
   externalThreadId: string;
   request: StartRunRequest;
   artifactTargets: RuntimeArtifactTarget[];
@@ -153,9 +153,21 @@ export type RuntimeExecutionObserver = {
   ) => Promise<void>;
 };
 
+export const runtimeSubmissionUnknownErrorCodes = [
+  "RUNTIME_SUBMISSION_UNKNOWN",
+  "RUNTIME_SUBMISSION_RECONCILIATION_UNAVAILABLE",
+  "RUNTIME_SUBMISSION_RECONCILIATION_PERSISTENCE_UNKNOWN",
+] as const;
+
+export type RuntimeSubmissionUnknownErrorCode =
+  typeof runtimeSubmissionUnknownErrorCodes[number];
+
 export class RuntimeSubmissionUnknownError extends Error {
-  constructor(message = "RUNTIME_SUBMISSION_UNKNOWN", options?: ErrorOptions) {
-    super(message, options);
+  constructor(
+    readonly code: RuntimeSubmissionUnknownErrorCode = "RUNTIME_SUBMISSION_UNKNOWN",
+    options?: ErrorOptions,
+  ) {
+    super(code, options);
     this.name = "RuntimeSubmissionUnknownError";
   }
 }
@@ -163,16 +175,27 @@ export class RuntimeSubmissionUnknownError extends Error {
 export type RuntimeCancellation = {
   runId: string;
   runtimeAttemptId: string;
-  principalId: string;
+  runtimeTransportOwnerId: string;
   externalThreadId: string;
   externalRunId: string | null;
 };
 
-export type RuntimeCancellationResult = {
-  externalRunId: string | null;
-  externalStatus: string | null;
-  found: boolean;
-};
+export type RuntimeCancellationResult =
+  | {
+      disposition: "not_found";
+      externalRunId: null;
+      externalStatus: null;
+    }
+  | {
+      disposition: "external_run_absent";
+      externalRunId: string;
+      externalStatus: null;
+    }
+  | {
+      disposition: "cancelled" | "already_terminal";
+      externalRunId: string;
+      externalStatus: string;
+    };
 
 export interface RuntimePort {
   readonly adapter: string;

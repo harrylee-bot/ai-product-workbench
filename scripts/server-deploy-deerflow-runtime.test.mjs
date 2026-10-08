@@ -11,6 +11,7 @@ test("DeerFlow deployment transfers private runtime paths to UID/GID 65532", () 
   const result = runDeployment();
 
   assert.equal(result.status, 0, result.stderr);
+  assert.doesNotMatch(result.commandLog, /buildx|--build\b/u);
   assert.deepEqual(result.permissionCommands, [
     `chown -R 65532:65532 ${result.runtimeHome}`,
     `chmod 0700 ${result.runtimeHome}`,

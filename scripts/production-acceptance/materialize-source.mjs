@@ -19,7 +19,7 @@ export const OBSERVATION_SOURCE_SCHEMA_VERSION = "workbench.production-observati
 
 const moduleDirectory = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(moduleDirectory, "../..");
-const schemaPath = path.join(repoRoot, "docs/evidence/production-observation-source.schema.json");
+const schemaPath = path.join(repoRoot, "schemas/evidence/production-observation-source.schema.json");
 const SHA256_PATTERN = /^[a-f0-9]{64}$/u;
 const SOURCE_PATH_PATTERN = /^(?:observations|raw)\/[A-Za-z0-9][A-Za-z0-9._/-]*$/u;
 const MAX_DECODED_BYTES = 100 * 1024 * 1024;

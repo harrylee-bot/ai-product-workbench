@@ -3,8 +3,10 @@ import {
   canvasAgentToolInputSchemas,
   canonicalJson,
   prototypeDocumentSchema,
+  prototypeExpressionVariablePaths,
   type CanvasScreenReference,
   type PrototypeDocument,
+  type PrototypeExpression,
   type RuntimeArtifactDraft,
   type RuntimeResult,
   type StartRunRequest,
@@ -295,7 +297,9 @@ function duplicateScreenDocument(
   const bindingMap = new Map(sourceBindings.map((binding) => [binding.id, fresh()]));
   const variablePaths = [...new Set(sourceBindings.flatMap((binding) => binding.source.kind === "variable"
     ? [binding.source.path]
-    : []))];
+    : binding.source.kind === "expression"
+      ? prototypeExpressionVariablePaths(binding.source.expression)
+      : []))];
   const variablePathMap = new Map(variablePaths.map((path, index) => [path, `copy${prefix}.v${index + 1}`]));
   const sourceMotions = next.motions.filter((motion) => sourceNodes.some((node) => node.motionIds.includes(motion.id)));
   const motionMap = new Map(sourceMotions.map((motion) => [motion.id, fresh()]));
@@ -347,6 +351,8 @@ function duplicateScreenDocument(
       cloned.source.stateId = stateMap.get(cloned.source.stateId) ?? cloned.source.stateId;
     } else if (cloned.source.kind === "variable") {
       cloned.source.path = variablePathMap.get(cloned.source.path) ?? cloned.source.path;
+    } else if (cloned.source.kind === "expression") {
+      cloned.source.expression = remapExpressionVariables(cloned.source.expression, variablePathMap);
     }
     return cloned;
   });
@@ -383,6 +389,30 @@ function duplicateScreenDocument(
   const parsedDuplicate = parsed.screens.find((screen) => screen.id === duplicate.id);
   if (!parsedDuplicate) throw new Error("CANVAS_DIRECT_INTENT_DUPLICATE_MISSING");
   return { document: parsed, screen: parsedDuplicate };
+}
+
+function remapExpressionVariables(
+  expression: PrototypeExpression,
+  paths: ReadonlyMap<string, string>,
+): PrototypeExpression {
+  switch (expression.kind) {
+    case "literal":
+      return expression;
+    case "variable":
+      return { ...expression, path: paths.get(expression.path) ?? expression.path };
+    case "contains":
+    case "equals":
+      return {
+        ...expression,
+        left: remapExpressionVariables(expression.left, paths),
+        right: remapExpressionVariables(expression.right, paths),
+      };
+    case "and":
+    case "or":
+      return { ...expression, operands: expression.operands.map((operand) => remapExpressionVariables(operand, paths)) };
+    case "not":
+      return { ...expression, operand: remapExpressionVariables(expression.operand, paths) };
+  }
 }
 
 function uniqueRoute(existing: string[], base: string): string {

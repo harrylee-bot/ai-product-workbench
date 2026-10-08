@@ -143,7 +143,7 @@ function prototypeDocument() {
   };
 }
 
-function readyReleaseWithKinds(kinds: Array<"prototype" | "design_system" | "data">) {
+function readyReleaseWithKinds(kinds: Array<"prototype" | "design_system" | "data" | "prd">) {
   const release: any = readyRelease();
   release.artifactPins = kinds.map((kind, position) => {
     const artifactId = `artifact_${position + 1}`;
@@ -216,6 +216,8 @@ function serviceWith(
         react: { available: true, authentication: "not_required", reasonCode: null },
         figma: { available: true, authentication: "not_required", reasonCode: null },
         mcp: { available: true, authentication: "not_required", reasonCode: null },
+        docx: { available: true, authentication: "not_required", reasonCode: null },
+        pdf: { available: true, authentication: "not_required", reasonCode: null },
       },
       packaging: {
         single_file: { available: true, authentication: "not_required", reasonCode: null },
@@ -272,6 +274,8 @@ describe("ExportJob API invariants", () => {
         react: { available: true, authentication: "not_required", reasonCode: null },
         figma: { available: true, authentication: "not_required", reasonCode: null },
         mcp: { available: true, authentication: "not_required", reasonCode: null },
+        docx: { available: true, authentication: "not_required", reasonCode: null },
+        pdf: { available: true, authentication: "not_required", reasonCode: null },
       },
       packaging: {
         single_file: { available: true, authentication: "not_required", reasonCode: null },
@@ -340,6 +344,67 @@ describe("ExportJob API invariants", () => {
     }).catch((error: unknown) => error);
     expect(failure).toMatchObject({ status: 400 });
     expect(JSON.stringify(failure)).not.toContain("client-controlled");
+    expect(db.projectRelease.findFirst).not.toHaveBeenCalled();
+    expect(db.$transaction).not.toHaveBeenCalled();
+    expect(queue.sendInTransaction).not.toHaveBeenCalled();
+  });
+
+  it.each(["docx", "pdf"] as const)("queues %s as one downloadable document", async (format) => {
+    let created: ReturnType<typeof queuedJob> | undefined;
+    const queue = { sendInTransaction: vi.fn().mockResolvedValue("job_1") };
+    const tx = {
+      $queryRaw: vi.fn().mockResolvedValue([{ id: "project_1", revision: 0 }]),
+      projectMember: { findUnique: vi.fn().mockResolvedValue({ role: "editor" }) },
+      exportJob: {
+        findUnique: vi.fn().mockResolvedValue(null),
+        create: vi.fn().mockImplementation(({ data }) => {
+          created = queuedJob(data);
+          return created;
+        }),
+        findUniqueOrThrow: vi.fn().mockImplementation(() => created),
+      },
+      projectRelease: { findFirst: vi.fn().mockResolvedValue({ id: "release_1" }) },
+    };
+    const db = {
+      projectRelease: { findFirst: vi.fn().mockResolvedValue(readyReleaseWithKinds(["prd"])) },
+      exportJob: { findUnique: vi.fn().mockResolvedValue(null) },
+      $transaction: vi.fn().mockImplementation((callback) => callback(tx)),
+    };
+    const result = await serviceWith(db, queue).create("principal_1", "project_1", `export:key:${format}`, {
+      releaseId: "release_1",
+      format,
+      packaging: "single_file",
+      selection: { kind: "release" },
+      options: {},
+    });
+
+    expect(result).toMatchObject({ format, packaging: "single_file", status: "queued" });
+    expect(tx.exportJob.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ format, packaging: "single_file" }),
+    }));
+    expect(queue.sendInTransaction).toHaveBeenCalledOnce();
+  });
+
+  it.each([
+    ["docx", "zip"],
+    ["pdf", "zip"],
+    ["react", "single_file"],
+    ["figma", "single_file"],
+    ["mcp", "single_file"],
+  ] as const)("rejects %s with %s before persistence", async (format, packaging) => {
+    const db = {
+      projectRelease: { findFirst: vi.fn() },
+      exportJob: { findUnique: vi.fn() },
+      $transaction: vi.fn(),
+    };
+    const queue = { sendInTransaction: vi.fn() };
+    await expect(serviceWith(db, queue).create("principal_1", "project_1", `export:key:${format}`, {
+      releaseId: "release_1",
+      format,
+      packaging,
+      selection: { kind: "release" },
+      options: {},
+    })).rejects.toMatchObject({ status: 400 });
     expect(db.projectRelease.findFirst).not.toHaveBeenCalled();
     expect(db.$transaction).not.toHaveBeenCalled();
     expect(queue.sendInTransaction).not.toHaveBeenCalled();
@@ -882,6 +947,115 @@ describe("ExportJob API invariants", () => {
 
     await expect(service.createPreview("viewer_1", "project_1", "preview:key:1", request))
       .resolves.toMatchObject({ id: "preview-1", status: "queued" });
+  });
+
+  it.each([
+    { initialScreenId: "screen-success", kind: "prototype", valid: true },
+    { initialScreenId: "screen-missing", kind: "prototype", valid: false },
+    { initialScreenId: "screen-success", kind: "data", valid: false },
+  ])("validates and persists the Preview opening screen without cropping ($kind/$initialScreenId)", async ({
+    initialScreenId, kind, valid,
+  }) => {
+    const previewExport = queuedJob({ id: "preview-export-1", releaseId: null });
+    const request = {
+      boardId: "board_1",
+      boardRevision: 0,
+      selection: {
+        kind: "artifact" as const,
+        artifactId: "artifact_1",
+        artifactVersionId: "version_1",
+      },
+      initialScreenId,
+    };
+    const previewRecord = {
+      id: "preview-1",
+      projectId: "project_1",
+      ...request,
+      exportJobId: previewExport.id,
+      createdById: "viewer_1",
+      idempotencyKey: "preview:key:screen",
+      requestHash: hashRequest(request),
+      expiresAt: new Date(Date.now() + 60_000),
+      createdAt: now,
+      updatedAt: now,
+      exportJob: previewExport,
+    };
+    const tx = {
+      $queryRaw: vi.fn()
+        .mockResolvedValueOnce([{ id: "project_1", revision: 0 }])
+        .mockResolvedValueOnce([{ id: "board_1", revision: 0 }])
+        .mockResolvedValueOnce([{ id: "artifact_1", title: "Checkout", currentVersionId: "version_1" }]),
+      projectMember: { findUnique: vi.fn().mockResolvedValue({ role: "viewer" }) },
+      board: { findUniqueOrThrow: vi.fn().mockResolvedValue({
+        id: "board_1",
+        projectId: "project_1",
+        revision: 0,
+        viewport: { x: 0, y: 0, zoom: 1 },
+        nodes: [],
+        edges: [],
+      }) },
+      artifactVersion: {
+        findMany: vi.fn().mockResolvedValue([{
+          id: "version_1",
+          artifactId: "artifact_1",
+          projectId: "project_1",
+          version: 1,
+          schemaVersion: 1,
+          status: "ready",
+          checksum: "b".repeat(64),
+          artifact: { projectId: "project_1", kind },
+          assets: [],
+        }]),
+        findFirst: vi.fn().mockResolvedValue({
+          status: "ready",
+          content: prototypeDocument(),
+          contentBlobId: null,
+          artifact: { kind },
+        }),
+      },
+      projectPreview: {
+        findUnique: vi.fn().mockResolvedValue(null),
+        create: vi.fn().mockResolvedValue(previewRecord),
+        findUniqueOrThrow: vi.fn().mockResolvedValue(previewRecord),
+      },
+      exportJob: { create: vi.fn().mockResolvedValue(previewExport) },
+    };
+    const db = {
+      projectPreview: { findUnique: vi.fn().mockResolvedValue(null) },
+      $transaction: vi.fn().mockImplementation((callback) => callback(tx)),
+    };
+    const queue = { sendInTransaction: vi.fn().mockResolvedValue("queued") };
+    const service = serviceWith(db, queue);
+    const result = service.createPreview("viewer_1", "project_1", "preview:key:screen", request);
+    if (!valid) {
+      await expect(result).rejects.toMatchObject({ status: 400 });
+      expect(tx.projectPreview.create).not.toHaveBeenCalled();
+      expect(queue.sendInTransaction).not.toHaveBeenCalled();
+      return;
+    }
+    await expect(result).resolves.toMatchObject({ initialScreenId, selection: request.selection });
+    expect(tx.exportJob.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ selectionScreenId: null }),
+    }));
+    expect(tx.projectPreview.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ initialScreenId, requestHash: hashRequest(request) }),
+    }));
+  });
+
+  it("rejects Preview screen crops before writing or replaying a receipt", async () => {
+    const db = { projectPreview: { findUnique: vi.fn() }, $transaction: vi.fn() };
+    await expect(serviceWith(db).createPreview("viewer_1", "project_1", "preview:key:crop", {
+      boardId: "board_1",
+      boardRevision: 0,
+      selection: {
+        kind: "artifact",
+        artifactId: "artifact_1",
+        artifactVersionId: "version_1",
+        screenId: "screen-success",
+      },
+    })).rejects.toMatchObject({ status: 400 });
+    expect(db.projectPreview.findUnique).not.toHaveBeenCalled();
+    expect(db.$transaction).not.toHaveBeenCalled();
   });
 
   it("keeps private Preview jobs outside every public Export read and command surface", async () => {

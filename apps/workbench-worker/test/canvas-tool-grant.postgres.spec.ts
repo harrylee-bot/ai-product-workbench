@@ -9,6 +9,8 @@ import {
   type CanvasToolGrantScope,
 } from "../src/runtime/canvas-tool-grant.service.js";
 
+import { seedReadyKnowledge } from "../../../scripts/test-support/knowledge-fixture.mjs";
+
 const databaseUrl = process.env.WORKBENCH_TEST_DATABASE_URL;
 const describeWithPostgres = databaseUrl ? describe : describe.skip;
 
@@ -192,11 +194,16 @@ async function seedGrantFixture(db: PrismaClient): Promise<GrantFixture> {
         threadId: fixture.threadId,
         adapter: "deerflow",
         externalThreadId: `canvas_grant_external_thread_${suffix}`,
-        metadata: { workbenchThreadId: fixture.threadId },
+        metadata: {
+          workbenchProjectId: fixture.projectId,
+          workbenchThreadId: fixture.threadId,
+          workbenchPrincipalId: fixture.principalId,
+        },
       },
     });
     await tx.run.create({
       data: {
+        knowledgeReleaseId: await seedReadyKnowledge(tx),
         id: fixture.runId,
         projectId: fixture.projectId,
         threadId: fixture.threadId,

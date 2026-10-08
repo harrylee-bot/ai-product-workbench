@@ -17,17 +17,22 @@ import {
 import { loadWorkerConfig } from "./config.js";
 import { db } from "./db.js";
 import { DeerFlowRuntimeAdapter } from "./runtime/deerflow-runtime.adapter.js";
+import { RuntimeLivenessError } from "./runtime/runtime-liveness.js";
 import { PrismaKnowledgeToolGrantIssuer } from "./runtime/knowledge-tool-grant.service.js";
 import { PrismaCanvasToolGrantIssuer } from "./runtime/canvas-tool-grant.service.js";
 import { RunProcessor } from "./runs/run-processor.js";
+import { loadRuntimeWorkerExecutionSignerFromEnvironment } from "./runtime/runtime-worker-execution-attestation.js";
+import { createRuntimeExecuteJobHandler } from "./runs/runtime-execute-job.handler.js";
 import { RuntimeCancellationReconciler } from "./runs/runtime-cancellation-reconciler.js";
 import { RuntimeExecutionReconciler } from "./runs/runtime-execution-reconciler.js";
 import { S3RuntimeReadyBlobReader } from "./storage/s3-runtime-ready-blob-reader.js";
+import { shutdownWorkerWithExitCode } from "./shutdown.js";
 
 const telemetry = initializeTelemetry({ serviceName: "workbench-runtime-worker" });
 
 async function main() {
   const config = loadWorkerConfig();
+  const executionSigner = await loadRuntimeWorkerExecutionSignerFromEnvironment();
   await db.$connect();
   const storage = new S3RuntimeReadyBlobReader(
     config,
@@ -77,41 +82,12 @@ async function main() {
     localConcurrency: config.concurrency,
     pollingIntervalSeconds: 2,
     notifyPollingIntervalSeconds: 30,
-  }, async (jobs) => {
-    const job = jobs[0] as JobWithMetadata<RuntimeExecuteJob> | undefined;
-    if (!job) return;
-    const command = queuePayload<RuntimeExecuteJob>(job.data);
-    recordQueueAge(job);
-    try {
-      const result = await traceQueueConsume({
-        destination: runtimeExecuteQueue,
-        messageId: job.id,
-        retryCount: job.retryCount,
-        retryLimit: job.retryLimit,
-      }, job.data, () => (
-        processor.execute(command.runId, command.approvalIds ?? [], job.signal, {
-          retryCount: job.retryCount,
-          retryLimit: job.retryLimit,
-        })
-      ));
-      if (isRecord(result) && "artifactCount" in result) {
-        await recordTerminalRunDrift(command.runId);
-      }
-      return result;
-    } catch (error) {
-      if (job.signal.aborted) {
-        recordRuntimeLivenessMetric({
-          operation: "abort",
-          outcome: "cancelled",
-          errorCode: "RUNTIME_QUEUE_ABORTED",
-        });
-      }
-      if (job.retryCount >= job.retryLimit) {
-        await recordTerminalRunDrift(command.runId);
-      }
-      throw error;
-    }
-  });
+  }, createRuntimeExecuteJobHandler({
+    processor,
+    executionSigner,
+    recordQueueAge,
+    recordTerminalRunDrift,
+  }));
 
   await boss.work<RuntimeCancelJob>(runtimeCancelQueue, {
     includeMetadata: true,
@@ -144,11 +120,15 @@ async function main() {
       if (result.cancelled) await recordTerminalRunDrift(command.runId);
       return result;
     } catch (error) {
+      const providerCancelTimedOut = error instanceof RuntimeLivenessError
+        && error.code === "RUNTIME_PROVIDER_CANCEL_TIMEOUT";
       recordRuntimeLivenessMetric({
         operation: "cancel",
-        outcome: job.signal.aborted ? "cancelled" : "error",
+        outcome: providerCancelTimedOut ? "timeout" : job.signal.aborted ? "cancelled" : "error",
         durationMs: performance.now() - startedAt,
-        errorCode: job.signal.aborted ? "RUNTIME_QUEUE_ABORTED" : "RUNTIME_CANCEL_JOB_FAILED",
+        errorCode: providerCancelTimedOut
+          ? error.code
+          : job.signal.aborted ? "RUNTIME_QUEUE_ABORTED" : "RUNTIME_CANCEL_JOB_FAILED",
       });
       if (job.signal.aborted) {
         recordRuntimeLivenessMetric({
@@ -160,7 +140,11 @@ async function main() {
       if (job.retryCount >= job.retryLimit) {
         await recordTerminalRunDrift(command.runId);
       }
-      throw error;
+      throw new Error(
+        providerCancelTimedOut
+          ? error.code
+          : job.signal.aborted ? "RUNTIME_QUEUE_ABORTED" : "RUNTIME_CANCEL_JOB_FAILED",
+      );
     }
   });
 
@@ -184,16 +168,23 @@ async function main() {
   await executionReconciler.runOnce();
   executionReconciler.start();
 
-  const shutdown = async (signal: string) => {
-    console.log(`[worker] received ${signal}`);
-    cancellationReconciler.stop();
-    executionReconciler.stop();
-    await boss.stop({ graceful: true, timeout: 30_000 });
-    await db.$disconnect();
-    await telemetry.shutdown();
+  const shutdownDependencies = {
+    log: (message: string) => console.log(message),
+    logError: (message: string, error: unknown) => console.error(message, error),
+    stopReconcilers: () => {
+      cancellationReconciler.stop();
+      executionReconciler.stop();
+    },
+    stopQueue: () => boss.stop({ graceful: true, timeout: 30_000 }),
+    disconnectDatabase: () => db.$disconnect(),
+    shutdownTelemetry: () => telemetry.shutdown(),
   };
-  process.once("SIGINT", () => void shutdown("SIGINT").finally(() => process.exit(0)));
-  process.once("SIGTERM", () => void shutdown("SIGTERM").finally(() => process.exit(0)));
+  const handleShutdown = (signal: string) => {
+    void shutdownWorkerWithExitCode(signal, shutdownDependencies)
+      .then((exitCode) => process.exit(exitCode));
+  };
+  process.once("SIGINT", () => handleShutdown("SIGINT"));
+  process.once("SIGTERM", () => handleShutdown("SIGTERM"));
   console.log(`[worker] listening on ${runtimeExecuteQueue}, ${runtimeCancelQueue}`);
 }
 
@@ -230,10 +221,6 @@ async function recordTerminalRunDrift(runId: string) {
 }
 
 const terminalRunStatuses = new Set(["succeeded", "failed", "cancelled"]);
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
-}
 
 void main().catch(async (error) => {
   console.error("[worker] fatal", error);

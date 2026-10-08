@@ -24,6 +24,42 @@ const databaseUrl =
 const describeWithPostgres = databaseUrl ? describe : describe.skip;
 
 describeWithPostgres("Knowledge grant issuer PostgreSQL concurrency", () => {
+  it("creates a usable UTC budget even when the database session uses Asia/Shanghai", async () => {
+    const db = new PrismaClient({ datasourceUrl: databaseUrl });
+    try {
+      const fixture = await seedIssuerFixture(db, false);
+      await db.$transaction(async (tx) => {
+        await tx.$executeRaw`SET LOCAL TIME ZONE 'Asia/Shanghai'`;
+        const issuer = new PrismaKnowledgeToolGrantIssuer({
+          $transaction: async (callback: (transaction: Prisma.TransactionClient) => Promise<unknown>) => callback(tx),
+        } as never, {
+          endpoint: "https://workbench.test/api/v1/runtime/knowledge/retrieve",
+          secret: Buffer.alloc(32, 31),
+          maximumTtlSeconds: 900,
+        });
+        await issuer.issue({
+          runId: fixture.runId,
+          runtimeAttemptId: fixture.runtimeAttemptId,
+          principalId: fixture.principalId,
+          projectId: fixture.projectId,
+          releaseId: fixture.releaseId,
+        });
+        const budget = await tx.knowledgeToolBudget.update({
+          where: { runtimeAttemptId: fixture.runtimeAttemptId },
+          data: { windowStarts: { increment: 1 }, totalStarts: { increment: 1 } },
+        });
+        const grant = await tx.knowledgeToolGrant.findFirstOrThrow({
+          where: { runtimeAttemptId: fixture.runtimeAttemptId },
+        });
+        expect(budget.createdAt).toEqual(grant.issuedAt);
+        expect(budget.windowStartedAt).toEqual(grant.issuedAt);
+        expect(budget.updatedAt.getTime()).toBeGreaterThanOrEqual(budget.createdAt.getTime());
+      });
+    } finally {
+      await db.$disconnect();
+    }
+  });
+
   it("serializes concurrent issuers on the RuntimeAttempt budget row", async () => {
     const firstClient = new PrismaClient({ datasourceUrl: databaseUrl });
     const secondClient = new PrismaClient({ datasourceUrl: databaseUrl });
@@ -119,7 +155,7 @@ function transactionFacade(
           ...args: unknown[]
         ) => Promise<unknown>;
         return callback({
-          $executeRaw: async () => 0,
+          knowledgeToolBudget: tx.knowledgeToolBudget,
           $queryRaw: async (...args: unknown[]) => {
             await hooks.beforeBudgetLock?.();
             const result = await queryRaw(...args);
@@ -132,7 +168,7 @@ function transactionFacade(
   };
 }
 
-async function seedIssuerFixture(db: PrismaClient) {
+async function seedIssuerFixture(db: PrismaClient, createBudget = true) {
   const suffix = randomUUID().replaceAll("-", "");
   const ids = {
     principalId: `principal_${suffix}`,
@@ -299,7 +335,11 @@ async function seedIssuerFixture(db: PrismaClient) {
         threadId: ids.threadId,
         adapter: "deerflow",
         externalThreadId: `external_${suffix}`,
-        metadata: { workbenchThreadId: ids.threadId },
+        metadata: {
+          workbenchProjectId: ids.projectId,
+          workbenchThreadId: ids.threadId,
+          workbenchPrincipalId: ids.principalId,
+        },
       },
     });
     await tx.run.create({
@@ -338,13 +378,18 @@ async function seedIssuerFixture(db: PrismaClient) {
         externalThreadId: `external_${suffix}`,
       },
     });
-    await tx.knowledgeToolBudget.create({
-      data: {
-        runtimeAttemptId: ids.runtimeAttemptId,
-        ...knowledgeToolBudgetPolicy,
-        windowStartedAt: new Date(),
-      },
-    });
+    if (createBudget) {
+      const now = new Date();
+      await tx.knowledgeToolBudget.create({
+        data: {
+          runtimeAttemptId: ids.runtimeAttemptId,
+          ...knowledgeToolBudgetPolicy,
+          windowStartedAt: now,
+          createdAt: now,
+          updatedAt: now,
+        },
+      });
+    }
   });
   return ids;
 }

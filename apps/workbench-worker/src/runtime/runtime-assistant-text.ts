@@ -16,6 +16,13 @@ export const runtimeRedactionBufferMaxLength = 4_096;
 const KNOWLEDGE_GRANT_PREFIX = "wbkg1.";
 const CANVAS_GRANT_PREFIX = "wbct1.";
 const CAPABILITY_TOKEN_CHARACTER = /^[A-Za-z0-9_.-]$/u;
+const RUNTIME_RESULT_SUBMIT_TOOL = "workbench_runtime_result_submit";
+const WORKBENCH_ARTIFACT_TOOLS = new Set([
+  "workbench_artifact_draft_publish",
+  "workbench_generation_stage_update",
+  "workbench_prototype_patch_publish",
+  RUNTIME_RESULT_SUBMIT_TOOL,
+]);
 
 const sha256Schema = z.string().regex(/^[0-9a-f]{64}$/u);
 const providerTextSnapshotSchema = z.object({
@@ -165,20 +172,34 @@ export function extractAssistantTextFrame(
   if (event === "messages" || event === "messages-tuple") {
     const payload = Array.isArray(data) ? data[0] : data;
     const message = asRecord(payload);
-    if (!message || !isAssistant(message)) return null;
-    const text = contentText(message.content);
+    if (!message || !isAssistant(message) || messageToolCalls(message).length > 0) return null;
+    const text = contentText(messageValue(message, "content"));
     return text ? { kind: "delta", text } : null;
   }
   if (event !== "values") return null;
   const messages = runtimeMessages(data);
   const currentTurnStart = currentTurnStartIndex(messages);
-  const message = messages
-    .slice(currentTurnStart + 1)
+  const currentTurn = messages.slice(currentTurnStart + 1);
+  const humanMessage = currentTurnStart >= 0 ? asRecord(messages[currentTurnStart]) : null;
+  const hasArtifactToolFlow = isWorkbenchArtifactRequest(humanMessage)
+    || currentTurn.some((candidate) => {
+      const message = asRecord(candidate);
+      if (!message) return false;
+      return isTool(message)
+        ? WORKBENCH_ARTIFACT_TOOLS.has(messageField(message, "name") ?? "")
+        : messageToolCalls(message).some((call) => WORKBENCH_ARTIFACT_TOOLS.has(call.name));
+    });
+  const resultResponseIndex = hasArtifactToolFlow
+    ? successfulRuntimeResultResponseIndex(currentTurn)
+    : -1;
+  if (hasArtifactToolFlow && resultResponseIndex < 0) return null;
+  const candidates = hasArtifactToolFlow ? currentTurn.slice(resultResponseIndex + 1) : currentTurn;
+  const message = candidates
     .reverse()
     .map(asRecord)
-    .find((candidate) => candidate && isAssistant(candidate));
+    .find((candidate) => candidate && isAssistant(candidate) && messageToolCalls(candidate).length === 0);
   if (!message) return null;
-  const text = contentText(message.content);
+  const text = contentText(messageValue(message, "content"));
   return text ? { kind: "cumulative", text } : null;
 }
 
@@ -663,20 +684,80 @@ function currentTurnStartIndex(messages: unknown[]) {
 function isAssistant(message: Record<string, unknown>) {
   const role = messageField(message, "role")?.toLowerCase();
   const type = messageField(message, "type")?.toLowerCase();
-  if (asRecord(message.additional_kwargs)?.hide_from_ui === true) return false;
-  return role === "assistant" || role === "ai" || ["ai", "assistant", "aimessage", "aimessagechunk"].includes(type ?? "");
+  if (asRecord(messageValue(message, "additional_kwargs"))?.hide_from_ui === true) return false;
+  return role === "assistant" || role === "ai"
+    || ["ai", "assistant", "aimessage", "aimessagechunk"].includes(type ?? "")
+    || ["aimessage", "aimessagechunk"].includes(messageConstructor(message) ?? "");
 }
 
 function isHuman(message: Record<string, unknown>) {
   const role = messageField(message, "role")?.toLowerCase();
   const type = messageField(message, "type")?.toLowerCase();
-  const constructor = Array.isArray(message.id)
-    ? message.id.filter((item): item is string => typeof item === "string").at(-1)?.toLowerCase()
-    : undefined;
+  const constructor = messageConstructor(message);
   return role === "user"
     || role === "human"
     || ["human", "user", "humanmessage", "usermessage"].includes(type ?? "")
     || constructor === "humanmessage";
+}
+
+function isTool(message: Record<string, unknown>) {
+  const role = messageField(message, "role")?.toLowerCase();
+  const type = messageField(message, "type")?.toLowerCase();
+  return role === "tool" || type === "tool" || type === "toolmessage"
+    || messageConstructor(message) === "toolmessage";
+}
+
+function messageConstructor(message: Record<string, unknown>) {
+  return Array.isArray(message.id)
+    ? message.id.filter((item): item is string => typeof item === "string").at(-1)?.toLowerCase()
+    : undefined;
+}
+
+function successfulRuntimeResultResponseIndex(messages: unknown[]) {
+  const declarations = new Set<string>();
+  for (let index = 0; index < messages.length; index += 1) {
+    const message = asRecord(messages[index]);
+    if (!message) continue;
+    if (isAssistant(message)) {
+      for (const call of messageToolCalls(message)) {
+        if (call.name === RUNTIME_RESULT_SUBMIT_TOOL) declarations.add(call.id);
+      }
+      continue;
+    }
+    if (!isTool(message) || messageField(message, "name") !== RUNTIME_RESULT_SUBMIT_TOOL) continue;
+    const toolCallId = messageField(message, "tool_call_id");
+    const artifact = asRecord(messageValue(message, "artifact"));
+    const status = messageField(message, "status")?.toLowerCase();
+    if (toolCallId && declarations.has(toolCallId) && (!status || status === "success")
+      && artifact?.protocol === "workbench.runtime.validated-result.v1" && artifact.ok === true) return index;
+  }
+  return -1;
+}
+
+function isWorkbenchArtifactRequest(message: Record<string, unknown> | null) {
+  if (!message || !isHuman(message)) return false;
+  const content = contentText(messageValue(message, "content"));
+  if (!content.startsWith("/workbench\n")) return false;
+  const match = content.match(/<workbench_context>\n([\s\S]*?)\n<\/workbench_context>/u);
+  if (!match) return false;
+  try {
+    return asRecord(JSON.parse(match[1]!))?.outputContract === "workbench.runtime.result.v1";
+  } catch {
+    return false;
+  }
+}
+
+function messageToolCalls(message: Record<string, unknown>) {
+  const additionalKwargs = asRecord(messageValue(message, "additional_kwargs"));
+  const rawCalls = messageValue(message, "tool_calls") ?? additionalKwargs?.tool_calls;
+  if (!Array.isArray(rawCalls)) return [];
+  return rawCalls.flatMap((rawCall) => {
+    const call = asRecord(rawCall);
+    const fn = asRecord(call?.function);
+    const id = stringValue(call?.id);
+    const name = stringValue(call?.name) ?? stringValue(fn?.name);
+    return id && name ? [{ id, name }] : [];
+  });
 }
 
 function messageField(message: Record<string, unknown>, field: string) {

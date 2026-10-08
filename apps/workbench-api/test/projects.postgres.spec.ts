@@ -12,6 +12,7 @@ import { ProjectDuplicatesService } from "../src/modules/projects/project-duplic
 import { ProjectsService } from "../src/modules/projects/projects.service.js";
 import { canonicalSha256 } from "../src/modules/releases/release.mapper.js";
 import { SharesService } from "../src/modules/shares/shares.service.js";
+import { seedPrototypeRelease } from "./prototype-release.fixture.js";
 
 const databaseUrl = process.env.WORKBENCH_TEST_DATABASE_URL;
 const describeWithPostgres = databaseUrl ? describe : describe.skip;
@@ -1070,41 +1071,7 @@ describeWithPostgres("Project lifecycle PostgreSQL transaction", () => {
         const board = await tx.board.create({
           data: { projectId: project.id, viewport: { x: 0, y: 0, zoom: 1 } },
         });
-        const snapshot = {
-          id: board.id,
-          projectId: project.id,
-          revision: 0,
-          viewport: { x: 0, y: 0, zoom: 1 },
-          nodes: [],
-          edges: [],
-        };
-        const boardChecksum = canonicalSha256(snapshot);
-        const manifest = {
-          protocol: "workbench.project-release.v1",
-          projectId: project.id,
-          releaseVersion: 1,
-          board: { id: board.id, revision: 0, checksum: boardChecksum },
-          artifacts: [],
-        };
-        const release = await tx.projectRelease.create({
-          data: {
-            projectId: project.id,
-            version: 1,
-            createdById: principal.id,
-            idempotencyKey: `release:${suffix}`,
-            requestHash: "a".repeat(64),
-            boardId: board.id,
-            boardRevision: 0,
-            boardSnapshot: snapshot,
-            boardChecksum,
-            manifest,
-            manifestSha256: canonicalSha256(manifest),
-          },
-        });
-        await tx.projectRelease.update({
-          where: { id: release.id },
-          data: { status: "ready", finishedAt: new Date() },
-        });
+        const release = await seedPrototypeRelease(tx, project.id, principal.id, board.id);
         return {
           principalId: principal.id,
           projectId: project.id,
@@ -1241,41 +1208,7 @@ describeWithPostgres("Project lifecycle PostgreSQL transaction", () => {
         const board = await tx.board.create({
           data: { projectId: project.id, viewport: { x: 0, y: 0, zoom: 1 } },
         });
-        const snapshot = {
-          id: board.id,
-          projectId: project.id,
-          revision: 0,
-          viewport: { x: 0, y: 0, zoom: 1 },
-          nodes: [],
-          edges: [],
-        };
-        const boardChecksum = canonicalSha256(snapshot);
-        const manifest = {
-          protocol: "workbench.project-release.v1",
-          projectId: project.id,
-          releaseVersion: 1,
-          board: { id: board.id, revision: 0, checksum: boardChecksum },
-          artifacts: [],
-        };
-        const release = await tx.projectRelease.create({
-          data: {
-            projectId: project.id,
-            version: 1,
-            createdById: principal.id,
-            idempotencyKey: `release:${suffix}`,
-            requestHash: "b".repeat(64),
-            boardId: board.id,
-            boardRevision: 0,
-            boardSnapshot: snapshot,
-            boardChecksum,
-            manifest,
-            manifestSha256: canonicalSha256(manifest),
-          },
-        });
-        await tx.projectRelease.update({
-          where: { id: release.id },
-          data: { status: "ready", finishedAt: new Date() },
-        });
+        const release = await seedPrototypeRelease(tx, project.id, principal.id, board.id);
         return {
           principalId: principal.id,
           projectId: project.id,

@@ -2,6 +2,8 @@
 
 import {
   artifactCreationSchema,
+  artifactFinalizationStateSchema,
+  confirmArtifactFinalizationRequestSchema,
   artifactListSchema,
   artifactSchema,
   artifactVersionDetailSchema,
@@ -48,6 +50,35 @@ import type { ArtifactListOptions } from "../domain";
 
 export class WorkbenchArtifactsApi {
   constructor(private readonly api: WorkbenchApiClient) {}
+
+  async getFinalization(artifactId: string, artifactVersionId: string) {
+    const result = await this.api.GET("/artifacts/{artifactId}/versions/{artifactVersionId}/finalization", {
+      params: { path: { artifactId, artifactVersionId } },
+    });
+    return parseContract(artifactFinalizationStateSchema, result.data, "get artifact finalization");
+  }
+
+  async confirmFinalization(artifactId: string, artifactVersionId: string, checksum: string) {
+    const result = await this.api.POST("/artifacts/{artifactId}/versions/{artifactVersionId}/finalization", {
+      params: { path: { artifactId, artifactVersionId } },
+      body: confirmArtifactFinalizationRequestSchema.parse({ checksum }),
+    });
+    return parseContract(artifactFinalizationStateSchema, result.data, "confirm artifact finalization");
+  }
+
+  async retryFinalization(artifactId: string, artifactVersionId: string) {
+    const result = await this.api.POST("/artifacts/{artifactId}/versions/{artifactVersionId}/finalization/retry", {
+      params: { path: { artifactId, artifactVersionId } },
+    });
+    return parseContract(artifactFinalizationStateSchema, result.data, "retry artifact finalization");
+  }
+
+  async withdrawFinalization(artifactId: string, artifactVersionId: string) {
+    const result = await this.api.POST("/artifacts/{artifactId}/versions/{artifactVersionId}/finalization/withdraw", {
+      params: { path: { artifactId, artifactVersionId } },
+    });
+    return parseContract(artifactFinalizationStateSchema, result.data, "withdraw artifact finalization");
+  }
 
   async listArtifacts(
     projectId: string,

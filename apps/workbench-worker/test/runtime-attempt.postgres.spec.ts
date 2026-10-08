@@ -1,17 +1,28 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
+import {
+  PROTOTYPE_PATCH_MAX_PAYLOAD_BYTES,
+  assertPrototypePatchPayloadSize,
+} from "@workbench/workbench-contracts";
 import { Prisma, PrismaClient } from "@workbench/workbench-db";
 import { RunEventStore } from "../src/runs/run-event.store.js";
+import { runtimeProviderCancellationUnconfirmedCode } from "../src/runs/runtime-cancellation-state.js";
 import {
   createRuntimeFinalizationPayload,
+  createRuntimeProviderProjection,
   createRuntimeProviderTextCheckpoint,
   projectIncompleteVisibleAssistantText,
   sha256Canonical,
 } from "../src/runtime/runtime-assistant-text.js";
-import { RuntimeAttemptService } from "../src/runtime/runtime-attempt.service.js";
+import {
+  RuntimeAttemptService,
+  type RuntimeExecutionClaim,
+} from "../src/runtime/runtime-attempt.service.js";
 import {
   RuntimeProviderStateBackfill,
   runtimeProviderStateBackfillEventPageSize,
 } from "../src/runtime/runtime-provider-state-backfill.js";
+
+import { seedReadyKnowledge } from "../../../scripts/test-support/knowledge-fixture.mjs";
 
 const databaseUrl = process.env.WORKBENCH_RUNTIME_ATTEMPT_TEST_DATABASE_URL;
 const describeWithPostgres = databaseUrl ? describe : describe.skip;
@@ -120,6 +131,873 @@ describeWithPostgres("RuntimeAttempt PostgreSQL cancellation fences", () => {
     } finally {
       await cleanupFixture(worker, fixture);
       await worker.$disconnect();
+    }
+  }, 120_000);
+});
+
+describeWithPostgres("RuntimeAttempt terminal provider rollover", () => {
+  it("atomically fails one provider attempt and creates a fresh fenced submission", async () => {
+    const db = new PrismaClient({ datasourceUrl: databaseUrl! });
+    const fixture = await seedAttemptFixture(db, true);
+    try {
+      const { service, claim } = await activateExternalRun(db, fixture);
+      const previous = await service.submissionContext(claim);
+      await expect(service.rolloverTerminalProviderError(claim, {
+        code: "RUNTIME_PROVIDER_TEMPORARILY_UNAVAILABLE",
+      })).resolves.toEqual({ nextAttempt: 2 });
+      await expect(db.runtimeAttempt.findUniqueOrThrow({ where: { id: claim.attemptId } })).resolves.toMatchObject({
+        status: "failed", finishedAt: expect.any(Date), errorRetryable: true,
+        errorCode: "RUNTIME_PROVIDER_TEMPORARILY_UNAVAILABLE", executionOwnerId: null,
+      });
+      await expect(db.run.findUniqueOrThrow({ where: { id: fixture.runId } })).resolves.toMatchObject({
+        status: "running", attempt: 2, errorCode: null, executionOwnerId: null,
+      });
+      await expect(service.rolloverTerminalProviderError(claim, {
+        code: "RUNTIME_PROVIDER_TEMPORARILY_UNAVAILABLE",
+      })).rejects.toThrow("RUNTIME_EXECUTION_FENCED");
+      const next = await service.ensure(fixture.runId, 2, fixture.binding);
+      const nextClaim = await service.claim(fixture.runId, next.id, "next-worker");
+      const submission = await service.submissionContext(nextClaim);
+      expect(submission.mode).toBe("submit");
+      expect(submission.providerIdempotencyKey).not.toBe(previous.providerIdempotencyKey);
+      expect(next.id).not.toBe(claim.attemptId);
+    } finally {
+      await cleanupFixture(db, fixture);
+      await db.$disconnect();
+    }
+  }, 120_000);
+
+  it("does not roll over a cancelled Run or an unattached attempt", async () => {
+    const db = new PrismaClient({ datasourceUrl: databaseUrl! });
+    const fixture = await seedAttemptFixture(db, true);
+    try {
+      const service = new RuntimeAttemptService(db, 120_000);
+      const claim = await service.claim(fixture.runId, fixture.runtimeAttemptId!, "test-worker");
+      await expect(service.rolloverTerminalProviderError(claim, {
+        code: "RUNTIME_PROVIDER_TEMPORARILY_UNAVAILABLE",
+      })).rejects.toThrow("RUNTIME_PROVIDER_RETRY_ROLLOVER_STATE_INVALID");
+      await service.submissionContext(claim);
+      await service.authorizeSubmission(claim);
+      await service.attachExternalRun(claim, fixture.externalRunId);
+      await cancelActiveRun(db, fixture.runId);
+      await expect(service.rolloverTerminalProviderError(claim, {
+        code: "RUNTIME_PROVIDER_TEMPORARILY_UNAVAILABLE",
+      })).rejects.toThrow("RUNTIME_EXECUTION_FENCED");
+      expect((await db.run.findUniqueOrThrow({ where: { id: fixture.runId } })).attempt).toBe(1);
+      expect((await db.runtimeAttempt.findUniqueOrThrow({ where: { id: claim.attemptId } })).errorCode).toBeNull();
+    } finally {
+      await cleanupFixture(db, fixture);
+      await db.$disconnect();
+    }
+  }, 120_000);
+});
+
+describeWithPostgres("RuntimeAttempt PostgreSQL cleanup lock order", () => {
+  it("serializes late attachment and cancellation claim without a Run-Attempt deadlock", async () => {
+    const monitor = new PrismaClient({ datasourceUrl: databaseUrl! });
+    const blocker = new PrismaClient({ datasourceUrl: databaseUrl! });
+    const lateWriter = new PrismaClient({ datasourceUrl: databaseUrl! });
+    const claimant = new PrismaClient({ datasourceUrl: databaseUrl! });
+    const fixture = await seedAttemptFixture(monitor, true);
+    const suffix = randomUUID().replaceAll("-", "").slice(0, 12);
+    const blockerApplicationName = `attempt-blocker-${suffix}`;
+    const attachApplicationName = `attempt-attach-${suffix}`;
+    const claimApplicationName = `attempt-claim-${suffix}`;
+    const failedAt = new Date();
+    const providerIdempotencyKey = `wbrt:${createHash("sha256")
+      .update(fixture.runtimeAttemptId!)
+      .digest("hex")}`;
+    const blockerLocked = deferred<void>();
+    const releaseBlocker = deferred<void>();
+    const attachService = new RuntimeAttemptService(
+      databaseWithApplicationName(lateWriter, attachApplicationName) as never,
+      120_000,
+    );
+    const claimService = new RuntimeAttemptService(
+      databaseWithApplicationName(claimant, claimApplicationName) as never,
+      120_000,
+    );
+    let blockerTransaction: Promise<unknown> | null = null;
+    let attachOperation:
+      | ReturnType<RuntimeAttemptService["attachExternalRunForCleanup"]>
+      | null = null;
+    let claimOperation:
+      | ReturnType<RuntimeAttemptService["claimProviderCancellation"]>
+      | null = null;
+    let cancellationClaim: RuntimeExecutionClaim | null = null;
+
+    try {
+      await monitor.run.update({
+        where: { id: fixture.runId },
+        data: {
+          status: "failed",
+          finishedAt: failedAt,
+          errorCode: runtimeProviderCancellationUnconfirmedCode,
+          errorDetail: "RUNTIME_PROVIDER_STREAM_IDLE_TIMEOUT",
+          errorRetryable: true,
+        },
+      });
+      await monitor.runtimeAttempt.update({
+        where: { id: fixture.runtimeAttemptId! },
+        data: {
+          status: "failed",
+          startedAt: failedAt,
+          finishedAt: failedAt,
+          errorCode: runtimeProviderCancellationUnconfirmedCode,
+          errorDetail: "RUNTIME_PROVIDER_STREAM_IDLE_TIMEOUT",
+          errorRetryable: true,
+          submissionUnknownAt: failedAt,
+          providerIdempotencyKey,
+          providerCancellationOperationEpoch: 1,
+          providerCancellationOperationStartedAt: failedAt,
+          providerCancellationOperationDeadlineAt: new Date(failedAt.getTime() + 50),
+        },
+      });
+      const operationState = await monitor.runtimeAttempt.findUniqueOrThrow({
+        where: { id: fixture.runtimeAttemptId! },
+        select: { providerCancellationOperationDeadlineAt: true },
+      });
+      if (!operationState.providerCancellationOperationDeadlineAt) {
+        throw new Error("RUNTIME_PROVIDER_CANCELLATION_OPERATION_MISSING");
+      }
+      await waitUntilAfterDatabaseTime(
+        monitor,
+        operationState.providerCancellationOperationDeadlineAt,
+      );
+
+      blockerTransaction = blocker.$transaction(async (tx) => {
+        await setTransactionApplicationName(tx, blockerApplicationName);
+        await tx.$queryRaw(Prisma.sql`
+          SELECT "id"
+          FROM "runtime_attempts"
+          WHERE "id" = ${fixture.runtimeAttemptId!}
+          FOR UPDATE
+        `);
+        blockerLocked.resolve();
+        await releaseBlocker.promise;
+      }, { maxWait: 10_000, timeout: 30_000 });
+      await blockerLocked.promise;
+
+      attachOperation = attachService.attachExternalRunForCleanup(
+        fixture.runtimeAttemptId!,
+        1,
+        fixture.externalRunId,
+      );
+      await waitForPostgresLockWait(monitor, attachApplicationName);
+
+      claimOperation = claimService.claimProviderCancellation(
+        fixture.runId,
+        fixture.runtimeAttemptId!,
+        `runtime-cleanup:${suffix}`,
+        120_000,
+      );
+      await waitForPostgresLockWait(monitor, claimApplicationName);
+
+      releaseBlocker.resolve();
+      await blockerTransaction;
+      const [attachResult, claimResult] = await Promise.allSettled([
+        attachOperation,
+        claimOperation,
+      ]);
+      if (attachResult.status === "rejected") throw attachResult.reason;
+      if (claimResult.status === "rejected") throw claimResult.reason;
+      expect([attachResult.status, claimResult.status]).toEqual(["fulfilled", "fulfilled"]);
+      if (claimResult.value.disposition !== "claimed") {
+        throw new Error("RUNTIME_PROVIDER_CANCELLATION_CLAIM_MISSING");
+      }
+      cancellationClaim = claimResult.value.claim;
+
+      expect(attachResult.value).toMatchObject({
+        externalRunId: fixture.externalRunId,
+        operationCurrent: false,
+      });
+      expect(cancellationClaim).toMatchObject({
+        runId: fixture.runId,
+        attemptId: fixture.runtimeAttemptId,
+        ownerId: `runtime-cleanup:${suffix}`,
+      });
+      const claimedRows = await Promise.all([
+        monitor.run.findUniqueOrThrow({
+          where: { id: fixture.runId },
+          select: { executionOwnerId: true, executionEpoch: true },
+        }),
+        monitor.runtimeAttempt.findUniqueOrThrow({
+          where: { id: fixture.runtimeAttemptId! },
+          select: {
+            externalRunId: true,
+            executionOwnerId: true,
+            executionEpoch: true,
+          },
+        }),
+      ]);
+      expect(claimedRows).toEqual([
+        {
+          executionOwnerId: cancellationClaim.ownerId,
+          executionEpoch: cancellationClaim.epoch,
+        },
+        {
+          externalRunId: fixture.externalRunId,
+          executionOwnerId: cancellationClaim.ownerId,
+          executionEpoch: cancellationClaim.epoch,
+        },
+      ]);
+      await expect(monitor.runtimeProviderCancellationResolution.count({
+        where: { runtimeAttemptId: fixture.runtimeAttemptId! },
+      })).resolves.toBe(0);
+
+      await claimService.releaseProviderCancellation(cancellationClaim);
+      cancellationClaim = null;
+      await expect(Promise.all([
+        monitor.run.findUniqueOrThrow({
+          where: { id: fixture.runId },
+          select: {
+            executionOwnerId: true,
+            executionHeartbeatAt: true,
+            executionLeaseExpiresAt: true,
+          },
+        }),
+        monitor.runtimeAttempt.findUniqueOrThrow({
+          where: { id: fixture.runtimeAttemptId! },
+          select: {
+            executionOwnerId: true,
+            executionHeartbeatAt: true,
+            executionLeaseExpiresAt: true,
+          },
+        }),
+      ])).resolves.toEqual([
+        {
+          executionOwnerId: null,
+          executionHeartbeatAt: null,
+          executionLeaseExpiresAt: null,
+        },
+        {
+          executionOwnerId: null,
+          executionHeartbeatAt: null,
+          executionLeaseExpiresAt: null,
+        },
+      ]);
+    } finally {
+      releaseBlocker.resolve();
+      await Promise.allSettled([
+        ...(blockerTransaction ? [blockerTransaction] : []),
+        ...(attachOperation ? [attachOperation] : []),
+        ...(claimOperation ? [claimOperation] : []),
+      ]);
+      if (cancellationClaim) {
+        await claimService.releaseProviderCancellation(cancellationClaim).catch(() => undefined);
+      }
+      await cleanupFixture(monitor, fixture);
+      await Promise.all([
+        monitor.$disconnect(),
+        blocker.$disconnect(),
+        lateWriter.$disconnect(),
+        claimant.$disconnect(),
+      ]);
+    }
+  }, 120_000);
+});
+
+describeWithPostgres("RuntimeAttempt PostgreSQL provider cancellation operations", () => {
+  it.each(["attach", "finish", "settle"] as const)(
+    "fences %s authority when the Attempt lock wait crosses the operation deadline",
+    async (action) => {
+      const monitor = new PrismaClient({ datasourceUrl: databaseUrl! });
+      const blocker = new PrismaClient({ datasourceUrl: databaseUrl! });
+      const worker = new PrismaClient({ datasourceUrl: databaseUrl! });
+      const fixture = await seedAttemptFixture(monitor, true);
+      const suffix = randomUUID().replaceAll("-", "").slice(0, 12);
+      const applicationName = `cancel-${action}-${suffix}`;
+      const blockerLocked = deferred<void>();
+      const releaseBlocker = deferred<void>();
+      const setupService = new RuntimeAttemptService(monitor, 120_000);
+      const service = new RuntimeAttemptService(
+        databaseWithApplicationName(worker, applicationName) as never,
+        120_000,
+      );
+      let blockerTransaction: Promise<unknown> | null = null;
+      let pendingOperation: Promise<unknown> | null = null;
+
+      try {
+        await monitor.runtimeAttempt.update({
+          where: { id: fixture.runtimeAttemptId! },
+          data: { providerIdempotencyKey: providerIdempotencyKeyForAttempt(fixture.runtimeAttemptId!) },
+        });
+        await cancelActiveRun(monitor, fixture.runId);
+        const operation = await setupService.startProviderCancellationOperation(
+          fixture.runId,
+          fixture.runtimeAttemptId!,
+          2_000,
+        );
+        if (!operation) throw new Error("RUNTIME_PROVIDER_CANCELLATION_OPERATION_MISSING");
+
+        blockerTransaction = blocker.$transaction(async (tx) => {
+          await tx.$queryRaw(Prisma.sql`
+            SELECT "id"
+            FROM "runtime_attempts"
+            WHERE "id" = ${fixture.runtimeAttemptId!}
+            FOR UPDATE
+          `);
+          blockerLocked.resolve();
+          await releaseBlocker.promise;
+        }, { maxWait: 10_000, timeout: 30_000 });
+        await blockerLocked.promise;
+
+        if (action === "attach") {
+          pendingOperation = service.attachExternalRunForCleanup(
+            fixture.runtimeAttemptId!,
+            operation.epoch,
+            fixture.externalRunId,
+          );
+        } else if (action === "finish") {
+          pendingOperation = service.finishProviderCancellationOperation(operation);
+        } else {
+          pendingOperation = service.settleProviderCancellationOperation(operation, {
+            outcome: "external_run_absent",
+            externalRunId: null,
+          });
+        }
+        await waitForPostgresLockWait(monitor, applicationName);
+        await waitUntilAfterDatabaseTime(monitor, operation.deadlineAt);
+        releaseBlocker.resolve();
+        await blockerTransaction;
+
+        const result = await pendingOperation;
+        if (action === "attach") {
+          expect(result).toEqual({
+            externalRunId: fixture.externalRunId,
+            operationCurrent: false,
+          });
+        } else if (action === "finish") {
+          expect(result).toBe(false);
+        } else {
+          expect(result).toBe("fenced");
+        }
+
+        await expect(monitor.runtimeAttempt.findUniqueOrThrow({
+          where: { id: fixture.runtimeAttemptId! },
+          select: {
+            externalRunId: true,
+            providerCancellationOperationEpoch: true,
+            providerCancellationOperationStartedAt: true,
+            providerCancellationOperationDeadlineAt: true,
+          },
+        })).resolves.toMatchObject({
+          externalRunId: action === "attach" ? fixture.externalRunId : null,
+          providerCancellationOperationEpoch: operation.epoch,
+          providerCancellationOperationStartedAt: expect.any(Date),
+          providerCancellationOperationDeadlineAt: expect.any(Date),
+        });
+        await expect(monitor.runtimeProviderCancellationResolution.count({
+          where: { runtimeAttemptId: fixture.runtimeAttemptId! },
+        })).resolves.toBe(0);
+      } finally {
+        releaseBlocker.resolve();
+        await Promise.allSettled([
+          ...(blockerTransaction ? [blockerTransaction] : []),
+          ...(pendingOperation ? [pendingOperation] : []),
+        ]);
+        await cleanupFixture(monitor, fixture);
+        await Promise.all([monitor.$disconnect(), blocker.$disconnect(), worker.$disconnect()]);
+      }
+    },
+    120_000,
+  );
+
+  it("rejects takeover before the database deadline and advances exactly one epoch after it", async () => {
+    const db = new PrismaClient({ datasourceUrl: databaseUrl! });
+    const fixture = await seedAttemptFixture(db, true);
+    const service = new RuntimeAttemptService(db, 120_000);
+
+    try {
+      await cancelActiveRun(db, fixture.runId);
+      const first = await service.startProviderCancellationOperation(
+        fixture.runId,
+        fixture.runtimeAttemptId!,
+        1_500,
+      );
+      if (!first) throw new Error("RUNTIME_PROVIDER_CANCELLATION_OPERATION_MISSING");
+
+      await expect(service.startProviderCancellationOperation(
+        fixture.runId,
+        fixture.runtimeAttemptId!,
+        1_500,
+      )).resolves.toBeNull();
+      await expect(db.$executeRaw(Prisma.sql`
+        UPDATE "runtime_attempts"
+        SET
+          "provider_cancellation_operation_epoch" = ${first.epoch + 1},
+          "provider_cancellation_operation_started_at" = clock_timestamp(),
+          "provider_cancellation_operation_deadline_at" = clock_timestamp() + INTERVAL '1 second'
+        WHERE "id" = ${fixture.runtimeAttemptId!}
+      `)).rejects.toThrow(/RUNTIME_PROVIDER_CANCELLATION_OPERATION_TAKEOVER_INVALID/u);
+
+      await waitUntilAfterDatabaseTime(db, first.deadlineAt);
+      const second = await service.startProviderCancellationOperation(
+        fixture.runId,
+        fixture.runtimeAttemptId!,
+        2_000,
+      );
+      expect(second).toMatchObject({
+        runId: fixture.runId,
+        attemptId: fixture.runtimeAttemptId,
+        epoch: first.epoch + 1,
+      });
+      expect(second!.deadlineAt.getTime()).toBeGreaterThan(first.deadlineAt.getTime());
+      await expect(db.runtimeAttempt.findUniqueOrThrow({
+        where: { id: fixture.runtimeAttemptId! },
+        select: { providerCancellationOperationEpoch: true },
+      })).resolves.toEqual({ providerCancellationOperationEpoch: first.epoch + 1 });
+    } finally {
+      await cleanupFixture(db, fixture);
+      await db.$disconnect();
+    }
+  }, 120_000);
+
+  it("persists stale positive provider identity after finish without granting resolution authority", async () => {
+    const db = new PrismaClient({ datasourceUrl: databaseUrl! });
+    const fixture = await seedAttemptFixture(db, true);
+    const service = new RuntimeAttemptService(db, 120_000);
+
+    try {
+      await terminalizeProviderCancellationUnconfirmed(db, fixture);
+      const claim = await claimProviderCancellation(service, fixture);
+      const staleOperation = await service.startProviderCancellationOperation(
+        fixture.runId,
+        fixture.runtimeAttemptId!,
+        150,
+        claim,
+      );
+      if (!staleOperation) throw new Error("RUNTIME_PROVIDER_CANCELLATION_OPERATION_MISSING");
+      await waitUntilAfterDatabaseTime(db, staleOperation.deadlineAt);
+      const currentOperation = await service.startProviderCancellationOperation(
+        fixture.runId,
+        fixture.runtimeAttemptId!,
+        30_000,
+        claim,
+      );
+      if (!currentOperation) throw new Error("RUNTIME_PROVIDER_CANCELLATION_OPERATION_MISSING");
+      expect(currentOperation.epoch).toBe(staleOperation.epoch + 1);
+      await expect(service.finishProviderCancellationOperation(currentOperation)).resolves.toBe(true);
+
+      await expect(service.attachExternalRunForCleanup(
+        fixture.runtimeAttemptId!,
+        staleOperation.epoch,
+        fixture.externalRunId,
+      )).resolves.toEqual({
+        externalRunId: fixture.externalRunId,
+        operationCurrent: false,
+      });
+      await expect(service.settleProviderCancellationOperation(staleOperation, {
+        outcome: "cancelled",
+        externalRunId: fixture.externalRunId,
+      })).resolves.toBe("fenced");
+      await expect(db.runtimeAttempt.findUniqueOrThrow({
+        where: { id: fixture.runtimeAttemptId! },
+      })).resolves.toMatchObject({
+        externalRunId: fixture.externalRunId,
+        providerCancellationOperationEpoch: currentOperation.epoch,
+        providerCancellationOperationStartedAt: null,
+        providerCancellationOperationDeadlineAt: null,
+      });
+      await expect(db.runtimeProviderCancellationResolution.count({
+        where: { runtimeAttemptId: fixture.runtimeAttemptId! },
+      })).resolves.toBe(0);
+    } finally {
+      await cleanupFixture(db, fixture);
+      await db.$disconnect();
+    }
+  }, 120_000);
+
+  it("rejects raw INSERT and UPDATE attempts to forge an active operation", async () => {
+    const db = new PrismaClient({ datasourceUrl: databaseUrl! });
+    const fixture = await seedAttemptFixture(db, true);
+    const forgedAttemptId = `forged_${randomUUID().replaceAll("-", "")}`;
+
+    try {
+      await expect(db.$executeRaw(Prisma.sql`
+        INSERT INTO "runtime_attempts" (
+          "id", "run_id", "runtime_binding_id", "attempt", "adapter", "external_thread_id",
+          "provider_cancellation_operation_epoch",
+          "provider_cancellation_operation_started_at",
+          "provider_cancellation_operation_deadline_at"
+        ) VALUES (
+          ${forgedAttemptId}, ${fixture.runId}, ${fixture.binding.id}, 2,
+          ${fixture.binding.adapter}, ${fixture.binding.externalThreadId},
+          1, clock_timestamp(), clock_timestamp() + INTERVAL '30 seconds'
+        )
+      `)).rejects.toThrow(
+        /RUNTIME_(?:ATTEMPT_MUST_START_PENDING|PROVIDER_CANCELLATION_OPERATION_MUST_START_EMPTY)/u,
+      );
+      await expect(db.$executeRaw(Prisma.sql`
+        UPDATE "runtime_attempts"
+        SET
+          "provider_cancellation_operation_epoch" = 1,
+          "provider_cancellation_operation_started_at" = clock_timestamp(),
+          "provider_cancellation_operation_deadline_at" = clock_timestamp() + INTERVAL '30 seconds'
+        WHERE "id" = ${fixture.runtimeAttemptId!}
+      `)).rejects.toThrow(/RUNTIME_PROVIDER_CANCELLATION_OPERATION_SCOPE_INVALID/u);
+
+      await expect(db.runtimeAttempt.findMany({
+        where: { id: { in: [fixture.runtimeAttemptId!, forgedAttemptId] } },
+        orderBy: { id: "asc" },
+        select: {
+          id: true,
+          providerCancellationOperationEpoch: true,
+          providerCancellationOperationStartedAt: true,
+          providerCancellationOperationDeadlineAt: true,
+        },
+      })).resolves.toEqual([{
+        id: fixture.runtimeAttemptId!,
+        providerCancellationOperationEpoch: 0,
+        providerCancellationOperationStartedAt: null,
+        providerCancellationOperationDeadlineAt: null,
+      }]);
+    } finally {
+      await cleanupFixture(db, fixture);
+      await db.$disconnect();
+    }
+  }, 120_000);
+
+  it("rejects resolutions outside the exact active operation scope", async () => {
+    const db = new PrismaClient({ datasourceUrl: databaseUrl! });
+    const fixture = await seedAttemptFixture(db, true);
+    const service = new RuntimeAttemptService(db, 120_000);
+
+    try {
+      await terminalizeProviderCancellationUnconfirmed(db, fixture);
+      const claim = await claimProviderCancellation(service, fixture);
+      const first = await service.startProviderCancellationOperation(
+        fixture.runId,
+        fixture.runtimeAttemptId!,
+        30_000,
+        claim,
+      );
+      if (!first) throw new Error("RUNTIME_PROVIDER_CANCELLATION_OPERATION_MISSING");
+      await service.attachExternalRunForCleanup(
+        fixture.runtimeAttemptId!,
+        first.epoch,
+        fixture.externalRunId,
+      );
+
+      await expect(insertProviderCancellationResolution(db, fixture, {
+        operationEpoch: first.epoch + 1,
+      })).rejects.toThrow(/RUNTIME_PROVIDER_CANCELLATION_RESOLUTION_EPOCH_INVALID/u);
+      await expect(insertProviderCancellationResolution(db, fixture, {
+        runId: `wrong_${fixture.runId}`,
+        operationEpoch: first.epoch,
+      })).rejects.toThrow(/RUNTIME_PROVIDER_CANCELLATION_RESOLUTION_SCOPE_INVALID/u);
+      await expect(insertProviderCancellationResolution(db, fixture, {
+        operationEpoch: first.epoch,
+        externalRunId: `wrong_${fixture.externalRunId}`,
+      })).rejects.toThrow(/RUNTIME_PROVIDER_CANCELLATION_RESOLUTION_EXTERNAL_RUN_INVALID/u);
+
+      await expect(service.finishProviderCancellationOperation(first)).resolves.toBe(true);
+      await expect(insertProviderCancellationResolution(db, fixture, {
+        operationEpoch: first.epoch,
+      })).rejects.toThrow(/RUNTIME_PROVIDER_CANCELLATION_OPERATION_NOT_ACTIVE/u);
+
+      const second = await service.startProviderCancellationOperation(
+        fixture.runId,
+        fixture.runtimeAttemptId!,
+        150,
+        claim,
+      );
+      if (!second) throw new Error("RUNTIME_PROVIDER_CANCELLATION_OPERATION_MISSING");
+      await waitUntilAfterDatabaseTime(db, second.deadlineAt);
+      await expect(insertProviderCancellationResolution(db, fixture, {
+        operationEpoch: second.epoch,
+      })).rejects.toThrow(/RUNTIME_PROVIDER_CANCELLATION_OPERATION_NOT_ACTIVE/u);
+      await expect(db.runtimeProviderCancellationResolution.count({
+        where: { runtimeAttemptId: fixture.runtimeAttemptId! },
+      })).resolves.toBe(0);
+    } finally {
+      await cleanupFixture(db, fixture);
+      await db.$disconnect();
+    }
+  }, 120_000);
+
+  it("rolls back settlement after resolution insertion and freezes the epoch after commit", async () => {
+    const db = new PrismaClient({ datasourceUrl: databaseUrl! });
+    const fixture = await seedAttemptFixture(db, true);
+    const service = new RuntimeAttemptService(db, 120_000);
+    const crashingService = new RuntimeAttemptService(
+      databaseWithProviderCancellationResolutionCrash(db) as never,
+      120_000,
+    );
+
+    try {
+      await terminalizeProviderCancellationUnconfirmed(db, fixture);
+      const claim = await claimProviderCancellation(service, fixture);
+      const operation = await service.startProviderCancellationOperation(
+        fixture.runId,
+        fixture.runtimeAttemptId!,
+        30_000,
+        claim,
+      );
+      if (!operation) throw new Error("RUNTIME_PROVIDER_CANCELLATION_OPERATION_MISSING");
+
+      await expect(crashingService.settleProviderCancellationOperation(operation, {
+        outcome: "cancelled",
+        externalRunId: fixture.externalRunId,
+      })).rejects.toThrow("SIMULATED_CRASH_AFTER_CANCELLATION_RESOLUTION_INSERT");
+      await expect(Promise.all([
+        db.runtimeAttempt.findUniqueOrThrow({
+          where: { id: fixture.runtimeAttemptId! },
+          select: {
+            externalRunId: true,
+            providerCancellationOperationEpoch: true,
+            providerCancellationOperationStartedAt: true,
+            providerCancellationOperationDeadlineAt: true,
+          },
+        }),
+        db.runtimeProviderCancellationResolution.count({
+          where: { runtimeAttemptId: fixture.runtimeAttemptId! },
+        }),
+      ])).resolves.toEqual([
+        {
+          externalRunId: null,
+          providerCancellationOperationEpoch: operation.epoch,
+          providerCancellationOperationStartedAt: expect.any(Date),
+          providerCancellationOperationDeadlineAt: expect.any(Date),
+        },
+        0,
+      ]);
+
+      await expect(service.settleProviderCancellationOperation(operation, {
+        outcome: "cancelled",
+        externalRunId: fixture.externalRunId,
+      })).resolves.toBe("resolved");
+      await expect(service.startProviderCancellationOperation(
+        fixture.runId,
+        fixture.runtimeAttemptId!,
+        30_000,
+        claim,
+      )).resolves.toBeNull();
+      await expect(db.$executeRaw(Prisma.sql`
+        UPDATE "runtime_attempts"
+        SET
+          "provider_cancellation_operation_epoch" = ${operation.epoch + 1},
+          "provider_cancellation_operation_started_at" = clock_timestamp(),
+          "provider_cancellation_operation_deadline_at" = clock_timestamp() + INTERVAL '30 seconds'
+        WHERE "id" = ${fixture.runtimeAttemptId!}
+      `)).rejects.toThrow(/RUNTIME_PROVIDER_CANCELLATION_OPERATION_RESOLVED/u);
+      await expect(db.runtimeAttempt.findUniqueOrThrow({
+        where: { id: fixture.runtimeAttemptId! },
+        select: {
+          providerCancellationOperationEpoch: true,
+          providerCancellationOperationStartedAt: true,
+          providerCancellationOperationDeadlineAt: true,
+        },
+      })).resolves.toEqual({
+        providerCancellationOperationEpoch: operation.epoch,
+        providerCancellationOperationStartedAt: null,
+        providerCancellationOperationDeadlineAt: null,
+      });
+    } finally {
+      await cleanupFixture(db, fixture);
+      await db.$disconnect();
+    }
+  }, 120_000);
+
+  it("observes a resolution committed while waiting for the cancellation scope locks", async () => {
+    const settlerDb = new PrismaClient({ datasourceUrl: databaseUrl! });
+    const claimantDb = new PrismaClient({ datasourceUrl: databaseUrl! });
+    const fixture = await seedAttemptFixture(settlerDb, true);
+    const resolutionInserted = deferred<void>();
+    const releaseSettlement = deferred<void>();
+    const applicationName = `cancel-resolution-wait-${randomUUID().replaceAll("-", "").slice(0, 12)}`;
+    const setupService = new RuntimeAttemptService(settlerDb, 120_000);
+    const settlingService = new RuntimeAttemptService(
+      databaseWithProviderCancellationResolutionBarrier(
+        settlerDb,
+        resolutionInserted,
+        releaseSettlement,
+      ) as never,
+      120_000,
+    );
+    const claimantService = new RuntimeAttemptService(
+      databaseWithApplicationName(claimantDb, applicationName) as never,
+      120_000,
+    );
+    let settlement: ReturnType<
+      RuntimeAttemptService["settleProviderCancellationOperation"]
+    > | null = null;
+    let claim: ReturnType<RuntimeAttemptService["claimProviderCancellation"]> | null = null;
+
+    try {
+      await terminalizeProviderCancellationUnconfirmed(settlerDb, fixture);
+      const cancellationClaim = await claimProviderCancellation(setupService, fixture);
+      const operation = await setupService.startProviderCancellationOperation(
+        fixture.runId,
+        fixture.runtimeAttemptId!,
+        30_000,
+        cancellationClaim,
+      );
+      if (!operation) throw new Error("RUNTIME_PROVIDER_CANCELLATION_OPERATION_MISSING");
+
+      settlement = settlingService.settleProviderCancellationOperation(operation, {
+        outcome: "cancelled",
+        externalRunId: fixture.externalRunId,
+      });
+      await resolutionInserted.promise;
+      claim = claimantService.claimProviderCancellation(
+        fixture.runId,
+        fixture.runtimeAttemptId!,
+        `runtime-cleanup:${randomUUID()}`,
+        120_000,
+      );
+      await waitForPostgresLockWait(settlerDb, applicationName);
+
+      releaseSettlement.resolve();
+      await expect(settlement).resolves.toBe("resolved");
+      await expect(claim).resolves.toEqual({ disposition: "resolved" });
+    } finally {
+      releaseSettlement.resolve();
+      await Promise.allSettled([
+        ...(settlement ? [settlement] : []),
+        ...(claim ? [claim] : []),
+      ]);
+      await cleanupFixture(settlerDb, fixture);
+      await Promise.all([settlerDb.$disconnect(), claimantDb.$disconnect()]);
+    }
+  }, 120_000);
+
+  it("rejects nullable failure codes at operation and resolution boundaries", async () => {
+    const db = new PrismaClient({ datasourceUrl: databaseUrl! });
+    const operationFixture = await seedAttemptFixture(db, true);
+    const resolutionFixture = await seedAttemptFixture(db, true);
+    const service = new RuntimeAttemptService(db, 120_000);
+
+    try {
+      const failedAt = new Date();
+      await db.run.update({
+        where: { id: operationFixture.runId },
+        data: { status: "failed", finishedAt: failedAt, errorCode: null },
+      });
+      await db.runtimeAttempt.update({
+        where: { id: operationFixture.runtimeAttemptId! },
+        data: {
+          status: "failed",
+          startedAt: failedAt,
+          finishedAt: failedAt,
+          errorCode: null,
+        },
+      });
+      await expect(db.$executeRaw(Prisma.sql`
+        UPDATE "runtime_attempts"
+        SET
+          "provider_cancellation_operation_epoch" = 1,
+          "provider_cancellation_operation_started_at" = clock_timestamp(),
+          "provider_cancellation_operation_deadline_at" = clock_timestamp() + INTERVAL '30 seconds'
+        WHERE "id" = ${operationFixture.runtimeAttemptId!}
+      `)).rejects.toThrow(/RUNTIME_PROVIDER_CANCELLATION_OPERATION_SCOPE_INVALID/u);
+
+      await db.runtimeAttempt.update({
+        where: { id: resolutionFixture.runtimeAttemptId! },
+        data: {
+          providerIdempotencyKey: providerIdempotencyKeyForAttempt(
+            resolutionFixture.runtimeAttemptId!,
+          ),
+        },
+      });
+      await cancelActiveRun(db, resolutionFixture.runId);
+      const operation = await service.startProviderCancellationOperation(
+        resolutionFixture.runId,
+        resolutionFixture.runtimeAttemptId!,
+        30_000,
+      );
+      if (!operation) throw new Error("RUNTIME_PROVIDER_CANCELLATION_OPERATION_MISSING");
+      await service.attachExternalRunForCleanup(
+        resolutionFixture.runtimeAttemptId!,
+        operation.epoch,
+        resolutionFixture.externalRunId,
+      );
+      await db.runtimeAttempt.update({
+        where: { id: resolutionFixture.runtimeAttemptId! },
+        data: {
+          status: "failed",
+          startedAt: failedAt,
+          finishedAt: failedAt,
+          errorCode: null,
+        },
+      });
+      await db.run.update({
+        where: { id: resolutionFixture.runId },
+        data: { status: "failed", finishedAt: failedAt, errorCode: null },
+      });
+      await expect(db.$transaction(async (tx) => {
+        await tx.runtimeProviderCancellationResolution.create({
+          data: {
+            runtimeAttemptId: resolutionFixture.runtimeAttemptId!,
+            runId: resolutionFixture.runId,
+            operationEpoch: operation.epoch,
+            externalRunId: resolutionFixture.externalRunId,
+            failureCode: "RUNTIME_EXECUTION_FAILED",
+            outcome: "cancelled",
+          },
+        });
+        await tx.runtimeAttempt.update({
+          where: { id: resolutionFixture.runtimeAttemptId! },
+          data: {
+            providerCancellationOperationStartedAt: null,
+            providerCancellationOperationDeadlineAt: null,
+          },
+        });
+      })).rejects.toThrow(/RUNTIME_PROVIDER_CANCELLATION_RESOLUTION_STATE_INVALID/u);
+
+      await expect(Promise.all([
+        db.runtimeAttempt.findUniqueOrThrow({
+          where: { id: operationFixture.runtimeAttemptId! },
+          select: { providerCancellationOperationEpoch: true },
+        }),
+        db.runtimeProviderCancellationResolution.count({
+          where: { runtimeAttemptId: resolutionFixture.runtimeAttemptId! },
+        }),
+      ])).resolves.toEqual([
+        { providerCancellationOperationEpoch: 0 },
+        0,
+      ]);
+    } finally {
+      await Promise.all([
+        cleanupFixture(db, operationFixture),
+        cleanupFixture(db, resolutionFixture),
+      ]);
+      await db.$disconnect();
+    }
+  }, 120_000);
+
+  it("blocks operations on a running Run and fences ordinary claims after cancellation starts", async () => {
+    const db = new PrismaClient({ datasourceUrl: databaseUrl! });
+    const fixture = await seedAttemptFixture(db, true);
+    const service = new RuntimeAttemptService(db, 120_000);
+
+    try {
+      await expect(service.startProviderCancellationOperation(
+        fixture.runId,
+        fixture.runtimeAttemptId!,
+        30_000,
+      )).rejects.toThrow("RUNTIME_PROVIDER_CANCELLATION_OPERATION_SCOPE_FENCED");
+      await expect(db.runtimeAttempt.findUniqueOrThrow({
+        where: { id: fixture.runtimeAttemptId! },
+        select: { providerCancellationOperationEpoch: true },
+      })).resolves.toEqual({ providerCancellationOperationEpoch: 0 });
+
+      await cancelActiveRun(db, fixture.runId);
+      const operation = await service.startProviderCancellationOperation(
+        fixture.runId,
+        fixture.runtimeAttemptId!,
+        30_000,
+      );
+      if (!operation) throw new Error("RUNTIME_PROVIDER_CANCELLATION_OPERATION_MISSING");
+      await expect(service.finishProviderCancellationOperation(operation)).resolves.toBe(true);
+      await expect(service.claim(
+        fixture.runId,
+        fixture.runtimeAttemptId!,
+        `ordinary-worker:${randomUUID()}`,
+      )).rejects.toThrow("RUNTIME_EXECUTION_PROVIDER_CANCELLATION_FENCED");
+    } finally {
+      await cleanupFixture(db, fixture);
+      await db.$disconnect();
     }
   }, 120_000);
 });
@@ -407,7 +1285,439 @@ describeWithPostgres("RuntimeAttempt PostgreSQL external event crash replay", ()
   }, 120_000);
 });
 
+describeWithPostgres("RuntimeAttempt PostgreSQL fault and concurrency fences", () => {
+  it.each([
+    ["before the pending insert", "before-pending-insert", "SIMULATED_CRASH_BEFORE_PENDING_INSERT"],
+    ["after the processed transition", "after-processed", "SIMULATED_CRASH_AFTER_PROCESSED_TRANSITION"],
+    ["after the projection CAS", "after-projection-cas", "SIMULATED_CRASH_AFTER_PROJECTION_CAS"],
+  ] as const)("rolls back every event effect %s", async (_label, faultPoint, errorMessage) => {
+    const db = new PrismaClient({ datasourceUrl: databaseUrl! });
+    const fixture = await seedAttemptFixture(db, true);
+    const { service, claim } = await activateExternalRun(db, fixture);
+    const faultedService = new RuntimeAttemptService(
+      databaseWithEventTransactionFault(db, faultPoint) as never,
+      120_000,
+    );
+    const input = externalEvent(fixture, `event-fault-${faultPoint}`);
+
+    try {
+      await expect(processWithActivityEffect(db, faultedService, claim, fixture, input))
+        .rejects.toThrow(errorMessage);
+
+      await expect(durableEventState(db, fixture)).resolves.toEqual(emptyDurableEventState());
+      await expect(processWithActivityEffect(db, service, claim, fixture, input))
+        .resolves.toEqual({ created: true, sequence: 1 });
+      await expect(durableEventState(db, fixture))
+        .resolves.toEqual(expectedDurableEventState(fixture, [input]));
+    } finally {
+      await cleanupFixture(db, fixture);
+      await db.$disconnect();
+    }
+  }, 120_000);
+
+  it("fences an expired owner after a new owner takes over at the next epoch", async () => {
+    const db = new PrismaClient({ datasourceUrl: databaseUrl! });
+    const fixture = await seedAttemptFixture(db, true);
+    const { service: firstService, claim: firstClaim } = await activateExternalRun(db, fixture);
+    const takeoverService = new RuntimeAttemptService(db, 120_000);
+    const expiredHeartbeatAt = new Date(Date.now() - 120_000);
+    const expiredLeaseAt = new Date(Date.now() - 60_000);
+    const input = externalEvent(fixture, "event-after-lease-takeover");
+
+    try {
+      await db.$transaction([
+        db.run.update({
+          where: { id: fixture.runId },
+          data: {
+            executionHeartbeatAt: expiredHeartbeatAt,
+            executionLeaseExpiresAt: expiredLeaseAt,
+          },
+        }),
+        db.runtimeAttempt.update({
+          where: { id: fixture.runtimeAttemptId! },
+          data: {
+            executionHeartbeatAt: expiredHeartbeatAt,
+            executionLeaseExpiresAt: expiredLeaseAt,
+          },
+        }),
+      ]);
+
+      const takeoverClaim = await takeoverService.claim(
+        fixture.runId,
+        fixture.runtimeAttemptId!,
+        `runtime-takeover-pg:${randomUUID()}`,
+      );
+      expect(takeoverClaim).toMatchObject({
+        runId: firstClaim.runId,
+        attemptId: firstClaim.attemptId,
+        epoch: firstClaim.epoch + 1,
+      });
+      expect(takeoverClaim.ownerId).not.toBe(firstClaim.ownerId);
+
+      await expect(firstService.heartbeat(firstClaim)).rejects.toThrow("RUNTIME_EXECUTION_FENCED");
+      await expect(processWithActivityEffect(db, firstService, firstClaim, fixture, input))
+        .rejects.toThrow("RUNTIME_EXECUTION_FENCED");
+      await expect(durableEventState(db, fixture)).resolves.toEqual(emptyDurableEventState());
+      await expect(takeoverService.claim(
+        fixture.runId,
+        fixture.runtimeAttemptId!,
+        `runtime-third-owner-pg:${randomUUID()}`,
+      )).rejects.toThrow("RUNTIME_EXECUTION_CLAIM_BUSY");
+
+      await expect(processWithActivityEffect(db, takeoverService, takeoverClaim, fixture, input))
+        .resolves.toEqual({ created: true, sequence: 1 });
+      await expect(durableEventState(db, fixture))
+        .resolves.toEqual(expectedDurableEventState(fixture, [input]));
+      await expect(Promise.all([
+        db.run.findUniqueOrThrow({
+          where: { id: fixture.runId },
+          select: { executionOwnerId: true, executionEpoch: true },
+        }),
+        db.runtimeAttempt.findUniqueOrThrow({
+          where: { id: fixture.runtimeAttemptId! },
+          select: { executionOwnerId: true, executionEpoch: true },
+        }),
+      ])).resolves.toEqual([
+        { executionOwnerId: takeoverClaim.ownerId, executionEpoch: takeoverClaim.epoch },
+        { executionOwnerId: takeoverClaim.ownerId, executionEpoch: takeoverClaim.epoch },
+      ]);
+    } finally {
+      await cleanupFixture(db, fixture);
+      await db.$disconnect();
+    }
+  }, 120_000);
+
+  it("deduplicates the same event concurrently across two database connections", async () => {
+    const firstDb = new PrismaClient({ datasourceUrl: databaseUrl! });
+    const secondDb = new PrismaClient({ datasourceUrl: databaseUrl! });
+    const fixture = await seedAttemptFixture(firstDb, true);
+    const { claim } = await activateExternalRun(firstDb, fixture);
+    const firstLockAcquired = deferred<void>();
+    const secondLockRequested = deferred<void>();
+    const releaseFirstLock = deferred<void>();
+    const firstService = new RuntimeAttemptService(
+      databaseWithLockScopeBarrier(firstDb, {
+        afterLockAcquired: firstLockAcquired,
+        releaseLock: releaseFirstLock,
+      }) as never,
+      120_000,
+    );
+    const secondService = new RuntimeAttemptService(
+      databaseWithLockScopeBarrier(secondDb, {
+        beforeLockRequest: secondLockRequested,
+      }) as never,
+      120_000,
+    );
+    const input = externalEvent(fixture, "event-concurrent-same-identity");
+    const firstEffects = vi.fn(async (tx: Prisma.TransactionClient) => {
+      await appendActivityEffect(new RunEventStore(firstDb), tx, fixture, input.externalEventId);
+    });
+    const secondEffects = vi.fn(async (tx: Prisma.TransactionClient) => {
+      await appendActivityEffect(new RunEventStore(secondDb), tx, fixture, input.externalEventId);
+    });
+    const firstOutcome = firstService.processExternalEvent(claim, input, firstEffects);
+    let secondOutcome: Promise<{ created: boolean; sequence: number }> | undefined;
+
+    try {
+      await firstLockAcquired.promise;
+      secondOutcome = secondService.processExternalEvent(claim, input, secondEffects);
+      await secondLockRequested.promise;
+      await expect(promiseStateAfter(secondOutcome, 100)).resolves.toBe("pending");
+
+      releaseFirstLock.resolve();
+      const results = await Promise.all([firstOutcome, secondOutcome]);
+
+      expect(results.map((result) => result.sequence)).toEqual([1, 1]);
+      expect(results.filter((result) => result.created)).toHaveLength(1);
+      expect(firstEffects.mock.calls.length + secondEffects.mock.calls.length).toBe(1);
+      await expect(durableEventState(firstDb, fixture))
+        .resolves.toEqual(expectedDurableEventState(fixture, [input]));
+    } finally {
+      releaseFirstLock.resolve();
+      await Promise.allSettled([
+        firstOutcome,
+        ...(secondOutcome ? [secondOutcome] : []),
+      ]);
+      await cleanupFixture(firstDb, fixture);
+      await Promise.all([firstDb.$disconnect(), secondDb.$disconnect()]);
+    }
+  }, 120_000);
+
+  it("serializes adjacent events into contiguous sequences across two database connections", async () => {
+    const firstDb = new PrismaClient({ datasourceUrl: databaseUrl! });
+    const secondDb = new PrismaClient({ datasourceUrl: databaseUrl! });
+    const fixture = await seedAttemptFixture(firstDb, true);
+    const { claim } = await activateExternalRun(firstDb, fixture);
+    const firstLockAcquired = deferred<void>();
+    const secondLockRequested = deferred<void>();
+    const releaseFirstLock = deferred<void>();
+    const firstService = new RuntimeAttemptService(
+      databaseWithLockScopeBarrier(firstDb, {
+        afterLockAcquired: firstLockAcquired,
+        releaseLock: releaseFirstLock,
+      }) as never,
+      120_000,
+    );
+    const secondService = new RuntimeAttemptService(
+      databaseWithLockScopeBarrier(secondDb, {
+        beforeLockRequest: secondLockRequested,
+      }) as never,
+      120_000,
+    );
+    const firstInput = externalEvent(fixture, "event-concurrent-adjacent-a");
+    const secondInput = externalEvent(fixture, "event-concurrent-adjacent-b");
+    const firstOutcome = processWithActivityEffect(
+      firstDb,
+      firstService,
+      claim,
+      fixture,
+      firstInput,
+    );
+    let secondOutcome: Promise<{ created: boolean; sequence: number }> | undefined;
+
+    try {
+      await firstLockAcquired.promise;
+      secondOutcome = processWithActivityEffect(
+        secondDb,
+        secondService,
+        claim,
+        fixture,
+        secondInput,
+      );
+      await secondLockRequested.promise;
+      await expect(promiseStateAfter(secondOutcome, 100)).resolves.toBe("pending");
+
+      releaseFirstLock.resolve();
+      const [firstResult, secondResult] = await Promise.all([firstOutcome, secondOutcome]);
+      const applied = [
+        { input: firstInput, result: firstResult },
+        { input: secondInput, result: secondResult },
+      ].sort((left, right) => left.result.sequence - right.result.sequence);
+
+      expect(applied.map(({ result }) => result)).toEqual([
+        { created: true, sequence: 1 },
+        { created: true, sequence: 2 },
+      ]);
+      await expect(durableEventState(firstDb, fixture))
+        .resolves.toEqual(expectedDurableEventState(fixture, applied.map(({ input }) => input)));
+    } finally {
+      releaseFirstLock.resolve();
+      await Promise.allSettled([
+        firstOutcome,
+        ...(secondOutcome ? [secondOutcome] : []),
+      ]);
+      await cleanupFixture(firstDb, fixture);
+      await Promise.all([firstDb.$disconnect(), secondDb.$disconnect()]);
+    }
+  }, 120_000);
+
+  it("processes one current event at the typed patch payload budget without a historical payload scan", async () => {
+    const queries: string[] = [];
+    const db = new PrismaClient({
+      datasourceUrl: databaseUrl!,
+      log: [{ emit: "event", level: "query" }],
+    });
+    db.$on("query", (event) => queries.push(event.query));
+    const fixture = await seedAttemptFixture(db, true);
+    const { service, claim } = await activateExternalRun(db, fixture);
+    const first = externalEvent(fixture, "event-before-large-payload");
+    const payloadOverhead = Buffer.byteLength(JSON.stringify({ syntheticText: "" }), "utf8");
+    const payload = {
+      syntheticText: "x".repeat(PROTOTYPE_PATCH_MAX_PAYLOAD_BYTES - payloadOverhead),
+    };
+    const current = {
+      externalRunId: fixture.externalRunId,
+      externalEventId: "event-typed-patch-payload-budget",
+      event: "synthetic.patch-payload",
+      payload,
+    } as const;
+
+    try {
+      expect(assertPrototypePatchPayloadSize(payload)).toBe(PROTOTYPE_PATCH_MAX_PAYLOAD_BYTES);
+      await service.processExternalEvent(claim, first, async () => undefined);
+
+      queries.length = 0;
+      await expect(service.processExternalEvent(claim, current, async () => undefined))
+        .resolves.toEqual({ created: true, sequence: 2 });
+      const transactionQueries = [...queries];
+      const inboxReads = transactionQueries.filter((query) => (
+        query.trimStart().toUpperCase().startsWith("SELECT")
+        && query.includes('"runtime_external_events"')
+      ));
+      expect(inboxReads).toHaveLength(1);
+      expect(inboxReads[0]).toMatch(/"external_event_id"\s*=\s*\$\d+/iu);
+      expect(inboxReads[0]).not.toMatch(/ORDER\s+BY|LIMIT\s+10001/iu);
+
+      await expect(db.runtimeExternalEvent.findUniqueOrThrow({
+        where: {
+          runtimeAttemptId_externalEventId: {
+            runtimeAttemptId: fixture.runtimeAttemptId!,
+            externalEventId: current.externalEventId,
+          },
+        },
+        select: { sequence: true, payload: true, payloadSha256: true, status: true },
+      })).resolves.toEqual({
+        sequence: 2,
+        payload,
+        payloadSha256: sha256Canonical(payload),
+        status: "processed",
+      });
+      await expect(Promise.all([
+        db.runtimeAttempt.findUniqueOrThrow({
+          where: { id: fixture.runtimeAttemptId! },
+          select: { externalEventSequence: true, lastExternalEventId: true },
+        }),
+        db.runtimeProviderState.findUniqueOrThrow({
+          where: { runtimeAttemptId: fixture.runtimeAttemptId! },
+          select: { lastAppliedSequence: true, lastExternalEventId: true },
+        }),
+      ])).resolves.toEqual([
+        { externalEventSequence: 2, lastExternalEventId: current.externalEventId },
+        { lastAppliedSequence: 2, lastExternalEventId: current.externalEventId },
+      ]);
+    } finally {
+      await cleanupFixture(db, fixture);
+      await db.$disconnect();
+    }
+  }, 120_000);
+});
+
 describeWithPostgres("RuntimeProviderState PostgreSQL invariants", () => {
+  it("keeps timestamps monotonic when the database wall clock moves backward", async () => {
+    const db = new PrismaClient({ datasourceUrl: databaseUrl! });
+    const fixture = await seedAttemptFixture(db, true);
+
+    try {
+      const { seeded, updated } = await db.$transaction(async (tx) => {
+        await tx.runtimeProviderState.create({
+          data: initialProviderState(fixture),
+        });
+        await tx.$executeRawUnsafe(
+          'ALTER TABLE "runtime_provider_states" DISABLE TRIGGER "runtime_provider_state_guard"',
+        );
+        await tx.$executeRaw(Prisma.sql`
+          WITH future_timestamp AS MATERIALIZED (
+            SELECT clock_timestamp() + INTERVAL '1 hour' AS value
+          )
+          UPDATE "runtime_provider_states" AS state
+          SET "built_at" = future_timestamp.value,
+              "updated_at" = future_timestamp.value
+          FROM future_timestamp
+          WHERE state."runtime_attempt_id" = ${fixture.runtimeAttemptId!}
+        `);
+        const seeded = await tx.runtimeProviderState.findUniqueOrThrow({
+          where: { runtimeAttemptId: fixture.runtimeAttemptId! },
+          select: { builtAt: true, updatedAt: true },
+        });
+        await tx.$executeRawUnsafe(
+          'ALTER TABLE "runtime_provider_states" ENABLE TRIGGER "runtime_provider_state_guard"',
+        );
+        const updated = await tx.runtimeProviderState.update({
+          where: { runtimeAttemptId: fixture.runtimeAttemptId! },
+          data: { projectionVersion: 2 },
+          select: { builtAt: true, updatedAt: true },
+        });
+        return { seeded, updated };
+      }, { maxWait: 10_000, timeout: 30_000 });
+
+      expect(updated.builtAt).toEqual(seeded.builtAt);
+      expect(updated.updatedAt.getTime()).toBeGreaterThanOrEqual(seeded.updatedAt.getTime());
+      expect(updated.updatedAt.getTime()).toBeGreaterThanOrEqual(updated.builtAt.getTime());
+    } finally {
+      await cleanupFixture(db, fixture);
+      await db.$disconnect();
+    }
+  }, 120_000);
+
+  it("inherits only from the direct predecessor and blocks a missing predecessor projection", async () => {
+    const db = new PrismaClient({ datasourceUrl: databaseUrl! });
+    const fixture = await seedAttemptFixture(db, true);
+    const directPredecessorId = `${fixture.runtimeAttemptId}_direct`;
+    const currentAttemptId = `${fixture.runtimeAttemptId}_current`;
+    const firstProjection = createRuntimeProviderProjection({
+      runtimeAttemptId: fixture.runtimeAttemptId!,
+      runId: fixture.runId,
+    });
+
+    try {
+      await db.$transaction(async (tx) => {
+        await tx.run.update({
+          where: { id: fixture.runId },
+          data: { attempt: 3 },
+        });
+        await tx.runtimeAttempt.createMany({
+          data: [
+            {
+              id: directPredecessorId,
+              runId: fixture.runId,
+              runtimeBindingId: fixture.binding.id,
+              attempt: 2,
+              adapter: fixture.binding.adapter,
+              externalThreadId: fixture.binding.externalThreadId,
+            },
+            {
+              id: currentAttemptId,
+              runId: fixture.runId,
+              runtimeBindingId: fixture.binding.id,
+              attempt: 3,
+              adapter: fixture.binding.adapter,
+              externalThreadId: fixture.binding.externalThreadId,
+            },
+          ],
+        });
+        await tx.runtimeProviderState.create({ data: providerProjectionData(firstProjection) });
+      });
+
+      const service = new RuntimeAttemptService(db, 120_000);
+      await expect(service.claim(
+        fixture.runId,
+        currentAttemptId,
+        `runtime-predecessor-pg:${randomUUID()}`,
+      )).rejects.toThrow("RUNTIME_PROVIDER_STATE_BACKFILL_REQUIRED");
+      await expect(db.runtimeProviderState.findUnique({
+        where: { runtimeAttemptId: currentAttemptId },
+      })).resolves.toBeNull();
+
+      const directProjection = createRuntimeProviderProjection({
+        runtimeAttemptId: directPredecessorId,
+        runId: fixture.runId,
+        snapshot: {
+          rawAssistantText: "wbkg1.",
+          visibleAssistantText: "",
+          redactionBuffer: "wbkg1.",
+        },
+      });
+      await db.runtimeProviderState.create({ data: providerProjectionData(directProjection) });
+
+      await expect(service.claim(
+        fixture.runId,
+        currentAttemptId,
+        `runtime-predecessor-pg:${randomUUID()}`,
+      )).resolves.toMatchObject({
+        runId: fixture.runId,
+        attemptId: currentAttemptId,
+        epoch: 1,
+      });
+      await expect(db.runtimeProviderState.findUniqueOrThrow({
+        where: { runtimeAttemptId: currentAttemptId },
+        select: {
+          lastAppliedSequence: true,
+          rawAssistantText: true,
+          visibleAssistantText: true,
+          redactionBuffer: true,
+        },
+      })).resolves.toEqual({
+        lastAppliedSequence: 0,
+        rawAssistantText: "wbkg1.",
+        visibleAssistantText: "",
+        redactionBuffer: "wbkg1.",
+      });
+    } finally {
+      await cleanupFixture(db, fixture);
+      await db.$disconnect();
+    }
+  }, 120_000);
+
   it("accepts a scoped initial projection and rejects invalid shape and scope", async () => {
     const db = new PrismaClient({ datasourceUrl: databaseUrl! });
     const fixture = await seedAttemptFixture(db, true);
@@ -475,11 +1785,16 @@ describeWithPostgres("RuntimeProviderState PostgreSQL invariants", () => {
           stateSha256: "c".repeat(64),
         },
       });
+      const started = await db.runtimeAttempt.findUniqueOrThrow({
+        where: { id: fixture.runtimeAttemptId! },
+        select: { startedAt: true },
+      });
+      if (!started.startedAt) throw new Error("RUNTIME_ATTEMPT_STARTED_AT_MISSING");
       await db.runtimeAttempt.update({
         where: { id: fixture.runtimeAttemptId! },
         data: {
           status: "succeeded",
-          finishedAt: new Date(),
+          finishedAt: started.startedAt,
           executionOwnerId: null,
           executionHeartbeatAt: null,
           executionLeaseExpiresAt: null,
@@ -803,6 +2118,22 @@ type AttemptFixture = {
   };
 };
 
+function providerProjectionData(state: ReturnType<typeof createRuntimeProviderProjection>) {
+  return {
+    runtimeAttemptId: state.runtimeAttemptId,
+    runId: state.runId,
+    projectionVersion: state.projectionVersion,
+    lastAppliedSequence: state.lastAppliedSequence,
+    lastExternalEventId: state.lastExternalEventId,
+    rawAssistantText: state.rawAssistantText,
+    visibleAssistantText: state.visibleAssistantText,
+    redactionBuffer: state.redactionBuffer,
+    finalizationExternalEventId: state.finalizationExternalEventId,
+    finalizationPayloadSha256: state.finalizationPayloadSha256,
+    stateSha256: state.stateSha256,
+  };
+}
+
 function initialProviderState(fixture: AttemptFixture) {
   if (!fixture.runtimeAttemptId) throw new Error("RUNTIME_ATTEMPT_FIXTURE_MISSING");
   return {
@@ -889,11 +2220,16 @@ async function seedAttemptFixture(db: PrismaClient, withAttempt: boolean): Promi
         threadId: fixture.threadId,
         adapter: fixture.binding.adapter,
         externalThreadId: fixture.binding.externalThreadId,
-        metadata: { workbenchThreadId: fixture.threadId },
+        metadata: {
+          workbenchProjectId: fixture.projectId,
+          workbenchThreadId: fixture.threadId,
+          workbenchPrincipalId: fixture.principalId,
+        },
       },
     });
     await tx.run.create({
       data: {
+        knowledgeReleaseId: await seedReadyKnowledge(tx),
         id: fixture.runId,
         projectId: fixture.projectId,
         threadId: fixture.threadId,
@@ -950,6 +2286,86 @@ async function activateExternalRun(
   await service.authorizeSubmission(claim);
   await service.attachExternalRun(claim, fixture.externalRunId);
   return { service, claim };
+}
+
+async function terminalizeProviderCancellationUnconfirmed(
+  db: PrismaClient,
+  fixture: AttemptFixture,
+) {
+  if (!fixture.runtimeAttemptId) throw new Error("RUNTIME_ATTEMPT_FIXTURE_MISSING");
+  const failedAt = new Date();
+  await db.run.update({
+    where: { id: fixture.runId },
+    data: {
+      status: "failed",
+      finishedAt: failedAt,
+      errorCode: runtimeProviderCancellationUnconfirmedCode,
+      errorDetail: "RUNTIME_PROVIDER_STREAM_IDLE_TIMEOUT",
+      errorRetryable: true,
+      executionOwnerId: null,
+      executionHeartbeatAt: null,
+      executionLeaseExpiresAt: null,
+    },
+  });
+  await db.runtimeAttempt.update({
+    where: { id: fixture.runtimeAttemptId },
+    data: {
+      status: "failed",
+      startedAt: failedAt,
+      finishedAt: failedAt,
+      errorCode: runtimeProviderCancellationUnconfirmedCode,
+      errorDetail: "RUNTIME_PROVIDER_STREAM_IDLE_TIMEOUT",
+      errorRetryable: true,
+      submissionUnknownAt: failedAt,
+      providerIdempotencyKey: providerIdempotencyKeyForAttempt(fixture.runtimeAttemptId),
+      executionOwnerId: null,
+      executionHeartbeatAt: null,
+      executionLeaseExpiresAt: null,
+    },
+  });
+}
+
+async function claimProviderCancellation(
+  service: RuntimeAttemptService,
+  fixture: AttemptFixture,
+): Promise<RuntimeExecutionClaim> {
+  if (!fixture.runtimeAttemptId) throw new Error("RUNTIME_ATTEMPT_FIXTURE_MISSING");
+  const result = await service.claimProviderCancellation(
+    fixture.runId,
+    fixture.runtimeAttemptId,
+    `runtime-cleanup:${randomUUID()}`,
+    120_000,
+  );
+  if (result.disposition !== "claimed") {
+    throw new Error(`RUNTIME_PROVIDER_CANCELLATION_CLAIM_${result.disposition.toUpperCase()}`);
+  }
+  return result.claim;
+}
+
+function providerIdempotencyKeyForAttempt(attemptId: string) {
+  return `wbrt:${createHash("sha256").update(attemptId).digest("hex")}`;
+}
+
+function insertProviderCancellationResolution(
+  db: PrismaClient,
+  fixture: AttemptFixture,
+  input: {
+    runId?: string;
+    operationEpoch: number;
+    externalRunId?: string;
+  },
+) {
+  if (!fixture.runtimeAttemptId) throw new Error("RUNTIME_ATTEMPT_FIXTURE_MISSING");
+  return db.$executeRaw(Prisma.sql`
+    INSERT INTO "runtime_provider_cancellation_resolutions" (
+      "runtime_attempt_id", "run_id", "operation_epoch", "external_run_id",
+      "failure_code", "outcome"
+    ) VALUES (
+      ${fixture.runtimeAttemptId}, ${input.runId ?? fixture.runId}, ${input.operationEpoch},
+      ${input.externalRunId ?? fixture.externalRunId},
+      'RUNTIME_PROVIDER_STREAM_IDLE_TIMEOUT', 'cancelled'
+    )
+  `);
 }
 
 function externalEvent(fixture: AttemptFixture, externalEventId: string) {
@@ -1260,6 +2676,250 @@ function databaseWithCursorCheckpointCrash(client: PrismaClient) {
   };
 }
 
+function databaseWithProviderCancellationResolutionCrash(client: PrismaClient) {
+  let injected = false;
+  return {
+    $transaction: <T>(callback: (tx: Prisma.TransactionClient) => Promise<T>) =>
+      client.$transaction(async (tx) => callback(new Proxy(tx, {
+        get(target, property, receiver) {
+          if (property === "runtimeProviderCancellationResolution") {
+            const delegate = Reflect.get(target, property, receiver) as object;
+            return new Proxy(delegate, {
+              get(delegateTarget, delegateProperty, delegateReceiver) {
+                const value = Reflect.get(
+                  delegateTarget,
+                  delegateProperty,
+                  delegateReceiver,
+                ) as unknown;
+                if (delegateProperty === "create") {
+                  const create = (value as (...args: unknown[]) => Promise<unknown>)
+                    .bind(delegateTarget);
+                  return async (...args: unknown[]) => {
+                    const result = await create(...args);
+                    if (!injected) {
+                      injected = true;
+                      throw new Error("SIMULATED_CRASH_AFTER_CANCELLATION_RESOLUTION_INSERT");
+                    }
+                    return result;
+                  };
+                }
+                return typeof value === "function" ? value.bind(delegateTarget) : value;
+              },
+            });
+          }
+          const value = Reflect.get(target, property, receiver) as unknown;
+          return typeof value === "function" ? value.bind(target) : value;
+        },
+      }) as Prisma.TransactionClient), { maxWait: 10_000, timeout: 30_000 }),
+  };
+}
+
+function databaseWithProviderCancellationResolutionBarrier(
+  client: PrismaClient,
+  resolutionInserted: Deferred<void>,
+  releaseSettlement: Deferred<void>,
+) {
+  let intercepted = false;
+  return {
+    $transaction: <T>(callback: (tx: Prisma.TransactionClient) => Promise<T>) =>
+      client.$transaction(async (tx) => callback(new Proxy(tx, {
+        get(target, property, receiver) {
+          if (property === "runtimeProviderCancellationResolution") {
+            const delegate = Reflect.get(target, property, receiver) as object;
+            return new Proxy(delegate, {
+              get(delegateTarget, delegateProperty, delegateReceiver) {
+                const value = Reflect.get(
+                  delegateTarget,
+                  delegateProperty,
+                  delegateReceiver,
+                ) as unknown;
+                if (delegateProperty === "create") {
+                  const create = (value as (...args: unknown[]) => Promise<unknown>)
+                    .bind(delegateTarget);
+                  return async (...args: unknown[]) => {
+                    const result = await create(...args);
+                    if (!intercepted) {
+                      intercepted = true;
+                      resolutionInserted.resolve();
+                      await releaseSettlement.promise;
+                    }
+                    return result;
+                  };
+                }
+                return typeof value === "function" ? value.bind(delegateTarget) : value;
+              },
+            });
+          }
+          const value = Reflect.get(target, property, receiver) as unknown;
+          return typeof value === "function" ? value.bind(target) : value;
+        },
+      }) as Prisma.TransactionClient), { maxWait: 10_000, timeout: 30_000 }),
+  };
+}
+
+type EventTransactionFaultPoint =
+  | "before-pending-insert"
+  | "after-processed"
+  | "after-projection-cas";
+
+function databaseWithEventTransactionFault(
+  client: PrismaClient,
+  faultPoint: EventTransactionFaultPoint,
+) {
+  let injected = false;
+  const fail = (message: string) => {
+    injected = true;
+    throw new Error(message);
+  };
+  return {
+    $transaction: <T>(callback: (tx: Prisma.TransactionClient) => Promise<T>) =>
+      client.$transaction(async (tx) => callback(new Proxy(tx, {
+        get(target, property, receiver) {
+          if (property === "runtimeExternalEvent") {
+            const delegate = Reflect.get(target, property, receiver) as object;
+            return new Proxy(delegate, {
+              get(delegateTarget, delegateProperty, delegateReceiver) {
+                const value = Reflect.get(delegateTarget, delegateProperty, delegateReceiver) as unknown;
+                if (delegateProperty === "create") {
+                  const create = (value as (...args: unknown[]) => Promise<unknown>).bind(delegateTarget);
+                  return async (...args: unknown[]) => {
+                    if (!injected && faultPoint === "before-pending-insert") {
+                      fail("SIMULATED_CRASH_BEFORE_PENDING_INSERT");
+                    }
+                    return create(...args);
+                  };
+                }
+                if (delegateProperty === "updateMany") {
+                  const updateMany = (value as (...args: unknown[]) => Promise<unknown>).bind(delegateTarget);
+                  return async (...args: unknown[]) => {
+                    const result = await updateMany(...args);
+                    if (!injected && faultPoint === "after-processed") {
+                      fail("SIMULATED_CRASH_AFTER_PROCESSED_TRANSITION");
+                    }
+                    return result;
+                  };
+                }
+                return typeof value === "function" ? value.bind(delegateTarget) : value;
+              },
+            });
+          }
+          if (property === "runtimeProviderState") {
+            const delegate = Reflect.get(target, property, receiver) as object;
+            return new Proxy(delegate, {
+              get(delegateTarget, delegateProperty, delegateReceiver) {
+                const value = Reflect.get(delegateTarget, delegateProperty, delegateReceiver) as unknown;
+                if (delegateProperty === "updateMany") {
+                  const updateMany = (value as (...args: unknown[]) => Promise<unknown>).bind(delegateTarget);
+                  return async (...args: unknown[]) => {
+                    const result = await updateMany(...args);
+                    if (!injected && faultPoint === "after-projection-cas") {
+                      fail("SIMULATED_CRASH_AFTER_PROJECTION_CAS");
+                    }
+                    return result;
+                  };
+                }
+                return typeof value === "function" ? value.bind(delegateTarget) : value;
+              },
+            });
+          }
+          const value = Reflect.get(target, property, receiver) as unknown;
+          return typeof value === "function" ? value.bind(target) : value;
+        },
+      }) as Prisma.TransactionClient), { timeout: 30_000 }),
+  };
+}
+
+function databaseWithLockScopeBarrier(
+  client: PrismaClient,
+  barrier: {
+    beforeLockRequest?: Deferred<void>;
+    afterLockAcquired?: Deferred<void>;
+    releaseLock?: Deferred<void>;
+  },
+) {
+  let lockScopeIntercepted = false;
+  return {
+    $transaction: <T>(callback: (tx: Prisma.TransactionClient) => Promise<T>) =>
+      client.$transaction(async (tx) => callback(new Proxy(tx, {
+        get(target, property, receiver) {
+          if (property === "$queryRaw") {
+            const queryRaw = target.$queryRaw.bind(target) as (...args: unknown[]) => Promise<unknown>;
+            return async (...args: unknown[]) => {
+              if (lockScopeIntercepted) return queryRaw(...args);
+              lockScopeIntercepted = true;
+              barrier.beforeLockRequest?.resolve();
+              const result = await queryRaw(...args);
+              barrier.afterLockAcquired?.resolve();
+              if (barrier.releaseLock) await barrier.releaseLock.promise;
+              return result;
+            };
+          }
+          const value = Reflect.get(target, property, receiver) as unknown;
+          return typeof value === "function" ? value.bind(target) : value;
+        },
+      }) as Prisma.TransactionClient), { timeout: 30_000 }),
+  };
+}
+
+function databaseWithApplicationName(client: PrismaClient, applicationName: string) {
+  return {
+    $transaction: <T>(callback: (tx: Prisma.TransactionClient) => Promise<T>) =>
+      client.$transaction(async (tx) => {
+        await setTransactionApplicationName(tx, applicationName);
+        return callback(tx);
+      }, { maxWait: 10_000, timeout: 30_000 }),
+  };
+}
+
+async function setTransactionApplicationName(
+  tx: Prisma.TransactionClient,
+  applicationName: string,
+) {
+  await tx.$queryRaw(Prisma.sql`
+    SELECT set_config('application_name', ${applicationName}, true)
+  `);
+}
+
+async function waitForPostgresLockWait(
+  db: PrismaClient,
+  applicationName: string,
+  timeoutMs = 10_000,
+) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const rows = await db.$queryRaw<Array<{ waitEventType: string | null }>>(Prisma.sql`
+      SELECT "wait_event_type" AS "waitEventType"
+      FROM "pg_stat_activity"
+      WHERE "datname" = current_database()
+        AND "application_name" = ${applicationName}
+        AND "state" = 'active'
+      ORDER BY "backend_start" DESC
+      LIMIT 1
+    `);
+    if (rows[0]?.waitEventType === "Lock") return;
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  throw new Error(`POSTGRES_LOCK_WAIT_TIMEOUT:${applicationName}`);
+}
+
+async function waitUntilAfterDatabaseTime(
+  db: PrismaClient,
+  deadlineAt: Date,
+  paddingMs = 75,
+) {
+  const target = deadlineAt.getTime() + paddingMs;
+  while (true) {
+    const rows = await db.$queryRaw<Array<{ databaseNow: Date }>>(Prisma.sql`
+      SELECT clock_timestamp() AS "databaseNow"
+    `);
+    const databaseNow = rows[0]?.databaseNow;
+    if (!databaseNow) throw new Error("POSTGRES_DATABASE_TIME_MISSING");
+    const remainingMs = target - databaseNow.getTime();
+    if (remainingMs <= 0) return;
+    await new Promise((resolve) => setTimeout(resolve, Math.min(remainingMs, 250)));
+  }
+}
+
 function databaseWithCommitResponseLoss(client: PrismaClient) {
   let injected = false;
   return {
@@ -1326,4 +2986,16 @@ function deferred<T>(): Deferred<T> {
     resolve = fulfill;
   });
   return { promise, resolve };
+}
+
+function promiseStateAfter<T>(promise: Promise<T>, durationMs: number) {
+  return Promise.race([
+    promise.then(
+      () => "settled" as const,
+      () => "settled" as const,
+    ),
+    new Promise<"pending">((resolve) => {
+      setTimeout(() => resolve("pending"), durationMs);
+    }),
+  ]);
 }

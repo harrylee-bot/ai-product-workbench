@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import {
   canonicalJson,
   designSystemDocumentSchema,
+  evaluatePrototypeExpression,
   materializeRuntimeDesignStyleSnapshot,
   orderBoardNodesByHierarchy,
   prdChannelLabels,
@@ -84,6 +85,12 @@ type PrototypeStyle = PrototypeNode["style"];
 const baseStyles = String.raw`*{box-sizing:border-box}html,body{margin:0;min-height:100%;background:#f4f5f7;color:#17191d;font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}button,input,textarea,select{font:inherit}.wb-export{min-height:100vh}.wb-export__header{position:sticky;top:0;z-index:100;display:flex;align-items:center;justify-content:space-between;gap:16px;min-height:56px;padding:10px 20px;background:#fff;border-bottom:1px solid #dfe2e7}.wb-export__title{margin:0;font-size:16px;line-height:1.4;font-weight:650}.wb-export__meta{font-size:12px;color:#69707d}.wb-export__content{padding:20px}.wb-board{position:relative;min-width:720px;min-height:360px;margin:0 0 24px;background:#e9ebef;background-image:linear-gradient(#d9dce2 1px,transparent 1px),linear-gradient(90deg,#d9dce2 1px,transparent 1px);background-size:24px 24px;border:1px solid #ced2d9;overflow:auto}.wb-board__node{position:absolute;display:flex;flex-direction:column;justify-content:center;min-width:120px;min-height:72px;padding:12px;background:#fff;border:1px solid #bcc2cc;box-shadow:0 2px 8px rgba(18,22,30,.08)}.wb-board__node--frame{justify-content:flex-start;min-width:0;min-height:0;padding:0;background:transparent;box-shadow:none}.wb-board__node--frame .wb-board__label{position:absolute;left:0;top:-20px;margin:0}.wb-board__node--drawing{display:block;min-width:0;min-height:0;padding:0;background:transparent;border:0;box-shadow:none}.wb-board__drawing{display:block;width:100%;height:100%;overflow:visible}.wb-board__kind{font-size:11px;color:#69707d;text-transform:uppercase}.wb-board__label{margin-top:4px;font-size:13px;font-weight:600}.wb-artifacts{display:grid;gap:20px}.wb-artifact{min-width:0;background:#fff;border:1px solid #d5d9e0}.wb-artifact__header{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 14px;border-bottom:1px solid #e1e4e9}.wb-artifact__title{margin:0;font-size:14px;font-weight:650}.wb-artifact__kind{font-size:11px;color:#69707d}.wb-artifact__body{padding:14px;overflow:auto}.wb-prototype__tabs{display:flex;gap:6px;margin-bottom:12px;overflow:auto}.wb-prototype__tab{height:32px;padding:0 12px;border:1px solid #cbd0d8;background:#fff;color:#3b414b;cursor:pointer}.wb-prototype__tab[aria-selected="true"]{background:#17191d;color:#fff;border-color:#17191d}.wb-prototype__stage{display:flex;justify-content:flex-start;overflow:auto;padding:16px;background:#e8eaee}.wb-screen{position:relative;flex:0 0 auto;background:#fff;box-shadow:0 8px 24px rgba(18,22,30,.14);overflow:hidden}.wb-node[hidden],.wb-screen[hidden]{display:none!important}.wb-node{letter-spacing:0}.wb-design-system{display:grid;gap:22px}.wb-design-system h3{margin:0 0 10px;font-size:13px}.wb-design-system__tokens,.wb-design-system__assets,.wb-design-system__items{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:10px}.wb-design-system__token,.wb-design-system__asset,.wb-design-system__item{min-width:0;padding:10px;border:1px solid #dfe2e7;background:#fafbfc}.wb-design-system__swatch{display:block;width:100%;height:44px;margin-bottom:8px;border:1px solid rgba(0,0,0,.12)}.wb-design-system__label{display:block;font-size:12px;font-weight:650;overflow-wrap:anywhere}.wb-design-system__value{display:block;margin-top:3px;color:#69707d;font:11px/1.45 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;overflow-wrap:anywhere}.wb-design-system__image{display:block;width:100%;height:120px;margin-bottom:8px;object-fit:contain;background:#eef0f3}.wb-design-system__font-preview{display:flex;align-items:center;width:100%;height:72px;margin-bottom:8px;padding:8px;background:#eef0f3;font-size:28px;line-height:1;overflow:hidden}.wb-design-system__copy{margin:4px 0 0;color:#565d68;font-size:12px;line-height:1.5}.wb-json{max-height:70vh;margin:0;overflow:auto;padding:16px;background:#15171b;color:#e8eaed;font:12px/1.55 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;white-space:pre-wrap}.wb-image{display:block;max-width:100%;height:auto}.wb-document{white-space:pre-wrap;line-height:1.6}.wb-prd{max-width:1100px;margin:0 auto;background:#fff;color:#1e2935;padding:48px 64px;font-family:"Noto Sans SC","Microsoft YaHei",sans-serif;line-height:1.7}.wb-prd__cover{min-height:320px;display:flex;flex-direction:column;justify-content:center;border-bottom:1px solid #cbd5e1;margin-bottom:36px}.wb-prd__cover h1{font-size:32px;margin:8px 0;color:#124b7a}.wb-prd h2{font-size:24px;color:#124b7a;border-bottom:2px solid #d8e4ef;padding-bottom:8px;margin:38px 0 16px}.wb-prd h3{font-size:18px;color:#1c628f;margin:24px 0 8px}.wb-prd__muted{color:#64748b;font-size:13px}.wb-prd__toc,.wb-prd__history,.wb-prd__table,.wb-prd__safety{width:100%;border-collapse:collapse;margin:12px 0 22px}.wb-prd__toc td,.wb-prd__history th,.wb-prd__history td,.wb-prd__table th,.wb-prd__table td,.wb-prd__safety th,.wb-prd__safety td{border:1px solid #cbd5e1;padding:8px;text-align:left;vertical-align:top}.wb-prd__history th,.wb-prd__table th,.wb-prd__safety th{background:#edf4f9}.wb-prd__block{margin:10px 0}.wb-prd__card{border:1px solid #d8e1ea;border-left:4px solid #2b6f9f;padding:12px 16px;margin:12px 0}.wb-prd__diagram{border:1px solid #cbd5e1;background:#f8fafc;padding:14px;margin:14px 0}.wb-prd__diagram-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:8px}.wb-prd__diagram-node{border:1px solid #6b8ca8;border-radius:4px;background:#fff;padding:8px;font-size:13px}.wb-prd__assumptions{border-left:4px solid #d97706;background:#fff7ed;padding:12px 16px}.wb-json{max-height:70vh;margin:0;overflow:auto;padding:16px;background:#15171b;color:#e8eaed;font:12px/1.55 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;white-space:pre-wrap}.wb-image{display:block;max-width:100%;height:auto}.wb-document{white-space:pre-wrap;line-height:1.6}.wb-empty{padding:40px;text-align:center;color:#69707d}@media(max-width:700px){.wb-export__content{padding:10px}.wb-export__header{padding:8px 12px}.wb-board{min-width:640px}.wb-artifact__body{padding:8px}.wb-prd{padding:28px 18px}.wb-prd__cover{min-height:220px}.wb-design-system__tokens,.wb-design-system__assets,.wb-design-system__items{grid-template-columns:1fr}}`;
 
 export function renderExportHtml(request: ExportBuildRequest): RenderedHtml {
+  if (request.initialScreenId !== undefined && request.selection.kind !== "artifact") {
+    throw new TerminalExportError(
+      "EXPORT_INITIAL_SCREEN_SELECTION_INVALID",
+      "initialScreenId is supported only for a single Prototype Artifact selection",
+    );
+  }
   const selected = selectExportArtifacts(request.source.artifacts, request.selection, request.source.boardSnapshot.nodes);
   const runtimePrototypes: RuntimePrototype[] = [];
   const fontFaces: string[] = [];
@@ -95,6 +102,7 @@ export function renderExportHtml(request: ExportBuildRequest): RenderedHtml {
       fontFaces,
       fontAssets,
       request.selection.kind === "artifact" ? request.selection.screenId : undefined,
+      request.initialScreenId,
     ))
     .join("");
   const includeBoard = request.selection.kind !== "artifact";
@@ -322,17 +330,25 @@ function renderArtifact(
   fontFaces: string[],
   fontAssets: RenderedFontAsset[],
   screenId?: string,
+  initialScreenId?: string,
 ) {
-  if (screenId !== undefined && artifact.kind !== "prototype") {
+  if ((screenId !== undefined || initialScreenId !== undefined) && artifact.kind !== "prototype") {
     throw new TerminalExportError(
       "EXPORT_SELECTION_SCREEN_KIND_INVALID",
-      "screenId is supported only for Prototype Artifact selections",
+      "screenId and initialScreenId are supported only for Prototype Artifact selections",
     );
   }
   const body = artifact.kind === "prototype"
-    ? renderPrototypeArtifact(artifact, runtimePrototypes, fontFaces, fontAssets, screenId)
-      : artifact.kind === "design_system"
-        ? renderDesignSystemArtifact(artifact, fontFaces, fontAssets)
+    ? renderPrototypeArtifact(
+        artifact,
+        runtimePrototypes,
+        fontFaces,
+        fontAssets,
+        screenId,
+        initialScreenId,
+      )
+    : artifact.kind === "design_system"
+      ? renderDesignSystemArtifact(artifact, fontFaces, fontAssets)
     : artifact.kind === "prd"
       ? renderPrdArtifact(artifact)
     : renderGenericArtifact(artifact);
@@ -584,6 +600,7 @@ function renderPrototypeArtifact(
   fontFaces: string[],
   fontAssets: RenderedFontAsset[],
   screenId?: string,
+  initialScreenId?: string,
 ) {
   const content = jsonContent(artifact);
   const parsed = prototypeDocumentSchema.safeParse(content);
@@ -609,6 +626,13 @@ function renderPrototypeArtifact(
       `Screen ${screenId} does not exist in Prototype ${artifact.artifactVersionId}`,
     );
   }
+  const resolvedInitialScreenId = initialScreenId ?? screens[0]!.id;
+  if (!screens.some((screen) => screen.id === resolvedInitialScreenId)) {
+    throw new TerminalExportError(
+      "EXPORT_INITIAL_SCREEN_NOT_FOUND",
+      `Initial screen ${resolvedInitialScreenId} does not exist in the rendered Prototype ${artifact.artifactVersionId}`,
+    );
+  }
 
   for (const asset of document.assets) {
     if (asset.kind !== "font") continue;
@@ -617,10 +641,10 @@ function renderPrototypeArtifact(
     fontAssets.push(renderedFontAsset(artifact.artifactVersionId, asset, blob));
   }
 
-  const screenMarkup = screens.map((screen, index) => {
+  const screenMarkup = screens.map((screen) => {
     const root = nodes.get(screen.rootNodeId);
     if (!root) throw new TerminalExportError("EXPORT_PROTOTYPE_ROOT_MISSING", `Screen ${screen.id} has no root node`);
-    return `<section class="wb-screen" data-wb-screen="${escapeHtml(screen.id)}" style="width:${screen.viewport.width}px;height:${screen.viewport.height}px"${index === 0 ? "" : " hidden"}>${renderNode(root, {
+    return `<section class="wb-screen" data-wb-screen="${escapeHtml(screen.id)}" style="width:${screen.viewport.width}px;height:${screen.viewport.height}px"${screen.id === resolvedInitialScreenId ? "" : " hidden"}>${renderNode(root, {
       nodes,
       tokens,
       assets,
@@ -629,8 +653,16 @@ function renderPrototypeArtifact(
       variables: new Map(document.variables.map((variable) => [variable.path, variable.initialValue])),
     })}</section>`;
   }).join("");
-  const tabs = screens.map((screen, index) => `<button class="wb-prototype__tab" type="button" data-wb-screen-target="${escapeHtml(screen.id)}" role="tab" aria-selected="${index === 0}">${escapeHtml(screen.name)}</button>`).join("");
-  runtimePrototypes.push(runtimeModel(prefix, document, tokens, assets, blobs, screens));
+  const tabs = screens.map((screen) => `<button class="wb-prototype__tab" type="button" data-wb-screen-target="${escapeHtml(screen.id)}" role="tab" aria-selected="${screen.id === resolvedInitialScreenId}">${escapeHtml(screen.name)}</button>`).join("");
+  runtimePrototypes.push(runtimeModel(
+    prefix,
+    document,
+    tokens,
+    assets,
+    blobs,
+    screens,
+    resolvedInitialScreenId,
+  ));
   return `<section class="wb-prototype" data-wb-prototype="${prefix}"><nav class="wb-prototype__tabs" role="tablist" aria-label="Prototype screens">${tabs}</nav><div class="wb-prototype__stage">${screenMarkup}</div></section>`;
 }
 
@@ -644,20 +676,29 @@ type RenderContext = {
 };
 
 function renderNode(node: PrototypeNode, context: RenderContext): string {
-  const attributes = `class="wb-node wb-node--${node.kind}" data-wb-node="${escapeHtml(node.id)}" data-wb-rotation="${node.style.rotation}" data-wb-transform-origin-x="${node.style.transformOrigin.x}" data-wb-transform-origin-y="${node.style.transformOrigin.y}" style="${escapeHtml(nodeStyle(node, context.tokens))}"${node.visible ? "" : " hidden"}`;
+  const boundVisible = initialBindingValue(node, "visible", context);
+  const visible = boundVisible === undefined ? node.visible : Boolean(boundVisible);
+  const attributes = `class="wb-node wb-node--${node.kind}" data-wb-node="${escapeHtml(node.id)}" data-wb-rotation="${node.style.rotation}" data-wb-transform-origin-x="${node.style.transformOrigin.x}" data-wb-transform-origin-y="${node.style.transformOrigin.y}" style="${escapeHtml(nodeStyle(node, context.tokens))}"${visible ? "" : " hidden"}`;
   if (node.kind === "frame") {
     return `<div ${attributes}>${node.childIds.map((id) => renderChild(id, context)).join("")}</div>`;
   }
   if (node.kind === "form") {
     return `<form ${attributes}>${node.childIds.map((id) => renderChild(id, context)).join("")}</form>`;
   }
-  if (node.kind === "text") return `<div ${attributes} data-wb-text="true">${escapeHtml(node.text)}</div>`;
+  if (node.kind === "text") {
+    const value = initialBindingValue(node, "text", context);
+    return `<div ${attributes} data-wb-text="true">${escapeHtml(value === undefined ? node.text : String(value ?? ""))}</div>`;
+  }
   if (node.kind === "button") {
-    return `<button ${attributes} type="${node.buttonType}"${node.disabled ? " disabled" : ""}><span data-wb-content="label">${escapeHtml(node.label)}</span>${node.childIds.map((id) => renderChild(id, context)).join("")}</button>`;
+    const value = initialBindingValue(node, "text", context);
+    const enabled = initialBindingValue(node, "enabled", context);
+    const disabled = enabled === undefined ? node.disabled : !enabled;
+    return `<button ${attributes} type="${node.buttonType}"${disabled ? " disabled" : ""}><span data-wb-content="label">${escapeHtml(value === undefined ? node.label : String(value ?? ""))}</span>${node.childIds.map((id) => renderChild(id, context)).join("")}</button>`;
   }
   if (node.kind === "input") return renderInput(node, attributes, context);
   if (node.kind === "image") {
-    const asset = context.assets.get(node.assetId);
+    const assetId = initialBindingValue(node, "imageAssetId", context);
+    const asset = context.assets.get(typeof assetId === "string" ? assetId : node.assetId);
     if (!asset || asset.kind !== "image") throw new TerminalExportError("EXPORT_IMAGE_ASSET_MISSING", `Image node ${node.id} has no valid asset`);
     const blob = requireAssetBlob(asset, context.blobs);
     return `<img ${attributes} src="${escapeHtml(dataUri(blob.mediaType, blob.bytes))}" alt="${escapeHtml(node.alt)}" style="${escapeHtml(`${nodeStyle(node, context.tokens)};object-fit:${node.fit}`)}">`;
@@ -676,18 +717,32 @@ function renderChild(nodeId: string, context: RenderContext) {
   return renderNode(child, context);
 }
 
+function initialBindingValue(
+  node: PrototypeNode,
+  property: PrototypeDocument["bindings"][number]["property"],
+  context: RenderContext,
+) {
+  const binding = node.bindingIds
+    .map((bindingId) => context.bindings.get(bindingId))
+    .find((candidate) => candidate?.property === property);
+  if (!binding || binding.source.kind === "state") return undefined;
+  if (binding.source.kind === "literal") return binding.source.value;
+  if (binding.source.kind === "variable") return context.variables.get(binding.source.path);
+  return evaluatePrototypeExpression(binding.source.expression, (path) => context.variables.get(path));
+}
+
 function renderInput(
   node: Extract<PrototypeNode, { kind: "input" }>,
   attributes: string,
   context: RenderContext,
 ) {
-  const common = `${attributes} name="${escapeHtml(node.fieldName)}" aria-label="${escapeHtml(node.label)}"${node.required ? " required" : ""}${node.disabled ? " disabled" : ""}`;
-  const valueBinding = node.bindingIds
-    .map((bindingId) => context.bindings.get(bindingId))
-    .find((binding) => binding?.property === "value");
-  const initialValue = valueBinding?.source.kind === "variable"
-    ? context.variables.get(valueBinding.source.path) ?? null
-    : null;
+  const enabled = initialBindingValue(node, "enabled", context);
+  const disabled = enabled === undefined ? node.disabled : !enabled;
+  const maxLength = ["text", "email", "password", "search", "textarea"].includes(node.inputType)
+    ? ' maxlength="10000"'
+    : "";
+  const common = `${attributes} name="${escapeHtml(node.fieldName)}" aria-label="${escapeHtml(node.label)}"${node.required ? " required" : ""}${disabled ? " disabled" : ""}${maxLength}`;
+  const initialValue = initialBindingValue(node, "value", context) ?? null;
   if (node.inputType === "textarea") return `<textarea ${common} placeholder="${escapeHtml(node.placeholder)}">${escapeHtml(String(initialValue ?? ""))}</textarea>`;
   if (node.inputType === "select") {
     const placeholder = initialValue === ""
@@ -723,12 +778,12 @@ function nodeStyle(
     `justify-content:${justifyValue(layout.justify)}`,
     ...(layout.display === "grid" && layout.gridColumns ? [`grid-template-columns:repeat(${layout.gridColumns},minmax(0,1fr))`] : []),
     `overflow:${layout.overflow}`,
-    ...styleDeclarations(style, tokens),
+    ...styleDeclarations(style, tokens, node.kind),
   ];
   return declarations.join(";");
 }
 
-function styleDeclarations(style: PrototypeStyle, tokens: Map<string, PrototypeToken>) {
+function styleDeclarations(style: PrototypeStyle, tokens: Map<string, PrototypeToken>, kind: PrototypeNode["kind"]) {
   const shadows = style.shadowTokenIds.map((id) => {
     const token = tokens.get(id);
     if (!token || token.type !== "shadow") throw invalidToken(id);
@@ -739,7 +794,7 @@ function styleDeclarations(style: PrototypeStyle, tokens: Map<string, PrototypeT
     `transform:rotate(${style.rotation}deg)`,
     "transform-box:border-box",
     `transform-origin:${style.transformOrigin.x * 100}% ${style.transformOrigin.y * 100}%`,
-    ...(style.fill ? [`background-color:${color(style.fill, tokens)}`] : []),
+    ...(style.fill ? [`${kind === "text" ? "color" : "background-color"}:${color(style.fill, tokens)}`] : []),
     ...(style.stroke ? [
       `border:${numeric(style.stroke.width, tokens)}px ${style.stroke.style} ${color(style.stroke.color, tokens)}`,
     ] : ["border:none"]),
@@ -768,6 +823,7 @@ function runtimeModel(
   assets: Map<string, PrototypeAsset>,
   blobs: Map<string, ExportBinaryAsset>,
   screens: PrototypeDocument["screens"],
+  initialScreenId: string,
 ): RuntimePrototype {
   const nodes = new Map(document.nodes.map((node) => [node.id, node]));
   const screenIds = new Set(screens.map((screen) => screen.id));
@@ -785,7 +841,7 @@ function runtimeModel(
   return {
     id,
     documentId: document.documentId,
-    initialScreenId: screens[0]!.id,
+    initialScreenId,
     screens,
     variables: document.variables,
     states: states.map((state) => ({

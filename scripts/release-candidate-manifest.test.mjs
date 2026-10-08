@@ -206,7 +206,7 @@ test("creates byte-identical manifest and inventory for the same repository snap
   assert.equal(first.manifest.criticalArtifacts.migrations.status, "complete");
   assert.equal(first.manifest.criticalArtifacts.generatedContracts.entryCount, 5);
   assert.equal(first.manifest.criticalArtifacts.knowledgeVaultConfiguration.entryCount, 4);
-  assert.equal(first.manifest.criticalArtifacts.remediationControl.entryCount, 3);
+  assert.equal(first.manifest.criticalArtifacts.systemContracts.entryCount, 2);
   assert.ok(first.manifest.criticalArtifacts.evidenceContracts.entryCount >= 2);
   assert.ok(first.manifest.sourceScopes.every((scope) => scope.status === "complete"));
   assert.equal(first.manifest.sourceScopes.find((scope) => scope.name === "runbooks")?.entryCount, 1);
@@ -352,8 +352,8 @@ async function createRepositoryFixture({ referencedAsset = null, orphanAsset = n
     ["tsconfig.base.json", "{}\n"],
     [".github/workflows/ci.yml", "name: candidate\n"],
     ["deploy/workbench-compose.yml", "services: {}\n"],
-    ["docs/runbooks/production-acceptance.md", "# Production acceptance\n"],
-    ["docs/evidence/ledger.schema.json", "{}\n"],
+    ["docs/runbooks/apitable-production-operations.md", "# APITable operations\n"],
+    ["schemas/evidence/ledger.schema.json", "{}\n"],
     ["apps/web/app/page.tsx", "export default function Page() { return null; }\n"],
     ["apps/web/app/icon.png", "icon\n"],
     ["apps/web/app/favicon.ico", "favicon\n"],
@@ -371,14 +371,10 @@ async function createRepositoryFixture({ referencedAsset = null, orphanAsset = n
     ["packages/workbench-canvas-tools/src/index.ts", "export {};\n"],
     ["packages/workbench-db/prisma/schema.prisma", "generator client { provider = \"prisma-client-js\" }\n"],
     ["packages/workbench-db/prisma/migrations/20260718000000_fixture/migration.sql", "SELECT 1;\n"],
-    ["integrations/deerflow/README.md", "# DeerFlow\n"],
     ["integrations/deerflow/skills/workbench/references/runtime-result.schema.json", "{}\n"],
     ["integrations/deerflow/skills/workbench/references/prd-runtime-result.schema.json", "{}\n"],
     ["integrations/deerflow/runtime-tools/deerflow_workbench_tools/runtime_result_validator.bundle.mjs", "export {};\n"],
-    ["scripts/workbench-hard-cut-manifest.mjs", "export {};\n"],
-    ["docs/workbench-hard-cut-deletion-manifest.json", "{}\n"],
-    ["docs/CODEX-RUNTIME-DATABASE-REMEDIATION-SPEC-20260723.md", "# Runtime remediation control\n"],
-    ["docs/CODEX-WORKBENCH-FUNCTIONAL-VISUAL-REMEDIATION-SPEC-20260727.md", "# Functional and visual remediation control\n"],
+    ["scripts/release-candidate-manifest.mjs", "export {};\n"],
     ["schemas/release-candidate-manifest.schema.json", "{}\n"],
     ["knowledge-vault/.obsidian/app.json", "{}\n"],
     ["knowledge-vault/.obsidian/core-plugins.json", "[]\n"],

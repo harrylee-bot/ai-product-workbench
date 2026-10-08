@@ -1,0 +1,25 @@
+[Unit]
+Description=Workbench filesystem capacity check (no cleanup)
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 -I /usr/local/libexec/workbench-capacity-check.py --state-dir /var/lib/workbench-capacity
+DynamicUser=yes
+StateDirectory=workbench-capacity
+StateDirectoryMode=0700
+UMask=0077
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=read-only
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_UNIX
+CapabilityBoundingSet=
+MemoryMax=64M
+CPUQuota=10%
+TimeoutStartSec=30
+StandardOutput=journal
+StandardError=journal

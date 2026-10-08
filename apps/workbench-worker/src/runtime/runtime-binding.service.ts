@@ -1,6 +1,20 @@
 import { Prisma, type PrismaClient } from "@workbench/workbench-db";
 import type { RuntimePort, RuntimeThreadMetadata } from "./runtime.port.js";
 
+const RUNTIME_TRANSPORT_OWNER_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u;
+
+export function runtimeBindingTransportOwnerId(binding: { metadata: unknown }) {
+  const metadata = binding.metadata;
+  if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) {
+    throw new Error("RUNTIME_BINDING_TRANSPORT_OWNER_INVALID");
+  }
+  const ownerId = (metadata as Record<string, unknown>).workbenchPrincipalId;
+  if (typeof ownerId !== "string" || !RUNTIME_TRANSPORT_OWNER_ID.test(ownerId)) {
+    throw new Error("RUNTIME_BINDING_TRANSPORT_OWNER_INVALID");
+  }
+  return ownerId;
+}
+
 export class RuntimeBindingService {
   constructor(
     private readonly db: PrismaClient,

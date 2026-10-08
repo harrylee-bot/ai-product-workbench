@@ -19,9 +19,11 @@ const request = {
 };
 
 describe("Run target ArtifactVersion contracts", () => {
-  it("rejects mixed PRD and Prototype/code work before a Run is created", () => {
+  it("accepts linked PRD and Prototype work and rejects unsupported mixed kinds", () => {
+    expect(startRunRequestSchema.safeParse({
+      ...request, workflow: "generate", requestedArtifactKinds: ["prd", "prototype"],
+    }).success).toBe(true);
     for (const requestedArtifactKinds of [
-      ["prd", "prototype"],
       ["prd", "code"],
       ["prd", "document"],
       ["prd", "data"],
@@ -35,7 +37,7 @@ describe("Run target ArtifactVersion contracts", () => {
       if (parsed.success) throw new Error("Expected mixed PRD work to be rejected");
       expect(parsed.error.issues).toContainEqual(expect.objectContaining({
         path: ["requestedArtifactKinds"],
-        message: expect.stringContaining("own Run"),
+        message: expect.stringContaining("together with Prototype"),
       }));
     }
   });

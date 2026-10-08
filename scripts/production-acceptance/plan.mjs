@@ -24,7 +24,7 @@ export const ACCEPTANCE_PLAN_SCHEMA_VERSION = "workbench.production-acceptance-p
 
 const moduleDirectory = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(moduleDirectory, "../..");
-const planSchemaPath = path.join(repoRoot, "docs/evidence/production-acceptance-plan.schema.json");
+const planSchemaPath = path.join(repoRoot, "schemas/evidence/production-acceptance-plan.schema.json");
 const SHA256_PATTERN = /^[a-f0-9]{64}$/u;
 const PREFIXED_SHA256_PATTERN = /^sha256:[a-f0-9]{64}$/u;
 const COMMIT_PATTERN = /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/u;

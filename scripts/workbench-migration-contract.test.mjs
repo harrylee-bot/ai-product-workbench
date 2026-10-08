@@ -10,6 +10,14 @@ const exportDeliveryMigration = await readFile(new URL(
   "../packages/workbench-db/prisma/migrations/20260718020000_export_delivery_matrix/migration.sql",
   import.meta.url,
 ), "utf8");
+const documentExportFormatsMigration = await readFile(new URL(
+  "../packages/workbench-db/prisma/migrations/20260916010000_document_export_formats/migration.sql",
+  import.meta.url,
+), "utf8");
+const documentExportPackagingMigration = await readFile(new URL(
+  "../packages/workbench-db/prisma/migrations/20260916011000_document_export_packaging/migration.sql",
+  import.meta.url,
+), "utf8");
 const canvasSnapshotDigestMigration = await readFile(new URL(
   "../packages/workbench-db/prisma/migrations/20260719010000_canvas_grant_snapshot_digest/migration.sql",
   import.meta.url,
@@ -50,6 +58,18 @@ const runtimeProviderStateMigration = await readFile(new URL(
   "../packages/workbench-db/prisma/migrations/20260723010000_runtime_provider_state_v2/migration.sql",
   import.meta.url,
 ), "utf8");
+const runtimeProviderCancellationResolutionMigration = await readFile(new URL(
+  "../packages/workbench-db/prisma/migrations/20260803010000_runtime_provider_cancellation_resolution/migration.sql",
+  import.meta.url,
+), "utf8");
+const runtimeProviderCancellationOperationMigration = await readFile(new URL(
+  "../packages/workbench-db/prisma/migrations/20260804010000_runtime_provider_cancellation_operation/migration.sql",
+  import.meta.url,
+), "utf8");
+const projectPreviewInitialScreenMigration = await readFile(new URL(
+  "../packages/workbench-db/prisma/migrations/20260805010000_project_preview_initial_screen/migration.sql",
+  import.meta.url,
+), "utf8");
 const prdV2ArtifactVersionGuardsMigration = await readFile(new URL(
   "../packages/workbench-db/prisma/migrations/20260723020000_prd_v2_artifact_version_guards/migration.sql",
   import.meta.url,
@@ -85,10 +105,33 @@ test("export packaging backfill restores the mutation guard", () => {
   assert(enableGuard > backfill, "migration must restore the guard after schema backfill");
 });
 
+test("document export enum additions commit before the packaging constraint uses them", () => {
+  assert.match(documentExportFormatsMigration, /^BEGIN;/u);
+  assert.match(documentExportFormatsMigration, /ALTER TYPE "ExportFormat" ADD VALUE IF NOT EXISTS 'docx';/u);
+  assert.match(documentExportFormatsMigration, /ALTER TYPE "ExportFormat" ADD VALUE IF NOT EXISTS 'pdf';/u);
+  assert.match(documentExportFormatsMigration, /COMMIT;\s*$/u);
+  assert.doesNotMatch(documentExportFormatsMigration, /ALTER TABLE|CREATE TABLE|UPDATE |DELETE |INSERT /u);
+  assert.match(documentExportPackagingMigration, /^BEGIN;/u);
+  assert.match(documentExportPackagingMigration, /COMMIT;\s*$/u);
+  assert.doesNotMatch(documentExportPackagingMigration, /ALTER TYPE/u);
+});
+
+test("document export packaging expands the old check without disabling guards or changing rows", () => {
+  assert.match(documentExportPackagingMigration, /SET LOCAL lock_timeout = '5s';/u);
+  assert.match(
+    documentExportPackagingMigration,
+    /DROP CONSTRAINT "export_jobs_format_packaging_check",\s+ADD CONSTRAINT "export_jobs_format_packaging_check"/u,
+  );
+  assert.match(documentExportPackagingMigration, /\("format" = 'html' AND "packaging" IN \('single_file', 'zip'\)\)/u);
+  assert.match(documentExportPackagingMigration, /\("format" IN \('docx', 'pdf'\) AND "packaging" = 'single_file'\)/u);
+  assert.match(documentExportPackagingMigration, /\("format" IN \('react', 'figma', 'mcp'\) AND "packaging" = 'zip'\)/u);
+  assert.doesNotMatch(documentExportPackagingMigration, /DISABLE TRIGGER|CREATE (?:OR REPLACE )?FUNCTION|UPDATE |DELETE |INSERT |DROP TABLE/u);
+});
+
 test("Canvas grant snapshot digest migration is append-only and fences legacy grants", async () => {
   const migrationEntries = await readdir(migrationsDirectory, { withFileTypes: true });
   const migrationCount = migrationEntries.filter((entry) => entry.isDirectory()).length;
-  assert.equal(migrationCount, 68, "candidate migration inventory must be updated explicitly");
+  assert.equal(migrationCount, 76, "candidate migration inventory must be updated explicitly");
   assert(migrationEntries.some((entry) => (
     entry.isDirectory()
     && entry.name === "20260719010000_canvas_grant_snapshot_digest"
@@ -131,6 +174,28 @@ test("Canvas grant snapshot digest migration is append-only and fences legacy gr
   assert.match(canvasSnapshotDigestMigration, /CANVAS_AGENT_SESSION_SNAPSHOT_IMMUTABLE/u);
   assert.match(canvasSnapshotDigestMigration, /CANVAS_TOOL_GRANT_SNAPSHOT_IMMUTABLE/u);
   assert.match(canvasSnapshotDigestMigration, /CANVAS_TOOL_GRANT_SNAPSHOT_SCOPE_INVALID/u);
+});
+
+test("Project Preview initial screens remain distinct from Export cropping", () => {
+  assert.match(projectPreviewInitialScreenMigration, /^BEGIN;/u);
+  assert.match(projectPreviewInitialScreenMigration, /ADD COLUMN "initial_screen_id" TEXT/u);
+  assert.match(
+    projectPreviewInitialScreenMigration,
+    /PROJECT_PREVIEW_LEGACY_SELECTION_SCREEN_CROP_FORBIDDEN/u,
+  );
+  assert.match(
+    projectPreviewInitialScreenMigration,
+    /FROM "project_previews" AS preview\s+JOIN "export_jobs" AS job[\s\S]+job\."selection_screen_id" IS NOT NULL/u,
+  );
+  assert.match(projectPreviewInitialScreenMigration, /PROJECT_PREVIEW_SELECTION_SCREEN_CROP_FORBIDDEN/u);
+  assert.match(projectPreviewInitialScreenMigration, /workbench\.prototype\.v1/u);
+  assert.match(projectPreviewInitialScreenMigration, /screen ->> 'id' = NEW\."initial_screen_id"/u);
+  assert.match(projectPreviewInitialScreenMigration, /application_schema TEXT := current_schema\(\)/u);
+  assert.match(
+    projectPreviewInitialScreenMigration,
+    /ALTER FUNCTION %I\.%I\(\) SET search_path TO %s/u,
+  );
+  assert.match(projectPreviewInitialScreenMigration, /COMMIT;\s*$/u);
 });
 
 test("Canvas visual cleanup has a bounded lifecycle candidate index", () => {
@@ -260,6 +325,118 @@ test("Runtime provider state v2 is scoped, monotonic, bounded, and finalization-
   assert.doesNotMatch(runtimeProviderStateMigration, /UPDATE "runtime_external_events"/u);
 });
 
+test("Runtime provider cancellation resolution is append-only and Run-lifecycle-bound", () => {
+  assert.match(runtimeProviderCancellationResolutionMigration, /^BEGIN;/u);
+  assert.match(
+    runtimeProviderCancellationResolutionMigration,
+    /FOREIGN KEY \("runtime_attempt_id", "run_id"\)[\s\S]*ON DELETE CASCADE/u,
+  );
+  assert.match(
+    runtimeProviderCancellationResolutionMigration,
+    /IF TG_OP = 'DELETE' AND pg_trigger_depth\(\) > 1 THEN/u,
+  );
+  assert.match(
+    runtimeProviderCancellationResolutionMigration,
+    /SELECT EXISTS \(SELECT 1 FROM %I\."runs" WHERE "id" = \$1\)/u,
+  );
+  assert.match(runtimeProviderCancellationResolutionMigration, /TG_TABLE_SCHEMA/u);
+  assert.match(runtimeProviderCancellationResolutionMigration, /IF NOT owning_run_exists THEN/u);
+  assert.match(
+    runtimeProviderCancellationResolutionMigration,
+    /RUNTIME_PROVIDER_CANCELLATION_RESOLUTION_APPEND_ONLY/u,
+  );
+  assert.match(
+    runtimeProviderCancellationResolutionMigration,
+    /BEFORE UPDATE OR DELETE ON "runtime_provider_cancellation_resolutions"/u,
+  );
+  assert.match(
+    runtimeProviderCancellationResolutionMigration,
+    /BEFORE TRUNCATE ON "runtime_provider_cancellation_resolutions"/u,
+  );
+  assert.match(runtimeProviderCancellationResolutionMigration, /COMMIT;\s*$/u);
+});
+
+test("Runtime provider cancellation operations are epoch-fenced and resolution-bound", () => {
+  assert.match(runtimeProviderCancellationOperationMigration, /^BEGIN;/u);
+  assert.match(
+    runtimeProviderCancellationOperationMigration,
+    /provider_cancellation_operation_epoch.*INTEGER NOT NULL DEFAULT 0/u,
+  );
+  assert.match(
+    runtimeProviderCancellationOperationMigration,
+    /provider_cancellation_operation_started_at.*TIMESTAMPTZ/u,
+  );
+  assert.match(
+    runtimeProviderCancellationOperationMigration,
+    /provider_cancellation_operation_deadline_at.*TIMESTAMPTZ/u,
+  );
+  assert.match(
+    runtimeProviderCancellationOperationMigration,
+    /runtime_attempts_provider_cancellation_operation_insert_guard/u,
+  );
+  assert.match(
+    runtimeProviderCancellationOperationMigration,
+    /BEFORE INSERT ON "runtime_attempts"/u,
+  );
+  assert.match(
+    runtimeProviderCancellationOperationMigration,
+    /runtime_attempts_provider_cancellation_operation_update_guard/u,
+  );
+  assert.match(
+    runtimeProviderCancellationOperationMigration,
+    /RUNTIME_PROVIDER_CANCELLATION_OPERATION_TAKEOVER_INVALID/u,
+  );
+  assert.match(
+    runtimeProviderCancellationOperationMigration,
+    /RUNTIME_PROVIDER_CANCELLATION_RESOLUTION_SCOPE_INVALID/u,
+  );
+  assert.match(
+    runtimeProviderCancellationOperationMigration,
+    /RUNTIME_PROVIDER_CANCELLATION_OPERATION_NOT_ACTIVE/u,
+  );
+  assert.match(
+    runtimeProviderCancellationOperationMigration,
+    /ADD COLUMN "operation_epoch" INTEGER NOT NULL/u,
+  );
+  assert.match(
+    runtimeProviderCancellationOperationMigration,
+    /ADD COLUMN "external_run_id" VARCHAR\(512\) NOT NULL/u,
+  );
+  assert.match(
+    runtimeProviderCancellationOperationMigration,
+    /FOREIGN KEY \("runtime_attempt_id", "run_id", "operation_epoch"\)/u,
+  );
+  assert.match(
+    runtimeProviderCancellationOperationMigration,
+    /fresh_now := clock_timestamp\(\)/u,
+  );
+  assert.match(
+    runtimeProviderCancellationOperationMigration,
+    /NEW\."updated_at" := GREATEST\(\s*clock_timestamp\(\),\s*OLD\."updated_at",\s*NEW\."built_at"\s*\)/u,
+  );
+  assert.match(
+    runtimeProviderCancellationOperationMigration,
+    /CREATE CONSTRAINT TRIGGER "runtime_provider_cancellation_resolutions_cleared_guard"/u,
+  );
+  assert.match(
+    runtimeProviderCancellationOperationMigration,
+    /DEFERRABLE INITIALLY DEFERRED/u,
+  );
+  assert.match(
+    runtimeProviderCancellationOperationMigration,
+    /run_error_code IS NOT DISTINCT FROM 'RUNTIME_PROVIDER_CANCELLATION_UNCONFIRMED'/u,
+  );
+  assert.match(
+    runtimeProviderCancellationOperationMigration,
+    /attempt_error_code IS DISTINCT FROM 'RUNTIME_PROVIDER_CANCELLATION_UNCONFIRMED'/u,
+  );
+  assert.doesNotMatch(
+    runtimeProviderCancellationOperationMigration,
+    /(?:run_error_code|attempt_error_code|(?:OLD|NEW)\."error_code")\s*(?:=|<>)\s*'RUNTIME_PROVIDER_CANCELLATION_UNCONFIRMED'/u,
+  );
+  assert.match(runtimeProviderCancellationOperationMigration, /COMMIT;\s*$/u);
+});
+
 test("PRD ArtifactVersion guards bind v1 and v2 schemas to their exact protocols", () => {
   assert.match(prdV2ArtifactVersionGuardsMigration, /^BEGIN;/u);
   assert.match(
@@ -315,6 +492,26 @@ test("all application trigger functions use a fixed trusted search path", () => 
     /ALTER FUNCTION %I\.%I\(%s\) SET search_path TO pg_catalog, public/u,
   );
   assert.match(triggerSearchPathMigration, /TRIGGER_FUNCTION_SEARCH_PATH_NOT_HARDENED/u);
+});
+
+test("knowledge lifecycle guards pin a trusted schema and commit the source enum before use", async () => {
+  const names = [
+    "20260924010000_knowledge_generation_lifecycle",
+    "20260924011000_artifact_knowledge_source",
+    "20260924012000_knowledge_source_integrity",
+  ];
+  const [lifecycle, sourceKind, integrity] = await Promise.all(names.map((name) =>
+    readFile(new URL(`${name}/migration.sql`, migrationsDirectory), "utf8")));
+  for (const migration of [lifecycle, integrity]) {
+    assert.match(migration, /application_schema TEXT := current_schema\(\)/u);
+    assert.match(migration, /pg_catalog, %I, public/u);
+    assert.match(migration, /ALTER FUNCTION %I\.%I\(\) SET search_path TO %s/u);
+    assert.match(migration, /COMMIT;\s*$/u);
+  }
+  assert.match(lifecycle, /NEW\.status = 'succeeded' AND \(TG_OP = 'INSERT' OR OLD\.status <> 'succeeded'\)/u);
+  assert.match(sourceKind, /ALTER TYPE "KnowledgeSourceKind" ADD VALUE 'artifact_version'/u);
+  assert.match(integrity, /KNOWLEDGE_DOCUMENT_SOURCE_IMMUTABLE/u);
+  assert.match(integrity, /artifact_version_id IS NULL AND status = 'active'/u);
 });
 
 test("database extensions are provisioned outside least-privilege application migrations", async () => {

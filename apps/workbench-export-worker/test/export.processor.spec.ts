@@ -65,6 +65,8 @@ function command() {
     packaging: "single_file" as const,
     selection: { kind: "release" as const },
     options: {},
+    purpose: "export" as const,
+    preview: null,
     release: {} as never,
   };
 }
@@ -116,6 +118,32 @@ describe("ExportProcessor", () => {
     const [identity, bytes] = test.storage.putVerified.mock.calls[0]!;
     expect(identity.mediaType).toBe("application/zip");
     expect(Buffer.from(bytes).subarray(0, 4).toString("hex")).toBe("504b0304");
+  });
+
+  it("passes the persisted Preview initial screen into the build without changing Export selection", async () => {
+    const test = harness();
+    const fixture = exportRequest();
+    test.store.start.mockResolvedValueOnce({
+      kind: "run",
+      command: {
+        ...command(),
+        purpose: "preview",
+        release: null,
+        preview: { initialScreenId: "screen-success" },
+        selection: {
+          kind: "artifact",
+          artifactId: "artifact-1",
+          artifactVersionId: "version-1",
+        },
+      },
+    } as never);
+    test.loader.load.mockResolvedValueOnce(fixture.source as never);
+
+    await test.processor.process("export-1", undefined, { retryCount: 0, retryLimit: 5 });
+
+    expect(test.browser.validateHtml).toHaveBeenCalledOnce();
+    const document = new TextDecoder().decode(test.browser.validateHtml.mock.calls[0]![0]);
+    expect(document).toContain('"initialScreenId":"screen-success"');
   });
 
   it("does no work when replay observes a terminal job", async () => {

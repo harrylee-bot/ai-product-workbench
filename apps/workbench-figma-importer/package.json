@@ -23,7 +23,7 @@
     "@create-figma-plugin/ui": "4.0.3",
     "@create-figma-plugin/utilities": "4.0.3",
     "@noble/hashes": "2.2.0",
-    "@workbench/workbench-contracts": "0.1.0",
+    "@workbench/workbench-contracts": "1.0.0",
     "fflate": "0.8.3",
     "preact": "10.29.7"
   },

@@ -127,11 +127,11 @@ wait_for_deerflow() {
 rollback_clean_host() {
   local status="$1"
   [ "$ROLLBACK_ON_FAILURE" = "1" ] || return 0
+  [ "$deployment_mutated" = "1" ] || return 0
   [ "$clean_host" = "1" ] || {
     echo "Deployment failed after an existing stack was detected; automatic rollback is disabled. Re-run with WORKBENCH_ROLLBACK_ENV_FILE set to the last signed candidate." >&2
     return 0
   }
-  [ "$deployment_mutated" = "1" ] || return 0
   echo "Deployment failed on a clean host; removing partially started services." >&2
   "${COMPOSE[@]}" down --remove-orphans >/dev/null 2>&1 || true
   if [ "$MANAGE_DEERFLOW_RUNTIME" = "1" ]; then
@@ -194,12 +194,20 @@ assert_image_mode() {
   fi
 }
 
+ensure_deerflow_image() {
+  [ "$MANAGE_DEERFLOW_RUNTIME" = "1" ] || return 0
+  local image_ref
+  image_ref="$(env_value WORKBENCH_DEERFLOW_IMAGE_REF)"
+  if ! docker image inspect "$image_ref" >/dev/null 2>&1; then
+    docker pull "$image_ref"
+  fi
+}
+
 prepare_deerflow_runtime() {
-  local base_config effective_config runtime_home image_ref internal_network host_port existing_id current_id
+  local base_config effective_config runtime_home internal_network host_port existing_id current_id
   base_config="$(env_value WORKBENCH_DEERFLOW_BASE_CONFIG_PATH)"
   effective_config="$(env_value DEER_FLOW_CONFIG_PATH)"
   runtime_home="$(env_value DEER_FLOW_HOME)"
-  image_ref="$(env_value WORKBENCH_DEERFLOW_IMAGE_REF)"
   internal_network="$(env_value WORKBENCH_INTERNAL_NETWORK_NAME)"
   host_port="$(env_value WORKBENCH_DEERFLOW_HOST_PORT)"
 
@@ -213,9 +221,6 @@ prepare_deerflow_runtime() {
   chown "$DEERFLOW_RUNTIME_UID:$DEERFLOW_RUNTIME_GID" "$effective_config"
   chmod 0600 "$effective_config"
 
-  if ! docker image inspect "$image_ref" >/dev/null 2>&1; then
-    docker pull "$image_ref"
-  fi
   docker network inspect "$internal_network" >/dev/null 2>&1 \
     || { echo "Workbench internal network was not created: $internal_network" >&2; return 1; }
   WORKBENCH_APP_DIR="$APP_DIR" \
@@ -329,13 +334,14 @@ if [ "$SKIP_PREFLIGHT" = "0" ] && [ "$IMAGE_MODE" = "pinned" ]; then
 fi
 
 compose_up() {
-  local -a options=(-d --remove-orphans)
-  if [ "$IMAGE_MODE" = "build" ]; then
-    options+=(--build)
-  else
-    options+=(--no-build)
-  fi
-  "${COMPOSE[@]}" up "${options[@]}" "$@"
+  "${COMPOSE[@]}" up -d --remove-orphans --no-build "$@"
+}
+
+prepare_validation_images() {
+  [ "$IMAGE_MODE" = "build" ] || return 0
+  # Finish bounded builds before stopping any live queue participants.
+  source "$SCRIPT_DIR/workbench-build-resources.sh"
+  validation_build_images "$@"
 }
 
 compose_up_force_recreate() {
@@ -370,7 +376,7 @@ run_runtime_queue_migrator() {
 
 prepare_runtime_queue_cutover() {
   stop_runtime_queue_participants
-  "${COMPOSE[@]}" up -d postgres
+  "${COMPOSE[@]}" up -d --no-build postgres
   wait_for_services postgres
   run_runtime_queue_migrator
 }
@@ -389,6 +395,8 @@ fi
 
 case "$DEPLOY_TARGET" in
   all)
+    prepare_validation_images
+    ensure_deerflow_image
     deployment_mutated=1
     prepare_runtime_queue_cutover
     if [ "$MANAGE_DEERFLOW_RUNTIME" = "1" ]; then
@@ -414,6 +422,7 @@ case "$DEPLOY_TARGET" in
     wait_for_services preview-gateway gateway
     ;;
   api)
+    prepare_validation_images workbench-api
     deployment_mutated=1
     compose_up workbench-api
     wait_for_services workbench-api
@@ -421,6 +430,7 @@ case "$DEPLOY_TARGET" in
     wait_for_services gateway
     ;;
   web)
+    prepare_validation_images workbench-web knowledge
     deployment_mutated=1
     compose_up workbench-web knowledge
     wait_for_services workbench-web knowledge
@@ -428,9 +438,11 @@ case "$DEPLOY_TARGET" in
     wait_for_services gateway
     ;;
   runtime-worker)
+    prepare_validation_images workbench-worker
+    ensure_deerflow_image
     deployment_mutated=1
     if [ "$MANAGE_DEERFLOW_RUNTIME" = "1" ]; then
-      "${COMPOSE[@]}" up -d postgres
+      "${COMPOSE[@]}" up -d --no-build postgres
       wait_for_services postgres
       prepare_deerflow_runtime
     fi
@@ -438,10 +450,11 @@ case "$DEPLOY_TARGET" in
     wait_for_services workbench-worker
     ;;
   deerflow-runtime)
-    deployment_mutated=1
     [ "$MANAGE_DEERFLOW_RUNTIME" = "1" ] \
       || { echo "deerflow-runtime target requires WORKBENCH_MANAGE_DEERFLOW_RUNTIME=1" >&2; exit 64; }
-    "${COMPOSE[@]}" up -d postgres
+    ensure_deerflow_image
+    deployment_mutated=1
+    "${COMPOSE[@]}" up -d --no-build postgres
     wait_for_services postgres
     prepare_deerflow_runtime
     ;;
@@ -476,7 +489,7 @@ case "$DEPLOY_TARGET" in
     WORKBENCH_ALLOW_RUNTIME_QUEUE_RECREATE=1 "${ROLLBACK_COMPOSE[@]}" config --quiet
     WORKBENCH_ALLOW_RUNTIME_QUEUE_RECREATE=1 "${ROLLBACK_COMPOSE[@]}" pull --quiet migrate
     stop_runtime_queue_participants
-    "${COMPOSE[@]}" up -d postgres
+    "${COMPOSE[@]}" up -d --no-build postgres
     wait_for_services postgres
     echo "Restoring Runtime queue policies with the previous signed candidate migrator."
     if WORKBENCH_ALLOW_RUNTIME_QUEUE_RECREATE=1 \
@@ -501,21 +514,25 @@ case "$DEPLOY_TARGET" in
       exec "$0"
     ;;
   file-worker)
+    prepare_validation_images workbench-file-worker
     deployment_mutated=1
     compose_up workbench-file-worker
     wait_for_services workbench-file-worker
     ;;
   import-worker)
+    prepare_validation_images workbench-import-worker
     deployment_mutated=1
     compose_up workbench-import-worker
     wait_for_services workbench-import-worker
     ;;
   export-worker)
+    prepare_validation_images workbench-export-worker
     deployment_mutated=1
     compose_up workbench-export-worker
     wait_for_services workbench-export-worker
     ;;
   preview)
+    prepare_validation_images workbench-preview preview-gateway
     deployment_mutated=1
     compose_up workbench-preview preview-gateway
     wait_for_services workbench-preview preview-gateway
@@ -523,6 +540,7 @@ case "$DEPLOY_TARGET" in
     wait_for_services preview-gateway
     ;;
   knowledge)
+    prepare_validation_images knowledge
     deployment_mutated=1
     compose_up knowledge
     wait_for_services knowledge
@@ -530,6 +548,7 @@ case "$DEPLOY_TARGET" in
     wait_for_services gateway
     ;;
   migrate)
+    prepare_validation_images migrate
     prepare_runtime_queue_cutover
     ;;
   *)

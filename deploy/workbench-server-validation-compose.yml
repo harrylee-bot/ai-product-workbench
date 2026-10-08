@@ -50,10 +50,12 @@ services:
       CLAMD_CONF_StreamMaxLength: 50M
       CLAMD_STARTUP_TIMEOUT: "300"
       FRESHCLAM_CHECKS: "4"
+      FRESHCLAM_CONF_OnUpdateExecute: workbench-clamav-notify
     volumes:
       - workbench-clamav-data:/var/lib/clamav
+      - ./workbench-clamav-notify.sh:/usr/local/bin/workbench-clamav-notify:ro
     healthcheck:
-      test: [CMD-SHELL, "clamdscan --ping 1 >/dev/null 2>&1"]
+      test: [CMD-SHELL, "clamdscan --ping=1 >/dev/null 2>&1"]
       interval: 30s
       timeout: 10s
       start_period: 300s

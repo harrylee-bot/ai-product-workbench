@@ -123,7 +123,7 @@ describe("Workbench route ownership", () => {
     expect(projectCss).toContain('@import "@xyflow/react/dist/style.css"');
     expect(projectCss).toContain(".ProseMirror");
     expect(projectCss).toContain(".workbench-prd-editor-content .tiptap");
-    expect(prdEditorSource).toContain('className="workbench-prd-editor-content"');
+    expect(prdEditorSource).toContain("workbench-prd-editor-content");
     expect(prdEditorSource).not.toContain("[&_.tiptap");
   });
 

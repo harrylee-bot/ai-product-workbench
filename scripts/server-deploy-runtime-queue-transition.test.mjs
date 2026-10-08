@@ -15,6 +15,121 @@ const queueParticipants = [
   "workbench-export-worker",
 ];
 
+test("validation images finish building before any queue participant stops", () => {
+  const result = runDeployment();
+
+  assert.equal(result.status, 0, result.stderr);
+  const buildIndex = findLine(result.lines, (line) => line === "validation-build all");
+  const stopIndex = findLine(result.lines, (line) => line.includes(" stop --timeout "));
+  assert.ok(buildIndex >= 0 && buildIndex < stopIndex, result.commandLog);
+  assert.ok(result.lines.indexOf("main-preflight") < buildIndex, result.commandLog);
+  assert.doesNotMatch(result.commandLog, / up .*--build/u);
+  assert.match(result.commandLog, / up -d --remove-orphans --no-build/u);
+});
+
+test("a failed validation build leaves the running stack untouched", () => {
+  const result = runDeployment({ failBuild: true });
+
+  assert.equal(result.status, 43, result.stderr);
+  assert.match(result.commandLog, /validation-build all/u);
+  assert.doesNotMatch(result.commandLog, / (?:stop|up|run|down) /u);
+  assert.doesNotMatch(result.stderr, /queue producers and consumers remain stopped/u);
+});
+
+test("pinned production pulls images without invoking the validation builder", () => {
+  const result = runDeployment({ imageMode: "pinned" });
+
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.commandLog, / pull --quiet/u);
+  assert.doesNotMatch(result.commandLog, /validation-build|--build\b/u);
+});
+
+test("stop does not initialize a builder", () => {
+  const result = runDeployment({ deployTarget: "stop" });
+
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.commandLog, / down --remove-orphans/u);
+  assert.doesNotMatch(result.commandLog, /validation-build|--build\b/u);
+});
+
+for (const deployTarget of ["all", "runtime-worker", "deerflow-runtime"]) {
+  test(`${deployTarget} obtains the DeerFlow image before deployment side effects`, () => {
+    const result = runDeployment({
+      deployTarget,
+      manageDeerflowRuntime: true,
+      deerflowImagePresent: false,
+    });
+
+    assert.equal(result.status, 0, result.stderr);
+    const pullIndex = findLine(result.lines, (line) => line.includes("docker pull "));
+    const mutationIndex = findLine(result.lines, (line) => / (?:stop|up|run|down) /u.test(line));
+    assert.ok(pullIndex >= 0 && pullIndex < mutationIndex, result.commandLog);
+    assert.equal(result.lines.filter((line) => line.includes("docker pull ")).length, 1);
+    assert.ok(pullIndex < result.lines.findIndex((line) => line.startsWith("deerflow-config-merge ")));
+  });
+
+  test(`${deployTarget} leaves running services untouched when the DeerFlow image cannot be pulled`, () => {
+    const result = runDeployment({
+      deployTarget,
+      manageDeerflowRuntime: true,
+      deerflowImagePresent: false,
+      failDeerflowPull: true,
+    });
+
+    assert.equal(result.status, 44, result.stderr);
+    assert.match(result.commandLog, /docker pull /u);
+    assert.doesNotMatch(result.commandLog, / (?:stop|up|run|down) /u);
+    assert.doesNotMatch(result.commandLog, /deerflow-config-merge/u);
+    assert.doesNotMatch(result.stderr, /queue producers and consumers remain stopped|automatic rollback/u);
+  });
+}
+
+test("a cached DeerFlow image is checked without a registry pull", () => {
+  const result = runDeployment({ manageDeerflowRuntime: true, failDeerflowPull: true });
+
+  assert.equal(result.status, 0, result.stderr);
+  const imageIndex = findLine(result.lines, (line) => line.includes("docker image inspect "));
+  const stopIndex = findLine(result.lines, (line) => line.includes(" stop --timeout "));
+  assert.ok(imageIndex >= 0 && imageIndex < stopIndex, result.commandLog);
+  assert.doesNotMatch(result.commandLog, /docker pull /u);
+});
+
+for (const deployTarget of ["api", "web", "migrate", "stop"]) {
+  test(`${deployTarget} does not require the DeerFlow image`, () => {
+    const result = runDeployment({
+      deployTarget,
+      manageDeerflowRuntime: true,
+      deerflowImagePresent: false,
+      failDeerflowPull: true,
+    });
+
+    assert.equal(result.status, 0, result.stderr);
+    assert.doesNotMatch(result.commandLog, /docker (?:image inspect|pull) /u);
+  });
+}
+
+for (const [deployTarget, services] of [
+  ["api", "workbench-api"],
+  ["web", "workbench-web knowledge"],
+  ["runtime-worker", "workbench-worker"],
+  ["file-worker", "workbench-file-worker"],
+  ["import-worker", "workbench-import-worker"],
+  ["export-worker", "workbench-export-worker"],
+  ["preview", "workbench-preview preview-gateway"],
+  ["knowledge", "knowledge"],
+  ["migrate", "migrate"],
+]) {
+  test(`${deployTarget} builds its target before deployment side effects`, () => {
+    const result = runDeployment({ deployTarget });
+
+    assert.equal(result.status, 0, result.stderr);
+    const buildIndex = result.lines.indexOf(`validation-build ${services}`);
+    const mutationIndex = findLine(result.lines, (line) => / (?:stop|up|run|down) /u.test(line));
+    assert.ok(buildIndex >= 0 && buildIndex < mutationIndex, result.commandLog);
+    assert.equal(result.lines.filter((line) => line.startsWith("validation-build ")).length, 1);
+  });
+}
+
 test("full deployment stops every queue participant before the authorized migrator", () => {
   const result = runDeployment({ processAuthorization: "1" });
 
@@ -75,6 +190,7 @@ test("rollback restores queue policy with the previous candidate before teardown
   const result = runDeployment({ deployTarget: "rollback" });
 
   assert.equal(result.status, 0, result.stderr);
+  assert.doesNotMatch(result.commandLog, /validation-build|--build\b/u);
   const stopIndex = findLine(result.lines, (line) => line.includes(" stop --timeout "));
   const rollbackMigrateIndex = findLine(
     result.lines,
@@ -133,8 +249,12 @@ test("legacy rollback recursively verifies the inventory and both production pre
 function runDeployment({
   deployTarget = "all",
   envFileAuthorization = "0",
+  failBuild = false,
   failMigration = false,
+  imageMode,
   manageDeerflowRuntime = false,
+  deerflowImagePresent = true,
+  failDeerflowPull = false,
   processAuthorization,
   rollbackSourceCommit = "a".repeat(40),
 } = {}) {
@@ -156,12 +276,31 @@ function runDeployment({
   const deerflowHome = join(stateDir, "deerflow-home");
   const inventory = join(deployDir, "production-image-manifest.json");
   const inventoryBundle = join(deployDir, "production-image-manifest.bundle.json");
+  const testDeployScript = join(deployDir, "server-deploy.sh");
+  const deploymentImageMode = imageMode ?? (deployTarget === "rollback" ? "pinned" : "build");
+  const deerflowEnv = manageDeerflowRuntime ? [
+    `WORKBENCH_DEERFLOW_BASE_CONFIG_PATH=${deerflowBaseConfig}`,
+    `DEER_FLOW_CONFIG_PATH=${deerflowEffectiveConfig}`,
+    `DEER_FLOW_HOME=${deerflowHome}`,
+    `WORKBENCH_DEERFLOW_IMAGE_REF=registry.example.test/workbench/deerflow@sha256:${"d".repeat(64)}`,
+    "WORKBENCH_INTERNAL_NETWORK_NAME=workbench_internal",
+    "WORKBENCH_DEERFLOW_HOST_PORT=2026",
+  ] : [];
 
   mkdirSync(deployDir, { recursive: true });
   mkdirSync(fakeBinDir, { recursive: true });
   mkdirSync(stateDir, { recursive: true });
   writeFileSync(commandLogPath, "");
-  writeFileSync(envFile, `WORKBENCH_ALLOW_RUNTIME_QUEUE_RECREATE=${envFileAuthorization}\n`);
+  writeFileSync(envFile, [
+    `WORKBENCH_ALLOW_RUNTIME_QUEUE_RECREATE=${envFileAuthorization}`,
+    `WORKBENCH_SOURCE_COMMIT=${"b".repeat(40)}`,
+    `WORKBENCH_IMAGE_INVENTORY_PATH=${inventory}`,
+    `WORKBENCH_IMAGE_INVENTORY_BUNDLE_PATH=${inventoryBundle}`,
+    "WORKBENCH_COSIGN_CERTIFICATE_IDENTITY=https://example.test/workbench.yml@refs/heads/main",
+    "WORKBENCH_COSIGN_OIDC_ISSUER=https://token.actions.githubusercontent.com",
+    ...deerflowEnv,
+    "",
+  ].join("\n"));
   writeFileSync(composeFile, "name: workbench\nservices: {}\n");
   writeFileSync(rollbackCompose, "name: workbench\nservices: {}\n");
   writeFileSync(composeOverlay, "services: {}\n");
@@ -176,17 +315,18 @@ function runDeployment({
     `WORKBENCH_IMAGE_INVENTORY_BUNDLE_PATH=${inventoryBundle}`,
     "WORKBENCH_COSIGN_CERTIFICATE_IDENTITY=https://example.test/workbench.yml@refs/heads/main",
     "WORKBENCH_COSIGN_OIDC_ISSUER=https://token.actions.githubusercontent.com",
-    ...(manageDeerflowRuntime ? [
-      `WORKBENCH_DEERFLOW_BASE_CONFIG_PATH=${deerflowBaseConfig}`,
-      `DEER_FLOW_CONFIG_PATH=${deerflowEffectiveConfig}`,
-      `DEER_FLOW_HOME=${deerflowHome}`,
-      `WORKBENCH_DEERFLOW_IMAGE_REF=registry.example.test/workbench/deerflow@sha256:${"d".repeat(64)}`,
-      "WORKBENCH_INTERNAL_NETWORK_NAME=workbench_internal",
-      "WORKBENCH_DEERFLOW_HOST_PORT=2026",
-    ] : []),
+    ...deerflowEnv,
     "",
   ].join("\n"));
   writeExecutable(preflight, "#!/bin/sh\nprintf 'main-preflight\\n' >> \"$TEST_COMMAND_LOG\"\n");
+  writeExecutable(testDeployScript, readFileSync(deployScript, "utf8"));
+  writeFileSync(join(deployDir, "workbench-build-resources.sh"), [
+    "validation_build_images() {",
+    "  printf 'validation-build %s\\n' \"${*:-all}\" >> \"$TEST_COMMAND_LOG\"",
+    "  if [ \"$TEST_FAIL_BUILD\" = 1 ]; then return 43; fi",
+    "}",
+    "",
+  ].join("\n"));
   writeExecutable(deerflowPreflight, "#!/bin/sh\nprintf 'deerflow-preflight\\n' >> \"$TEST_COMMAND_LOG\"\n");
   writeExecutable(join(fakeBinDir, "node"), fakeNodeSource());
   writeExecutable(join(fakeBinDir, "cosign"), "#!/bin/sh\nexit 0\n");
@@ -200,11 +340,11 @@ function runDeployment({
     PATH: `${fakeBinDir}:${process.env.PATH}`,
     WORKBENCH_ENV_FILE: envFile,
     WORKBENCH_COMPOSE_FILE: composeFile,
-    WORKBENCH_COMPOSE_OVERLAY: deployTarget === "rollback" ? "" : composeOverlay,
+    WORKBENCH_COMPOSE_OVERLAY: deploymentImageMode === "pinned" ? "" : composeOverlay,
     WORKBENCH_PREFLIGHT_SCRIPT: preflight,
     WORKBENCH_DEERFLOW_COMPOSE_FILE: deerflowCompose,
     WORKBENCH_DEERFLOW_PREFLIGHT_SCRIPT: deerflowPreflight,
-    WORKBENCH_DEPLOY_IMAGE_MODE: deployTarget === "rollback" ? "pinned" : "build",
+    WORKBENCH_DEPLOY_IMAGE_MODE: deploymentImageMode,
     WORKBENCH_MANAGE_DEERFLOW_RUNTIME: manageDeerflowRuntime ? "1" : "0",
     WORKBENCH_DEPLOY_LOCK_FILE: join(appDir, "deploy.lock"),
     WORKBENCH_DEPLOY_HEALTH_TIMEOUT_SECONDS: "5",
@@ -213,7 +353,10 @@ function runDeployment({
     WORKBENCH_ROLLBACK_COMPOSE_FILE: rollbackCompose,
     DEPLOY_TARGET: deployTarget,
     TEST_COMMAND_LOG: commandLogPath,
+    TEST_FAIL_BUILD: failBuild ? "1" : "0",
     TEST_FAIL_MIGRATION: failMigration ? "1" : "0",
+    TEST_DEERFLOW_IMAGE_PRESENT: deerflowImagePresent ? "1" : "0",
+    TEST_FAIL_DEERFLOW_PULL: failDeerflowPull ? "1" : "0",
     TEST_ROLLBACK_ENV: rollbackEnv,
     TEST_STATE_DIR: stateDir,
   };
@@ -225,7 +368,7 @@ function runDeployment({
 
   let result;
   try {
-    result = spawnSync("bash", [deployScript], { encoding: "utf8", env });
+    result = spawnSync("bash", [testDeployScript], { encoding: "utf8", env });
     const commandLog = readFileSync(commandLogPath, "utf8");
     return {
       ...result,
@@ -259,6 +402,11 @@ function fakeDockerSource() {
     "#!/bin/sh",
     "printf 'allow=%s docker %s\\n' \"${WORKBENCH_ALLOW_RUNTIME_QUEUE_RECREATE:-unset}\" \"$*\" >> \"$TEST_COMMAND_LOG\"",
     "if [ \"$1\" != compose ]; then",
+    "  if [ \"$1 $2\" = 'image inspect' ] && [ \"$TEST_DEERFLOW_IMAGE_PRESENT\" != 1 ] && [ ! -f \"$TEST_STATE_DIR/deerflow-image\" ]; then exit 1; fi",
+    "  if [ \"$1\" = pull ]; then",
+    "    if [ \"$TEST_FAIL_DEERFLOW_PULL\" = 1 ]; then exit 44; fi",
+    "    : > \"$TEST_STATE_DIR/deerflow-image\"",
+    "  fi",
     "  if [ \"$1 $2\" = 'inspect --format' ]; then printf 'healthy\\n'; fi",
     "  exit 0",
     "fi",
@@ -280,7 +428,7 @@ function fakeDockerSource() {
     "    rm -f \"$TEST_STATE_DIR/started\"",
     "    exit 0",
     "    ;;",
-    "  *' up -d postgres '*)",
+    "  *' up -d --no-build postgres '*)",
     "    : > \"$TEST_STATE_DIR/postgres\"",
     "    exit 0",
     "    ;;",

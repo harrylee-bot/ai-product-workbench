@@ -3,7 +3,7 @@ import test from "node:test";
 
 import { assertRouteTransitionFrames } from "./workbench-route-frame-contract.mjs";
 
-test("accepts a mounted sync handoff when visible enter samples are coalesced", () => {
+test("accepts a mounted synchronized route transition when visible enter samples are coalesced", () => {
   const result = assertRouteTransitionFrames([
     frame({ home: route(1, "translateY(6px)"), homeHeader: route(1) }),
     frame({

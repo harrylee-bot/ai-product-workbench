@@ -28,7 +28,7 @@ function issuerHarness() {
   let budgetCreationCount = 0;
   const grants: Array<Record<string, unknown>> = [];
   const tx = {
-    $executeRaw: vi.fn(async () => {
+    knowledgeToolBudget: { createMany: vi.fn(async () => {
       if (!budget) {
         budget = {
           ...knowledgeToolBudgetPolicy,
@@ -37,8 +37,8 @@ function issuerHarness() {
         };
         budgetCreationCount += 1;
       }
-      return 1;
-    }),
+      return { count: 1 };
+    }) },
     $queryRaw: vi.fn(async () => budget ? [budget] : []),
     knowledgeToolGrant: {
       findFirst: vi.fn(async ({ where }: { where: Record<string, unknown> }) => {
@@ -94,6 +94,18 @@ describe("PrismaKnowledgeToolGrantIssuer", () => {
     expect(first).not.toBeNull();
     expect(replay).toEqual(first);
     expect(harness.budgetCreationCount()).toBe(1);
+    expect(harness.tx.knowledgeToolBudget.createMany).toHaveBeenCalledWith({
+      data: {
+        runtimeAttemptId: scope.runtimeAttemptId,
+        ...knowledgeToolBudgetPolicy,
+        windowStartedAt: now,
+        windowStarts: 0,
+        totalStarts: 0,
+        createdAt: now,
+        updatedAt: now,
+      },
+      skipDuplicates: true,
+    });
     expect(harness.tx.$queryRaw).toHaveBeenCalledTimes(2);
     expect(harness.tx.knowledgeToolGrant.create).toHaveBeenCalledTimes(1);
     expect(harness.grants).toHaveLength(1);
@@ -136,7 +148,7 @@ describe("PrismaKnowledgeToolGrantIssuer", () => {
     const db = { $transaction: vi.fn() };
     const issuer = new PrismaKnowledgeToolGrantIssuer(db as never, null);
 
-    await expect(issuer.issue({ ...scope, releaseId: null })).resolves.toBeNull();
+    await expect(issuer.issue({ ...scope, releaseId: null })).rejects.toThrow("KNOWLEDGE_RELEASE_REQUIRED");
     expect(db.$transaction).not.toHaveBeenCalled();
   });
 });

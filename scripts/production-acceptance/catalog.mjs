@@ -18,12 +18,12 @@ const scriptsRoot = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(scriptsRoot, "../..");
 export const DEFAULT_CONTROL_CATALOG_PATH = path.join(
   repoRoot,
-  "docs/evidence/governance/production-acceptance-control-catalog.v1.json",
+  "schemas/evidence/governance/production-acceptance-control-catalog.v1.json",
 );
 export const CONTROL_CATALOG_PACKAGE_PATH = "governance/production-acceptance-control-catalog.v1.json";
 const schemaPath = path.join(
   repoRoot,
-  "docs/evidence/governance/production-acceptance-control-catalog.schema.json",
+  "schemas/evidence/governance/production-acceptance-control-catalog.schema.json",
 );
 const CAPACITY_THRESHOLDS = Object.freeze(new Map([
   ["G10.CAPACITY.ACTIVE_RUNS", { kind: "number", operator: "gte", expected: 100, unit: "simultaneous-active-runs" }],
@@ -213,7 +213,7 @@ async function validateExecutionMapping(control, findings) {
     return;
   }
   const relativePath = execution.kind === "command" ? execution.argv?.[1] : execution.path;
-  if (typeof relativePath !== "string" || (!relativePath.startsWith("scripts/") && !relativePath.startsWith("deploy/") && !relativePath.startsWith("docs/runbooks/"))) {
+  if (typeof relativePath !== "string" || (relativePath !== "README.md" && !relativePath.startsWith("scripts/") && !relativePath.startsWith("deploy/") && !relativePath.startsWith("docs/runbooks/"))) {
     findings.push(`${control.controlId} execution mapping path is invalid`);
     return;
   }

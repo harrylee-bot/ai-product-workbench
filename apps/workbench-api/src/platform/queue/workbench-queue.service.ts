@@ -13,6 +13,8 @@ import {
   fileVerifyQueue,
   importSourceProcessQueue,
   importSourceProcessQueueOptions,
+  knowledgeReleaseBuildQueue,
+  knowledgeReleaseBuildQueueOptions,
 } from "@workbench/workbench-contracts";
 import { fromPrisma, PgBoss, type SendOptions } from "pg-boss";
 
@@ -64,6 +66,7 @@ export class WorkbenchQueueService implements OnModuleInit, OnModuleDestroy {
       notify: true,
     });
     await this.boss.createQueue(exportDeliveryQueue, exportDeliveryQueueOptions);
+    await this.boss.createQueue(knowledgeReleaseBuildQueue, knowledgeReleaseBuildQueueOptions);
   }
 
   async onModuleDestroy() {

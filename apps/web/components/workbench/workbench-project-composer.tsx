@@ -62,6 +62,7 @@ import {
 } from "./workbench-composer-menus";
 import type { WorkbenchArtifactOutputKind } from "./workbench-composer-menus";
 import { viewTransition } from "./workbench-motion";
+import { WorkbenchTargetSurfaceControl } from "./workbench-target-surface-control";
 import { WorkbenchImportSourcesDialog } from "./workbench-import-sources-dialog";
 
 type WorkbenchRunSubmitHandler = (
@@ -123,6 +124,7 @@ export function ProjectComposer({
   onClearContext,
   onRetryDesignPresets,
   onRetryModels: _onRetryModels,
+  onTargetSurfaceChange,
   onToggleModel,
   onSubmitPrompt,
   designPresetItems,
@@ -425,6 +427,11 @@ export function ProjectComposer({
           >
             /
           </button>
+          <WorkbenchTargetSurfaceControl
+            disabled={disabled}
+            onChange={onTargetSurfaceChange}
+            surface={targetSurface}
+          />
           <div className="flex-1" />
           <button
             aria-expanded={composerPanel === "attachments"}

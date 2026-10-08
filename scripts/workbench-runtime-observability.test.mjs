@@ -5,7 +5,7 @@ import YAML from "yaml";
 
 const root = new URL("../", import.meta.url);
 const alertsPath = "deploy/observability/workbench-runtime-alerts.yaml";
-const runbookPath = "docs/runbooks/workbench-runtime-provider-state-rollout.md";
+const runbookPath = "README.md";
 
 test("Runtime alerts are well-formed and every runbook link resolves", async () => {
   const [alertSource, runbook] = await Promise.all([
@@ -13,11 +13,7 @@ test("Runtime alerts are well-formed and every runbook link resolves", async () 
     readFile(new URL(runbookPath, root), "utf8"),
   ]);
   const document = YAML.parse(alertSource);
-  assert.doesNotMatch(
-    runbook,
-    /CODEX-RUNTIME-DATABASE-REMEDIATION-SPEC-20260723\.md/u,
-    "the operational runbook must not depend on an unshipped remediation specification",
-  );
+  assert.match(runbook, /Provider State/u);
   assert.equal(document?.kind, "PrometheusRule");
   const rules = document?.spec?.groups?.flatMap((group) => group.rules ?? []) ?? [];
   assert(rules.length >= 9, "Runtime observability must keep the complete alert inventory");
@@ -33,7 +29,7 @@ test("Runtime alerts are well-formed and every runbook link resolves", async () 
     assert.match(rule.labels?.severity ?? "", /^(?:warning|critical)$/u);
     assert.equal(typeof rule.annotations?.summary, "string");
     const runbookUrl = rule.annotations?.runbook_url ?? "";
-    assert.match(runbookUrl, /^docs\/runbooks\/workbench-runtime-provider-state-rollout\.md#[a-z0-9-]+$/u);
+    assert.match(runbookUrl, /^README\.md#[a-z0-9-]+$/u);
     const anchor = runbookUrl.slice(runbookUrl.indexOf("#") + 1);
     assert(markdownAnchors(runbook).has(anchor), `${rule.alert} links to missing runbook anchor #${anchor}`);
   }

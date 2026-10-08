@@ -1,5 +1,5 @@
-const GENERAL_RUNBOOK = "docs/runbooks/workbench-production-acceptance-g6-g11.md";
-const RECOVERY_RUNBOOK = "docs/runbooks/workbench-postgres-recovery-drill.md";
+const GENERAL_RUNBOOK = "README.md";
+const RECOVERY_RUNBOOK = "README.md";
 
 const general = Object.freeze({ kind: "runbook", path: GENERAL_RUNBOOK, section: "执行控制项" });
 const recovery = Object.freeze({ kind: "runbook", path: RECOVERY_RUNBOOK, section: "执行演练" });

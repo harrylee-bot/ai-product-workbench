@@ -54,10 +54,19 @@ ENV NODE_ENV=production \
     NPM_CONFIG_REPLACE_REGISTRY_HOST=always \
     PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 \
     WORKBENCH_EXPORT_CHROMIUM_PATH=/usr/bin/chromium \
-    WORKBENCH_FIGMA_FALLBACK_FONT_PATH=/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf
+    WORKBENCH_FIGMA_FALLBACK_FONT_PATH=/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf \
+    PATH="/opt/workbench-export-python/bin:${PATH}"
 
 COPY --chmod=0555 deploy/prepare-node-image.sh /usr/local/bin/prepare-node-image
-RUN prepare-node-image ca-certificates openssl chromium fonts-dejavu-core
+RUN prepare-node-image ca-certificates openssl chromium fonts-dejavu-core fonts-noto-cjk \
+    python3 python3-lxml python3-pillow python3-virtualenv libreoffice-writer
+
+COPY deploy/workbench-export-python-requirements.txt /tmp/workbench-export-python-requirements.txt
+RUN python3 -m virtualenv --no-download --system-site-packages /opt/workbench-export-python \
+  && /opt/workbench-export-python/bin/python3 -m pip install --disable-pip-version-check --no-cache-dir \
+    --index-url https://pypi.org/simple --only-binary=:all: --no-deps --require-hashes \
+    -r /tmp/workbench-export-python-requirements.txt \
+  && rm /tmp/workbench-export-python-requirements.txt
 
 COPY --chown=node:node package.json package-lock.json ./
 COPY --chown=node:node apps/workbench-export-worker/package.json apps/workbench-export-worker/package.json
@@ -73,11 +82,14 @@ COPY --from=build --chown=node:node /app/packages/workbench-content-security/dis
 COPY --from=build --chown=node:node /app/packages/workbench-contracts/dist packages/workbench-contracts/dist
 COPY --from=build --chown=node:node /app/packages/workbench-db/generated packages/workbench-db/generated
 COPY --from=build --chown=node:node /app/packages/workbench-export-core/dist packages/workbench-export-core/dist
+COPY --from=build --chown=node:node /app/packages/workbench-export-core/scripts packages/workbench-export-core/scripts
 COPY --from=build --chown=node:node /app/packages/workbench-telemetry/dist packages/workbench-telemetry/dist
-
-RUN node --input-type=module -e "await import('./packages/workbench-export-core/dist/index.js')"
+COPY --chown=node:node integrations/deerflow/skills/requirement-doc-template/assets/requirement-template.docx integrations/deerflow/skills/requirement-doc-template/assets/requirement-template.docx
+COPY --chown=node:node integrations/deerflow/skills/requirement-doc-template/scripts/docx_quality_check.py integrations/deerflow/skills/requirement-doc-template/scripts/docx_quality_check.py
+COPY --chown=node:node deploy/check-workbench-document-export.mjs deploy/check-workbench-document-export.mjs
 
 USER node
+RUN node deploy/check-workbench-document-export.mjs
 HEALTHCHECK --interval=20s --timeout=5s --start-period=30s --retries=4 \
   CMD ["node", "apps/workbench-export-worker/dist/healthcheck.js"]
 CMD ["node", "apps/workbench-export-worker/dist/main.js"]

@@ -1,10 +1,10 @@
 "use client";
 
 import Link from "next/link";
-import Form from "next/form";
 import { useSearchParams } from "next/navigation";
 import { useState } from "react";
 
+import { useAuthFormSubmission } from "@/components/auth/auth-form";
 import { LoaderIcon } from "@/components/auth/auth-icons";
 import { authToast } from "@/components/auth/auth-toast";
 import { Button } from "@/components/ui/button";
@@ -67,8 +67,10 @@ export function RegisterPage() {
     }
   };
 
+  const { handleSubmit: handleFormSubmit, pending } = useAuthFormSubmission(handleSubmit);
+
   return (
-    <Form action={handleSubmit} className="flex flex-col gap-4">
+    <form aria-busy={pending} className="flex flex-col gap-4" onSubmit={handleFormSubmit}>
       <div className="flex flex-col gap-2">
         <Label
           className="font-normal text-muted-foreground"
@@ -122,13 +124,13 @@ export function RegisterPage() {
       </div>
 
       <Button
-        aria-disabled={isSuccessful}
+        aria-disabled={pending || isSuccessful}
         className="relative"
-        disabled={isSuccessful}
+        disabled={pending || isSuccessful}
         type="submit"
       >
         创建工作台
-        {isSuccessful && (
+        {(pending || isSuccessful) && (
           <span className="absolute right-4 animate-spin">
             <LoaderIcon />
           </span>
@@ -144,6 +146,6 @@ export function RegisterPage() {
           登录继续
         </Link>
       </p>
-    </Form>
+    </form>
   );
 }

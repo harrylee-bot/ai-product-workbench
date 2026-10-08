@@ -128,9 +128,9 @@ sleep 0.35
 [ "$(read_count)" = "$first_count" ] || fail "unchanged content triggered a rebuild"
 
 # Excluded content and mtime-only changes do not alter the publish generation.
-mkdir -p "$CONTENT_DIR/99-收件箱"
+mkdir -p "$CONTENT_DIR/private"
 printf '%s\n' '---' 'title: 私有记录' 'status: 已生效' 'tags: [私有]' '---' '# 私有记录' 'private' \
-  > "$CONTENT_DIR/99-收件箱/私有.md"
+  > "$CONTENT_DIR/private/私有.md"
 touch "$CONTENT_DIR/00-知识库使用规范/规则.md"
 sleep 0.35
 [ "$(read_count)" = "$first_count" ] || fail "non-published or mtime-only change triggered a rebuild"

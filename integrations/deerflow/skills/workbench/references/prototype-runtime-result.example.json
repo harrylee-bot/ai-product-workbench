@@ -7,7 +7,15 @@
       "schemaVersion": 1,
       "title": "活动报名",
       "operation": { "kind": "create" },
-      "citations": [],
+      "citations": [{
+        "id": "example-only-replace-with-retrieved-citation",
+        "documentId": "example-document",
+        "chunkId": "example-chunk",
+        "sourcePath": "00-rules/example.md",
+        "title": "Transport example only, not an authorized source",
+        "quote": "Replace this entire citation with an actual knowledge retrieval result.",
+        "locator": { "heading": "Example", "startLine": null, "endLine": null }
+      }],
       "content": {
         "protocol": "workbench.prototype.v1",
         "documentId": "prototype-signup",

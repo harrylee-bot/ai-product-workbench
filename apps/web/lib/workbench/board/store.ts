@@ -422,7 +422,7 @@ export function createBoardStore(board: Board, etag = revisionEtag(board.revisio
         }
         return;
       }
-      const prdAdditions = nextBoard.revision > state.serverRevision
+      const artifactAdditions = nextBoard.revision > state.serverRevision
         && (
           state.saveStatus === "dirty"
           || state.saveStatus === "saving"
@@ -430,11 +430,11 @@ export function createBoardStore(board: Board, etag = revisionEtag(board.revisio
           || (state.saveStatus === "error" && retrySnapshot !== null)
         )
         && localBoardContentMatchesServer(state, confirmedServerRequest)
-        ? serverPrdAdditions(confirmedServerRequest, nextBoard)
+        ? serverAutoMergeableArtifactAdditions(confirmedServerRequest, nextBoard)
         : null;
-      if (prdAdditions) {
+      if (artifactAdditions) {
         const nextProjection = boardToFlow(nextBoard);
-        const additionIds = new Set(prdAdditions.map((node) => node.id));
+        const additionIds = new Set(artifactAdditions.map((node) => node.id));
         const addedFlowNodes = nextProjection.nodes.filter((node) => additionIds.has(node.id));
         const viewportDirty = !viewportEquals(state.viewport, nextBoard.viewport);
         confirmedServerRequest = canonicalBoardRequestFromBoard(nextBoard);
@@ -767,7 +767,7 @@ function localBoardContentMatchesServer(
     && equal(localRequest.edges, serverRequest.edges);
 }
 
-function serverPrdAdditions(
+function serverAutoMergeableArtifactAdditions(
   currentServerRequest: ReplaceBoardRequest,
   nextBoard: Board,
 ): Board["nodes"] | null {
@@ -787,16 +787,16 @@ function serverPrdAdditions(
 
   const currentNodeIds = new Set(currentServerRequest.nodes.map((node) => node.id));
   const additions = nextRequest.nodes.filter((node) => !currentNodeIds.has(node.id));
-  return additions.length > 0 && additions.every(isRootPrdArtifactNode) ? additions : null;
+  return additions.length > 0 && additions.every(isAutoMergeableRootArtifactNode) ? additions : null;
 }
 
-function isRootPrdArtifactNode(node: Board["nodes"][number]): boolean {
+function isAutoMergeableRootArtifactNode(node: Board["nodes"][number]): boolean {
   return node.kind === "artifact"
     && node.parentNodeId === null
     && node.artifactId !== null
     && node.artifactVersionId !== null
     && node.data.nodeType === "artifact"
-    && node.data.artifactKind === "prd";
+    && (node.data.artifactKind === "prd" || node.data.artifactKind === "prototype");
 }
 
 function mergeRemoteNodes(

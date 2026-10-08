@@ -79,6 +79,7 @@ const editedVersionSelect = {
   citations: true,
   createdByRunId: true,
   knowledgeReleaseId: true,
+  sourcePrdVersionId: true,
   createdAt: true,
   artifact: { select: { kind: true } },
 } as const;
@@ -453,6 +454,7 @@ export class ArtifactsService {
             citations: base.citations as Prisma.InputJsonValue,
             createdByRunId: null,
             knowledgeReleaseId: base.knowledgeReleaseId,
+            sourcePrdVersionId: base.sourcePrdVersionId,
           },
         });
         if (base.assets.length > 0) {
@@ -631,6 +633,7 @@ export class ArtifactsService {
         citations: true,
         createdByRunId: true,
         knowledgeReleaseId: true,
+        sourcePrdVersionId: true,
         createdAt: true,
         artifact: { select: { kind: true } },
         contentBlob: {
@@ -660,6 +663,7 @@ export class ArtifactsService {
       citations: version.citations,
       createdByRunId: version.createdByRunId,
       knowledgeReleaseId: version.knowledgeReleaseId,
+      ...(version.sourcePrdVersionId ? { sourcePrdVersionId: version.sourcePrdVersionId } : {}),
       createdAt: version.createdAt.toISOString(),
     };
     let detail: ArtifactVersionDetail;
@@ -991,6 +995,7 @@ function mapEditedArtifactVersion(version: {
   citations: unknown;
   createdByRunId: string | null;
   knowledgeReleaseId: string | null;
+  sourcePrdVersionId?: string | null;
   createdAt: Date;
   artifact: { kind: string };
 }): ArtifactVersionDetail {
@@ -1011,6 +1016,7 @@ function mapEditedArtifactVersion(version: {
     citations: version.citations,
     createdByRunId: version.createdByRunId,
     knowledgeReleaseId: version.knowledgeReleaseId,
+    ...(version.sourcePrdVersionId ? { sourcePrdVersionId: version.sourcePrdVersionId } : {}),
     createdAt: version.createdAt.toISOString(),
     contentMode: "inline",
     content: version.content,

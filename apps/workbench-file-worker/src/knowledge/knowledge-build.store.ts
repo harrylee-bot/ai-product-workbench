@@ -20,6 +20,7 @@ export type KnowledgeBuildCommand = {
   releaseVersion: number;
   leaseToken: string;
   chunksReady: boolean;
+  ingestion?: { parentReleaseId: string; sourcePath: string; markdown: string; checksum: string; artifactVersionId: string; artifactChecksum: string };
   embeddingProfile: CanonicalEmbeddingProfileV1;
   retrievalProfile: CanonicalRetrievalProfileV1;
   delivery: KnowledgeBuildDelivery;

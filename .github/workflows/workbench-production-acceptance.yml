@@ -237,7 +237,7 @@ jobs:
           set -euo pipefail
           manifest="$IMAGE_ROOT/production-image-manifest.json"
           bundle="$IMAGE_ROOT/production-image-manifest.bundle.json"
-          catalog="docs/evidence/governance/production-acceptance-control-catalog.v1.json"
+          catalog="schemas/evidence/governance/production-acceptance-control-catalog.v1.json"
           test -f "$catalog" && test ! -L "$catalog"
           node scripts/production-image-inventory.mjs \
             --manifest "$manifest" \
@@ -398,7 +398,7 @@ jobs:
           PRODUCTION_IMAGE_MANIFEST_SHA256: ${{ steps.g4.outputs.image_manifest_sha256 }}
           DEPLOYMENT_CONFIG_MANIFEST_PATH: ${{ runner.temp }}/workbench-deployment-config/artifact/production-deployment-config.json
           DEPLOYMENT_CONFIG_MANIFEST_SHA256: ${{ steps.deployment_config.outputs.manifest_sha256 }}
-          CONTROL_CATALOG_PATH: ${{ github.workspace }}/docs/evidence/governance/production-acceptance-control-catalog.v1.json
+          CONTROL_CATALOG_PATH: ${{ github.workspace }}/schemas/evidence/governance/production-acceptance-control-catalog.v1.json
           CONTROL_CATALOG_SHA256: ${{ steps.g4.outputs.control_catalog_sha256 }}
         run: |
           set -euo pipefail
@@ -433,7 +433,7 @@ jobs:
           PRODUCTION_IMAGE_MANIFEST_SHA256: ${{ steps.g4.outputs.image_manifest_sha256 }}
           DEPLOYMENT_CONFIG_MANIFEST_PATH: ${{ runner.temp }}/workbench-deployment-config/artifact/production-deployment-config.json
           DEPLOYMENT_CONFIG_MANIFEST_SHA256: ${{ steps.deployment_config.outputs.manifest_sha256 }}
-          CONTROL_CATALOG_PATH: ${{ github.workspace }}/docs/evidence/governance/production-acceptance-control-catalog.v1.json
+          CONTROL_CATALOG_PATH: ${{ github.workspace }}/schemas/evidence/governance/production-acceptance-control-catalog.v1.json
           CONTROL_CATALOG_SHA256: ${{ steps.g4.outputs.control_catalog_sha256 }}
         run: |
           set -euo pipefail

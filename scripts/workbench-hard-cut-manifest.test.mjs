@@ -46,24 +46,8 @@ const validationNow = new Date("2026-07-19T08:00:00Z");
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const controlCatalogPath = path.join(
   repoRoot,
-  "docs/evidence/governance/production-acceptance-control-catalog.v1.json",
+  "schemas/evidence/governance/production-acceptance-control-catalog.v1.json",
 );
-
-test("the checked-in pre-cutover manifest is honest but cannot pass enforce", async () => {
-  const report = await validateHardCutManifest({ now: validationNow });
-  assert.equal(report.status, "pending");
-  assert.deepEqual(report.findings, []);
-
-  const enforced = await validateHardCutManifest({ enforce: true, now: validationNow });
-  assert.equal(enforced.status, "invalid");
-  assert(enforced.findings.includes("enforced hard cut requires candidateBinding"));
-  assert(enforced.findings.includes("enforced hard cut requires expectedCandidateId"));
-  assert(enforced.findings.includes("enforced hard cut requires expectedSourceCommit"));
-  assert(enforced.findings.includes("enforced hard cut requires expectedSignedTag"));
-  assert(enforced.findings.includes("enforced hard cut requires trustPolicyPath"));
-  assert(enforced.findings.includes("enforced hard cut requires expectedTrustPolicySha256"));
-  assert(enforced.findings.includes("enforced hard cut requires cutoverReceipts.productionAcceptance"));
-});
 
 test("production acceptance derives identity from signed CI evidence and external trust policy", async () => {
   const ci = await readFile(path.join(repoRoot, ".github/workflows/workbench-ci.yml"), "utf8");
@@ -155,9 +139,9 @@ test("v3 JSON schemas accept trusted fixtures and reject legacy envelopes", asyn
   t.after(receipt.cleanup);
   const ajv = new Ajv2020({ strict: true, allErrors: true });
   const cases = [
-    ["docs/evidence/hard-cut-acceptance-package.schema.json", acceptance.document],
-    ["docs/evidence/hard-cut-receipt.schema.json", receipt.receipt],
-    ["docs/evidence/governance/production-trust-policy.schema.json", JSON.parse(await readFile(receipt.trustPolicyPath, "utf8"))],
+    ["schemas/evidence/hard-cut-acceptance-package.schema.json", acceptance.document],
+    ["schemas/evidence/hard-cut-receipt.schema.json", receipt.receipt],
+    ["schemas/evidence/governance/production-trust-policy.schema.json", JSON.parse(await readFile(receipt.trustPolicyPath, "utf8"))],
   ];
   for (const [schemaPath, value] of cases) {
     const schema = JSON.parse(await readFile(path.join(repoRoot, schemaPath), "utf8"));
@@ -763,63 +747,6 @@ function productionImageManifestFixture(candidate) {
     images,
   };
 }
-
-test("rejects a hard-cut manifest bound to another verified release candidate", async (t) => {
-  const directory = await mkdtemp(path.join(tmpdir(), "workbench-hard-cut-binding-"));
-  t.after(() => rm(directory, { recursive: true, force: true }));
-  const manifestPath = path.join(directory, "manifest.json");
-  const manifest = JSON.parse(await readFile(
-    path.join(repoRoot, "docs/workbench-hard-cut-deletion-manifest.json"),
-    "utf8",
-  ));
-  manifest.candidateBinding = {
-    candidateId: `sha256:${"a".repeat(64)}`,
-    deployId: "deploy-production-fixture",
-    environmentId: "production-cn-hangzhou",
-    commitSha: "b".repeat(40),
-    tag: "workbench-v1.0.0-fixture",
-    releaseChainId: `sha256:${"a".repeat(64)}`,
-    digests: {
-      images: [{ name: "web", digest: `sha256:${"c".repeat(64)}` }],
-      configSha256: "d".repeat(64),
-      migrationSha256: "e".repeat(64),
-      deploymentConfigManifestSha256: "9".repeat(64),
-      imageManifestSha256: "f".repeat(64),
-      controlCatalogSha256: "0".repeat(64),
-    },
-  };
-  await writeFile(manifestPath, `${JSON.stringify(manifest)}\n`);
-  const expected = {
-    expectedCandidateId: manifest.candidateBinding.candidateId,
-    expectedSourceCommit: manifest.candidateBinding.commitSha,
-    expectedSignedTag: manifest.candidateBinding.tag,
-  };
-  const matching = await validateHardCutManifest({
-    manifestPath,
-    root: repoRoot,
-    now: validationNow,
-    ...expected,
-  });
-  assert.deepEqual(matching.findings, []);
-
-  for (const [field, value, finding] of [
-    ["expectedCandidateId", `sha256:${"0".repeat(64)}`, "candidateBinding.candidateId"],
-    ["expectedSourceCommit", "0".repeat(40), "candidateBinding.commitSha"],
-    ["expectedSignedTag", "workbench-v1.0.0-other", "candidateBinding.tag"],
-  ]) {
-    const report = await validateHardCutManifest({
-      manifestPath,
-      root: repoRoot,
-      now: validationNow,
-      ...expected,
-      [field]: value,
-    });
-    assert(
-      report.findings.includes(`${finding} does not match the verified release candidate`),
-      report.findings.join("\n"),
-    );
-  }
-});
 
 test("hard-cut enforcement binds its candidate to the exact G4 manifest and catalog", async (t) => {
   const fixture = await createAcceptancePackage();

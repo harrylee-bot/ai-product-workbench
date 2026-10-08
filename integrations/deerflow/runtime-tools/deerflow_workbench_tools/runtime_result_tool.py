@@ -1,17 +1,28 @@
 from __future__ import annotations
 
+import copy
 import hashlib
 import json
+from collections.abc import Mapping
 from typing import Any
 
 from langchain.tools import tool
 
 from deerflow.tools.types import Runtime
 
-from .runtime_result_validator import validate_runtime_result
+from .prd_reference_normalizer import normalize_runtime_result_prd_references
+from .prototype_runtime_normalizer import normalize_runtime_result_prototype_layout_aliases
+from .runtime_result_validator import (
+    validate_runtime_artifact_draft,
+    validate_runtime_result,
+)
 
 
 VALIDATED_RESULT_PROTOCOL = "workbench.runtime.validated-result.v1"
+ARTIFACT_DRAFT_TOOL_NAME = "workbench_artifact_draft_publish"
+ARTIFACT_DRAFT_PROTOCOL = "workbench.runtime.artifact-draft.v1"
+_DRAFT_RECOVERY_KINDS = frozenset({"prd", "prototype"})
+_DRAFT_RECOVERY_FIELDS = ("title", "content", "operation")
 
 
 @tool(
@@ -25,12 +36,28 @@ def workbench_runtime_result_submit(
 ) -> tuple[str, dict[str, Any]]:
     """Validate and submit the complete final 产品工作台 Runtime result envelope.
 
-    Call this only for the lead agent's final candidate. If validation fails, fix every
-    returned issue and submit the complete candidate again. After validation succeeds,
-    do not mutate or resubmit the result.
+    The candidate has exactly protocol, message, and artifacts. Run identifiers are
+    supplied by the runtime; never add runId or runtimeAttemptId to the candidate.
+
+    Example for a NEW document (replace the title and text with the requested content):
+    {"protocol":"workbench.runtime.result.v1","message":"文档已生成。","artifacts":[{"kind":"document","schemaVersion":1,"title":"文档","operation":{"kind":"create"},"citations":[{"id":"example-citation","documentId":"example-document","chunkId":"example-chunk","sourcePath":"00-rules/example.md","title":"Illustrative source","quote":"Example source facts","locator":{"heading":"Source","startLine":null,"endLine":null}}],"content":{"text":"完整文档正文"}}]}
+
+    Citation values above are illustrative. Replace them with exact citations from
+    a successful knowledge retrieval in this Run. Every artifact needs at least
+    one verified citation; never submit an empty array or invent source values.
+
+    schemaVersion is a JSON number, not a quoted string. operation is an object,
+    never the string "create". For an edit, use {"kind":"revise","target":<the exact
+    supplied target>} instead. PRD and Prototype require their own complete content
+    schemas; the document example does not replace those schemas.
+
+    If ok is false, NO result was accepted. Fix every reported issue and call this
+    tool again with the complete candidate. Do not stop, claim completion, or return
+    an empty assistant message after a rejection. Only after ok is true, return a
+    concise user-facing completion message without mutating or resubmitting the result.
 
     Args:
-        candidate: The complete workbench.runtime.result.v1 object, without a Markdown fence.
+        candidate: Complete unfenced envelope with protocol, message, and artifacts. Every artifact needs kind, numeric schemaVersion, title, an operation object, citations array, and content.
     """
     context = runtime.context if isinstance(runtime.context, dict) else {}
     scope = context.get("workbench")
@@ -46,7 +73,19 @@ def workbench_runtime_result_submit(
         "WORKBENCH_TOOL_CALL_ID_INVALID",
         maximum_length=512,
     )
-    validation = validate_runtime_result(candidate)
+    normalized_candidate, normalizations = normalize_runtime_result_prd_references(candidate)
+    normalized_candidate, prototype_normalizations = normalize_runtime_result_prototype_layout_aliases(
+        normalized_candidate,
+    )
+    normalizations.extend(prototype_normalizations)
+    normalized_candidate, draft_normalizations = _recover_draft_placeholders(
+        runtime,
+        normalized_candidate,
+        run_id=run_id,
+        runtime_attempt_id=runtime_attempt_id,
+    )
+    normalizations.extend(draft_normalizations)
+    validation = validate_runtime_result(normalized_candidate)
     if validation["ok"] is not True:
         artifact = _validated_artifact(
             run_id,
@@ -56,13 +95,14 @@ def workbench_runtime_result_submit(
             issues=validation["issues"],
         )
         return (
-            json.dumps(validation, ensure_ascii=False, separators=(",", ":")),
+            json.dumps(_validation_feedback(validation, normalizations), ensure_ascii=False, separators=(",", ":")),
             artifact,
         )
 
     content = json.dumps({
         "protocol": "workbench.runtime.validation.v1",
         "ok": True,
+        "normalizations": normalizations,
         "message": "Validated. Return only a concise user-facing completion message.",
     }, ensure_ascii=False, separators=(",", ":"))
     return content, _validated_artifact(
@@ -70,9 +110,219 @@ def workbench_runtime_result_submit(
         runtime_attempt_id,
         tool_call_id,
         True,
-        result=candidate,
+        result=normalized_candidate,
         result_checksum=validation["candidateChecksum"],
     )
+
+
+def _recover_draft_placeholders(
+    runtime: Runtime,
+    candidate: Any,
+    *,
+    run_id: str,
+    runtime_attempt_id: str,
+) -> tuple[Any, list[dict[str, Any]]]:
+    """Recover only the observed [null] artifact fields from a trusted draft."""
+    if not isinstance(candidate, dict):
+        return candidate, []
+    artifacts = candidate.get("artifacts")
+    if not isinstance(artifacts, list):
+        return candidate, []
+    if not any(
+        isinstance(artifact, dict)
+        and artifact.get("kind") in _DRAFT_RECOVERY_KINDS
+        and any(_is_null_array(artifact.get(field)) for field in _DRAFT_RECOVERY_FIELDS)
+        for artifact in artifacts
+    ):
+        return candidate, []
+
+    normalized = copy.deepcopy(candidate)
+    normalized_artifacts = normalized.get("artifacts")
+    if not isinstance(normalized_artifacts, list):
+        return candidate, []
+
+    normalizations: list[dict[str, Any]] = []
+    for artifact_index, artifact in enumerate(normalized_artifacts):
+        if (
+            not isinstance(artifact, dict)
+            or artifact.get("kind") not in _DRAFT_RECOVERY_KINDS
+            or not any(_is_null_array(artifact.get(field)) for field in _DRAFT_RECOVERY_FIELDS)
+        ):
+            continue
+        draft = _latest_successful_draft(
+            runtime,
+            artifact_index,
+            run_id=run_id,
+            runtime_attempt_id=runtime_attempt_id,
+        )
+        if (
+            not isinstance(draft, Mapping)
+            or draft.get("kind") != artifact.get("kind")
+        ):
+            continue
+        for field in _DRAFT_RECOVERY_FIELDS:
+            if not _is_null_array(artifact.get(field)) or field not in draft:
+                continue
+            artifact[field] = copy.deepcopy(draft[field])
+            normalizations.append({
+                "path": ["artifacts", artifact_index, field],
+                "from": [None],
+                "action": "recovered-from-artifact-draft",
+                "artifactIndex": artifact_index,
+            })
+    return normalized, normalizations
+
+
+def _latest_successful_draft(
+    runtime: Runtime,
+    artifact_index: int,
+    *,
+    run_id: str,
+    runtime_attempt_id: str,
+) -> Mapping[str, Any] | None:
+    state = getattr(runtime, "state", None)
+    messages = state.get("messages") if isinstance(state, Mapping) else getattr(
+        state,
+        "messages",
+        None,
+    )
+    if not isinstance(messages, list):
+        return None
+    for message in reversed(messages):
+        message_type = _message_value(message, "type")
+        if isinstance(message_type, str):
+            message_type = message_type.lower()
+        if message_type not in {"tool", "toolmessage"}:
+            continue
+        if _message_value(message, "name") != ARTIFACT_DRAFT_TOOL_NAME:
+            continue
+        message_tool_call_id = _message_value(message, "tool_call_id")
+        if not isinstance(message_tool_call_id, str):
+            continue
+        status = _message_value(message, "status")
+        if status is not None and (
+            not isinstance(status, str) or status.lower() != "success"
+        ):
+            continue
+        content = _message_value(message, "content")
+        if isinstance(content, str) and content.lstrip().startswith("Error:"):
+            continue
+        artifact = _message_value(message, "artifact")
+        if not isinstance(artifact, Mapping):
+            continue
+        if (
+            artifact.get("protocol") != ARTIFACT_DRAFT_PROTOCOL
+            or artifact.get("ok") is not True
+            or artifact.get("runId") != run_id
+            or artifact.get("runtimeAttemptId") != runtime_attempt_id
+            or artifact.get("toolCallId") != message_tool_call_id
+            or (
+                isinstance(artifact.get("artifactIndex"), bool)
+                or not isinstance(artifact.get("artifactIndex"), int)
+            )
+            or artifact.get("artifactIndex") != artifact_index
+        ):
+            continue
+        draft = artifact.get("draft")
+        draft_checksum = artifact.get("draftChecksum")
+        if not isinstance(draft, Mapping) or not _is_sha256(draft_checksum):
+            continue
+        envelope = {
+            "protocol": artifact["protocol"],
+            "runId": artifact["runId"],
+            "runtimeAttemptId": artifact["runtimeAttemptId"],
+            "toolCallId": artifact["toolCallId"],
+            "artifactIndex": artifact["artifactIndex"],
+            "ok": artifact["ok"],
+            "draftChecksum": draft_checksum,
+        }
+        if artifact.get("checksum") != _sha256_json(envelope):
+            continue
+        if _sha256_json(dict(draft)) != draft_checksum:
+            continue
+        try:
+            validation = validate_runtime_artifact_draft(dict(draft))
+        except Exception:
+            continue
+        if (
+            validation.get("ok") is True
+            and validation.get("candidateChecksum") == draft_checksum
+        ):
+            return draft
+    return None
+
+
+def _message_value(message: Any, key: str) -> Any:
+    if isinstance(message, Mapping):
+        return message.get(key)
+    return getattr(message, key, None)
+
+
+def _is_null_array(value: Any) -> bool:
+    return isinstance(value, list) and len(value) == 1 and value[0] is None
+
+
+def _sha256_json(value: Mapping[str, Any]) -> str:
+    return hashlib.sha256(_canonical_json(dict(value)).encode("utf-8")).hexdigest()
+
+
+def _is_sha256(value: Any) -> bool:
+    return (
+        isinstance(value, str)
+        and len(value) == 64
+        and all(character in "0123456789abcdef" for character in value)
+    )
+
+
+def _validation_feedback(
+    validation: dict[str, Any],
+    normalizations: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    hints: list[str] = []
+    field_hints = {
+        "schemaVersion": (
+            "schemaVersion must be a positive JSON integer, for example 1, not "
+            '"1". Keep the required version for the requested artifact kind.'
+        ),
+        "operation": (
+            'For a new artifact, operation is {"kind":"create"}, not "create". '
+            'For an edit, use {"kind":"revise","target":<the exact supplied target>}.'
+        ),
+        "citations": (
+            "citations must be a nonempty JSON array copied exactly from a successful "
+            "Knowledge retrieval in this attempt. Retrieve authorized knowledge first; "
+            "when no relevant knowledge exists, require more knowledge or fail. Never invent citations."
+        ),
+    }
+    for issue in validation.get("issues", []):
+        path = issue.get("path") if isinstance(issue, dict) else None
+        if path == ["message"]:
+            hints.append("message must be a string summarizing the completed result.")
+        elif path == [] and issue.get("code") == "unrecognized_keys":
+            hints.append(
+                "The envelope allows only protocol, message, and artifacts. Remove "
+                "the rejected envelope keys; runtime identifiers are supplied securely."
+            )
+        elif (
+            isinstance(path, list)
+            and len(path) == 3
+            and path[0] == "artifacts"
+            and isinstance(path[1], int)
+            and path[2] in field_hints
+        ):
+            hints.append(field_hints[path[2]])
+    feedback = {
+        **validation,
+        "repairInstruction": (
+            "No result was accepted. Correct every reported issue in the complete "
+            "candidate, preserving the requested content and all valid fields, then "
+            "call workbench_runtime_result_submit again. Continue until ok:true. "
+            "Do not end the turn or return an empty completion while ok:false."
+        ),
+        "repairHints": list(dict.fromkeys(hints)),
+    }
+    feedback["normalizations"] = normalizations or []
+    return feedback
 
 
 def _validated_artifact(

@@ -123,6 +123,10 @@ import {
 import { WorkbenchShareDialog } from "./workbench-share-dialog";
 import { ExportDialog } from "./workbench-export-dialog";
 import {
+  documentExportReferences,
+  resolveDocumentExportSelection,
+} from "@/lib/workbench/features/document-export-selection";
+import {
   WorkbenchBoardConflictDialog,
   type WorkbenchBoardConflictAction,
 } from "./workbench-board-conflict-dialog";
@@ -1144,6 +1148,24 @@ function WorkbenchProjectRouteInner() {
     : publication.activeExportSelection ?? canvasExportSelection;
   const exportHasSelection = canvasSelection.hasSelection
     || publication.activeExportSelection !== null;
+  const documentExportReferenceList = documentExportReferences(
+    workbench.boardController.state?.nodes ?? EMPTY_BOARD_NODES,
+    exportSelection,
+  );
+  const documentExportVersionQueries = useWorkbenchArtifactVersionBatch(
+    workbench.selectedProjectId,
+    documentExportReferenceList,
+    exportOpen && workbench.capabilities.canExport,
+  );
+  const documentExport = resolveDocumentExportSelection(
+    exportSelection,
+    documentExportReferenceList,
+    documentExportVersionQueries.map((query) => ({
+      value: query.data?.value,
+      pending: query.isPending,
+      error: query.isError,
+    })),
+  );
 
   return (
     <>
@@ -1363,6 +1385,7 @@ function WorkbenchProjectRouteInner() {
         capabilities={publication.exportCapabilities}
         capabilitiesError={publication.exportCapabilitiesError}
         capabilitiesPending={publication.exportCapabilitiesPending}
+        documentExport={documentExport}
         error={publication.exportError}
         hasSelection={exportHasSelection}
         onDownload={publication.downloadExport}

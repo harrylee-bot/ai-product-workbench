@@ -1,0 +1,46 @@
+    # Same-origin multipart uploads only. The API streams downloads and Preview
+    # reads ready objects internally; no public bucket/object GET route is needed.
+    location = /${WORKBENCH_S3_BUCKET} {
+      access_log off;
+      return 404;
+    }
+
+    location ^~ /${WORKBENCH_S3_BUCKET}/staging/files/ {
+      # The user-file contract is 25 MiB. This caps each signed part at 50 MiB
+      # without increasing the Web/API request limit.
+      client_max_body_size 50m;
+      # Query signatures must not enter proxy access or request-error logs.
+      access_log off;
+      error_log /dev/null;
+      limit_except PUT OPTIONS {
+        deny all;
+      }
+      # No URI suffix or rewrite: changing the bucket/key path invalidates SigV4.
+      proxy_pass http://object-storage:9000;
+      proxy_http_version 1.1;
+      proxy_set_header Host $http_host;
+      # Authentication is the query signature verified by the private S3 bucket.
+      # Browser sessions and Workbench capability headers do not reach storage.
+      proxy_set_header Cookie "";
+      proxy_set_header Authorization "";
+      proxy_set_header X-Forwarded-For "";
+      proxy_set_header X-Forwarded-Host "";
+      proxy_set_header X-Forwarded-Proto "";
+      proxy_set_header X-Workbench-Client-IP "";
+      proxy_set_header X-Workbench-Edge-Client-IP "";
+      proxy_set_header X-Workbench-Edge-Auth "";
+      proxy_set_header Connection "";
+      proxy_hide_header Set-Cookie;
+      proxy_request_buffering off;
+      proxy_buffering off;
+      proxy_cache off;
+      proxy_connect_timeout 5s;
+      proxy_read_timeout 120s;
+      proxy_send_timeout 120s;
+    }
+
+    # Fail closed for listing, ready blobs, other prefixes, and bucket management.
+    location ^~ /${WORKBENCH_S3_BUCKET}/ {
+      access_log off;
+      return 404;
+    }

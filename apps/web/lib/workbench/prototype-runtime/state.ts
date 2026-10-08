@@ -1,4 +1,5 @@
 import {
+  evaluatePrototypeExpression,
   isCanonicalPrototypeDateInputValue,
   type PrototypeAction,
   type PrototypeBinding,
@@ -147,6 +148,12 @@ export function resolvePrototypeRuntimeBinding(
 ): PrototypeRuntimeValue | undefined {
   if (binding.source.kind === "literal") return binding.source.value;
   if (binding.source.kind === "variable") return runtime.variables[binding.source.path];
+  if (binding.source.kind === "expression") {
+    return evaluatePrototypeExpression(
+      binding.source.expression,
+      (path) => runtime.variables[path],
+    );
+  }
   const source = binding.source;
   if (runtime.stateId !== source.stateId) return undefined;
   return document.states.find((state) => state.id === source.stateId)

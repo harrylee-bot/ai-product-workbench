@@ -75,12 +75,11 @@ describe("DeerFlow PRD Runtime Result reference", () => {
     expect(normalizedWorkbenchSkillSource).toContain("never call `ask_clarification`");
     expect(normalizedWorkbenchSkillSource).toContain("still complete the PRD");
     expect(normalizedWorkbenchSkillSource).toContain("only a non-PRD Run may request input");
-    expect(normalizedWorkbenchSkillSource).toContain("cannot use clarification or end early");
+    expect(normalizedWorkbenchSkillSource).toContain("generation is blocked for every Artifact kind");
     expect(normalizedWorkbenchSkillSource).not.toContain("otherwise request input");
     expect(normalizedWorkbenchSkillSource).not.toContain("or use clarification where");
-    expect(normalizedWorkbenchSkillSource).toContain("Runtime contract rejects a Run");
-    expect(normalizedWorkbenchSkillSource).toContain("PRD-only Run must complete");
-    expect(normalizedWorkbenchSkillSource).toContain("returning `ok:true`");
+    expect(normalizedWorkbenchSkillSource).toContain("PRD and Prototype is one linked Run");
+    expect(normalizedWorkbenchSkillSource).toContain("Submit both artifacts once");
   });
 
   it("vendors the complete canonical requirement-document skill byte for byte", () => {

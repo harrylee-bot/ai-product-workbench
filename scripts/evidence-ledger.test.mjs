@@ -394,8 +394,8 @@ test("rejects noncanonical JSON even when its semantic seal is valid", async (t)
 });
 
 test("schemas enumerate every 7.1 field and keep index state-free", async () => {
-  const ledgerSchema = JSON.parse(await readFile(path.join(repositoryRoot, "docs/evidence/ledger.schema.json"), "utf8"));
-  const indexSchema = JSON.parse(await readFile(path.join(repositoryRoot, "docs/evidence/index.schema.json"), "utf8"));
+  const ledgerSchema = JSON.parse(await readFile(path.join(repositoryRoot, "schemas/evidence/ledger.schema.json"), "utf8"));
+  const indexSchema = JSON.parse(await readFile(path.join(repositoryRoot, "schemas/evidence/index.schema.json"), "utf8"));
   const entryRequired = new Set(ledgerSchema.$defs.entry.required);
   for (const field of [
     "gateId",

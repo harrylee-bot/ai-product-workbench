@@ -33,10 +33,7 @@ const forbidden = [
   {
     label: "legacy Stitch name",
     pattern: /(?:stitch|stich|sttich|sticht|stitich|sitch)/i,
-    allowedFiles: new Set([
-      "docs/workbench-greenfield-implementation-plan.md",
-      "docs/workbench-open-source-reuse-strategy.md",
-    ]),
+    allowedFiles: new Set(),
     allowLine: (line, relativePath) =>
       officialGoogleStitchReference.test(line),
   },
@@ -44,14 +41,6 @@ const forbidden = [
   {
     label: "legacy ai-product-workbench identifier",
     pattern: /ai[_-]product[_-]workbench/i,
-    allowedFiles: new Set(["docs/workbench-hard-cut-deletion-manifest.json"]),
-    allowLine: (line, relativePath) => (
-      relativePath === "docs/workbench-hard-cut-deletion-manifest.json" && (
-        /"(?:path|evidenceReference)":\s*"(?:git status --short -- )?integrations\/deerflow\/skills\/ai-product-workbench"/iu.test(line)
-        || /^\s*"(?:database=ai_product_workbench;schema=public|ai-product-workbench(?:-(?:api|web|knowledge|postgres|storage))?(?::uploads\/)?|container=ai-product-workbench-(?:api|web))",?\s*$/iu.test(line)
-        || /^\s*"targets":\s*\[.*\],?\s*$/iu.test(line)
-      )
-    ),
   },
   { label: "legacy product-workbench identifier", pattern: /(?<!ai[_-])product[_-]workbench/i },
 ];
@@ -77,8 +66,8 @@ const requiredBrandSurfaces = [
     label: "OpenAPI title",
   },
   {
-    relativePath: "integrations/deerflow/README.md",
-    pattern: /^# 产品工作台 DeerFlow 部署合同$/mu,
+    relativePath: "README.md",
+    pattern: /^## 产品工作台 DeerFlow 部署合同$/mu,
     label: "DeerFlow deployment contract title",
   },
   {

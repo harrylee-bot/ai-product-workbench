@@ -42,43 +42,25 @@ export class PrismaKnowledgeToolGrantIssuer implements KnowledgeToolGrantIssuer 
   async issue(scope: KnowledgeToolGrantScope): Promise<KnowledgeToolDescriptor | null> {
     if (!scope.releaseId) {
       recordKnowledgeVisibilityMetric({ operation: "catalog", outcome: "hidden" });
-      return null;
+      throw new Error("KNOWLEDGE_RELEASE_REQUIRED");
     }
     if (!this.config) throw new Error("KNOWLEDGE_TOOL_NOT_CONFIGURED");
 
     const now = floorToSecond(new Date());
     const reusableAfter = new Date(now.getTime() + 60_000);
     const payload = await this.db.$transaction(async (tx) => {
-      await tx.$executeRaw(Prisma.sql`
-        INSERT INTO "knowledge_tool_budgets" (
-          "runtime_attempt_id",
-          "max_successful_calls",
-          "max_concurrent_calls",
-          "max_starts_per_window",
-          "window_seconds",
-          "max_attempts_per_invocation",
-          "max_total_starts",
-          "window_started_at",
-          "window_starts",
-          "total_starts",
-          "created_at",
-          "updated_at"
-        ) VALUES (
-          ${scope.runtimeAttemptId},
-          ${knowledgeToolBudgetPolicy.maxSuccessfulCalls},
-          ${knowledgeToolBudgetPolicy.maxConcurrentCalls},
-          ${knowledgeToolBudgetPolicy.maxStartsPerWindow},
-          ${knowledgeToolBudgetPolicy.windowSeconds},
-          ${knowledgeToolBudgetPolicy.maxAttemptsPerInvocation},
-          ${knowledgeToolBudgetPolicy.maxTotalStarts},
-          ${now},
-          0,
-          0,
-          ${now},
-          ${now}
-        )
-        ON CONFLICT ("runtime_attempt_id") DO NOTHING
-      `);
+      await tx.knowledgeToolBudget.createMany({
+        data: {
+          runtimeAttemptId: scope.runtimeAttemptId,
+          ...knowledgeToolBudgetPolicy,
+          windowStartedAt: now,
+          windowStarts: 0,
+          totalStarts: 0,
+          createdAt: now,
+          updatedAt: now,
+        },
+        skipDuplicates: true,
+      });
       const [budget] = await tx.$queryRaw<Array<{
         maxSuccessfulCalls: number;
         maxConcurrentCalls: number;

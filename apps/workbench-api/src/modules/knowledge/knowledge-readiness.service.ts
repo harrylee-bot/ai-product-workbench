@@ -63,7 +63,7 @@ export class KnowledgeReadinessService {
       },
       orderBy: { id: "asc" },
     });
-    if (releases.length === 0) return;
+    if (!releases.some((release) => release.status === "ready")) throw new Error("KNOWLEDGE_RELEASE_REQUIRED");
     if (!this.config.grantSecret) throw new Error("KNOWLEDGE_CAPABILITY_NOT_CONFIGURED");
     if (!this.config.providers) throw new Error("KNOWLEDGE_PROVIDERS_NOT_CONFIGURED");
 

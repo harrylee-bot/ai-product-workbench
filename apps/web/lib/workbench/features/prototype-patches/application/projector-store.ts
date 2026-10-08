@@ -191,6 +191,16 @@ export class PrototypePatchProjectorStore {
     this.#snapshot = emptySnapshot;
   }
 
+  settleTerminal(status: "succeeded" | "failed" | "cancelled"): void {
+    if (status !== "succeeded") {
+      this.#discardAll();
+      return;
+    }
+    for (const artifact of this.#artifacts.values()) {
+      this.#startFinalization(artifact.artifactId, artifact.artifactVersionId);
+    }
+  }
+
   #ingest(event: RunEvent): void {
     const scope = this.#scope;
     if (!scope || !eventBelongsToScope(event, scope)) return;
@@ -211,9 +221,14 @@ export class PrototypePatchProjectorStore {
       case "artifact.version.created":
         this.#startFinalization(event.payload.artifactId, event.payload.artifactVersionId);
         return;
+      case "run.completed":
+        this.settleTerminal("succeeded");
+        return;
       case "run.cancelled":
+        this.settleTerminal("cancelled");
+        return;
       case "run.failed":
-        this.#discardAll();
+        this.settleTerminal("failed");
         return;
       default:
         return;
@@ -313,14 +328,13 @@ export class PrototypePatchProjectorStore {
 
   #startFinalization(artifactId: string, artifactVersionId: string): void {
     const artifact = this.#artifacts.get(artifactVersionId);
-    if (!artifact || artifact.artifactId !== artifactId) return;
+    if (!artifact || artifact.artifactId !== artifactId || artifact.finalizing) return;
     artifact.finalizing = true;
     artifact.inbox = [];
     artifact.inboxBytes = 0;
     for (const screen of artifact.screens.values()) {
       screen.state = reducePrototypePatchProjection(screen.state, { type: "finalization_started" });
     }
-    this.#recovery.abort(artifactVersionId);
     this.#publish();
     const firstScreen = artifact.screens.keys().next().value as string | undefined;
     if (firstScreen) this.#requestCheckpoint(artifact, firstScreen, true);
@@ -545,6 +559,8 @@ export class PrototypePatchProjectorStore {
       )]);
     }
     const capturedScope = scopeKey(scope);
+    const waitsForActiveCheckpoint = requireReady
+      && this.#recovery.isRecovering(artifact.artifactVersionId);
     void this.#recovery.recover(
       artifact.artifactVersionId,
       async (signal) => {
@@ -563,6 +579,13 @@ export class PrototypePatchProjectorStore {
         || scopeKey(this.#scope) !== capturedScope
         || this.#artifacts.get(artifact.artifactVersionId) !== artifact
       ) return;
+      if (waitsForActiveCheckpoint) {
+        const finalized = [...artifact.screens.values()].every(
+          (candidate) => candidate.state.phase === "finalized",
+        );
+        if (!finalized) this.#requestCheckpoint(artifact, screenId, true);
+        return;
+      }
       if (result.kind === "failed") {
         this.#checkpointFailed(artifact, screenId, result.error);
       }

@@ -32,14 +32,26 @@ Target Prototype snapshots may include `assets` containing verified binary metad
       "schemaVersion": 1,
       "title": "调研记录",
       "operation": { "kind": "create" },
-      "citations": [],
+      "citations": [{
+        "id": "example-citation",
+        "documentId": "example-document",
+        "chunkId": "example-chunk",
+        "sourcePath": "00-rules/example.md",
+        "title": "Illustrative source",
+        "quote": "Example source facts",
+        "locator": { "heading": "Source", "startLine": null, "endLine": null }
+      }],
       "content": { "text": "完整调研内容" }
     }
   ]
 }
 ```
 
+Citation values in examples are illustrative only. Retrieve knowledge successfully for the current Run and copy exact returned citations. Every Artifact requires at least one verified citation from the pinned KnowledgeRelease; empty or invented citations cannot complete generation.
+
 PRD and Prototype content must satisfy the complete schemas in `runtime-result.schema.json`; do not substitute free-form Markdown or an abbreviated object. Prototype `variables` and state `values` are explicit runtime data sources: every variable/state binding must resolve to one of them, and binding node/value types must match the schema. Forms, submit/reset button types, submit ownership, and select options are explicit IR fields; do not rely on renderer inference.
+
+When both PRD and Prototype are requested, finish the PRD stages and publish its complete Draft at index 0 first. Then complete the Prototype stages and publish its Draft at index 1, using that same PRD as its source. Submit one final result containing both unchanged Drafts in that order. A successful PRD Draft alone does not complete a linked Run.
 
 ### PRD authoring fast path
 
@@ -58,6 +70,28 @@ Submit the complete candidate with `workbench_runtime_result_submit`. If it repo
 For a single-screen request, return one screen unless the user explicitly requires more. Prefer at most 48 nodes, 12 actions, 12 bindings, 4 states, and 8 motions, keep the complete response below 16,000 output tokens, and reuse shared tokens, assets, and state instead of duplicating equivalent variants or prose.
 
 Do **not** read the full generated `runtime-result.schema.json` by default. The generated schema remains authoritative and is used by production validation, but it is not a prompt template. Inspect only the relevant `$defs` when adding a type absent from the compact example (for example an image, icon, select, vector, navigation action, or token), or follow the exact field path reported by validation.
+
+### Computed Prototype bindings
+
+Use `{"kind":"expression","expression":EXPRESSION}` as a binding source when displayed text, visibility, or enabled state depends on current input variables. Input `value` bindings remain writable variable sources; expressions cannot supply input values or image assets. Expressions contain only the following declarative forms, never JavaScript or string formulas:
+
+| Form | Meaning |
+| --- | --- |
+| `{"kind":"literal","value":VALUE}` | One string, finite number, boolean, or null |
+| `{"kind":"variable","path":"form.query"}` | Current value of an explicitly declared variable |
+| `{"kind":"contains","left":EXPRESSION,"right":EXPRESSION}` | Case-insensitive substring match between strings; trim whitespace from the right-hand search string; an empty search matches |
+| `{"kind":"equals","left":EXPRESSION,"right":EXPRESSION}` | Strict equality without type conversion; values of different types, including a cleared numeric input (`null`) versus a number, are unequal |
+| `{"kind":"and","operands":[EXPRESSION,...]}` | All boolean operands are true |
+| `{"kind":"or","operands":[EXPRESSION,...]}` | At least one boolean operand is true |
+| `{"kind":"not","operand":EXPRESSION}` | Negate one boolean operand |
+
+Each expression is limited to depth 8 and 64 nodes, with 1–16 operands per `and`/`or`. Types are checked; strings such as `"false"` are not booleans. An expression cannot reference a binding or another expression by ID.
+
+For search and category filtering of a finite demonstration list, use a row-level `visible` binding whose expression combines `contains(rowTitle, form.query)` with `or(equals(form.category, "all"), equals(form.category, rowCategory))`. Replace row title/category literals with the actual row's content. Bind the empty-state container to `not(or(...the same row predicates))`. Keep the row and empty containers in flow layout so hidden rows do not leave fixed gaps. Inputs automatically recompute dependent bindings on change, including when a form is reset.
+
+Place a `buttonType:"reset"` button inside that same explicit form to clear the input variables back to their declared initial values. If an existing visual state also needs resetting, it may additionally use a `setState` action; a state switch alone does not clear inputs. A search submit action may report input values with `successStateId:null`, but must not force a fixed result/empty state regardless of the submitted values. If there are no visual states, use `states:[]` and `initialStateId:null`; do not create states with empty `overrides`.
+
+Before declaring an interactive filter complete, verify a matching value, a different category, combined conditions, an unmatched value, and reset against the actual predicates. Fixed demonstration state changes do not satisfy arbitrary input filtering.
 
 ## Revise An Artifact
 

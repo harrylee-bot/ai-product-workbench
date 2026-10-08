@@ -33,6 +33,7 @@ sys.modules.update({
 })
 
 from deerflow_workbench_tools.artifact_draft_tool import (
+    _has_prd_shape_failure,
     workbench_artifact_draft_publish,
 )
 
@@ -116,6 +117,69 @@ class ArtifactDraftToolTests(unittest.TestCase):
         self.assertTrue(any(issue["path"] == ["title"] for issue in response["issues"]))
         self.assertNotIn("draft", artifact)
 
+    def test_checkbox_repair_names_the_variable_and_preserves_false_without_coercion(self) -> None:
+        invalid = copy.deepcopy(self.draft)
+        input_node = next(
+            node for node in invalid["content"]["nodes"] if node["kind"] == "input"
+        )
+        input_node["inputType"] = "checkbox"
+        invalid["content"]["variables"][0]["initialValue"] = "false"
+        before = copy.deepcopy(invalid)
+
+        content, artifact = workbench_artifact_draft_publish.func(self.runtime, 0, invalid)
+        repeated_content, _ = workbench_artifact_draft_publish.func(self.runtime, 0, invalid)
+        response = json.loads(content)
+        repeated_response = json.loads(repeated_content)
+
+        self.assertFalse(response["ok"])
+        self.assertEqual(response["issues"], [{
+            "code": "custom",
+            "path": ["content", "variables", 0, "initialValue"],
+            "message": (
+                "checkbox input variable form.name initialValue must be boolean; "
+                "received string"
+            ),
+        }])
+        self.assertIn("JSON boolean true or false", response["repairInstruction"])
+        self.assertIn('never the strings "true" or "false"', response["repairInstruction"])
+        self.assertIn("Do not resubmit an unchanged candidate", response["repairInstruction"])
+        self.assertNotIn("continue repairing until", response["repairInstruction"])
+        self.assertRegex(response["candidateChecksum"], r"^[0-9a-f]{64}$")
+        self.assertEqual(repeated_response, response)
+        self.assertEqual(invalid, before)
+        self.assertNotIn("draft", artifact)
+
+        repaired = copy.deepcopy(invalid)
+        repaired["content"]["variables"][0]["initialValue"] = False
+        repaired_content, repaired_artifact = workbench_artifact_draft_publish.func(
+            self.runtime, 0, repaired,
+        )
+        repaired_response = json.loads(repaired_content)
+        self.assertTrue(repaired_response["ok"])
+        self.assertNotEqual(repaired_response["candidateChecksum"], response["candidateChecksum"])
+        self.assertIs(
+            repaired_artifact["draft"]["content"]["variables"][0]["initialValue"], False,
+        )
+        self.assertEqual(repaired_artifact["draft"]["content"]["bindings"], before["content"]["bindings"])
+
+    def test_identical_valid_drafts_remain_idempotently_accepted(self) -> None:
+        first_content, first_artifact = workbench_artifact_draft_publish.func(
+            self.runtime, 0, self.draft,
+        )
+        self.runtime.tool_call_id = "call_repeat"
+        repeated_content, repeated_artifact = workbench_artifact_draft_publish.func(
+            self.runtime, 0, copy.deepcopy(self.draft),
+        )
+        first_response = json.loads(first_content)
+        repeated_response = json.loads(repeated_content)
+
+        self.assertTrue(first_response["ok"])
+        self.assertTrue(repeated_response["ok"])
+        self.assertEqual(first_response["candidateChecksum"], repeated_response["candidateChecksum"])
+        self.assertEqual(first_artifact["draftChecksum"], repeated_artifact["draftChecksum"])
+        self.assertEqual(first_artifact["draft"], repeated_artifact["draft"])
+        self.assertNotIn("repairInstruction", repeated_response)
+
     def test_accepts_a_complete_prd_v2_draft_and_rejects_an_incomplete_safety_table(self) -> None:
         content, artifact = workbench_artifact_draft_publish.func(
             self.prd_runtime,
@@ -136,6 +200,82 @@ class ArtifactDraftToolTests(unittest.TestCase):
         self.assertEqual(json.loads(invalid_content)["ok"], False)
         self.assertEqual(invalid_artifact["ok"], False)
         self.assertNotIn("draft", invalid_artifact)
+
+    def test_prd_semantic_errors_preserve_the_complete_draft_for_local_repair(self) -> None:
+        invalid = copy.deepcopy(self.prd_draft)
+        section = invalid["content"]["sections"]["businessRequirements"]["acceptanceCriteria"]
+        table = next(block for block in section["blocks"] if block["type"] == "table")
+        standard_column_id = table["columns"][2]["id"]
+        standard = next(
+            cell for cell in table["rows"][0]["cells"]
+            if cell["columnId"] == standard_column_id
+        )
+        standard["content"] = [
+            {"type": "text", "text": "页面正常显示内容，符合预期。", "marks": []},
+        ]
+        before = copy.deepcopy(invalid)
+
+        content, artifact = workbench_artifact_draft_publish.func(
+            self.prd_runtime, 0, invalid,
+        )
+
+        response = json.loads(content)
+        self.assertFalse(response["ok"])
+        self.assertTrue(any(
+            "observable results" in issue["message"] for issue in response["issues"]
+        ))
+        self.assertIn("Edit only the returned issue paths", response["repairInstruction"])
+        self.assertNotIn("top-level PRD structure", response["repairInstruction"])
+        self.assertNotIn("draft", artifact)
+        self.assertEqual(invalid, before)
+
+    def test_prd_root_type_errors_describe_the_actual_directory_object(self) -> None:
+        for root in ("sections", "tableOfContents"):
+            with self.subTest(root=root):
+                invalid = copy.deepcopy(self.prd_draft)
+                invalid["content"][root] = []
+                content, artifact = workbench_artifact_draft_publish.func(
+                    self.prd_runtime, 0, invalid,
+                )
+                response = json.loads(content)
+                self.assertFalse(response["ok"])
+                self.assertTrue(any(
+                    issue["path"] == ["content", root]
+                    and issue["code"] == "invalid_type"
+                    for issue in response["issues"]
+                ))
+                self.assertIn(
+                    "revision, cover, tableOfContents, and sections are objects",
+                    response["repairInstruction"],
+                )
+                self.assertIn("tableOfContents.entries", response["repairInstruction"])
+                self.assertNotIn("draft", artifact)
+
+    def test_nested_prd_type_errors_and_extra_keys_need_only_local_repairs(self) -> None:
+        for mutate in (
+            lambda content: content["tableOfContents"].update(entries={}),
+            lambda content: content["sections"].update(businessRequirements=None),
+            lambda content: content.update(placeholder=True),
+        ):
+            invalid = copy.deepcopy(self.prd_draft)
+            mutate(invalid["content"])
+            content, _ = workbench_artifact_draft_publish.func(self.prd_runtime, 0, invalid)
+            response = json.loads(content)
+            self.assertFalse(response["ok"])
+            self.assertIn("Edit only the returned issue paths", response["repairInstruction"])
+
+    def test_prd_shape_detection_does_not_reclassify_root_semantic_errors(self) -> None:
+        for code in ("custom", "too_small", "unrecognized_keys"):
+            self.assertFalse(_has_prd_shape_failure(
+                self.prd_draft, [{"path": ["content", "sections"], "code": code}],
+            ))
+        self.assertTrue(_has_prd_shape_failure(
+            self.prd_draft, [{"path": ["content"], "code": "invalid_type"}],
+        ))
+        self.assertFalse(_has_prd_shape_failure(
+            self.draft, [{"path": ["content"], "code": "invalid_type"}],
+        ))
+        self.assertFalse(_has_prd_shape_failure(None, [None]))
 
     def test_rejects_an_unstable_artifact_index(self) -> None:
         with self.assertRaisesRegex(ValueError, "WORKBENCH_ARTIFACT_DRAFT_INDEX_INVALID"):

@@ -49,6 +49,71 @@ test("the Node image helper maps the approved Alpine package set and pins npm", 
   );
 });
 
+for (const distribution of ["alpine", "debian"]) {
+  test(`the Node image helper installs the document renderer dependencies on ${distribution}`, async (t) => {
+    const fixture = await mkdtemp(path.join(os.tmpdir(), "workbench-document-image-"));
+    t.after(() => rm(fixture, { recursive: true, force: true }));
+    const log = path.join(fixture, "calls.log");
+    const packageManager = distribution === "alpine" ? "apk" : "apt-get";
+    for (const command of [packageManager, "npm", "sed", "rm"]) {
+      const executable = path.join(fixture, command);
+      await writeFile(executable, `#!/bin/sh\nprintf '%s\\n' '${command} '"$*" >> "$WORKBENCH_TEST_LOG"\n`);
+      await chmod(executable, 0o755);
+    }
+    const packages = [
+      "python3",
+      "python3-lxml",
+      "python3-pillow",
+      "python3-virtualenv",
+      "libreoffice-writer",
+      "fonts-noto-cjk",
+    ];
+    const result = spawnSync("/bin/sh", [helper, ...packages], {
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        PATH: fixture,
+        WORKBENCH_CONTAINER_NPM_VERSION: "11.18.0",
+        WORKBENCH_TEST_LOG: log,
+      },
+    });
+    assert.equal(result.status, 0, result.stderr);
+    const packageCalls = (await readFile(log, "utf8")).split("\n")
+      .filter((line) => line.startsWith(`${packageManager} `));
+    assert.deepEqual(packageCalls, distribution === "alpine"
+      ? ["apk add --no-cache python3 py3-lxml py3-pillow py3-virtualenv libreoffice-writer font-noto-cjk"]
+      : ["apt-get update", "apt-get install -y --no-install-recommends python3 python3-lxml python3-pil python3-virtualenv libreoffice-writer fonts-noto-cjk"]);
+  });
+}
+
+test("the image helper still rejects unapproved Alpine packages before installing anything", async (t) => {
+  const fixture = await mkdtemp(path.join(os.tmpdir(), "workbench-rejected-image-package-"));
+  t.after(() => rm(fixture, { recursive: true, force: true }));
+  const executable = path.join(fixture, "apk");
+  await writeFile(executable, "#!/bin/sh\nexit 99\n");
+  await chmod(executable, 0o755);
+  const result = spawnSync("/bin/sh", [helper, "unapproved-package"], {
+    encoding: "utf8",
+    env: { ...process.env, PATH: fixture },
+  });
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /unsupported Alpine container package: unapproved-package/u);
+});
+
+test("the Export image includes the template and checker and verifies both document formats as its runtime user", async () => {
+  const source = await readFile(path.join(root, "apps/workbench-export-worker/Dockerfile"), "utf8");
+  for (const file of [
+    "integrations/deerflow/skills/requirement-doc-template/assets/requirement-template.docx",
+    "integrations/deerflow/skills/requirement-doc-template/scripts/docx_quality_check.py",
+    "deploy/check-workbench-document-export.mjs",
+  ]) {
+    assert.ok(source.includes(`COPY --chown=node:node ${file} ${file}`), `${file} must be present in the runtime image`);
+  }
+  assert.match(source, /--system-site-packages \/opt\/workbench-export-python/u);
+  assert.match(source, /--only-binary=:all: --no-deps --require-hashes/u);
+  assert.match(source, /USER node\nRUN node deploy\/check-workbench-document-export\.mjs/u);
+});
+
 test("all candidate Node Dockerfiles use the hardened Alpine helper", async () => {
   for (const relativePath of nodeDockerfiles) {
     const source = await readFile(path.join(root, relativePath), "utf8");

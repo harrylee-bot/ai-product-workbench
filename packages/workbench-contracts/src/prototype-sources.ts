@@ -1,10 +1,12 @@
 import { z } from "zod";
 import { sha256Schema } from "./files.js";
 import {
+  evaluatePrototypeExpression,
   prototypeActionSchema,
   prototypeAssetSchema,
   prototypeBindingSchema,
   prototypeDocumentSchema,
+  prototypeExpressionVariablePaths,
   prototypeMotionSchema,
   prototypeNodeSchema,
   prototypeScreenSchema,
@@ -109,7 +111,11 @@ export function projectPrototypeSourceScreens(
   }));
 
   const variablePaths = new Set(bindings.flatMap((binding) => (
-    binding.source.kind === "variable" ? [binding.source.path] : []
+    binding.source.kind === "variable"
+      ? [binding.source.path]
+      : binding.source.kind === "expression"
+        ? prototypeExpressionVariablePaths(binding.source.expression)
+        : []
   )));
   const variables = document.variables
     .filter((variable) => variablePaths.has(variable.path))
@@ -249,6 +255,9 @@ function bindingValue(
   if (binding.source.kind === "literal") return binding.source.value;
   if (binding.source.kind === "variable") {
     return variables.get(binding.source.path)?.initialValue;
+  }
+  if (binding.source.kind === "expression") {
+    return evaluatePrototypeExpression(binding.source.expression, (path) => variables.get(path)?.initialValue);
   }
   return states.get(binding.source.stateId)?.values[binding.source.field];
 }

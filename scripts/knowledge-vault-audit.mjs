@@ -24,9 +24,8 @@ export const DEFAULT_REQUIRED_FILES = [
   "04-产品文档规范/PRD标准结构.md",
   "05-原型设计规范/原型生成总规则.md",
   "05-原型设计规范/签到活动高保真HTML原型框架.md",
-  "06-历史案例库/案例复用索引.md",
+  "06-案例库/案例复用索引.md",
   "07-来源资产索引/README.md",
-  "99-收件箱/README.md",
 ];
 
 const DEFAULT_UNREFERENCED_SAMPLE_LIMIT = 12;
@@ -44,7 +43,7 @@ export async function auditKnowledgeVault({
   const titleOwners = new Map();
   const errors = [];
   const warnings = [];
-  const legacyMetadataGaps = [];
+  const sourceMetadataGaps = [];
   const links = [];
   const internalPathFindings = [];
   const publicationStatusByFile = new Map();
@@ -52,7 +51,6 @@ export async function auditKnowledgeVault({
   const tiers = {
     main: { files: 0, characters: 0 },
     source: { files: 0, characters: 0 },
-    inbox: { files: 0, characters: 0 },
     template: { files: 0, characters: 0 },
   };
 
@@ -73,7 +71,7 @@ export async function auditKnowledgeVault({
     if (!metadata.title) errors.push(`缺少 title：${relativePath}`);
     if (!metadata.description) {
       if (tier === "main" || tier === "template") errors.push(`缺少 description：${relativePath}`);
-      else legacyMetadataGaps.push(relativePath);
+      else sourceMetadataGaps.push(relativePath);
     }
     if (!metadata.status) errors.push(`缺少 status：${relativePath}`);
     if (!metadata.tags.length) errors.push(`缺少 tags：${relativePath}`);
@@ -115,8 +113,8 @@ export async function auditKnowledgeVault({
     if (owners.length > 1) errors.push(`标题重复「${title}」：${owners.join("、")}`);
   }
 
-  if (legacyMetadataGaps.length) {
-    warnings.push(`来源/收件箱有 ${legacyMetadataGaps.length} 个旧条目缺少 description；这些条目不参与正式生成，可在再次整理时补齐。`);
+  if (sourceMetadataGaps.length) {
+    warnings.push(`来源条目有 ${sourceMetadataGaps.length} 个文件缺少 description；这些条目不参与正式生成。`);
   }
 
   const linkTargets = new Set(files.map((file) => file.replace(/\.md$/, "")));
@@ -146,7 +144,7 @@ export async function auditKnowledgeVault({
     markdownFiles: files.length,
     indexedFiles,
     publishedFiles,
-    excludedFiles: tiers.inbox.files + tiers.template.files,
+    excludedFiles: tiers.template.files,
     internalPathFindings,
     tiers,
     assetClosure,
@@ -458,7 +456,6 @@ function findInternalAbsolutePathLines(raw) {
 
 function knowledgeTier(relativePath) {
   if (relativePath.startsWith("07-来源资产索引/")) return "source";
-  if (relativePath.startsWith("99-收件箱/")) return "inbox";
   if (relativePath.startsWith("_templates/")) return "template";
   return "main";
 }

@@ -183,13 +183,13 @@ acceptance meaning, keep unsupported behavior out of committed scope, record a
 conservative typed assumption or acceptance boundary, and still complete the
 PRD through draft publication and Runtime result submission.
 
-A request for both PRD and Prototype/code is sequential, not parallel. The
-Runtime contract rejects a Run whose `requestedArtifactKinds` mixes `prd` with
-`prototype` or `code`; callers must submit two Runs instead. The PRD-only Run
-must complete with `workbench_runtime_result_submit` returning `ok:true` before
-a later Prototype/code Run may use that persisted PRD. If invalid mixed input
-somehow reaches this skill, fail fast without clarification, delegation,
-Prototype Canvas tools, stage tools, draft publication, or result submission.
+A request for both PRD and Prototype is one linked Run. Complete PRD stages
+and reference reads, publish the validated PRD at artifact_index 0, then build
+its Prototype and publish it at artifact_index 1. Submit both artifacts once
+in the final Result. Do not stop after the PRD Draft in a linked Run.
+Every artifact requires nonempty citations copied exactly from successful
+Knowledge retrieval in the current attempt. Missing knowledge is a blocker,
+not permission to generate from memory or fabricate sources.
 
 Output is the user's fixed requirement-document template, not a freeform lightweight PRD. A newly created PRD must use Artifact `schemaVersion: 2` with content protocol `workbench.prd.v2`. Protocol v1 remains read-only/revision compatible for existing Artifacts and is never the shape for a new PRD. Every PRD Artifact in this Runtime uses the following exact structure; a request for an incompatible format is not permission to submit schema-invalid content:
 
@@ -233,7 +233,7 @@ Writing requirements:
 - Preserve the exact PRD v2 transport paths: `content.sections.introduction`, `content.sections.businessRequirements.acceptanceCriteria`, `content.sections.businessRequirements.additionalSections`, `content.sections.degradation`, and `content.sections.safetyBaseline`. `content.sections.businessRequirements` also owns `pageLinks`, `coreRules`, and `flowAndPages`. Never put `acceptanceCriteria` or `additionalSections` directly under `content.sections`, and never put `degradation` or `safetyBaseline` directly under `content`.
 - Keep IDs globally unique across the document and every nested IR entity. Resolve every table, diagram, citation, assumption, goal, requirement, criterion, and flow reference, and keep requirement/criterion references bidirectional.
 - Never use a filled PRD example as an authoring source. A business example can silently inject unrelated pages, roles, permissions, states, retry behavior, or acceptance rules into a short request.
-- When a complete schema-valid PRD candidate exists, call `workbench_artifact_draft_publish` with that complete candidate so the 500 x 500 document appears on the Canvas. Then submit an identical final Artifact through `workbench_runtime_result_submit`. A placeholder, prose outline, partial section, or progress estimate is not a publishable draft.
+- When a complete schema-valid PRD candidate exists, call `workbench_artifact_draft_publish` at `artifact_index: 0`. For an exact PRD-only Run, the trusted Runtime submits the normalized Draft once. For a linked PRD and Prototype Run, continue with the Prototype and submit both together. If validation fails, repair only the reported paths. A placeholder, prose outline, partial section, or progress estimate is not a publishable draft.
 
 ## Runtime Inputs
 
@@ -276,7 +276,7 @@ The response protocol is `workbench.knowledge-retrieval-result.v1`. It already c
 - Never alter citation `id`, `documentId`, `chunkId`, `sourcePath`, `quote`, or `locator`; copy cited entries exactly into Artifact citations.
 - Use focused queries and reuse returned results within the turn. Do not use the capability for unrelated exploration.
 - Do not change `mode`, `routeScope`, Project, Release, or principal. The capability only permits `hybrid` + `production` for its pinned scope.
-- If the tool is missing for a Run with a pinned release, expires, or returns a non-success response, do not fabricate Knowledge results or silently substitute model memory. A PRD-only Canvas Run cannot use clarification or end early: omit unsupported Knowledge-dependent claims, record the limitation as a typed assumption or acceptance boundary, and complete the PRD from explicit authorized facts. Only a non-PRD Run may return a safe unavailable message or use clarification when the requested Artifact cannot be produced without Knowledge.
+- If the tool is missing, expires, fails, or returns no relevant sources, generation is blocked for every Artifact kind, including PRD. Require additional knowledge or report the failure; never substitute model memory, empty citations, or unsupported assumptions for retrieval evidence.
 
 ## Runtime Result
 
@@ -314,7 +314,7 @@ one complete current checkpoint before the next patch, then use the supplied
 `baseRevision`. A checkpoint is the only recovery boundary after a degraded projection;
 do not guess missing operations or reuse an older revision.
 
-The lead agent must finish every turn by calling `workbench_runtime_result_submit` with the complete unfenced `workbench.runtime.result.v1` object in its `candidate` argument. The Worker accepts only the current turn's validated ToolMessage artifact; it does not parse Markdown fences, raw JSON, assistant state fields, or sub-agent text.
+Every turn must finish with a successful `workbench_runtime_result_submit` carrying the complete unfenced `workbench.runtime.result.v1` object in its `candidate` argument. For an exact PRD-only Run, the trusted Runtime submits the normalized successful Draft automatically once; the lead must not repeat that submission. Other Runs use the explicit Result path. The Worker accepts only the current turn's validated ToolMessage artifact; it does not parse Markdown fences, raw JSON, assistant state fields, or sub-agent text.
 
 If the tool returns `ok:false`, fix every reported path and submit the complete candidate again. Continue until it returns `ok:true`. After the first successful submission, do not mutate or resubmit the candidate; return only a concise user-facing completion message. Sub-agents may research or draft content, but the lead agent alone owns the final submit call.
 
@@ -332,6 +332,8 @@ Do not load the entire generated `references/runtime-result.schema.json` into mo
 - Every Prototype variable binding must reference one explicit `variables[].path`; every state binding must reference an explicit key in `states[].values`. Do not invent implicit browser variables or undeclared state fields.
 - A state binding source is exactly `{"kind":"state","stateId":"<states[].id>","field":"<key in that state's values>"}`. It never uses `key`, `path`, or a bare state name.
 - Binding properties must match their node and value types: `value` is input-only, `imageAssetId` is image-only, `enabled` is button/input-only and boolean, and `visible` is boolean.
+- Interactive search and filters must calculate results from the current input values. Use `source:{"kind":"expression","expression":...}` for computed `visible`, `enabled`, or `text` bindings; read the compact expression guidance in `references/runtime-result-contract.md`. Inputs remain bound to declared variables. A fixed `setState` or unconditional submit `successStateId` does not implement a search or a value-dependent filter.
+- For a finite demonstration list, bind each row's visibility to its actual matching predicate, and bind the empty state to the negation of all row matches. Use `buttonType:"reset"` inside the explicit form to restore input variables and computed results. Do not label a button “clear” if it only changes a visual state. Do not claim dynamic behavior that the returned bindings and actions cannot execute.
 - Interactive forms use an explicit `form` node. Submit/reset buttons declare `buttonType`, a submit action belongs to the form's `submit` event, and every submitted binding targets an input inside that form. Never infer form ownership from layout.
 - A select input declares all `options` explicitly with unique values; its current value must be empty or match one enabled/disabled declared option. Non-select inputs use an empty options array.
 - A `date` input binds either an empty string or a real calendar date in canonical `YYYY-MM-DD` form. Do not return locale dates, timestamps, timezone suffixes, or impossible dates.

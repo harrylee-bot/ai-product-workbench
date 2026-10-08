@@ -578,11 +578,32 @@ await context.route("**/api/v1/**", async (route) => {
     return json(route, { items: [] });
   }
   if (method === "GET" && path === "/api/v1/exports/capabilities") {
+    const available = { available: true, authentication: "not_required", reasonCode: null };
+    const authRequired = {
+      available: false,
+      authentication: "required",
+      reasonCode: "EXPORT_EXTERNAL_AUTHENTICATION_REQUIRED",
+    };
     return json(route, {
-      html: { available: false, reasonCode: "EXPORT_HTML_UNAVAILABLE" },
-      react: { available: false, reasonCode: "EXPORT_REACT_UNAVAILABLE" },
-      figma: { available: false, reasonCode: "EXPORT_FIGMA_UNAVAILABLE" },
-      mcp: { available: false, reasonCode: "EXPORT_MCP_UNAVAILABLE" },
+      formats: {
+        html: available,
+        react: available,
+        figma: { available: false, authentication: "not_required", reasonCode: "EXPORT_FIGMA_UNAVAILABLE" },
+        mcp: available,
+        docx: available,
+        pdf: available,
+      },
+      packaging: { single_file: available, zip: available },
+      external: {
+        ai_studio: {
+          available: false,
+          authentication: "not_required",
+          reasonCode: "EXPORT_EXTERNAL_AI_STUDIO_UNAVAILABLE",
+        },
+        netlify: authRequired,
+        lovable: authRequired,
+        bolt: authRequired,
+      },
     });
   }
   if (method === "POST" && path === "/api/v1/projects/project-1/previews") {
@@ -590,9 +611,10 @@ await context.route("**/api/v1/**", async (route) => {
     assert(body.boardId === board.id, "Project Preview must pin the current Board identity");
     assert(body.boardRevision === board.revision, "Project Preview must pin the current Board revision");
     assert(body.selection?.kind === "artifact", "Screen Preview must use an Artifact selection");
-    previewSelections.push(structuredClone(body.selection));
+    assert(!("screenId" in body.selection), "Screen Preview must not crop the Prototype");
+    previewSelections.push({ ...structuredClone(body.selection), initialScreenId: body.initialScreenId });
     const id = `preview-${++projectPreviewCount}`;
-    const preview = projectPreviewFixture(id, body.selection);
+    const preview = projectPreviewFixture(id, body.selection, body.initialScreenId);
     projectPreviews.set(id, preview);
     return json(route, preview, { location: `/api/v1/previews/${id}` }, 202);
   }
@@ -986,7 +1008,7 @@ await waitForValue(
   "first selected-screen Preview creation",
 );
 assert(
-  previewSelections.at(-1)?.screenId === "screen-home",
+  previewSelections.at(-1)?.initialScreenId === "screen-home",
   `Multi-screen Preview must preserve its first selected screen: ${JSON.stringify(previewSelections)}`,
 );
 await previewOverlay.getByRole("button", { name: "Checkout Screen", exact: true }).click();
@@ -995,14 +1017,15 @@ await waitForValue(
   "second selected-screen Preview creation",
 );
 assert(
-  previewSelections.at(-1)?.screenId === "screen-checkout",
+  previewSelections.at(-1)?.initialScreenId === "screen-checkout",
   `Multi-screen Preview must preserve selected-screen order: ${JSON.stringify(previewSelections)}`,
 );
 assert(
   previewSelections.slice(previewsBeforeDirectOpen).every((selection) => (
     selection.artifactId === "artifact-1"
     && selection.artifactVersionId === "version-1"
-    && selection.screenId !== "screen-settings"
+    && selection.initialScreenId !== "screen-settings"
+    && !("screenId" in selection)
   )),
   "Multi-screen Preview must remain scoped to the frozen ArtifactVersion screen references",
 );
@@ -1708,13 +1731,14 @@ function prototypeDocumentFixture() {
   return document;
 }
 
-function projectPreviewFixture(id, selection) {
+function projectPreviewFixture(id, selection, initialScreenId) {
   return {
     id,
     projectId: project.id,
     boardId: board.id,
     boardRevision: board.revision,
     selection,
+    initialScreenId,
     status: "succeeded",
     revision: 0,
     failure: null,

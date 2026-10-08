@@ -84,7 +84,7 @@ export function ComposerCommandMenu({
 }) {
   const commands = [
     { icon: SparklesIcon, label: "生成 UI 界面设计", value: "基于此 PRD 生成 UI 界面设计" },
-    { icon: FileTextIcon, label: "继续完善需求文档", value: "细化补签和奖励规则" },
+    { icon: FileTextIcon, label: "继续完善需求文档", value: "继续完善当前需求文档，细化业务规则并补充异常场景和验收标准" },
     { icon: FrameIcon, label: "整理为多屏流程", value: "把当前设计整理成多屏流程" },
   ];
 

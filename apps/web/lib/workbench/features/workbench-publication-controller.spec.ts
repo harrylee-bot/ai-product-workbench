@@ -7,6 +7,7 @@ import {
   copyExportHtmlToClipboard,
   exportFormatForTarget,
   exportTargetForExternalDelivery,
+  exportTargetForFormat,
   flushWorkbenchBoard,
   selectLatestRestorableExternalDelivery,
   validateIsolatedPreviewCapability,
@@ -26,6 +27,10 @@ describe("Workbench publication controller", () => {
     expect(exportFormatForTarget("Copy code")).toBe("html");
     expect(exportFormatForTarget("React")).toBe("react");
     expect(exportFormatForTarget("MCP")).toBe("mcp");
+    expect(exportFormatForTarget("Download Word")).toBe("docx");
+    expect(exportFormatForTarget("Download PDF")).toBe("pdf");
+    expect(exportTargetForFormat("docx", "single_file")).toBe("Download Word");
+    expect(exportTargetForFormat("pdf", "single_file")).toBe("Download PDF");
     expect(exportTargetForExternalDelivery("ai_studio")).toBe("AI Studio");
     expect(exportTargetForExternalDelivery("netlify")).toBe("Netlify");
   });

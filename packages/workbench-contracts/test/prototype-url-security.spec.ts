@@ -227,6 +227,50 @@ describe("workbench.prototype.v1 form contract", () => {
     }
   });
 
+  it.each([
+    { inputType: "checkbox", initialValue: "false", expectedType: "boolean", receivedType: "string" },
+    { inputType: "checkbox", initialValue: 0, expectedType: "boolean", receivedType: "number" },
+    { inputType: "checkbox", initialValue: null, expectedType: "boolean", receivedType: "null" },
+    { inputType: "radio", initialValue: false, expectedType: "string or null", receivedType: "boolean" },
+    { inputType: "number", initialValue: "12", expectedType: "number or null", receivedType: "string" },
+    { inputType: "date", initialValue: "2026-02-29", expectedType: "an empty string or a canonical YYYY-MM-DD calendar date", receivedType: "string" },
+    { inputType: "text", initialValue: false, expectedType: "string", receivedType: "boolean" },
+  ] as const)("locates a $inputType initial-value failure at its referenced variable", ({
+    inputType, initialValue, expectedType, receivedType,
+  }) => {
+    const document = documentWithForm();
+    const input = document.nodes.find((candidate) => candidate.id === "input-email");
+    if (input?.kind !== "input") throw new Error("input fixture missing");
+    input.inputType = inputType;
+    if (inputType === "radio") input.optionValue = "choice";
+    document.variables[0]!.initialValue = initialValue;
+    document.variables.unshift({ path: "unrelated.label", initialValue: "Keep this value" });
+
+    for (const schema of [prototypeDocumentSchema, publicPrototypeDocumentSchema]) {
+      const parsed = schema.safeParse(document);
+      expect(parsed.success).toBe(false);
+      if (parsed.success) throw new Error("invalid input was accepted");
+      expect(parsed.error.issues).toContainEqual({
+        code: "custom",
+        path: ["variables", 1, "initialValue"],
+        message: `${inputType} input variable form.email initialValue must be ${expectedType}; received ${receivedType}`,
+      });
+    }
+    expect(document.variables[1]!.initialValue).toBe(initialValue);
+  });
+
+  it.each([true, false])("accepts and preserves a checkbox's boolean initialValue %s", (initialValue) => {
+    const document = documentWithForm();
+    const input = document.nodes.find((candidate) => candidate.id === "input-email");
+    if (input?.kind !== "input") throw new Error("input fixture missing");
+    input.inputType = "checkbox";
+    document.variables[0]!.initialValue = initialValue;
+
+    const parsed = prototypeDocumentSchema.parse(document);
+    expect(parsed.variables[0]!.initialValue).toBe(initialValue);
+    expect(parsed.bindings).toEqual(document.bindings);
+  });
+
   it("uses one variable fact source per writable input, except one radio field", () => {
     const literal = documentWithForm();
     literal.bindings[0]!.source = { kind: "literal", value: "fixed" };

@@ -466,6 +466,34 @@ describe("export contracts", () => {
     }).success).toBe(false);
   });
 
+  it.each([
+    ["html", "single_file", true],
+    ["html", "zip", true],
+    ["docx", "single_file", true],
+    ["docx", "zip", false],
+    ["pdf", "single_file", true],
+    ["pdf", "zip", false],
+    ["react", "single_file", false],
+    ["react", "zip", true],
+    ["figma", "single_file", false],
+    ["figma", "zip", true],
+    ["mcp", "single_file", false],
+    ["mcp", "zip", true],
+  ] as const)("validates %s with %s packaging", (format, packaging, accepted) => {
+    const result = createExportJobRequestSchema.safeParse({
+      releaseId: "release-1",
+      format,
+      packaging,
+      selection: { kind: "artifact", artifactId: "artifact-1", artifactVersionId: "version-1" },
+    });
+    expect(result.success).toBe(accepted);
+    if (!result.success) {
+      expect(result.error.issues).toEqual([
+        expect.objectContaining({ path: ["packaging"] }),
+      ]);
+    }
+  });
+
   it("enforces output and timestamps for terminal export states", () => {
     expect(exportJobSchema.parse(queuedExport)).toEqual(queuedExport);
     expect(exportJobSchema.safeParse({ ...queuedExport, output: exportOutput }).success).toBe(false);

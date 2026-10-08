@@ -224,8 +224,8 @@ export function ProjectSuggestionPills({
 }) {
   const items = projectMode === "document" ? [
     "基于此 PRD 生成 UI 界面设计",
-    "细化补签和奖励规则",
-    "增加积分商城功能说明",
+    "细化当前需求的业务规则",
+    "补充异常场景和验收标准",
   ] : [
     "Change the generation status to 'Complete'",
     "Add a 'Style' configuration panel on the left",

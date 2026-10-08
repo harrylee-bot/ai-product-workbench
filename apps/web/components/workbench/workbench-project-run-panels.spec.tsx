@@ -5,6 +5,7 @@ import { MotionConfig } from "framer-motion";
 import type { ComponentProps } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { isRetryableRun } from "../../lib/workbench/features/workbench-run-actions";
 import {
   LeftInspector,
   MobileRunStatus,
@@ -332,6 +333,49 @@ describe("ProjectTranscriptPanel", () => {
     });
 
     expect(within(getAgentCard(container)).getByText("RUNTIME_ARTIFACTS_MISSING:prototype")).not.toBeNull();
+  });
+
+  it("shows provider filtering on desktop and mobile without offering a retry", () => {
+    const failure = {
+      code: "RUNTIME_PROVIDER_CONTENT_FILTERED",
+      message: "模型服务商拦截了本次输出，任务已停止。",
+      retryable: false,
+    };
+    const canRetry = isRetryableRun({ status: "failed", failure });
+    const onRetry = vi.fn();
+    const { container } = render(
+      <>
+        {panelElement({
+          canRetry,
+          failure,
+          isPrdRun: false,
+          messages: [{ id: "message-1", status: "completed", text: "}\n", working: false }],
+          onRetry,
+          prompt: "生成一个普通业务页面",
+          runStatus: "failed",
+        })}
+        <MobileRunStatus
+          busy={false}
+          canCancel={false}
+          canRetry={canRetry}
+          failure={failure}
+          generationStage={null}
+          isPrdRun={false}
+          onCancel={vi.fn()}
+          onRetry={onRetry}
+          prompt="生成一个普通业务页面"
+          runPhaseLabel={null}
+          runStatus="failed"
+        />
+      </>,
+    );
+
+    const mobileStatus = container.querySelector<HTMLElement>("[data-mobile-run-status]");
+    expect(within(getAgentCard(container)).getByText(failure.message)).not.toBeNull();
+    expect(mobileStatus).not.toBeNull();
+    expect(within(mobileStatus!).getByText(failure.message)).not.toBeNull();
+    expect(screen.queryByRole("button", { name: "重试当前运行" })).toBeNull();
+    expect(onRetry).not.toHaveBeenCalled();
   });
 
   it("restores queued PRD context on retry and keeps it deterministic after reconnect", () => {

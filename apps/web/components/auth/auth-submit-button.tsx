@@ -1,9 +1,8 @@
 "use client";
 
-import { useFormStatus } from "react-dom";
-
 import { Button } from "@/components/ui/button";
 
+import { useAuthFormPending } from "./auth-form";
 import { LoaderIcon } from "./auth-icons";
 
 export function AuthSubmitButton({
@@ -13,7 +12,7 @@ export function AuthSubmitButton({
   children: React.ReactNode;
   isSuccessful: boolean;
 }) {
-  const { pending } = useFormStatus();
+  const pending = useAuthFormPending();
 
   return (
     <Button

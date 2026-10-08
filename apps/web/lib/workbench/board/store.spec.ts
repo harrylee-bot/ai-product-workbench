@@ -483,7 +483,7 @@ describe("Board store CAS lifecycle", () => {
     expect(store.getState().nodes[0]?.position).toEqual({ x: 130, y: 230 });
   });
 
-  it("keeps conflicts for non-PRD server artifact additions", () => {
+  it("merges a server-created Prototype node while preserving a dirty local viewport", () => {
     const store = createBoardStore(board);
     store.getState().setViewport({ x: 30, y: 40, zoom: 0.63 });
     const remote = boardWithPrd(board, 2);
@@ -494,6 +494,45 @@ describe("Board store CAS lifecycle", () => {
         nodeType: "artifact",
         title: "Prototype",
         artifactKind: "prototype",
+      },
+    };
+
+    store.getState().reconcileFromServer(remote, '"2"');
+
+    expect(store.getState()).toMatchObject({
+      serverRevision: 2,
+      etag: '"2"',
+      viewport: { x: 30, y: 40, zoom: 0.63 },
+      dirty: true,
+      saveStatus: "dirty",
+      activeSaveVersion: null,
+      lastSaveError: null,
+    });
+    expect(store.getState().nodes.map((node) => node.id)).toEqual(["node-1", "node-prd"]);
+    expect(store.getState().prepareSave()).toMatchObject({
+      baseRevision: 2,
+      ifMatch: '"2"',
+      request: {
+        viewport: { x: 30, y: 40, zoom: 0.63 },
+        nodes: [
+          { id: "node-1" },
+          { id: "node-prd", data: { artifactKind: "prototype" } },
+        ],
+      },
+    });
+  });
+
+  it("keeps conflicts for other server artifact additions", () => {
+    const store = createBoardStore(board);
+    store.getState().setViewport({ x: 30, y: 40, zoom: 0.63 });
+    const remote = boardWithPrd(board, 2);
+    remote.nodes[1] = {
+      ...remote.nodes[1]!,
+      data: {
+        protocol: boardNodeProtocol,
+        nodeType: "artifact",
+        title: "Image",
+        artifactKind: "image",
       },
     };
 

@@ -1,18 +1,26 @@
 // @vitest-environment jsdom
 
 import { act, renderHook, waitFor } from "@testing-library/react";
-import type { ExternalExportDelivery } from "@workbench/workbench-contracts";
+import type {
+  ExportSelection,
+  ExternalExportDelivery,
+  ProjectPreview,
+} from "@workbench/workbench-contracts";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { createBoardStore } from "./board";
 import { useWorkbenchPublicationController } from "./workbench-publication-controller";
 
 const mocks = vi.hoisted(() => ({
   cancel: vi.fn(),
   createDelivery: vi.fn(),
+  createPreview: vi.fn(),
+  createPreviewToken: vi.fn(),
   deliveriesByExport: {} as Record<string, ExternalDeliveryFixture[]>,
   details: {} as Record<string, { value: ExportFixture; etag: string } | undefined>,
   getDelivery: vi.fn(),
   getContent: vi.fn(),
+  getPreview: vi.fn(),
   jobsByProject: {} as Record<string, ExportFixture[]>,
   listDeliveries: vi.fn(),
 }));
@@ -40,6 +48,9 @@ vi.mock("./exports", async (importOriginal) => {
     createExternalExportDelivery: mocks.createDelivery,
     getExternalExportDelivery: mocks.getDelivery,
     getExportContent: mocks.getContent,
+    createProjectPreview: mocks.createPreview,
+    createProjectPreviewToken: mocks.createPreviewToken,
+    getProjectPreview: mocks.getPreview,
     listExternalExportDeliveries: mocks.listDeliveries,
   }),
   useWorkbenchExportCapabilities: () => ({
@@ -118,6 +129,9 @@ afterEach(() => {
   mocks.details = {};
   mocks.deliveriesByExport = {};
   mocks.jobsByProject = {};
+  mocks.createPreview.mockReset();
+  mocks.createPreviewToken.mockReset();
+  mocks.getPreview.mockReset();
 });
 
 describe("Workbench export recovery", () => {
@@ -278,6 +292,131 @@ describe("Workbench export recovery", () => {
     rendered.unmount();
   });
 });
+
+describe("Workbench Preview cache compatibility", () => {
+  const home: ExportSelection = {
+    kind: "artifact",
+    artifactId: "artifact-1",
+    artifactVersionId: "version-1",
+    screenId: "screen-home",
+  };
+  const artifact: ExportSelection = {
+    kind: "artifact",
+    artifactId: "artifact-1",
+    artifactVersionId: "version-1",
+  };
+
+  it.each([
+    { name: "legacy opening-screen metadata", selection: artifact, initialScreenId: "screen-home" },
+    { name: "current selection metadata", selection: home, initialScreenId: undefined },
+  ])("reuses a successful Preview with $name", async ({ selection, initialScreenId }) => {
+    const preview = projectPreview({ selection, initialScreenId });
+    const originalSelection = { ...selection };
+    mocks.createPreview.mockResolvedValue(preview);
+    mocks.getPreview.mockResolvedValue(preview);
+    mockPreviewTokens();
+    const rendered = renderPreviewController();
+
+    await act(async () => {
+      await rendered.result.current.createPreview(home);
+      await rendered.result.current.createPreview(home);
+    });
+
+    expect(mocks.createPreview).toHaveBeenCalledOnce();
+    expect(mocks.createPreview).toHaveBeenCalledWith("project-a", {
+      boardId: "board-1",
+      boardRevision: 3,
+      selection: artifact,
+      initialScreenId: "screen-home",
+    });
+    expect(mocks.getPreview).toHaveBeenCalledExactlyOnceWith(preview.id);
+    expect(mocks.createPreviewToken.mock.calls).toEqual([[preview.id], [preview.id]]);
+    expect(preview.selection).toEqual(originalSelection);
+    rendered.unmount();
+  });
+
+  it.each([
+    {
+      name: "a different legacy opening screen",
+      selection: artifact,
+      initialScreenId: "screen-success",
+    },
+    {
+      name: "an explicit different screen despite matching legacy metadata",
+      selection: { ...home, screenId: "screen-success" },
+      initialScreenId: "screen-home",
+    },
+    {
+      name: "an unscoped artifact without legacy screen metadata",
+      selection: artifact,
+      initialScreenId: null,
+    },
+    {
+      name: "a different pinned artifact version",
+      selection: { ...artifact, artifactVersionId: "version-2" },
+      initialScreenId: "screen-home",
+    },
+  ])("replaces the cached Preview when it returns $name", async ({ selection, initialScreenId }) => {
+    const initial = projectPreview({ selection: home });
+    const replacement = projectPreview({ id: "preview-replacement", selection: home });
+    mocks.createPreview.mockResolvedValueOnce(initial).mockResolvedValueOnce(replacement);
+    mocks.getPreview.mockResolvedValue(projectPreview({ selection, initialScreenId }));
+    mockPreviewTokens();
+    const rendered = renderPreviewController();
+
+    await act(async () => {
+      await rendered.result.current.createPreview(home);
+      await rendered.result.current.createPreview(home);
+    });
+
+    expect(mocks.getPreview).toHaveBeenCalledExactlyOnceWith(initial.id);
+    expect(mocks.createPreview).toHaveBeenCalledTimes(2);
+    expect(mocks.createPreviewToken.mock.calls).toEqual([[initial.id], [replacement.id]]);
+    rendered.unmount();
+  });
+});
+
+function renderPreviewController() {
+  const store = createBoardStore({
+    id: "board-1",
+    projectId: "project-a",
+    revision: 3,
+    viewport: { x: 0, y: 0, zoom: 1 },
+    nodes: [],
+    edges: [],
+  });
+  return renderHook(() => useWorkbenchPublicationController({
+    boardController: { store, save: vi.fn() },
+    canExport: false,
+    canPreview: true,
+    canShare: false,
+    projectId: "project-a",
+  }));
+}
+
+function projectPreview(overrides: Partial<ProjectPreview>): ProjectPreview {
+  return {
+    id: "preview-1",
+    projectId: "project-a",
+    boardId: "board-1",
+    boardRevision: 3,
+    selection: { kind: "board" },
+    status: "succeeded",
+    revision: 1,
+    failure: null,
+    createdAt: "2026-09-16T00:00:00.000Z",
+    expiresAt: "2099-09-16T00:00:00.000Z",
+    updatedAt: "2026-09-16T00:00:01.000Z",
+    ...overrides,
+  };
+}
+
+function mockPreviewTokens() {
+  mocks.createPreviewToken.mockImplementation(async (previewId: string) => ({
+    url: `https://preview.example.test/preview/${previewId}`,
+    expiresAt: "2099-09-16T00:00:00.000Z",
+  }));
+}
 
 function renderController(projectId: string) {
   return renderHook(

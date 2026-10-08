@@ -1157,6 +1157,58 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/artifacts/{artifactId}/versions/{artifactVersionId}/finalization": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Owner-visible finalization and ingestion state */
+        get: operations["getArtifactFinalization"];
+        put?: never;
+        /** Idempotent immutable-version confirmation and queued project knowledge ingestion */
+        post: operations["confirmArtifactFinalization"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/artifacts/{artifactId}/versions/{artifactVersionId}/finalization/retry": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Retry the existing ingestion job using a new release version */
+        post: operations["retryArtifactFinalization"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/artifacts/{artifactId}/versions/{artifactVersionId}/finalization/withdraw": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Withdraw this source and retire all derived knowledge releases */
+        post: operations["withdrawArtifactFinalization"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/artifacts/{artifactId}/versions/{artifactVersionId}/preference": {
         parameters: {
             query?: never;
@@ -1780,6 +1832,7 @@ export interface components {
             citations: components["schemas"]["ArtifactCitation"][];
             createdByRunId: string | null;
             knowledgeReleaseId: string | null;
+            sourcePrdVersionId?: string | null;
             /** Format: date-time */
             createdAt: string;
             /** @enum {string} */
@@ -1814,6 +1867,69 @@ export interface components {
             revision: components["schemas"]["PrototypePatchRevision"];
             checksum: components["schemas"]["PrototypePatchChecksum"];
         };
+        Sha256: string;
+        ArtifactFinalization: {
+            id: string;
+            artifactVersionId: string;
+            projectId: string;
+            confirmedById: string;
+            checksum: string;
+            /** @enum {string} */
+            status: "confirmed" | "ingesting" | "ingested" | "rejected" | "withdrawn";
+            /** Format: date-time */
+            confirmedAt: string;
+            /** Format: date-time */
+            withdrawnAt: string | null;
+            ingestionJob: {
+                id: string;
+                /** @enum {string} */
+                status: "queued" | "converting" | "indexing" | "publishing" | "published" | "failed" | "withdrawn";
+                attempt: number;
+                errorCode: string | null;
+                /** Format: date-time */
+                createdAt: string;
+                /** Format: date-time */
+                updatedAt: string;
+                releases: {
+                    id: string;
+                    version: number;
+                    /** @enum {string} */
+                    status: "building" | "ready" | "failed" | "retired";
+                    parentReleaseId: string | null;
+                }[];
+            } | null;
+        };
+        ArtifactFinalizationState: {
+            id: string;
+            artifactVersionId: string;
+            projectId: string;
+            confirmedById: string;
+            checksum: string;
+            /** @enum {string} */
+            status: "confirmed" | "ingesting" | "ingested" | "rejected" | "withdrawn";
+            /** Format: date-time */
+            confirmedAt: string;
+            /** Format: date-time */
+            withdrawnAt: string | null;
+            ingestionJob: {
+                id: string;
+                /** @enum {string} */
+                status: "queued" | "converting" | "indexing" | "publishing" | "published" | "failed" | "withdrawn";
+                attempt: number;
+                errorCode: string | null;
+                /** Format: date-time */
+                createdAt: string;
+                /** Format: date-time */
+                updatedAt: string;
+                releases: {
+                    id: string;
+                    version: number;
+                    /** @enum {string} */
+                    status: "building" | "ready" | "failed" | "retired";
+                    parentReleaseId: string | null;
+                }[];
+            } | null;
+        } | null;
         ArtifactList: {
             items: components["schemas"]["Artifact"][];
             nextCursor: string | null;
@@ -1828,6 +1944,7 @@ export interface components {
             citations: components["schemas"]["ArtifactCitation"][];
             createdByRunId: string | null;
             knowledgeReleaseId: string | null;
+            sourcePrdVersionId?: string | null;
             /** Format: date-time */
             createdAt: string;
             /** @enum {string} */
@@ -1854,6 +1971,7 @@ export interface components {
             citations: components["schemas"]["ArtifactCitation"][];
             createdByRunId: string | null;
             knowledgeReleaseId: string | null;
+            sourcePrdVersionId?: string | null;
             /** Format: date-time */
             createdAt: string;
             /** @enum {string} */
@@ -1875,6 +1993,7 @@ export interface components {
             citations: components["schemas"]["ArtifactCitation"][];
             createdByRunId: string | null;
             knowledgeReleaseId: string | null;
+            sourcePrdVersionId?: string | null;
             /** Format: date-time */
             createdAt: string;
             /** @enum {string} */
@@ -2002,6 +2121,7 @@ export interface components {
             citations: components["schemas"]["ArtifactCitation"][];
             createdByRunId: string | null;
             knowledgeReleaseId: string | null;
+            sourcePrdVersionId?: string | null;
             /** Format: date-time */
             createdAt: string;
             /** @enum {string} */
@@ -2024,6 +2144,7 @@ export interface components {
             citations: components["schemas"]["ArtifactCitation"][];
             createdByRunId: string | null;
             knowledgeReleaseId: string | null;
+            sourcePrdVersionId?: string | null;
             /** Format: date-time */
             createdAt: string;
             /** @enum {string} */
@@ -2045,6 +2166,7 @@ export interface components {
             citations: components["schemas"]["ArtifactCitation"][];
             createdByRunId: string | null;
             knowledgeReleaseId: string | null;
+            sourcePrdVersionId?: string | null;
             /** Format: date-time */
             createdAt: string;
             /** @enum {string} */
@@ -2315,6 +2437,7 @@ export interface components {
             citations: components["schemas"]["ArtifactCitation"][];
             createdByRunId: string | null;
             knowledgeReleaseId: string | null;
+            sourcePrdVersionId?: string | null;
             /** Format: date-time */
             createdAt: string;
             /** @enum {string} */
@@ -2433,6 +2556,234 @@ export interface components {
         };
         PrototypeAsset: components["schemas"]["PrototypeImageAsset"] | components["schemas"]["PrototypeIconAsset"] | components["schemas"]["PrototypeFontAsset"];
         PrototypeRuntimeValue: string | number | boolean | null;
+        PrototypeExpressionDepth1: {
+            /** @enum {string} */
+            kind: "literal";
+            value: components["schemas"]["PrototypeRuntimeValue"];
+        } | {
+            /** @enum {string} */
+            kind: "variable";
+            path: string;
+        };
+        PrototypeExpressionDepth2: {
+            /** @enum {string} */
+            kind: "literal";
+            value: components["schemas"]["PrototypeRuntimeValue"];
+        } | {
+            /** @enum {string} */
+            kind: "variable";
+            path: string;
+        } | {
+            /** @enum {string} */
+            kind: "contains";
+            left: components["schemas"]["PrototypeExpressionDepth1"];
+            right: components["schemas"]["PrototypeExpressionDepth1"];
+        } | {
+            /** @enum {string} */
+            kind: "equals";
+            left: components["schemas"]["PrototypeExpressionDepth1"];
+            right: components["schemas"]["PrototypeExpressionDepth1"];
+        } | {
+            /** @enum {string} */
+            kind: "and";
+            operands: components["schemas"]["PrototypeExpressionDepth1"][];
+        } | {
+            /** @enum {string} */
+            kind: "or";
+            operands: components["schemas"]["PrototypeExpressionDepth1"][];
+        } | {
+            /** @enum {string} */
+            kind: "not";
+            operand: components["schemas"]["PrototypeExpressionDepth1"];
+        };
+        PrototypeExpressionDepth3: {
+            /** @enum {string} */
+            kind: "literal";
+            value: components["schemas"]["PrototypeRuntimeValue"];
+        } | {
+            /** @enum {string} */
+            kind: "variable";
+            path: string;
+        } | {
+            /** @enum {string} */
+            kind: "contains";
+            left: components["schemas"]["PrototypeExpressionDepth2"];
+            right: components["schemas"]["PrototypeExpressionDepth2"];
+        } | {
+            /** @enum {string} */
+            kind: "equals";
+            left: components["schemas"]["PrototypeExpressionDepth2"];
+            right: components["schemas"]["PrototypeExpressionDepth2"];
+        } | {
+            /** @enum {string} */
+            kind: "and";
+            operands: components["schemas"]["PrototypeExpressionDepth2"][];
+        } | {
+            /** @enum {string} */
+            kind: "or";
+            operands: components["schemas"]["PrototypeExpressionDepth2"][];
+        } | {
+            /** @enum {string} */
+            kind: "not";
+            operand: components["schemas"]["PrototypeExpressionDepth2"];
+        };
+        PrototypeExpressionDepth4: {
+            /** @enum {string} */
+            kind: "literal";
+            value: components["schemas"]["PrototypeRuntimeValue"];
+        } | {
+            /** @enum {string} */
+            kind: "variable";
+            path: string;
+        } | {
+            /** @enum {string} */
+            kind: "contains";
+            left: components["schemas"]["PrototypeExpressionDepth3"];
+            right: components["schemas"]["PrototypeExpressionDepth3"];
+        } | {
+            /** @enum {string} */
+            kind: "equals";
+            left: components["schemas"]["PrototypeExpressionDepth3"];
+            right: components["schemas"]["PrototypeExpressionDepth3"];
+        } | {
+            /** @enum {string} */
+            kind: "and";
+            operands: components["schemas"]["PrototypeExpressionDepth3"][];
+        } | {
+            /** @enum {string} */
+            kind: "or";
+            operands: components["schemas"]["PrototypeExpressionDepth3"][];
+        } | {
+            /** @enum {string} */
+            kind: "not";
+            operand: components["schemas"]["PrototypeExpressionDepth3"];
+        };
+        PrototypeExpressionDepth5: {
+            /** @enum {string} */
+            kind: "literal";
+            value: components["schemas"]["PrototypeRuntimeValue"];
+        } | {
+            /** @enum {string} */
+            kind: "variable";
+            path: string;
+        } | {
+            /** @enum {string} */
+            kind: "contains";
+            left: components["schemas"]["PrototypeExpressionDepth4"];
+            right: components["schemas"]["PrototypeExpressionDepth4"];
+        } | {
+            /** @enum {string} */
+            kind: "equals";
+            left: components["schemas"]["PrototypeExpressionDepth4"];
+            right: components["schemas"]["PrototypeExpressionDepth4"];
+        } | {
+            /** @enum {string} */
+            kind: "and";
+            operands: components["schemas"]["PrototypeExpressionDepth4"][];
+        } | {
+            /** @enum {string} */
+            kind: "or";
+            operands: components["schemas"]["PrototypeExpressionDepth4"][];
+        } | {
+            /** @enum {string} */
+            kind: "not";
+            operand: components["schemas"]["PrototypeExpressionDepth4"];
+        };
+        PrototypeExpressionDepth6: {
+            /** @enum {string} */
+            kind: "literal";
+            value: components["schemas"]["PrototypeRuntimeValue"];
+        } | {
+            /** @enum {string} */
+            kind: "variable";
+            path: string;
+        } | {
+            /** @enum {string} */
+            kind: "contains";
+            left: components["schemas"]["PrototypeExpressionDepth5"];
+            right: components["schemas"]["PrototypeExpressionDepth5"];
+        } | {
+            /** @enum {string} */
+            kind: "equals";
+            left: components["schemas"]["PrototypeExpressionDepth5"];
+            right: components["schemas"]["PrototypeExpressionDepth5"];
+        } | {
+            /** @enum {string} */
+            kind: "and";
+            operands: components["schemas"]["PrototypeExpressionDepth5"][];
+        } | {
+            /** @enum {string} */
+            kind: "or";
+            operands: components["schemas"]["PrototypeExpressionDepth5"][];
+        } | {
+            /** @enum {string} */
+            kind: "not";
+            operand: components["schemas"]["PrototypeExpressionDepth5"];
+        };
+        PrototypeExpressionDepth7: {
+            /** @enum {string} */
+            kind: "literal";
+            value: components["schemas"]["PrototypeRuntimeValue"];
+        } | {
+            /** @enum {string} */
+            kind: "variable";
+            path: string;
+        } | {
+            /** @enum {string} */
+            kind: "contains";
+            left: components["schemas"]["PrototypeExpressionDepth6"];
+            right: components["schemas"]["PrototypeExpressionDepth6"];
+        } | {
+            /** @enum {string} */
+            kind: "equals";
+            left: components["schemas"]["PrototypeExpressionDepth6"];
+            right: components["schemas"]["PrototypeExpressionDepth6"];
+        } | {
+            /** @enum {string} */
+            kind: "and";
+            operands: components["schemas"]["PrototypeExpressionDepth6"][];
+        } | {
+            /** @enum {string} */
+            kind: "or";
+            operands: components["schemas"]["PrototypeExpressionDepth6"][];
+        } | {
+            /** @enum {string} */
+            kind: "not";
+            operand: components["schemas"]["PrototypeExpressionDepth6"];
+        };
+        PrototypeExpressionDepth8: {
+            /** @enum {string} */
+            kind: "literal";
+            value: components["schemas"]["PrototypeRuntimeValue"];
+        } | {
+            /** @enum {string} */
+            kind: "variable";
+            path: string;
+        } | {
+            /** @enum {string} */
+            kind: "contains";
+            left: components["schemas"]["PrototypeExpressionDepth7"];
+            right: components["schemas"]["PrototypeExpressionDepth7"];
+        } | {
+            /** @enum {string} */
+            kind: "equals";
+            left: components["schemas"]["PrototypeExpressionDepth7"];
+            right: components["schemas"]["PrototypeExpressionDepth7"];
+        } | {
+            /** @enum {string} */
+            kind: "and";
+            operands: components["schemas"]["PrototypeExpressionDepth7"][];
+        } | {
+            /** @enum {string} */
+            kind: "or";
+            operands: components["schemas"]["PrototypeExpressionDepth7"][];
+        } | {
+            /** @enum {string} */
+            kind: "not";
+            operand: components["schemas"]["PrototypeExpressionDepth7"];
+        };
+        /** @description Prototype expressions use only the declared operators, at most eight levels and 64 total nodes, and one to sixteen operands per and/or. A bounded pre-parse walk enforces tree limits before structural parsing; variable references and operand/result types are checked by the Prototype document contract. */
+        PrototypeExpression: components["schemas"]["PrototypeExpressionDepth8"];
         PrototypeBindingSource: {
             /** @enum {string} */
             kind: "variable";
@@ -2446,6 +2797,10 @@ export interface components {
             /** @enum {string} */
             kind: "literal";
             value: components["schemas"]["PrototypeRuntimeValue"];
+        } | {
+            /** @enum {string} */
+            kind: "expression";
+            expression: components["schemas"]["PrototypeExpression"];
         };
         PrototypeBinding: {
             id: string;
@@ -2933,6 +3288,7 @@ export interface components {
             citations: components["schemas"]["ArtifactCitation"][];
             createdByRunId: string | null;
             knowledgeReleaseId: string | null;
+            sourcePrdVersionId?: string | null;
             /** Format: date-time */
             createdAt: string;
             /** @enum {string} */
@@ -3089,6 +3445,7 @@ export interface components {
             citations: components["schemas"]["ArtifactCitation"][];
             createdByRunId: string | null;
             knowledgeReleaseId: string | null;
+            sourcePrdVersionId?: string | null;
             /** Format: date-time */
             createdAt: string;
             /** @enum {string} */
@@ -3272,6 +3629,14 @@ export interface components {
             };
             nodes: components["schemas"]["BoardNodes"];
             edges: components["schemas"]["BoardEdge"][];
+        };
+        /** @description A business document contains exactly one nonempty text or Markdown body; enforced by the runtime Zod contract. */
+        BusinessDocument: {
+            /** @enum {string} */
+            protocol?: "workbench.document.v1";
+            title?: string;
+            text?: string;
+            markdown?: string;
         };
         /** @enum {string} */
         CanvasAgentCapability: "canvas:read" | "canvas:interact" | "artifact:edit" | "run:create";
@@ -4298,7 +4663,6 @@ export interface components {
             partNumber: components["schemas"]["UploadPartNumber"];
             etag: components["schemas"]["MultipartETag"];
         };
-        Sha256: string;
         /** @description Multipart part numbers are unique and strictly ascending; enforced by the runtime Zod contract. */
         CompleteFileUploadRequest: {
             /** @description Provider ETags keyed by unique, strictly ascending partNumber values */
@@ -4424,6 +4788,9 @@ export interface components {
             file: components["schemas"]["FileAsset"];
             upload: components["schemas"]["FileUploadSession"];
         };
+        ConfirmArtifactFinalizationRequest: {
+            checksum: string;
+        };
         CreateImageArtifactRequest: {
             /**
              * @description discriminator enum property added by openapi-typescript
@@ -4465,7 +4832,7 @@ export interface components {
             [key: string]: components["schemas"]["JsonValue"];
         };
         /** @enum {string} */
-        ExportFormat: "html" | "react" | "figma" | "mcp";
+        ExportFormat: "html" | "react" | "figma" | "mcp" | "docx" | "pdf";
         /** @enum {string} */
         ExportPackaging: "single_file" | "zip";
         /** @description Board node ids are unique and in canonical ascending order; enforced by the runtime Zod contract and database constraint. */
@@ -4579,10 +4946,12 @@ export interface components {
             token: string;
             deliveryStatus: components["schemas"]["ProjectInvitationDeliveryStatus"];
         };
+        /** @description Project Preview keeps initial-screen intent separate from single-screen Export cropping, and only Artifact selections can name an initial screen. */
         CreateProjectPreviewRequest: {
             boardId: string;
             boardRevision: components["schemas"]["Revision"];
             selection: components["schemas"]["ExportSelection"];
+            initialScreenId?: string | null;
         };
         CreateProjectReleaseRequest: {
             boardId: string;
@@ -4971,6 +5340,8 @@ export interface components {
                 react: components["schemas"]["AvailableExportCapability"];
                 figma: components["schemas"]["AvailableExportCapability"];
                 mcp: components["schemas"]["AvailableExportCapability"];
+                docx: components["schemas"]["AvailableExportCapability"];
+                pdf: components["schemas"]["AvailableExportCapability"];
             };
             packaging: {
                 single_file: components["schemas"]["AvailableExportCapability"];
@@ -5791,6 +6162,7 @@ export interface components {
             boardId: string;
             boardRevision: components["schemas"]["Revision"];
             selection: components["schemas"]["ExportSelection"];
+            initialScreenId?: string | null;
             status: components["schemas"]["PreviewStatus"];
             revision: components["schemas"]["Revision"];
             failure: {
@@ -6466,6 +6838,7 @@ export interface components {
         };
         RotateShareGrantRequest: {
             releaseId: string;
+            artifactVersionId?: string;
             scope?: components["schemas"]["ShareScope"] & unknown;
             /**
              * Format: date-time
@@ -6479,6 +6852,7 @@ export interface components {
         ShareGrant: {
             id: string;
             releaseId: string;
+            artifactVersionId?: string | null;
             createdById: string;
             scope: components["schemas"]["ShareScope"];
             status: components["schemas"]["ShareStatus"];
@@ -9599,6 +9973,109 @@ export interface operations {
                 };
                 content?: never;
             };
+            404: components["responses"]["Problem"];
+        };
+    };
+    getArtifactFinalization: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                artifactId: components["parameters"]["ArtifactId"];
+                artifactVersionId: components["parameters"]["ArtifactVersionId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Owner-visible finalization and ingestion state */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ArtifactFinalizationState"];
+                };
+            };
+            404: components["responses"]["Problem"];
+        };
+    };
+    confirmArtifactFinalization: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                artifactId: components["parameters"]["ArtifactId"];
+                artifactVersionId: components["parameters"]["ArtifactVersionId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConfirmArtifactFinalizationRequest"];
+            };
+        };
+        responses: {
+            /** @description Idempotent immutable-version confirmation and queued project knowledge ingestion */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ArtifactFinalizationState"];
+                };
+            };
+            400: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+        };
+    };
+    retryArtifactFinalization: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                artifactId: components["parameters"]["ArtifactId"];
+                artifactVersionId: components["parameters"]["ArtifactVersionId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Retry the existing ingestion job using a new release version */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ArtifactFinalizationState"];
+                };
+            };
+            400: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+        };
+    };
+    withdrawArtifactFinalization: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                artifactId: components["parameters"]["ArtifactId"];
+                artifactVersionId: components["parameters"]["ArtifactVersionId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Withdraw this source and retire all derived knowledge releases */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ArtifactFinalizationState"];
+                };
+            };
+            400: components["responses"]["Problem"];
             404: components["responses"]["Problem"];
         };
     };

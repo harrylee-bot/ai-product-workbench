@@ -1,6 +1,6 @@
 {
   "name": "@workbench/web",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "private": true,
   "scripts": {
     "dev": "next dev --turbo --hostname localhost --port 3000",
@@ -30,8 +30,8 @@
     "@tiptap/starter-kit": "^3.27.4",
     "@uppy/aws-s3": "^5.1.0",
     "@uppy/core": "^5.2.0",
-    "@workbench/workbench-contracts": "0.1.0",
-    "@workbench/workbench-telemetry": "0.1.0",
+    "@workbench/workbench-contracts": "1.0.0",
+    "@workbench/workbench-telemetry": "1.0.0",
     "@xyflow/react": "^12.11.2",
     "@xyflow/system": "0.0.79",
     "better-auth": "1.6.23",

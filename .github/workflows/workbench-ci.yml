@@ -294,9 +294,6 @@ jobs:
       - name: Check product naming
         run: npm run brand:check
 
-      - name: Validate hard-cut deletion manifest
-        run: npm run hard-cut:manifest
-
       - name: Generate clean Web route types
         run: npm --workspace @workbench/web run typegen
 

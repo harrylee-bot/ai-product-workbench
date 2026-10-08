@@ -1,7 +1,14 @@
 name: workbench
 
+x-workbench-logging: &workbench-logging
+  driver: json-file
+  options:
+    max-size: "20m"
+    max-file: "5"
+
 services:
   postgres:
+    logging: *workbench-logging
     image: ${WORKBENCH_POSTGRES_IMAGE:-pgvector/pgvector:pg16}
     restart: unless-stopped
     environment:
@@ -21,6 +28,7 @@ services:
     networks: [workbench-internal]
 
   object-storage:
+    logging: *workbench-logging
     # Local-only convenience profile. MinIO is AGPL-3.0 and is not part of the
     # default production topology; production must provide an approved S3 endpoint.
     profiles: [local-object-storage]
@@ -45,6 +53,7 @@ services:
     networks: [workbench-internal, workbench-ingress]
 
   object-storage-init:
+    logging: *workbench-logging
     profiles: [local-object-storage]
     image: ${WORKBENCH_MINIO_MC_IMAGE:-minio/mc:RELEASE.2024-11-21T17-21-54Z}
     restart: "no"
@@ -70,6 +79,7 @@ services:
     networks: [workbench-internal]
 
   object-storage-egress:
+    logging: *workbench-logging
     # TLS is passed through untouched to one configured S3 host. Internal-only
     # consumers gain OSS access without receiving general Internet egress.
     image: ${WORKBENCH_NGINX_IMAGE:-nginx:stable-alpine}
@@ -87,7 +97,14 @@ services:
     environment:
       WORKBENCH_S3_EGRESS_UPSTREAM_HOST: ${WORKBENCH_S3_EGRESS_UPSTREAM_HOST:?WORKBENCH_S3_EGRESS_UPSTREAM_HOST is required}
     volumes:
-      - ./workbench-oss-egress-nginx.conf.template:/etc/workbench/oss-egress-nginx.conf.template:ro
+      # Keep this file mount stable when --project-directory is overridden.
+      # A missing template must fail instead of becoming an empty directory.
+      - type: bind
+        source: ${WORKBENCH_APP_DIR:?WORKBENCH_APP_DIR is required}/deploy/workbench-oss-egress-nginx.conf.template
+        target: /etc/workbench/oss-egress-nginx.conf.template
+        read_only: true
+        bind:
+          create_host_path: false
     read_only: true
     cap_drop: [ALL]
     cap_add: [NET_BIND_SERVICE]
@@ -108,6 +125,7 @@ services:
       workbench-egress: {}
 
   docling:
+    logging: *workbench-logging
     profiles: [local-docling]
     image: ${WORKBENCH_DOCLING_IMAGE:-ghcr.io/docling-project/docling-serve-cpu:v1.26.0@sha256:7e07522e0240c1db3ff5b837ffa969c2ecd5a71664c0e0369f5a69fc169e30ba}
     restart: unless-stopped
@@ -160,6 +178,7 @@ services:
     networks: [workbench-internal]
 
   migrate:
+    logging: *workbench-logging
     image: ${WORKBENCH_API_MIGRATOR_IMAGE_REF:-workbench-api-migrator:local}
     build:
       context: ..
@@ -187,6 +206,7 @@ services:
     networks: [workbench-internal]
 
   workbench-api:
+    logging: *workbench-logging
     image: ${WORKBENCH_API_IMAGE_REF:-workbench-api:local}
     build:
       context: ..
@@ -290,6 +310,7 @@ services:
     networks: [workbench-internal, workbench-egress]
 
   workbench-web:
+    logging: *workbench-logging
     image: ${WORKBENCH_WEB_IMAGE_REF:-workbench-web:local}
     build:
       context: ..
@@ -351,6 +372,7 @@ services:
     networks: [workbench-internal, workbench-egress]
 
   workbench-worker:
+    logging: *workbench-logging
     image: ${WORKBENCH_RUNTIME_WORKER_IMAGE_REF:-workbench-runtime-worker:local}
     build:
       context: ..
@@ -418,6 +440,7 @@ services:
     networks: [workbench-internal, workbench-egress]
 
   workbench-file-worker:
+    logging: *workbench-logging
     image: ${WORKBENCH_FILE_WORKER_IMAGE_REF:-workbench-file-worker:local}
     build:
       context: ..
@@ -505,6 +528,7 @@ services:
     networks: [workbench-internal, workbench-egress]
 
   workbench-import-worker:
+    logging: *workbench-logging
     image: ${WORKBENCH_IMPORT_WORKER_IMAGE_REF:-workbench-import-worker:local}
     build:
       context: ..
@@ -575,6 +599,7 @@ services:
     networks: [workbench-internal, workbench-egress]
 
   workbench-export-worker:
+    logging: *workbench-logging
     image: ${WORKBENCH_EXPORT_WORKER_IMAGE_REF:-workbench-export-worker:local}
     build:
       context: ..
@@ -599,6 +624,7 @@ services:
       OTEL_TRACES_SAMPLER_ARG: ${OTEL_TRACES_SAMPLER_ARG:-1}
       WORKBENCH_DATABASE_URL: ${WORKBENCH_DATABASE_URL:?WORKBENCH_DATABASE_URL is required and must use the postgres service hostname}
       WORKBENCH_EXPORT_CONCURRENCY: ${WORKBENCH_EXPORT_CONCURRENCY:-1}
+      WORKBENCH_WEB_ORIGIN: ${WORKBENCH_WEB_ORIGIN:?WORKBENCH_WEB_ORIGIN is required}
       WORKBENCH_EXPORT_MAX_INPUT_BYTES: ${WORKBENCH_EXPORT_MAX_INPUT_BYTES:-52428800}
       WORKBENCH_EXPORT_MAX_OUTPUT_BYTES: ${WORKBENCH_EXPORT_MAX_OUTPUT_BYTES:-52428800}
       WORKBENCH_EXPORT_BROWSER_TIMEOUT_MS: ${WORKBENCH_EXPORT_BROWSER_TIMEOUT_MS:-20000}
@@ -632,6 +658,7 @@ services:
     networks: [workbench-internal]
 
   workbench-preview:
+    logging: *workbench-logging
     image: ${WORKBENCH_PREVIEW_IMAGE_REF:-workbench-preview:local}
     build:
       context: ..
@@ -683,6 +710,7 @@ services:
     networks: [workbench-internal]
 
   knowledge:
+    logging: *workbench-logging
     image: ${WORKBENCH_KNOWLEDGE_IMAGE_REF:-workbench-quartz:local}
     build:
       context: ..
@@ -716,6 +744,7 @@ services:
     networks: [workbench-internal]
 
   preview-gateway:
+    logging: *workbench-logging
     image: ${WORKBENCH_NGINX_IMAGE:-nginx:stable-alpine}
     restart: unless-stopped
     user: "101:101"
@@ -746,6 +775,7 @@ services:
     networks: [workbench-internal, workbench-ingress]
 
   gateway:
+    logging: *workbench-logging
     image: ${WORKBENCH_NGINX_IMAGE:-nginx:stable-alpine}
     restart: unless-stopped
     entrypoint: [nginx, -g, daemon off;]

@@ -16,6 +16,7 @@ import { fileURLToPath } from "node:url";
 import {
   RecoveryDrillError,
   assertReceiptContainsNoSecrets,
+  collectCandidateMigrationManifest,
   parseTableInventory,
   performRecoveryDrill,
   prepareRecoveryPlan,
@@ -29,6 +30,7 @@ import {
 
 const execFileAsync = promisify(execFile);
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const migrationCount = (await collectCandidateMigrationManifest(repoRoot)).count;
 const cliPath = path.join(repoRoot, "scripts/workbench-postgres-recovery-drill.mjs");
 const sourceCommit = "1".repeat(40);
 const candidateId = `sha256:${"2".repeat(64)}`;
@@ -48,7 +50,7 @@ test("plan mode performs no database or Git commands and needs no secrets", asyn
   const plan = JSON.parse(stdout);
   assert.equal(plan.mode, "PLAN");
   assert.equal(plan.executionRequested, false);
-  assert.equal(plan.candidate.migrationCount, 68);
+  assert.equal(plan.candidate.migrationCount, migrationCount);
   assert.match(plan.requiredConfirmation, /^G5-RECOVERY-DRILL:/u);
   await assert.rejects(stat(fixture.output), { code: "ENOENT" });
 });
@@ -463,7 +465,7 @@ function validOptions(output, overrides = {}) {
     sourceDatabase: "workbench_g5_source_test",
     restoreDatabase,
     confirmRestoreDatabase: overrides.confirmRestoreDatabase ?? restoreDatabase,
-    expectedMigrationCount: "68",
+    expectedMigrationCount: String(migrationCount),
     maxRpoSeconds: "60",
     maxRtoSeconds: "900",
     output,
@@ -482,7 +484,7 @@ function validArguments(output) {
     "--source-database", "workbench_g5_source_test",
     "--restore-database", "workbench_g5_restore_test",
     "--confirm-restore-database", "workbench_g5_restore_test",
-    "--expected-migration-count", "68",
+    "--expected-migration-count", String(migrationCount),
     "--max-rpo-seconds", "60",
     "--max-rto-seconds", "900",
     "--output", output,

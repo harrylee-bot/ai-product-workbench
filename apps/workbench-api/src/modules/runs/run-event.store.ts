@@ -72,6 +72,16 @@ function toRunEvent(
     type: event.type,
     occurredAt: event.occurredAt.toISOString(),
     traceId: run.traceId,
-    payload: event.payload,
+    payload: publicRunEventPayload(event.type, event.payload),
   });
+}
+
+export function publicRunEventPayload(type: string, payload: unknown) {
+  if (type !== "run.failed" || !payload || typeof payload !== "object" || Array.isArray(payload)) {
+    return payload;
+  }
+  const code = (payload as Record<string, unknown>).code;
+  return typeof code === "string"
+    ? { ...payload, message: code }
+    : payload;
 }

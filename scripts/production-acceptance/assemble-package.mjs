@@ -54,8 +54,8 @@ export const PRODUCTION_APPROVAL_SET_SCHEMA_VERSION = "workbench.production-appr
 
 const moduleDirectory = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(moduleDirectory, "../..");
-const packageSchemaPath = path.join(repoRoot, "docs/evidence/hard-cut-acceptance-package.schema.json");
-const approvalSetSchemaPath = path.join(repoRoot, "docs/evidence/production-approval-set.schema.json");
+const packageSchemaPath = path.join(repoRoot, "schemas/evidence/hard-cut-acceptance-package.schema.json");
+const approvalSetSchemaPath = path.join(repoRoot, "schemas/evidence/production-approval-set.schema.json");
 const COLLECTION_SCHEMA_VERSION = "workbench.production-observation-collection.v1";
 const PLAN_PACKAGE_PATH = "governance/production-acceptance-plan.json";
 const COLLECTION_PACKAGE_PATH = "collection.json";

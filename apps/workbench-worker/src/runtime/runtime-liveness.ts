@@ -3,6 +3,7 @@ import { recordRuntimeLivenessMetric } from "@workbench/workbench-telemetry";
 export type RuntimeLivenessCode =
   | "RUNTIME_PROVIDER_SUBMISSION_TIMEOUT"
   | "RUNTIME_PROVIDER_STREAM_IDLE_TIMEOUT"
+  | "RUNTIME_PROVIDER_CANCEL_TIMEOUT"
   | "RUNTIME_EXECUTION_WALL_CLOCK_EXCEEDED";
 
 export class RuntimeLivenessError extends Error {
@@ -92,7 +93,7 @@ export class RuntimeWallClockBudget {
   rebase(startedAtMs: number): void {
     if (!Number.isFinite(startedAtMs)) throw new Error("RUNTIME_EXECUTION_STARTED_AT_INVALID");
     this.stop();
-    const remainingMs = this.maximumWallClockMs - Math.max(0, Date.now() - startedAtMs);
+    const remainingMs = this.maximumWallClockMs - Math.max(0, performance.now() - startedAtMs);
     if (remainingMs <= 0) {
       recordRuntimeLivenessMetric({
         operation: "wall-clock",
@@ -127,12 +128,40 @@ export class RuntimeWallClockBudget {
   }
 }
 
-export async function raceWithAbort<T>(operation: Promise<T>, signal: AbortSignal): Promise<T> {
-  if (signal.aborted) throw abortReason(signal);
+export class RuntimeProviderCancellationBudget {
+  private readonly controller = new AbortController();
+  private readonly timer: NodeJS.Timeout;
+
+  constructor(timeoutMs: number, parentSignal?: AbortSignal) {
+    assertDuration(timeoutMs);
+    this.signal = parentSignal
+      ? AbortSignal.any([parentSignal, this.controller.signal])
+      : this.controller.signal;
+    this.timer = setTimeout(() => {
+      this.controller.abort(new RuntimeLivenessError(
+        "RUNTIME_PROVIDER_CANCEL_TIMEOUT",
+        true,
+      ));
+    }, timeoutMs);
+    this.timer.unref?.();
+  }
+
+  readonly signal: AbortSignal;
+
+  stop(): void {
+    clearTimeout(this.timer);
+  }
+}
+
+export function raceWithAbort<T>(operation: Promise<T>, signal: AbortSignal): Promise<T> {
   return new Promise<T>((resolve, reject) => {
     const abort = () => reject(abortReason(signal));
-    signal.addEventListener("abort", abort, { once: true });
     operation.then(resolve, reject).finally(() => signal.removeEventListener("abort", abort));
+    if (signal.aborted) {
+      abort();
+      return;
+    }
+    signal.addEventListener("abort", abort, { once: true });
   });
 }
 

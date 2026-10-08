@@ -5,6 +5,7 @@ import {
   prdSafetyBaselineIntro,
   prdSafetyBaselineItems,
   prdTableOfContentsEntriesFor,
+  prototypeDocumentSchema,
   type PrdBlock,
   type PrdDocument,
   type PrdDocumentV1,
@@ -629,10 +630,132 @@ describe("Workbench Artifact content", () => {
 
     const rendered = screen.getByLabelText("Start date") as HTMLInputElement;
     expect(rendered.type).toBe("date");
+    expect(rendered.getAttribute("maxlength")).toBeNull();
     expect(rendered.value).toBe("2026-07-16");
     fireEvent.change(rendered, { target: { value: "2026-08-01" } });
     expect(rendered.value).toBe("2026-08-01");
     expect(screen.getByText("2026-08-01")).not.toBeNull();
+  });
+
+  it("filters from native input and select events and restores controls and results through reset", async () => {
+    mocks.useArtifactVersion.mockReturnValue(artifactQuery("prototype", filteringPrototypeDocument()));
+    render(<WorkbenchArtifactContent reference={{ ...reference(), screenId: "screen-filter" }} />);
+    const user = userEvent.setup();
+    const keyword = screen.getByRole("textbox", { name: "书名搜索" }) as HTMLInputElement;
+    const category = screen.getByRole("combobox", { name: "分类筛选" }) as HTMLSelectElement;
+
+    expect(screen.getByText("Refactoring")).not.toBeNull();
+    expect(screen.getByText("启示录")).not.toBeNull();
+    expect(screen.queryByText("没有匹配结果")).toBeNull();
+
+    await user.type(keyword, "  REFACTORING  ");
+    expect(screen.getByText("Refactoring")).not.toBeNull();
+    expect(screen.queryByText("启示录")).toBeNull();
+    await user.selectOptions(category, "pm");
+    expect(screen.queryByText("Refactoring")).toBeNull();
+    expect(screen.getByText("没有匹配结果")).not.toBeNull();
+
+    await user.selectOptions(category, "tech");
+    await user.click(screen.getByRole("button", { name: "搜索" }));
+    expect(screen.getByText("Refactoring")).not.toBeNull();
+    expect(screen.queryByText("没有匹配结果")).toBeNull();
+
+    await user.click(screen.getByRole("button", { name: "清空筛选" }));
+    expect(keyword.value).toBe("");
+    expect(category.value).toBe("all");
+    expect(screen.getByText("Refactoring")).not.toBeNull();
+    expect(screen.getByText("启示录")).not.toBeNull();
+    expect(screen.queryByText("没有匹配结果")).toBeNull();
+
+    await user.selectOptions(category, "pm");
+    expect(screen.queryByText("Refactoring")).toBeNull();
+    expect(screen.getByText("启示录")).not.toBeNull();
+    await user.type(keyword, "不存在的书");
+    expect(screen.queryByText("启示录")).toBeNull();
+    expect(screen.getByText("没有匹配结果")).not.toBeNull();
+    await user.click(screen.getByRole("button", { name: "清空筛选" }));
+    expect(keyword.value).toBe("");
+    expect(category.value).toBe("all");
+    expect(screen.getByText("Refactoring")).not.toBeNull();
+    expect(screen.getByText("启示录")).not.toBeNull();
+  });
+
+  it("keeps calculated content available when a number input is cleared and re-entered", async () => {
+    const document = interactivePrototypeDocument();
+    const input = document.nodes.find((node) => node.id === "input-email");
+    const preview = document.nodes.find((node) => node.id === "text-email-preview");
+    const variable = document.variables.find((candidate) => candidate.path === "form.email");
+    const binding = document.bindings.find((candidate) => candidate.id === "binding-email-preview");
+    if (input?.kind !== "input" || preview?.kind !== "text" || !variable || !binding) {
+      throw new Error("numeric input fixture missing");
+    }
+    input.inputType = "number";
+    input.fieldName = "quantity";
+    input.label = "Quantity";
+    input.required = false;
+    variable.initialValue = 1;
+    preview.text = "Quantity matches";
+    binding.property = "visible";
+    binding.source = {
+      kind: "expression",
+      expression: {
+        kind: "equals",
+        left: { kind: "variable", path: "form.email" },
+        right: { kind: "literal", value: 1 },
+      },
+    };
+    mocks.useArtifactVersion.mockReturnValue(artifactQuery(
+      "prototype", prototypeDocumentSchema.parse(document),
+    ));
+    render(<WorkbenchArtifactContent reference={{ ...reference(), screenId: "screen-form" }} />);
+    const user = userEvent.setup();
+    const quantity = screen.getByRole("spinbutton", { name: "Quantity" }) as HTMLInputElement;
+
+    expect(quantity.value).toBe("1");
+    expect(quantity.getAttribute("maxlength")).toBeNull();
+    expect(screen.getByText("Quantity matches")).not.toBeNull();
+    await user.clear(quantity);
+    expect(quantity.value).toBe("");
+    expect(screen.queryByText("Quantity matches")).toBeNull();
+    await user.type(quantity, "1");
+    expect(quantity.value).toBe("1");
+    expect(screen.getByText("Quantity matches")).not.toBeNull();
+  });
+
+  it("limits text pastes and keeps filtering recoverable when a change event bypasses the native limit", async () => {
+    mocks.useArtifactVersion.mockReturnValue(artifactQuery("prototype", filteringPrototypeDocument()));
+    render(<WorkbenchArtifactContent reference={{ ...reference(), screenId: "screen-filter" }} />);
+    const user = userEvent.setup();
+    const keyword = screen.getByRole("textbox", { name: "书名搜索" }) as HTMLInputElement;
+    const longValue = "x".repeat(10_001);
+
+    await user.click(keyword);
+    await user.paste(longValue);
+    expect(keyword.value).toBe(longValue.slice(0, 10_000));
+    expect(screen.getByText("没有匹配结果")).not.toBeNull();
+
+    fireEvent.change(keyword, { target: { value: longValue } });
+    expect(keyword.value).toBe(longValue);
+    expect(screen.getByText("没有匹配结果")).not.toBeNull();
+    await user.click(screen.getByRole("button", { name: "清空筛选" }));
+    expect(keyword.value).toBe("");
+    expect(screen.getByText("Refactoring")).not.toBeNull();
+    expect(screen.getByText("启示录")).not.toBeNull();
+  });
+
+  it("limits native textarea pastes without applying text limits to select or checkbox controls", async () => {
+    mocks.useArtifactVersion.mockReturnValue(artifactQuery("prototype", interactivePrototypeDocument()));
+    render(<WorkbenchArtifactContent reference={{ ...reference(), screenId: "screen-form" }} />);
+    const user = userEvent.setup();
+    const notes = screen.getByRole("textbox", { name: "Notes" }) as HTMLTextAreaElement;
+    const longValue = "n".repeat(10_001);
+
+    await user.click(notes);
+    await user.paste(longValue);
+    expect(notes.value).toBe(longValue.slice(0, 10_000));
+    expect(screen.getByRole("textbox", { name: "Email" }).getAttribute("maxlength")).toBe("10000");
+    expect(screen.getByRole("combobox", { name: "Plan" }).getAttribute("maxlength")).toBeNull();
+    expect(screen.getByRole("checkbox", { name: "Accept" }).getAttribute("maxlength")).toBeNull();
   });
 
   it("emits one submit event for duplicate activations in the same in-flight window", async () => {
@@ -724,6 +847,49 @@ describe("Workbench Artifact content", () => {
     fireEvent.click(screen.getByRole("button", { name: "Open success" }));
     expect(screen.queryByText("Success screen")).toBeNull();
     expect(onDocumentCommit).not.toHaveBeenCalled();
+  });
+
+  it.each(["literal", "token", "state"] as const)("renders %s text fills as foreground colors without changing frame backgrounds", (source) => {
+    const document = prototypeDocument();
+    const text = document.nodes.find((node) => node.id === "text-success")!;
+    const root = document.nodes.find((node) => node.id === "frame-success")!;
+    root.style.fill = { kind: "literal", value: "#ffffff" };
+    text.style.fill = source === "token"
+      ? { kind: "token", tokenId: "text-color" }
+      : { kind: "literal", value: "#112233" };
+    document.tokens.push({ id: "text-color", name: "Text", type: "color", value: "#112233" });
+    text.style.typography = {
+      fontFamily: { kind: "literal", value: "sans-serif" },
+      fontSize: { kind: "literal", value: 16 },
+      fontWeight: { kind: "literal", value: 400 },
+      lineHeight: { kind: "literal", value: 24 },
+      letterSpacing: { kind: "literal", value: 0 },
+      align: "left",
+      transform: "none",
+      decoration: "none",
+    };
+    if (source === "state") {
+      document.screens[1]!.initialStateId = "state-colored";
+      document.states.push({
+        id: "state-colored",
+        screenId: "screen-success",
+        name: "Colored",
+        values: {},
+        overrides: [{
+          nodeId: text.id,
+          style: { ...structuredClone(text.style), fill: { kind: "literal", value: "#445566" } },
+        }],
+      });
+    }
+    mocks.useArtifactVersion.mockReturnValue(artifactQuery("prototype", document));
+
+    render(<WorkbenchArtifactContent reference={{ ...reference(), screenId: "screen-success" }} />);
+
+    const rendered = screen.getByText("Success screen");
+    expect(rendered.style.color).toBe(source === "state" ? "rgb(68, 85, 102)" : "rgb(17, 34, 51)");
+    expect(rendered.style.backgroundColor).toBe("");
+    expect(rendered.style.lineHeight).toBe("24px");
+    expect(rendered.parentElement!.style.backgroundColor).toBe("rgb(255, 255, 255)");
   });
 
   it("renders static rotation and border-box origin from the active Prototype style", () => {
@@ -1563,6 +1729,113 @@ function interactivePrototypeDocument(): PrototypeDocument {
       easing: "easeOut",
     }],
   };
+}
+
+function filteringPrototypeDocument(): PrototypeDocument {
+  const screenId = "screen-filter";
+  const books = [
+    { id: "book-refactoring", title: "Refactoring", category: "tech" },
+    { id: "book-inspired", title: "启示录", category: "pm" },
+  ];
+  const literal = (value: string) => ({ kind: "literal" as const, value });
+  const variable = (path: string) => ({ kind: "variable" as const, path });
+  const rowExpressions = books.map((book) => ({
+    kind: "and" as const,
+    operands: [
+      { kind: "contains" as const, left: literal(book.title), right: variable("filter.keyword") },
+      {
+        kind: "or" as const,
+        operands: [
+          { kind: "equals" as const, left: variable("filter.category"), right: literal("all") },
+          { kind: "equals" as const, left: variable("filter.category"), right: literal(book.category) },
+        ],
+      },
+    ],
+  }));
+  const root = {
+    ...nodeBase("root-filter", screenId, null),
+    kind: "frame" as const,
+    childIds: ["form-filter", ...books.map((book) => book.id), "text-empty"],
+    clipContent: false,
+  };
+  const form = {
+    ...nodeBase("form-filter", screenId, root.id),
+    kind: "form" as const,
+    childIds: ["input-keyword", "input-category", "button-search", "button-reset"],
+    actionIds: ["action-search"],
+  };
+  const keyword = {
+    ...nodeBase("input-keyword", screenId, form.id),
+    kind: "input" as const,
+    inputType: "text" as const,
+    fieldName: "keyword",
+    label: "书名搜索",
+    placeholder: "",
+    optionValue: null,
+    options: [],
+    required: false,
+    disabled: false,
+    bindingIds: ["binding-keyword"],
+  };
+  const category = {
+    ...keyword,
+    id: "input-category",
+    name: "Category",
+    inputType: "select" as const,
+    fieldName: "category",
+    label: "分类筛选",
+    options: [
+      { value: "all", label: "全部", disabled: false },
+      { value: "tech", label: "技术", disabled: false },
+      { value: "pm", label: "产品", disabled: false },
+    ],
+    bindingIds: ["binding-category"],
+  };
+  const button = {
+    ...nodeBase("button-search", screenId, form.id),
+    kind: "button" as const,
+    label: "搜索",
+    buttonType: "submit" as const,
+    childIds: [],
+    disabled: false,
+  };
+  return prototypeDocumentSchema.parse({
+    protocol: "workbench.prototype.v1", documentId: "prototype-filter", title: "Collection", revision: 1,
+    screens: [{
+      id: screenId, name: "Collection", route: "/", rootNodeId: root.id,
+      initialStateId: null, viewport: { width: 390, height: 844 },
+    }],
+    nodes: [
+      root, form, keyword, category, button,
+      { ...button, id: "button-reset", name: "Reset", label: "清空筛选", buttonType: "reset" },
+      ...books.map((book) => ({
+        ...nodeBase(book.id, screenId, root.id),
+        kind: "text", text: book.title, maxLines: 1, bindingIds: [`binding-${book.id}`],
+      })),
+      {
+        ...nodeBase("text-empty", screenId, root.id),
+        kind: "text", text: "没有匹配结果", maxLines: 1, bindingIds: ["binding-empty"],
+      },
+    ],
+    tokens: [], assets: [], states: [], motions: [],
+    variables: [{ path: "filter.keyword", initialValue: "" }, { path: "filter.category", initialValue: "all" }],
+    actions: [{
+      id: "action-search", nodeId: form.id, event: "submit", kind: "submit",
+      bindingIds: ["binding-keyword", "binding-category"], successStateId: null,
+    }],
+    bindings: [
+      { id: "binding-keyword", nodeId: keyword.id, property: "value", source: variable("filter.keyword") },
+      { id: "binding-category", nodeId: category.id, property: "value", source: variable("filter.category") },
+      ...books.map((book, index) => ({
+        id: `binding-${book.id}`, nodeId: book.id, property: "visible",
+        source: { kind: "expression", expression: rowExpressions[index] },
+      })),
+      {
+        id: "binding-empty", nodeId: "text-empty", property: "visible",
+        source: { kind: "expression", expression: { kind: "not", operand: { kind: "or", operands: rowExpressions } } },
+      },
+    ],
+  });
 }
 
 function frame(id: string, screenId: string, childIds: string[]): PrototypeNode {

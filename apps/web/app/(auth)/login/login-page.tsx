@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { useState } from "react";
+import { type FormEvent, useState } from "react";
 
 import { AuthForm } from "@/components/auth/auth-form";
 import { AuthSubmitButton } from "@/components/auth/auth-submit-button";
@@ -74,6 +74,11 @@ export function LoginPage({
     }
   };
 
+  const handleOidcFormSubmit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    void handleOidcSubmit();
+  };
+
   return (
     <>
       <AuthForm action={handleSubmit} defaultAccount={account}>
@@ -99,7 +104,7 @@ export function LoginPage({
             <span className="h-px flex-1 bg-border/60" />
           </div>
 
-          <form action={handleOidcSubmit} className="flex flex-col">
+          <form className="flex flex-col" onSubmit={handleOidcFormSubmit}>
             <Button
               aria-disabled={isSsoPending}
               disabled={isSsoPending}

@@ -519,6 +519,7 @@ export function ProjectScreenView({
         status={root.loadStatus}
       />
       <WorkbenchArtifactVersionDialog
+        canFinalize={root.capabilities.canManageMembers && !canvas.activeRun}
         canPin={root.capabilities.canEdit && !canvas.activeRun}
         onOpenChange={artifactEditing.onVersionHistoryOpenChange}
         onPinVersion={artifactEditing.onPinArtifactVersion}

@@ -6,10 +6,12 @@ import { ArtifactVersionPreferencesController } from "./artifact-version-prefere
 import { ArtifactVersionPreferencesService } from "./artifact-version-preferences.service.js";
 import { ArtifactsController } from "./artifacts.controller.js";
 import { ArtifactsService } from "./artifacts.service.js";
+import { ArtifactFinalizationsController } from "./artifact-finalizations.controller.js";
+import { ArtifactFinalizationsService } from "./artifact-finalizations.service.js";
 
 @Module({
   imports: [AccessModule, IdentityModule, ObjectStorageModule],
-  controllers: [ArtifactsController, ArtifactVersionPreferencesController],
-  providers: [ArtifactsService, ArtifactVersionPreferencesService],
+  controllers: [ArtifactsController, ArtifactVersionPreferencesController, ArtifactFinalizationsController],
+  providers: [ArtifactsService, ArtifactVersionPreferencesService, ArtifactFinalizationsService],
 })
 export class ArtifactsModule {}

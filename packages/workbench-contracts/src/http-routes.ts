@@ -1,4 +1,5 @@
 import { z, type ZodTypeAny } from "zod";
+import { artifactFinalizationStateSchema, confirmArtifactFinalizationRequestSchema } from "./finalizations.js";
 import {
   artifactKindSchema,
   artifactCreationSchema,
@@ -769,6 +770,27 @@ export const workbenchHttpRoutes = [
     requestHeaders: ["ifNoneMatch"],
     response: response(200, "Immutable Artifact version content, explicitly inline or blob-backed", named("ArtifactVersionDetail", artifactVersionDetailSchema), ["etag"]),
     additionalResponses: [response(304, "Immutable Artifact version manifest has not changed")], problemStatuses: problems(404),
+  },
+  {
+    method: "get", path: "/artifacts/{artifactId}/versions/{artifactVersionId}/finalization", operationId: "getArtifactFinalization",
+    response: response(200, "Owner-visible finalization and ingestion state", named("ArtifactFinalizationState", artifactFinalizationStateSchema)),
+    problemStatuses: problems(404),
+  },
+  {
+    method: "post", path: "/artifacts/{artifactId}/versions/{artifactVersionId}/finalization", operationId: "confirmArtifactFinalization",
+    requestBody: named("ConfirmArtifactFinalizationRequest", confirmArtifactFinalizationRequestSchema),
+    response: response(200, "Idempotent immutable-version confirmation and queued project knowledge ingestion", named("ArtifactFinalizationState", artifactFinalizationStateSchema)),
+    problemStatuses: problems(400, 404),
+  },
+  {
+    method: "post", path: "/artifacts/{artifactId}/versions/{artifactVersionId}/finalization/retry", operationId: "retryArtifactFinalization",
+    response: response(200, "Retry the existing ingestion job using a new release version", named("ArtifactFinalizationState", artifactFinalizationStateSchema)),
+    problemStatuses: problems(400, 404),
+  },
+  {
+    method: "post", path: "/artifacts/{artifactId}/versions/{artifactVersionId}/finalization/withdraw", operationId: "withdrawArtifactFinalization",
+    response: response(200, "Withdraw this source and retire all derived knowledge releases", named("ArtifactFinalizationState", artifactFinalizationStateSchema)),
+    problemStatuses: problems(400, 404),
   },
   {
     method: "get", path: "/artifacts/{artifactId}/versions/{artifactVersionId}/preference", operationId: "getArtifactVersionPreference",

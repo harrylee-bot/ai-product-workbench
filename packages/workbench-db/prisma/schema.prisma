@@ -345,6 +345,7 @@ enum KnowledgeSourceKind {
   vault_markdown
   storage_asset
   project_upload
+  artifact_version
 }
 
 enum KnowledgeRoute {
@@ -480,7 +481,7 @@ model Principal {
   createdProjects                 Project[]                         @relation("ProjectCreator")
   createdThreads                  Thread[]                          @relation("ThreadCreator")
   createdRuns                     Run[]
-  runCancellationReceipts         RunCancellationReceipt[]           @relation("RunCancellationReceiptPrincipal")
+  runCancellationReceipts         RunCancellationReceipt[]          @relation("RunCancellationReceiptPrincipal")
   createdSubmissionIntents        SubmissionIntent[]                @relation("SubmissionIntentCreator")
   uploadedFiles                   FileAsset[]                       @relation("FileUploader")
   createdShares                   ShareGrant[]                      @relation("ShareCreator")
@@ -505,6 +506,7 @@ model Principal {
   createdProjectInvitations       ProjectInvitation[]               @relation("ProjectInvitationCreator")
   acceptedProjectInvitations      ProjectInvitation[]               @relation("ProjectInvitationAcceptor")
   createdImportSources            ImportSource[]                    @relation("ImportSourceCreator")
+  artifactFinalizations           ArtifactFinalization[]
 
   @@unique([issuer, subject])
   @@index([email])
@@ -588,6 +590,8 @@ model Project {
   submissionIntents     SubmissionIntent[]
   canvasAgentSessions   CanvasAgentSession[]
   importSources         ImportSource[]
+  knowledgeReleases     KnowledgeRelease[]
+  artifactFinalizations ArtifactFinalization[]
 
   @@unique([id, workspaceId])
   @@index([workspaceId, status, updatedAt])
@@ -849,44 +853,65 @@ model RuntimeBinding {
 }
 
 model RuntimeAttempt {
-  id                         String                      @id @default(cuid())
-  runId                      String                      @map("run_id")
-  runtimeBindingId           String                      @map("runtime_binding_id")
-  attempt                    Int
-  adapter                    String
-  externalThreadId           String                      @map("external_thread_id")
-  externalRunId              String?                     @map("external_run_id")
-  providerIdempotencyKey     String?                     @unique @map("provider_idempotency_key") @db.VarChar(128)
-  status                     RuntimeAttemptStatus        @default(pending)
-  lastExternalEventId        String?                     @map("last_external_event_id")
-  externalEventSequence      Int                         @default(0) @map("external_event_sequence")
-  submissionUnknownAt        DateTime?                   @map("submission_unknown_at") @db.Timestamptz(6)
-  executionOwnerId           String?                     @map("execution_owner_id") @db.VarChar(128)
-  executionEpoch             Int                         @default(0) @map("execution_epoch")
-  executionHeartbeatAt       DateTime?                   @map("execution_heartbeat_at") @db.Timestamptz(6)
-  executionLeaseExpiresAt    DateTime?                   @map("execution_lease_expires_at") @db.Timestamptz(6)
-  startedAt                  DateTime?                   @map("started_at")
-  finishedAt                 DateTime?                   @map("finished_at")
-  errorCode                  String?                     @map("error_code")
-  errorDetail                String?                     @map("error_detail")
-  errorRetryable             Boolean?                    @map("error_retryable")
-  createdAt                  DateTime                    @default(now()) @map("created_at")
-  updatedAt                  DateTime                    @updatedAt @map("updated_at")
-  run                        Run                         @relation(fields: [runId], references: [id], onDelete: Cascade)
-  runtimeBinding             RuntimeBinding              @relation(fields: [runtimeBindingId], references: [id], onDelete: Cascade)
-  knowledgeToolBudget        KnowledgeToolBudget?
-  canvasAgentSession         CanvasAgentSession?
-  prototypePatchApplications PrototypePatchApplication[]
-  externalEvents             RuntimeExternalEvent[]
-  providerState              RuntimeProviderState?
+  id                                      String                                 @id @default(cuid())
+  runId                                   String                                 @map("run_id")
+  runtimeBindingId                        String                                 @map("runtime_binding_id")
+  attempt                                 Int
+  adapter                                 String
+  externalThreadId                        String                                 @map("external_thread_id")
+  externalRunId                           String?                                @map("external_run_id")
+  providerIdempotencyKey                  String?                                @unique @map("provider_idempotency_key") @db.VarChar(128)
+  status                                  RuntimeAttemptStatus                   @default(pending)
+  lastExternalEventId                     String?                                @map("last_external_event_id")
+  externalEventSequence                   Int                                    @default(0) @map("external_event_sequence")
+  submissionUnknownAt                     DateTime?                              @map("submission_unknown_at") @db.Timestamptz(6)
+  executionOwnerId                        String?                                @map("execution_owner_id") @db.VarChar(128)
+  executionEpoch                          Int                                    @default(0) @map("execution_epoch")
+  executionHeartbeatAt                    DateTime?                              @map("execution_heartbeat_at") @db.Timestamptz(6)
+  executionLeaseExpiresAt                 DateTime?                              @map("execution_lease_expires_at") @db.Timestamptz(6)
+  providerCancellationOperationEpoch      Int                                    @default(0) @map("provider_cancellation_operation_epoch")
+  providerCancellationOperationStartedAt  DateTime?                              @map("provider_cancellation_operation_started_at") @db.Timestamptz(6)
+  providerCancellationOperationDeadlineAt DateTime?                              @map("provider_cancellation_operation_deadline_at") @db.Timestamptz(6)
+  startedAt                               DateTime?                              @map("started_at")
+  finishedAt                              DateTime?                              @map("finished_at")
+  errorCode                               String?                                @map("error_code")
+  errorDetail                             String?                                @map("error_detail")
+  errorRetryable                          Boolean?                               @map("error_retryable")
+  createdAt                               DateTime                               @default(now()) @map("created_at")
+  updatedAt                               DateTime                               @updatedAt @map("updated_at")
+  run                                     Run                                    @relation(fields: [runId], references: [id], onDelete: Cascade)
+  runtimeBinding                          RuntimeBinding                         @relation(fields: [runtimeBindingId], references: [id], onDelete: Cascade)
+  knowledgeToolBudget                     KnowledgeToolBudget?
+  canvasAgentSession                      CanvasAgentSession?
+  prototypePatchApplications              PrototypePatchApplication[]
+  externalEvents                          RuntimeExternalEvent[]
+  providerState                           RuntimeProviderState?
+  providerCancellationResolution          RuntimeProviderCancellationResolution?
 
   @@unique([runId, attempt])
   @@unique([id, runId])
+  @@unique([id, runId, providerCancellationOperationEpoch], map: "runtime_attempts_provider_cancel_operation_scope_key")
   @@unique([adapter, externalRunId])
   @@index([runtimeBindingId, status])
   @@index([externalThreadId, status])
   @@index([status, executionLeaseExpiresAt])
   @@map("runtime_attempts")
+}
+
+model RuntimeProviderCancellationResolution {
+  runtimeAttemptId String         @id @map("runtime_attempt_id")
+  runId            String         @map("run_id")
+  operationEpoch   Int            @map("operation_epoch")
+  externalRunId    String         @map("external_run_id") @db.VarChar(512)
+  failureCode      String         @map("failure_code") @db.VarChar(120)
+  outcome          String         @db.VarChar(32)
+  convergedAt      DateTime       @default(now()) @map("converged_at") @db.Timestamptz(6)
+  runtimeAttempt   RuntimeAttempt @relation(fields: [runtimeAttemptId, runId, operationEpoch], references: [id, runId, providerCancellationOperationEpoch], onDelete: Cascade, onUpdate: Restrict, map: "runtime_provider_cancellation_resolutions_attempt_fkey")
+
+  @@unique([runtimeAttemptId, runId], map: "runtime_provider_cancellation_resolutions_attempt_run_key")
+  @@unique([runtimeAttemptId, runId, operationEpoch], map: "runtime_provider_cancel_resolutions_operation_scope_key")
+  @@index([runId, convergedAt])
+  @@map("runtime_provider_cancellation_resolutions")
 }
 
 model RuntimeProviderState {
@@ -978,17 +1003,17 @@ model CanvasAgentSession {
 }
 
 model CanvasToolGrant {
-  id              String                 @id @db.Uuid
-  agentSessionId  String                 @unique @map("agent_session_id")
-  payloadSha256   String                 @unique @map("payload_sha256") @db.Char(64)
-  declarationHash String                 @map("declaration_hash") @db.Char(64)
-  snapshotSha256  String                 @map("snapshot_sha256") @db.Char(64)
-  issuedAt        DateTime               @map("issued_at") @db.Timestamptz(6)
-  expiresAt       DateTime               @map("expires_at") @db.Timestamptz(6)
-  revokedAt       DateTime?              @map("revoked_at") @db.Timestamptz(6)
-  createdAt       DateTime               @default(now()) @map("created_at") @db.Timestamptz(6)
-  agentSession    CanvasAgentSession     @relation(fields: [agentSessionId], references: [id], onDelete: Cascade, onUpdate: Restrict)
-  invocations     CanvasToolInvocation[]
+  id                 String                   @id @db.Uuid
+  agentSessionId     String                   @unique @map("agent_session_id")
+  payloadSha256      String                   @unique @map("payload_sha256") @db.Char(64)
+  declarationHash    String                   @map("declaration_hash") @db.Char(64)
+  snapshotSha256     String                   @map("snapshot_sha256") @db.Char(64)
+  issuedAt           DateTime                 @map("issued_at") @db.Timestamptz(6)
+  expiresAt          DateTime                 @map("expires_at") @db.Timestamptz(6)
+  revokedAt          DateTime?                @map("revoked_at") @db.Timestamptz(6)
+  createdAt          DateTime                 @default(now()) @map("created_at") @db.Timestamptz(6)
+  agentSession       CanvasAgentSession       @relation(fields: [agentSessionId], references: [id], onDelete: Cascade, onUpdate: Restrict)
+  invocations        CanvasToolInvocation[]
   visualCapabilities CanvasVisualCapability[]
 
   @@index([expiresAt])
@@ -1032,7 +1057,7 @@ model CanvasToolInvocation {
   agentSession              CanvasAgentSession         @relation(fields: [agentSessionId, runId], references: [id, runId], onDelete: Cascade, onUpdate: Restrict)
   grant                     CanvasToolGrant            @relation(fields: [grantId], references: [id], onDelete: Restrict, onUpdate: Restrict)
   clientCommand             CanvasClientCommand?
-  visualCapability           CanvasVisualCapability?
+  visualCapability          CanvasVisualCapability?
   resultArtifactVersion     ArtifactVersion?           @relation("CanvasInvocationResultVersion", fields: [resultArtifactVersionId, projectId], references: [id, projectId], onDelete: Restrict, onUpdate: Restrict)
 
   @@unique([agentSessionId, toolCallId])
@@ -1070,7 +1095,7 @@ model CanvasClientCommand {
   updatedAt                     DateTime                  @updatedAt @map("updated_at") @db.Timestamptz(6)
   agentSession                  CanvasAgentSession        @relation(fields: [agentSessionId, runId], references: [id, runId], onDelete: Cascade, onUpdate: Restrict)
   invocation                    CanvasToolInvocation      @relation(fields: [invocationId], references: [id], onDelete: Cascade, onUpdate: Restrict)
-  visualCapability             CanvasVisualCapability?
+  visualCapability              CanvasVisualCapability?
 
   @@unique([agentSessionId, toolCallId])
   @@index([projectId, clientSessionId, status, createdAt])
@@ -1082,7 +1107,7 @@ model CanvasClientCommand {
 model CanvasVisualCapability {
   id                String                       @id @db.Uuid
   agentSessionId    String                       @map("agent_session_id")
-  grantId           String                       @db.Uuid @map("grant_id")
+  grantId           String                       @map("grant_id") @db.Uuid
   invocationId      String                       @unique @map("invocation_id")
   commandId         String                       @unique @map("command_id")
   projectId         String                       @map("project_id")
@@ -1286,20 +1311,20 @@ model Blob {
 }
 
 model ReadyObjectIntegrityIncident {
-  id                   String   @id @default(cuid())
-  fingerprint          String   @unique @db.Char(64)
-  storageKey           String   @map("storage_key")
-  failureCode          String   @map("failure_code") @db.VarChar(120)
-  expectedSha256       String   @map("expected_sha256") @db.Char(64)
-  expectedByteSize     BigInt   @map("expected_byte_size")
-  expectedMediaType    String   @map("expected_media_type")
-  observedSha256       String?  @map("observed_sha256") @db.Char(64)
-  observedByteSize     BigInt?  @map("observed_byte_size")
-  observedMediaType    String?  @map("observed_media_type") @db.VarChar(512)
-  observedContentRange String?  @map("observed_content_range") @db.VarChar(512)
-  occurrenceCount      Int      @default(1) @map("occurrence_count")
-  firstDetectedAt      DateTime @default(now()) @map("first_detected_at") @db.Timestamptz(6)
-  lastDetectedAt       DateTime @default(now()) @map("last_detected_at") @db.Timestamptz(6)
+  id                   String                                 @id @default(cuid())
+  fingerprint          String                                 @unique @db.Char(64)
+  storageKey           String                                 @map("storage_key")
+  failureCode          String                                 @map("failure_code") @db.VarChar(120)
+  expectedSha256       String                                 @map("expected_sha256") @db.Char(64)
+  expectedByteSize     BigInt                                 @map("expected_byte_size")
+  expectedMediaType    String                                 @map("expected_media_type")
+  observedSha256       String?                                @map("observed_sha256") @db.Char(64)
+  observedByteSize     BigInt?                                @map("observed_byte_size")
+  observedMediaType    String?                                @map("observed_media_type") @db.VarChar(512)
+  observedContentRange String?                                @map("observed_content_range") @db.VarChar(512)
+  occurrenceCount      Int                                    @default(1) @map("occurrence_count")
+  firstDetectedAt      DateTime                               @default(now()) @map("first_detected_at") @db.Timestamptz(6)
+  lastDetectedAt       DateTime                               @default(now()) @map("last_detected_at") @db.Timestamptz(6)
   retentionReleases    ReadyObjectIntegrityRetentionRelease[]
 
   @@index([storageKey, lastDetectedAt], map: "ready_object_integrity_incidents_storage_detected_idx")
@@ -1636,6 +1661,11 @@ model ArtifactVersion {
   runtimeDraftIndex         Int?                            @map("runtime_draft_index")
   runtimeDraftTitle         String?                         @map("runtime_draft_title")
   knowledgeReleaseId        String?                         @map("knowledge_release_id")
+  sourcePrdVersionId        String?                         @map("source_prd_version_id")
+  sourcePrdVersion          ArtifactVersion?                @relation("PrototypeSourcePrd", fields: [sourcePrdVersionId], references: [id], onDelete: Restrict)
+  derivedPrototypes         ArtifactVersion[]               @relation("PrototypeSourcePrd")
+  finalization              ArtifactFinalization?
+  knowledgeSources          KnowledgeDocumentSource[]
   createdAt                 DateTime                        @default(now()) @map("created_at")
   artifact                  Artifact                        @relation("ArtifactVersions", fields: [artifactId, projectId], references: [id, projectId], onDelete: Cascade, onUpdate: Restrict)
   currentFor                Artifact[]                      @relation("ArtifactCurrentVersion")
@@ -2014,24 +2044,25 @@ model ReleaseArtifactVersion {
 }
 
 model ShareGrant {
-  id             String           @id @default(cuid())
-  projectId      String           @map("project_id")
-  releaseId      String           @map("release_id")
-  createdById    String           @map("created_by_id")
-  idempotencyKey String           @map("idempotency_key")
-  requestHash    String           @map("request_hash")
-  tokenHash      String           @unique @map("token_hash")
-  scope          ShareScope       @default(view)
-  status         ShareStatus      @default(active)
-  revision       Int              @default(0)
-  expiresAt      DateTime?        @map("expires_at")
-  revokedAt      DateTime?        @map("revoked_at")
-  createdAt      DateTime         @default(now()) @map("created_at")
-  updatedAt      DateTime         @updatedAt @map("updated_at")
-  project        Project          @relation(fields: [projectId], references: [id], onDelete: Restrict, onUpdate: Restrict)
-  release        ProjectRelease   @relation(fields: [releaseId, projectId], references: [id, projectId], onDelete: Restrict, onUpdate: Restrict)
-  createdBy      Principal        @relation("ShareCreator", fields: [createdById], references: [id])
-  remixes        ProjectLineage[]
+  id                String           @id @default(cuid())
+  projectId         String           @map("project_id")
+  releaseId         String           @map("release_id")
+  artifactVersionId String?          @map("artifact_version_id")
+  createdById       String           @map("created_by_id")
+  idempotencyKey    String           @map("idempotency_key")
+  requestHash       String           @map("request_hash")
+  tokenHash         String           @unique @map("token_hash")
+  scope             ShareScope       @default(view)
+  status            ShareStatus      @default(active)
+  revision          Int              @default(0)
+  expiresAt         DateTime?        @map("expires_at")
+  revokedAt         DateTime?        @map("revoked_at")
+  createdAt         DateTime         @default(now()) @map("created_at")
+  updatedAt         DateTime         @updatedAt @map("updated_at")
+  project           Project          @relation(fields: [projectId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  release           ProjectRelease   @relation(fields: [releaseId, projectId], references: [id, projectId], onDelete: Restrict, onUpdate: Restrict)
+  createdBy         Principal        @relation("ShareCreator", fields: [createdById], references: [id])
+  remixes           ProjectLineage[]
 
   @@unique([id, releaseId])
   @@index([projectId, status])
@@ -2161,26 +2192,27 @@ model ExternalExportDelivery {
 }
 
 model ProjectPreview {
-  id             String                          @id @default(cuid())
-  projectId      String                          @map("project_id")
-  boardId        String                          @map("board_id")
-  boardRevision  Int                             @map("board_revision")
-  boardSnapshot  Json                            @map("board_snapshot")
-  boardChecksum  String                          @map("board_checksum")
-  manifest       Json
-  manifestSha256 String                          @map("manifest_sha256")
-  exportJobId    String                          @unique @map("export_job_id")
-  createdById    String                          @map("created_by_id")
-  idempotencyKey String                          @map("idempotency_key")
-  requestHash    String                          @map("request_hash")
-  expiresAt      DateTime                        @map("expires_at")
-  createdAt      DateTime                        @default(now()) @map("created_at")
-  updatedAt      DateTime                        @updatedAt @map("updated_at")
-  project        Project                         @relation(fields: [projectId], references: [id], onDelete: Cascade, onUpdate: Restrict)
-  board          Board                           @relation(fields: [boardId, projectId], references: [id, projectId], onDelete: Restrict, onUpdate: Restrict)
-  exportJob      ExportJob                       @relation("PreviewExportJob", fields: [exportJobId], references: [id], onDelete: Cascade, onUpdate: Restrict)
-  createdBy      Principal                       @relation("PreviewCreator", fields: [createdById], references: [id], onDelete: Restrict, onUpdate: Restrict)
-  artifactPins   ProjectPreviewArtifactVersion[]
+  id              String                          @id @default(cuid())
+  projectId       String                          @map("project_id")
+  boardId         String                          @map("board_id")
+  boardRevision   Int                             @map("board_revision")
+  initialScreenId String?                         @map("initial_screen_id")
+  boardSnapshot   Json                            @map("board_snapshot")
+  boardChecksum   String                          @map("board_checksum")
+  manifest        Json
+  manifestSha256  String                          @map("manifest_sha256")
+  exportJobId     String                          @unique @map("export_job_id")
+  createdById     String                          @map("created_by_id")
+  idempotencyKey  String                          @map("idempotency_key")
+  requestHash     String                          @map("request_hash")
+  expiresAt       DateTime                        @map("expires_at")
+  createdAt       DateTime                        @default(now()) @map("created_at")
+  updatedAt       DateTime                        @updatedAt @map("updated_at")
+  project         Project                         @relation(fields: [projectId], references: [id], onDelete: Cascade, onUpdate: Restrict)
+  board           Board                           @relation(fields: [boardId, projectId], references: [id, projectId], onDelete: Restrict, onUpdate: Restrict)
+  exportJob       ExportJob                       @relation("PreviewExportJob", fields: [exportJobId], references: [id], onDelete: Cascade, onUpdate: Restrict)
+  createdBy       Principal                       @relation("PreviewCreator", fields: [createdById], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  artifactPins    ProjectPreviewArtifactVersion[]
 
   @@unique([id, projectId])
   @@unique([projectId, idempotencyKey])
@@ -2216,6 +2248,13 @@ model KnowledgeRelease {
   workspaceId                String?                   @map("workspace_id")
   version                    Int
   status                     KnowledgeReleaseStatus    @default(building)
+  projectId                  String?                   @map("project_id")
+  parentReleaseId            String?                   @map("parent_release_id")
+  ingestionJobId             String?                   @map("ingestion_job_id")
+  project                    Project?                  @relation(fields: [projectId], references: [id], onDelete: Restrict)
+  parentRelease              KnowledgeRelease?         @relation("KnowledgeReleaseLineage", fields: [parentReleaseId], references: [id], onDelete: Restrict)
+  derivedReleases            KnowledgeRelease[]        @relation("KnowledgeReleaseLineage")
+  ingestionJob               KnowledgeIngestionJob?    @relation(fields: [ingestionJobId], references: [id], onDelete: Restrict)
   embeddingProfileId         String                    @map("embedding_profile_id")
   embeddingProfileSpecSha256 String                    @map("embedding_profile_spec_sha256")
   embeddingDimension         Int                       @map("embedding_dimension")
@@ -2246,29 +2285,98 @@ model KnowledgeRelease {
   @@index([embeddingProfileId, status])
   @@index([retrievalProfileId, status])
   @@index([workspaceId, status, version])
+  @@index([projectId, status, version])
+  @@index([parentReleaseId])
+  @@index([ingestionJobId])
   @@index([status, leaseExpiresAt, updatedAt])
   @@map("knowledge_releases")
 }
 
 model KnowledgeDocument {
-  id           String              @id @default(cuid())
-  releaseId    String              @map("release_id")
-  sourceKind   KnowledgeSourceKind @map("source_kind")
-  sourcePath   String              @map("source_path")
+  id           String                   @id @default(cuid())
+  releaseId    String                   @map("release_id")
+  sourceKind   KnowledgeSourceKind      @map("source_kind")
+  sourcePath   String                   @map("source_path")
   title        String
   checksum     String
   route        KnowledgeRoute
-  sourceBlobId String?             @map("source_blob_id")
+  sourceBlobId String?                  @map("source_blob_id")
   metadata     Json
-  release      KnowledgeRelease    @relation(fields: [releaseId], references: [id], onDelete: Cascade)
-  sourceBlob   Blob?               @relation("KnowledgeSourceBlob", fields: [sourceBlobId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  release      KnowledgeRelease         @relation(fields: [releaseId], references: [id], onDelete: Cascade)
+  sourceBlob   Blob?                    @relation("KnowledgeSourceBlob", fields: [sourceBlobId], references: [id], onDelete: Restrict, onUpdate: Restrict)
   chunks       KnowledgeChunk[]
+  source       KnowledgeDocumentSource?
 
   @@unique([releaseId, sourcePath])
   @@unique([id, releaseId])
   @@index([releaseId, route])
   @@index([sourceBlobId])
   @@map("knowledge_documents")
+}
+
+enum ArtifactFinalizationStatus {
+  confirmed
+  ingesting
+  ingested
+  rejected
+  withdrawn
+}
+
+enum KnowledgeIngestionStatus {
+  queued
+  converting
+  indexing
+  publishing
+  published
+  failed
+  withdrawn
+}
+
+model ArtifactFinalization {
+  id                String                     @id @default(cuid())
+  artifactVersionId String                     @unique @map("artifact_version_id")
+  projectId         String                     @map("project_id")
+  confirmedById     String                     @map("confirmed_by_id")
+  checksum          String
+  status            ArtifactFinalizationStatus @default(confirmed)
+  confirmedAt       DateTime                   @default(now()) @map("confirmed_at")
+  withdrawnAt       DateTime?                  @map("withdrawn_at")
+  artifactVersion   ArtifactVersion            @relation(fields: [artifactVersionId], references: [id], onDelete: Restrict)
+  project           Project                    @relation(fields: [projectId], references: [id], onDelete: Restrict)
+  confirmedBy       Principal                  @relation(fields: [confirmedById], references: [id], onDelete: Restrict)
+  ingestionJob      KnowledgeIngestionJob?
+
+  @@index([projectId, status])
+  @@map("artifact_finalizations")
+}
+
+model KnowledgeIngestionJob {
+  id             String                   @id @default(cuid())
+  finalizationId String                   @unique @map("finalization_id")
+  status         KnowledgeIngestionStatus @default(queued)
+  attempt        Int                      @default(0)
+  sourcePath     String                   @map("source_path")
+  markdown       String
+  checksum       String
+  errorCode      String?                  @map("error_code")
+  createdAt      DateTime                 @default(now()) @map("created_at")
+  updatedAt      DateTime                 @updatedAt @map("updated_at")
+  finalization   ArtifactFinalization     @relation(fields: [finalizationId], references: [id], onDelete: Restrict)
+  releases       KnowledgeRelease[]
+
+  @@index([status, updatedAt])
+  @@map("knowledge_ingestion_jobs")
+}
+
+model KnowledgeDocumentSource {
+  documentId        String            @id @map("document_id")
+  artifactVersionId String            @map("artifact_version_id")
+  checksum          String
+  document          KnowledgeDocument @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  artifactVersion   ArtifactVersion   @relation(fields: [artifactVersionId], references: [id], onDelete: Restrict)
+
+  @@index([artifactVersionId])
+  @@map("knowledge_document_sources")
 }
 
 model KnowledgeChunk {

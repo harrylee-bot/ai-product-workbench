@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import importlib.util
+import copy
 from pathlib import Path
 import sys
 import types
@@ -35,6 +36,9 @@ def install_import_stubs() -> bool:
         def __init__(self, **values):
             self.__dict__.update(values)
 
+    class AIMessage(ToolMessage):
+        pass
+
     class Command:
         pass
 
@@ -55,9 +59,10 @@ def install_import_stubs() -> bool:
     model_types = modules["langchain.agents.middleware.types"]
     model_types.ModelCallResult = object
     model_types.ModelRequest = object
-    model_types.ModelResponse = object
+    model_types.ModelResponse = type("ModelResponse", (), {})
     modules["langchain_core.messages"].SystemMessage = SystemMessage
     modules["langchain_core.messages"].ToolMessage = ToolMessage
+    modules["langchain_core.messages"].AIMessage = AIMessage
     modules["langgraph.prebuilt.tool_node"].ToolCallRequest = object
     modules["langgraph.types"].Command = Command
     sys.modules.update(modules)
@@ -95,6 +100,9 @@ workbench_requested_artifact_kinds_from_runnable_config = (
 workbench_knowledge_enabled_from_runnable_config = (
     middleware_module.workbench_knowledge_enabled_from_runnable_config
 )
+workbench_run_scope_from_runnable_config = (
+    middleware_module.workbench_run_scope_from_runnable_config
+)
 
 
 class FakeTool:
@@ -103,14 +111,18 @@ class FakeTool:
 
 
 class FakeModelRequest:
-    def __init__(self, tools, system_message=None):
+    def __init__(self, tools, system_message=None, state=None, context=None):
         self.tools = list(tools)
         self.system_message = system_message
+        self.state = state or {}
+        self.runtime = types.SimpleNamespace(context=context)
 
     def override(self, **overrides):
         return FakeModelRequest(
             overrides.get("tools", self.tools),
             overrides.get("system_message", self.system_message),
+            self.state,
+            self.runtime.context,
         )
 
 
@@ -251,6 +263,120 @@ def prd_messages(*, stage_count: int, references: bool, draft: bool = False) -> 
     return messages
 
 
+def automatic_prd_request():
+    messages = prd_messages(stage_count=4, references=True, draft=True)
+    for message in messages:
+        if message.get("type") == "tool" and "artifact" in message:
+            message["artifact"].update({
+                "runId": "run-auto", "runtimeAttemptId": "attempt-auto",
+                "toolCallId": message["tool_call_id"],
+            })
+        elif message.get("type") == "tool" and message.get("name") == READ_FILE_TOOL_NAME:
+            message["artifact"] = {
+                "protocol": "workbench.runtime.prd-reference-read.v1",
+                "runId": "run-auto",
+                "runtimeAttemptId": "attempt-auto",
+                "toolCallId": message["tool_call_id"],
+            }
+    messages[-1]["artifact"]["artifactIndex"] = 0
+    messages[-1]["artifact"]["draft"]["title"] = "Normalized PRD"
+    return FakeModelRequest(
+        [FakeTool(RUNTIME_RESULT_TOOL_NAME)],
+        state={"messages": messages},
+        context={"workbench": {
+            "runId": "run-auto", "runtimeAttemptId": "attempt-auto",
+            "requestedArtifactKinds": ["prd"],
+        }},
+    )
+
+
+class AutomaticPrdResultTest(unittest.IsolatedAsyncioTestCase):
+    def test_submits_the_normalized_draft_once_without_calling_model(self):
+        request = automatic_prd_request()
+        middleware = WorkbenchToolScopeMiddleware(
+            None,
+            ["prd"],
+            run_scope=("run-auto", "attempt-auto"),
+        )
+        result = middleware.wrap_model_call(request, lambda _request: self.fail("model called"))
+        call = result.tool_calls[0]
+        self.assertEqual(call["name"], RUNTIME_RESULT_TOOL_NAME)
+        self.assertEqual(call["args"]["candidate"]["artifacts"], [request.state["messages"][-1]["artifact"]["draft"]])
+        replay = middleware.wrap_model_call(request, lambda _request: self.fail("model called"))
+        self.assertEqual(call["id"], replay.tool_calls[0]["id"])
+
+        append_tool_batch(request.state["messages"], [call], [tool_message(
+            RUNTIME_RESULT_TOOL_NAME, call["id"], "Error: validation failed", status="error",
+        )])
+        sentinel = object()
+        self.assertIs(middleware.wrap_model_call(request, lambda _request: sentinel), sentinel)
+
+    async def test_async_converges_success_without_another_model_call(self):
+        request = automatic_prd_request()
+        middleware = WorkbenchToolScopeMiddleware(
+            None,
+            ["prd"],
+            run_scope=("run-auto", "attempt-auto"),
+        )
+
+        async def forbidden(_request):
+            self.fail("model called")
+
+        automatic = await middleware.awrap_model_call(request, forbidden)
+        call = automatic.tool_calls[0]
+        append_tool_batch(request.state["messages"], [call], [tool_message(
+            RUNTIME_RESULT_TOOL_NAME, call["id"], artifact={
+                "protocol": "workbench.runtime.validated-result.v1",
+                "ok": True, "runId": "run-auto", "runtimeAttemptId": "attempt-auto",
+                "toolCallId": call["id"],
+                "result": {**call["args"]["candidate"], "message": "Complete"},
+            },
+        )])
+        result = await middleware.awrap_model_call(request, forbidden)
+        self.assertEqual(result.content, "Complete")
+        self.assertFalse(getattr(result, "tool_calls", []))
+
+    def test_rejects_unbound_stale_missing_and_duplicate_history(self):
+        original = automatic_prd_request()
+        for variant in ("scope", "attempt", "reference", "stage", "draft", "index", "duplicate", "new-turn", "pending"):
+            with self.subTest(variant=variant):
+                request = copy.deepcopy(original)
+                messages = request.state["messages"]
+                run_scope = ("run-auto", "attempt-auto")
+                if variant == "scope":
+                    run_scope = None
+                elif variant == "attempt":
+                    run_scope = ("run-auto", "another-attempt")
+                elif variant == "reference":
+                    next(m for m in messages if m.get("name") == READ_FILE_TOOL_NAME)["content"] = "changed"
+                elif variant == "stage":
+                    next(m for m in messages if m.get("name") == "workbench_generation_stage_update")["artifact"]["runId"] = "other"
+                elif variant == "draft":
+                    messages[-1]["artifact"]["ok"] = False
+                elif variant == "index":
+                    messages[-1]["artifact"]["artifactIndex"] = 1
+                elif variant == "duplicate":
+                    messages.extend(copy.deepcopy(messages[-2:]))
+                elif variant == "new-turn":
+                    messages.append({"type": "human", "content": "new request"})
+                else:
+                    messages.append({"type": "ai", "content": "", "tool_calls": [
+                        call(RUNTIME_RESULT_TOOL_NAME, "pending-result"),
+                    ]})
+                sentinel = object()
+                self.assertIs(
+                    WorkbenchToolScopeMiddleware(
+                        None,
+                        ["prd"],
+                        run_scope=run_scope,
+                    ).wrap_model_call(
+                        request,
+                        lambda _request: sentinel,
+                    ),
+                    sentinel,
+                )
+
+
 def request_in_state(
     messages: list[dict],
     name: str,
@@ -362,6 +488,32 @@ class WorkbenchToolScopeMiddlewareTests(unittest.TestCase):
             )
         )
 
+    def test_run_scope_is_read_only_from_trusted_runtime_context(self) -> None:
+        expected = ("run-1", "attempt-1")
+        self.assertEqual(
+            workbench_run_scope_from_runnable_config(
+                {
+                    "context": {
+                        "workbench": {
+                            "runId": expected[0],
+                            "runtimeAttemptId": expected[1],
+                        }
+                    }
+                }
+            ),
+            expected,
+        )
+        for malformed in (
+            None,
+            {},
+            {"configurable": {"runId": "run-1", "runtimeAttemptId": "attempt-1"}},
+            {"context": {"workbench": []}},
+            {"context": {"workbench": {"runId": "", "runtimeAttemptId": "attempt-1"}}},
+            {"context": {"workbench": {"runId": "run-1", "runtimeAttemptId": " attempt-1"}}},
+        ):
+            with self.subTest(malformed=malformed):
+                self.assertIsNone(workbench_run_scope_from_runnable_config(malformed))
+
     def test_knowledge_tool_is_visible_only_for_the_exact_true_grant(self) -> None:
         for disabled in (None, False, 1, "true", {}, []):
             with self.subTest(disabled=disabled):
@@ -417,6 +569,7 @@ class WorkbenchToolScopeMiddlewareTests(unittest.TestCase):
             self.visible_names(None, ["prd", "prototype"]),
             [
                 "workbench_runtime_result_submit",
+                READ_FILE_TOOL_NAME,
                 *ARTIFACT_PROGRESS_TOOL_NAMES,
                 *PROTOTYPE_ONLY_TOOL_NAMES,
             ],
@@ -451,7 +604,7 @@ class WorkbenchToolScopeMiddlewareTests(unittest.TestCase):
         )
         for non_exact_prd_scope in (
             ["prototype"],
-            ["prd", "document"],
+            ["document"],
             ["prd", "prd"],
         ):
             with self.subTest(non_exact_prd_scope=non_exact_prd_scope):
@@ -1065,9 +1218,9 @@ class WorkbenchToolScopeMiddlewareTests(unittest.TestCase):
         blocked = middleware.wrap_tool_call(current_final, lambda _request: sentinel)
         self.assertIn("WORKBENCH_PRD_COLLECTING_STAGE_REQUIRED", blocked.content)
 
-    def test_prd_reference_reader_is_blocked_outside_exact_prd_runs(self) -> None:
+    def test_prd_reference_reader_is_blocked_when_prd_is_not_requested(self) -> None:
         path = PRD_REFERENCE_FILES[0][0]
-        for requested_kinds in (["prototype"], ["document"], ["prd", "prototype"]):
+        for requested_kinds in (["prototype"], ["document"]):
             with self.subTest(requested_kinds=requested_kinds):
                 middleware = WorkbenchToolScopeMiddleware(None, requested_kinds)
                 called = False
@@ -1084,6 +1237,70 @@ class WorkbenchToolScopeMiddlewareTests(unittest.TestCase):
                     blocked.content,
                     "Error: WORKBENCH_PRD_REFERENCE_TOOL_NOT_AUTHORIZED",
                 )
+
+    def test_linked_run_keeps_prd_draft_then_publishes_prototype_before_combined_result(self) -> None:
+        middleware = WorkbenchToolScopeMiddleware(
+            None, ["prd", "prototype"], run_scope=("run-auto", "attempt-auto"),
+        )
+        request = automatic_prd_request()
+        request.runtime.context["workbench"]["requestedArtifactKinds"] = ["prd", "prototype"]
+        scoped = middleware.wrap_model_call(request, lambda scoped: scoped)
+        self.assertIsInstance(scoped, FakeModelRequest)
+        self.assertIn("<workbench_linked_prd_policy>", scoped.system_message.text)
+        self.assertNotIn("<workbench_prd_clarification_policy>", scoped.system_message.text)
+        messages = request.state["messages"]
+        prd = copy.deepcopy(messages[-1]["artifact"]["draft"])
+        prototype = {"kind": "prototype", "title": "Linked Prototype"}
+        sentinel = object()
+
+        early = request_in_state(
+            copy.deepcopy(messages), RUNTIME_RESULT_TOOL_NAME, "early",
+            {"candidate": {"artifacts": [prd]}},
+        )
+        self.assertIn(
+            "WORKBENCH_LINKED_PROTOTYPE_STAGES_REQUIRED",
+            middleware.wrap_tool_call(early, lambda _request: sentinel).content,
+        )
+        for index, stage in enumerate(middleware_module.PROTOTYPE_STAGE_SEQUENCE):
+            call_id = f"prototype-stage-{index}"
+            stage_request = request_in_state(messages, "workbench_generation_stage_update", call_id, {"stage": stage})
+            self.assertIs(middleware.wrap_tool_call(stage_request, lambda _request: sentinel), sentinel)
+            messages.append(tool_message("workbench_generation_stage_update", call_id, artifact={
+                "protocol": "workbench.runtime.generation-stage.v1", "stage": stage,
+                "runId": "run-auto", "runtimeAttemptId": "attempt-auto", "toolCallId": call_id,
+            }))
+
+        draft_request = request_in_state(messages, "workbench_artifact_draft_publish", "prototype-draft", {
+            "artifact_index": 1, "draft": prototype,
+        })
+        self.assertIs(middleware.wrap_tool_call(draft_request, lambda _request: sentinel), sentinel)
+        messages.append(tool_message("workbench_artifact_draft_publish", "prototype-draft", artifact={
+            "protocol": "workbench.runtime.artifact-draft.v1", "ok": True,
+            "runId": "run-auto", "runtimeAttemptId": "attempt-auto", "toolCallId": "prototype-draft",
+            "artifactIndex": 1, "draft": prototype,
+        }))
+        incomplete = request_in_state(
+            copy.deepcopy(messages), RUNTIME_RESULT_TOOL_NAME, "incomplete",
+            {"candidate": {"artifacts": [prd]}},
+        )
+        self.assertIn(
+            "WORKBENCH_LINKED_RESULT_DRAFT_MISMATCH",
+            middleware.wrap_tool_call(incomplete, lambda _request: sentinel).content,
+        )
+        result_request = request_in_state(messages, RUNTIME_RESULT_TOOL_NAME, "combined", {
+            "candidate": {"artifacts": [prd, prototype]},
+        })
+        self.assertIs(middleware.wrap_tool_call(result_request, lambda _request: sentinel), sentinel)
+
+    def test_linked_run_rejects_prototype_stages_before_prd_draft(self) -> None:
+        middleware = WorkbenchToolScopeMiddleware(None, ["prd", "prototype"])
+        request = request_in_state(
+            prd_messages(stage_count=4, references=True),
+            "workbench_generation_stage_update", "early-prototype",
+            {"stage": middleware_module.PROTOTYPE_STAGE_SEQUENCE[0]},
+        )
+        result = middleware.wrap_tool_call(request, lambda _request: self.fail("handler called"))
+        self.assertIn("WORKBENCH_PRD_DRAFT_REQUIRED", result.content)
 
 
 class WorkbenchToolScopeMiddlewareAsyncTests(unittest.IsolatedAsyncioTestCase):

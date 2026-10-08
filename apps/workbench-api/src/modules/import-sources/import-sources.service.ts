@@ -145,7 +145,6 @@ export class ImportSourcesService {
             request: request as Prisma.InputJsonValue,
             requestHash,
             idempotencyKey,
-            checksum: resolved.checksum,
             revision: 0,
           },
           select: importSourceSelect,

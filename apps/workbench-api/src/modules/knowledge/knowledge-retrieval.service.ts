@@ -36,7 +36,7 @@ export class KnowledgeRetrievalService {
     assertQueryMode(command.mode, command.routeScope);
     const query = normalizeQuery(command.query);
     const project = await this.access.findProject(command.principalId, command.projectId, "read");
-    const release = await this.store.findScopedRelease(command.releaseId, project.workspaceId);
+    const release = await this.store.findScopedRelease(command.releaseId, project.workspaceId, command.projectId);
     if (!release) throw notFoundProblem("Knowledge release");
     const resolved = assertKnowledgeReleasePins(release, this.dependencies.segmenter.identity);
     const { embeddingProfile, retrievalProfile, policy } = resolved;

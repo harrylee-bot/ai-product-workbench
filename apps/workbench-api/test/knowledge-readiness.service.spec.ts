@@ -20,12 +20,12 @@ afterEach(() => {
 });
 
 describe("KnowledgeReadinessService", () => {
-  it("does not require capability or providers before a ready release exists", async () => {
+  it("fails closed before a ready release exists", async () => {
     const { db, service } = createService([], {});
     const request = vi.fn();
     vi.stubGlobal("fetch", request);
 
-    await expect(service.assertReady()).resolves.toBeUndefined();
+    await expect(service.assertReady()).rejects.toThrow("KNOWLEDGE_RELEASE_REQUIRED");
     expect(db.knowledgeRelease.findMany).toHaveBeenCalledOnce();
     expect(request).not.toHaveBeenCalled();
   });
@@ -58,7 +58,7 @@ describe("KnowledgeReadinessService", () => {
     vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => (
       String(input).includes("reranker") ? Response.json(rerankerInfo()) : Response.json(embeddingInfo())
     )));
-    const { db, service } = createService([readyPin(embeddingSpec(), "retired")], fullConfig());
+    const { db, service } = createService([readyPin(), readyPin(embeddingSpec(), "retired")], fullConfig());
 
     await expect(service.assertReady()).resolves.toBeUndefined();
     expect(db.knowledgeRelease.findMany).toHaveBeenCalledWith(expect.objectContaining({

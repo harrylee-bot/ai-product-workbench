@@ -132,6 +132,26 @@ ${"正文。".repeat(50)}
   assert.match(errors, /byteSize 不匹配/);
 });
 
+test("does not truncate frontmatter asset paths that contain spaces", async (t) => {
+  const assetPath = "imports/manuals-prototypes-20260702/assets/source manual.pptx";
+  const fixture = await createFixture({
+    markdown: markdownDocument(
+      "来源文件名包含空格，仍应按完整路径解析。",
+      `source: storage/${assetPath}`,
+    ),
+    assets: { [assetPath]: Buffer.from("source", "utf8") },
+  });
+  t.after(fixture.cleanup);
+
+  const report = await auditFixture(fixture);
+
+  assert.equal(report.passed, true, report.errors.join("\n"));
+  assert.deepEqual(report.assetClosure.unresolvedAssets, []);
+  assert.deepEqual(report.assetClosure.referencedAssets.map((asset) => asset.path), [
+    `storage/${assetPath}`,
+  ]);
+});
+
 async function auditFixture(fixture) {
   return auditKnowledgeVault({
     vaultRoot: fixture.vaultRoot,

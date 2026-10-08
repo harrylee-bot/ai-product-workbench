@@ -10,7 +10,9 @@ import {
   prdTableOfContentsEntriesFor,
   runtimeResultSchema,
 } from "../src/index.js";
-import { prdDocumentV2Example } from "../src/prd-example.js";
+import { prdDocumentV2Example as prdExampleWithoutCitations } from "../src/prd-example.js";
+import { sourceCitations } from "./knowledge-citation.fixture.js";
+const prdDocumentV2Example = { ...prdExampleWithoutCitations, citations: sourceCitations };
 
 function cloneExample() {
   return structuredClone(prdDocumentV2Example);
@@ -213,7 +215,7 @@ describe("workbench.prd.v2", () => {
         schemaVersion: 2,
         title: legacy.title,
         operation: { kind: "create" },
-        citations: [],
+        citations: sourceCitations,
         content: legacy,
       }],
     }).valid).toBe(true);
@@ -242,7 +244,7 @@ describe("workbench.prd.v2", () => {
         schemaVersion: 2,
         title: document.title,
         operation: { kind: "create" },
-        citations: [],
+        citations: sourceCitations,
         content: document,
       }],
     }).valid).toBe(true);
@@ -1449,7 +1451,7 @@ describe("workbench.prd.v2", () => {
         schemaVersion: 2,
         title: prdDocumentV2Example.title,
         operation: { kind: "create" },
-        citations: [],
+        citations: sourceCitations,
         content: prdDocumentV2Example,
       }],
     };
@@ -1474,7 +1476,7 @@ describe("workbench.prd.v2", () => {
         schemaVersion: 2,
         title: prdDocumentV2Example.title,
         operation: { kind: "create" },
-        citations: [],
+        citations: sourceCitations,
         content: prdDocumentV2Example,
       }],
     };
@@ -1493,7 +1495,7 @@ describe("workbench.prd.v2", () => {
             screenIds: [],
           },
         },
-        citations: [],
+        citations: sourceCitations,
         content: legacyPrdDocument(),
       }],
     };
@@ -1517,7 +1519,7 @@ describe("workbench.prd.v2", () => {
       version: 1,
       status: "staging",
       checksum: "a".repeat(64),
-      citations: [],
+      citations: sourceCitations,
       createdByRunId: "run-prd-v2",
       knowledgeReleaseId: null,
       createdAt: "2026-07-23T00:00:00.000Z",
@@ -1549,7 +1551,7 @@ describe("workbench.prd.v2", () => {
       kind: "prd",
       schemaVersion: 1,
       title: "Legacy PRD",
-      citations: [],
+      citations: sourceCitations,
       content: legacyPrdDocument(),
     };
     const candidate = {
@@ -1590,7 +1592,7 @@ function legacyPrdDocument() {
       changedById: null,
     },
     assumptions: [],
-    citations: [],
+    citations: sourceCitations,
     sections: {
       executiveSummary: {
         title: "Executive summary",

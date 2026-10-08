@@ -56,6 +56,31 @@ class RuntimeResultValidatorTests(unittest.TestCase):
         self.assertIn(("artifacts", 0, "content", "bindings", 0, "source", "stateId"), paths)
         self.assertIn(("artifacts", 0, "content", "bindings", 0, "source", "field"), paths)
 
+    def test_checkbox_type_error_points_to_the_referenced_variable_in_the_bundle(self) -> None:
+        candidate = copy.deepcopy(self.example)
+        content = candidate["artifacts"][0]["content"]
+        input_node = next(node for node in content["nodes"] if node["kind"] == "input")
+        input_node["inputType"] = "checkbox"
+        content["variables"][0]["initialValue"] = "true"
+        content["variables"].insert(0, {"path": "unrelated.label", "initialValue": "Keep"})
+
+        result = validate_runtime_result(candidate)
+
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["issues"], [{
+            "code": "custom",
+            "path": ["artifacts", 0, "content", "variables", 1, "initialValue"],
+            "message": (
+                "checkbox input variable form.name initialValue must be boolean; "
+                "received string"
+            ),
+        }])
+        self.assertEqual(content["variables"][1]["initialValue"], "true")
+        content["variables"][1]["initialValue"] = True
+        repaired = validate_runtime_result(candidate)
+        self.assertTrue(repaired["ok"])
+        self.assertNotEqual(result["candidateChecksum"], repaired["candidateChecksum"])
+
     def test_accepts_the_prd_v2_test_fixture_without_business_specific_runtime_rules(self) -> None:
         candidate = json.loads(PRD_EXAMPLE_PATH.read_text(encoding="utf-8"))
 
@@ -63,6 +88,56 @@ class RuntimeResultValidatorTests(unittest.TestCase):
 
         self.assertTrue(result["ok"])
         self.assertEqual(result["issues"], [])
+
+    def test_rejects_vague_acceptance_text_before_publishing_a_prd(self) -> None:
+        candidate = json.loads(PRD_EXAMPLE_PATH.read_text(encoding="utf-8"))
+        section = candidate["artifacts"][0]["content"]["sections"]["businessRequirements"]["acceptanceCriteria"]
+        table = next(block for block in section["blocks"] if block["type"] == "table")
+        standard_column_id = table["columns"][2]["id"]
+        standard = next(
+            cell for cell in table["rows"][0]["cells"]
+            if cell["columnId"] == standard_column_id
+        )
+        standard["content"] = [{"type": "text", "text": "页面正常显示内容，符合预期。", "marks": []}]
+
+        result = validate_runtime_result(candidate)
+
+        self.assertFalse(result["ok"])
+        self.assertTrue(any(
+            issue["path"] == [
+                "artifacts", 0, "content", "sections", "businessRequirements",
+                "acceptanceCriteria", "blocks", "rows", 0,
+            ]
+            and "observable results" in issue["message"]
+            for issue in result["issues"]
+        ))
+
+    def test_rejects_missing_recovery_branch_before_publishing_a_prd(self) -> None:
+        candidate = json.loads(PRD_EXAMPLE_PATH.read_text(encoding="utf-8"))
+        content = candidate["artifacts"][0]["content"]
+        self.assertTrue(content["sections"]["degradation"]["applicable"])
+        flow = content["sections"]["businessRequirements"]["flowAndPages"]["diagrams"][0]
+        flow["edges"] = [
+            {
+                "id": f"validation-linear-edge-{index}",
+                "from": current["id"],
+                "to": following["id"],
+                "label": None,
+            }
+            for index, (current, following) in enumerate(zip(flow["nodes"], flow["nodes"][1:]))
+        ]
+
+        result = validate_runtime_result(candidate)
+
+        self.assertFalse(result["ok"])
+        self.assertTrue(any(
+            issue["path"] == [
+                "artifacts", 0, "content", "sections", "businessRequirements",
+                "flowAndPages", "diagrams", 0,
+            ]
+            and "failure and recovery branch" in issue["message"]
+            for issue in result["issues"]
+        ))
 
     def test_validates_one_draft_without_result_path_prefixes(self) -> None:
         draft = copy.deepcopy(self.example["artifacts"][0])
@@ -154,7 +229,7 @@ class RuntimeResultValidatorTests(unittest.TestCase):
             "message": "numeric canonicalization",
             "artifacts": [{
                 "title": "Numeric data",
-                "citations": [],
+                "citations": copy.deepcopy(self.example["artifacts"][0]["citations"]),
                 "operation": {"kind": "create"},
                 "kind": "data",
                 "schemaVersion": 1,

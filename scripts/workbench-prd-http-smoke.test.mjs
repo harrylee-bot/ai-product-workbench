@@ -594,8 +594,8 @@ test("allows explicit no-new-default and existing-setting constraints", () => {
     "系统读取消费者现有通知开关设置并展示，不设置新的默认启用或关闭状态。",
     "本需求不产生新的默认开关状态；验收时不得出现由本需求新增的默认启用或默认关闭口径。",
     "验收时不得出现本次改造所新增的默认开启或默认停用规则。",
-    "无法确保旧系统状态；验收时不得出现由本需求新增的默认启用。",
-    "无法确保旧系统状态，但是验收时不得出现由本需求新增的默认启用。",
+    "无法确保当前系统状态；验收时不得出现由本需求新增的默认启用。",
+    "无法确保当前系统状态，但是验收时不得出现由本需求新增的默认启用。",
     "不是沿用旧的默认口径，而是验收时不得出现由本需求新增的默认启用。",
     "不能新增默认状态并明确验收时不得出现由本需求新增的默认启用。",
   ]) {
@@ -678,6 +678,9 @@ test("rejects safety remarks with the right nouns but negative or shifted meanin
   for (const [index, remarks] of [
     [0, "现有功能不发生修改。"],
     [1, "消费者订单由内部客服管理。"],
+    [1, "页面不面向公众已登录消费者。"],
+    [1, "页面暂不开放给公众已登录的消费者。"],
+    [1, "页面尚未提供给公众消费者。"],
     [1, "页面不再面向消费者。"],
     [1, "页面尚未面向消费者。"],
     [20, "本次不涉及完整性和一致性校验。"],
@@ -696,6 +699,18 @@ test("accepts a public-consumer safety remark with an explicit qualifier particl
   const document = orderNotificationPrdFixture();
   document.sections.safetyBaseline.rows[1].remarks = "订单通知设置功能面向已登录的消费者。";
   assert.doesNotThrow(() => assertPrdSmokeBusinessSemantics(document));
+});
+
+test("accepts public and signed-in qualifiers describing the same consumer audience", () => {
+  for (const remarks of [
+    "面向公众已登录消费者。",
+    "订单通知设置功能面向公众已登录的消费者。",
+    "订单通知设置功能提供给公众消费者。",
+  ]) {
+    const document = orderNotificationPrdFixture();
+    document.sections.safetyBaseline.rows[1].remarks = remarks;
+    assert.doesNotThrow(() => assertPrdSmokeBusinessSemantics(document), remarks);
+  }
 });
 
 test("accepts a row 1 remark that describes construction of the requested capability", () => {

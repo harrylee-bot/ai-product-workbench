@@ -69,18 +69,25 @@ describe("exported Prototype runtime URL security", () => {
 
   it("resets only variables owned by the selected sibling form", async () => {
     installSiblingFormRuntime();
+    await flushRuntimeActions();
     const primary = document.querySelector<HTMLInputElement>('[data-wb-node="input-primary"]')!;
     const secondary = document.querySelector<HTMLInputElement>('[data-wb-node="input-secondary"]')!;
+    const resetResult = document.querySelector<HTMLElement>('[data-wb-node="text-reset-result"]')!;
+    expect(resetResult.hidden).toBe(true);
     primary.value = "primary-changed";
     primary.dispatchEvent(new Event("input", { bubbles: true }));
     secondary.value = "secondary-changed";
     secondary.dispatchEvent(new Event("input", { bubbles: true }));
+    expect(resetResult.hidden).toBe(true);
 
     document.querySelector<HTMLButtonElement>('[data-reset-form="primary"]')!.click();
     await flushRuntimeActions();
 
     expect(primary.value).toBe("primary-initial");
     expect(secondary.value).toBe("secondary-changed");
+    expect(document.querySelector('[data-wb-node="text-primary"]')!.textContent).toBe("primary-initial");
+    expect(document.querySelector('[data-wb-node="text-secondary"]')!.textContent).toBe("secondary-changed");
+    expect(resetResult.hidden).toBe(false);
   });
 });
 
@@ -146,6 +153,23 @@ function installSiblingFormRuntime() {
       bindings: [
         { id: "binding-primary", nodeId: "input-primary", property: "value", source: { kind: "variable", path: "form.primary" } },
         { id: "binding-secondary", nodeId: "input-secondary", property: "value", source: { kind: "variable", path: "form.secondary" } },
+        { id: "binding-primary-expression", nodeId: "text-primary", property: "text", source: { kind: "expression", expression: { kind: "variable", path: "form.primary" } } },
+        { id: "binding-secondary-expression", nodeId: "text-secondary", property: "text", source: { kind: "expression", expression: { kind: "variable", path: "form.secondary" } } },
+        {
+          id: "binding-reset-result",
+          nodeId: "text-reset-result",
+          property: "visible",
+          source: {
+            kind: "expression",
+            expression: {
+              kind: "and",
+              operands: [
+                { kind: "equals", left: { kind: "variable", path: "form.primary" }, right: { kind: "literal", value: "primary-initial" } },
+                { kind: "equals", left: { kind: "variable", path: "form.secondary" }, right: { kind: "literal", value: "secondary-changed" } },
+              ],
+            },
+          },
+        },
       ],
     }],
   });
@@ -156,6 +180,9 @@ function installSiblingFormRuntime() {
     '<section data-wb-screen="screen-forms">',
     '<form data-wb-node="form-primary"><input data-wb-node="input-primary" name="primary"><button data-reset-form="primary" type="reset">Reset</button></form>',
     '<form data-wb-node="form-secondary"><input data-wb-node="input-secondary" name="secondary"></form>',
+    '<div data-wb-node="text-primary" data-wb-text="true"></div>',
+    '<div data-wb-node="text-secondary" data-wb-text="true"></div>',
+    '<div data-wb-node="text-reset-result" data-wb-text="true">Only the primary form was reset</div>',
     "</section>",
     "</div>",
   ].join("");

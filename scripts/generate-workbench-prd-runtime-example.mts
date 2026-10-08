@@ -2,6 +2,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 import { prdDocumentV2Example } from "../packages/workbench-contracts/src/prd-example.js";
+import { sourceCitations } from "../packages/workbench-contracts/test/knowledge-citation.fixture.js";
 
 const outputUrl = new URL(
   "../integrations/deerflow/test-fixtures/prd-runtime-result.example.json",
@@ -15,8 +16,8 @@ const runtimeExample = {
     schemaVersion: 2,
     title: prdDocumentV2Example.title,
     operation: { kind: "create" },
-    citations: prdDocumentV2Example.citations,
-    content: prdDocumentV2Example,
+    citations: sourceCitations,
+    content: { ...prdDocumentV2Example, citations: sourceCitations },
   }],
 };
 const output = `${JSON.stringify(runtimeExample, null, 2)}\n`;

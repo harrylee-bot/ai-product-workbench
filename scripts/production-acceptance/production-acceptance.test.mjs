@@ -195,7 +195,7 @@ test("approval payload command freezes the v3 implementer and time envelope", as
   assert.equal(result.approval.evidenceSha256, security.evidenceSha256);
   assert.equal(await readFile(result.outputPath, "utf8"), canonicalJsonFile(result.payload));
   const signatureSchema = JSON.parse(await readFile(
-    path.join(repoRoot, "docs/evidence/production-approval-signature.schema.json"),
+    path.join(repoRoot, "schemas/evidence/production-approval-signature.schema.json"),
     "utf8",
   ));
   const validate = createStrictAjv2020().compile(signatureSchema);

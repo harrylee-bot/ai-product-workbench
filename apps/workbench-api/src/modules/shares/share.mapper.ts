@@ -16,6 +16,7 @@ import { sanitizePublicJson } from "../releases/release.mapper.js";
 export type ShareGrantRecord = {
   id: string;
   releaseId: string;
+  artifactVersionId?: string | null;
   createdById: string;
   scope: "view" | "remix";
   status: "active" | "revoked" | "expired";
@@ -30,6 +31,7 @@ export function mapShareGrant(record: ShareGrantRecord): ShareGrant {
   return shareGrantSchema.parse({
     id: record.id,
     releaseId: record.releaseId,
+    ...(record.artifactVersionId ? { artifactVersionId: record.artifactVersionId } : {}),
     createdById: record.createdById,
     scope: record.scope,
     status: record.status,
@@ -84,7 +86,7 @@ export function mapPublicArtifactVersion(
     schemaVersion: record.schemaVersion,
     status: "ready" as const,
     checksum: record.checksum,
-    citations: record.citations,
+    citations: [],
     createdAt: record.createdAt.toISOString(),
   };
   let detail: PublicArtifactVersionDetail;

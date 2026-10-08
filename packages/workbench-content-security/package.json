@@ -1,6 +1,6 @@
 {
   "name": "@workbench/workbench-content-security",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "private": true,
   "type": "module",
   "main": "dist/index.js",
@@ -15,7 +15,7 @@
     "dist"
   ],
   "dependencies": {
-    "@workbench/workbench-db": "0.1.0"
+    "@workbench/workbench-db": "1.0.0"
   },
   "scripts": {
     "build": "rm -rf dist && tsc -p tsconfig.build.json",

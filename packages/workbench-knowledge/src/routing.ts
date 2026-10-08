@@ -30,8 +30,6 @@ export function routeKnowledgeDocument(input: {
     route = "production";
   } else if (/^07(?:-|$)/.test(directory)) {
     route = "source_lookup";
-  } else if (/^99(?:-|$)/.test(directory)) {
-    route = "excluded";
   } else {
     route = "quarantine";
   }

@@ -27,9 +27,8 @@ export const REQUIRED_KNOWLEDGE_VAULT_CONFIG = Object.freeze([
   "knowledge-vault/.obsidian/templates.json",
 ]);
 
-const REQUIRED_REMEDIATION_CONTROL_FILES = Object.freeze([
-  "docs/CODEX-RUNTIME-DATABASE-REMEDIATION-SPEC-20260723.md",
-  "docs/CODEX-WORKBENCH-FUNCTIONAL-VISUAL-REMEDIATION-SPEC-20260727.md",
+const REQUIRED_SYSTEM_CONTRACT_FILES = Object.freeze([
+  "README.md",
   "schemas/release-candidate-manifest.schema.json",
 ]);
 
@@ -52,7 +51,7 @@ export const REQUIRED_SOURCE_SCOPES = Object.freeze([
   { name: "ci", roots: [".github/"] },
   { name: "deployment", roots: ["deploy/"] },
   { name: "runbooks", roots: ["docs/runbooks/"] },
-  { name: "evidenceContracts", roots: ["docs/evidence/", "schemas/"] },
+  { name: "evidenceContracts", roots: ["schemas/"] },
   { name: "web", roots: ["apps/web/"] },
   { name: "quartz", roots: ["apps/knowledge/"] },
   { name: "workbenchApi", roots: ["apps/workbench-api/"] },
@@ -67,7 +66,7 @@ export const REQUIRED_SOURCE_SCOPES = Object.freeze([
   { name: "releaseAndOperationsScripts", roots: ["scripts/"] },
   { name: "knowledgeVaultMarkdown", roots: ["knowledge-vault/"], markdownOnly: true },
   { name: "knowledgeVaultConfiguration", roots: [], exactPaths: REQUIRED_KNOWLEDGE_VAULT_CONFIG },
-  { name: "remediationControl", roots: [], exactPaths: REQUIRED_REMEDIATION_CONTROL_FILES },
+  { name: "systemContracts", roots: [], exactPaths: REQUIRED_SYSTEM_CONTRACT_FILES },
 ]);
 
 export const REQUIRED_GENERATED_CONTRACTS = Object.freeze([
@@ -76,11 +75,6 @@ export const REQUIRED_GENERATED_CONTRACTS = Object.freeze([
   "integrations/deerflow/skills/workbench/references/runtime-result.schema.json",
   "integrations/deerflow/skills/workbench/references/prd-runtime-result.schema.json",
   "integrations/deerflow/runtime-tools/deerflow_workbench_tools/runtime_result_validator.bundle.mjs",
-]);
-
-const REQUIRED_HARD_CUT_FILES = Object.freeze([
-  "docs/workbench-hard-cut-deletion-manifest.json",
-  "scripts/workbench-hard-cut-manifest.mjs",
 ]);
 
 const CRITICAL_GROUP_DEFINITIONS = Object.freeze([
@@ -114,11 +108,6 @@ const CRITICAL_GROUP_DEFINITIONS = Object.freeze([
     roots: ["deploy/"],
   },
   {
-    name: "hardCutDeletion",
-    exactPaths: REQUIRED_HARD_CUT_FILES,
-    includeEntries: true,
-  },
-  {
     name: "brandAssets",
     roots: ["apps/web/public/brand/"],
     exactPaths: ["apps/web/app/icon.png", "apps/web/app/favicon.ico"],
@@ -134,13 +123,13 @@ const CRITICAL_GROUP_DEFINITIONS = Object.freeze([
     includeEntries: true,
   },
   {
-    name: "remediationControl",
-    exactPaths: REQUIRED_REMEDIATION_CONTROL_FILES,
+    name: "systemContracts",
+    exactPaths: REQUIRED_SYSTEM_CONTRACT_FILES,
     includeEntries: true,
   },
   {
     name: "evidenceContracts",
-    roots: ["docs/evidence/", "schemas/"],
+    roots: ["schemas/"],
   },
 ]);
 
@@ -907,7 +896,7 @@ function groupMatches(group, candidatePath) {
 }
 
 function isCriticalCandidatePath(candidatePath) {
-  if (REQUIRED_GENERATED_CONTRACTS.includes(candidatePath) || REQUIRED_HARD_CUT_FILES.includes(candidatePath)) return true;
+  if (REQUIRED_GENERATED_CONTRACTS.includes(candidatePath)) return true;
   if (candidatePath === "packages/workbench-db/prisma/schema.prisma") return true;
   if (candidatePath.startsWith("packages/workbench-db/prisma/migrations/") && candidatePath.endsWith("/migration.sql")) return true;
   return REQUIRED_SOURCE_SCOPES.some((scope) => scopeMatches(scope, candidatePath));

@@ -1,6 +1,6 @@
 {
   "name": "@workbench/workbench-import-worker",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "private": true,
   "type": "module",
   "scripts": {
@@ -12,10 +12,10 @@
   },
   "dependencies": {
     "@aws-sdk/client-s3": "3.896.0",
-    "@workbench/workbench-content-security": "0.1.0",
-    "@workbench/workbench-contracts": "0.1.0",
-    "@workbench/workbench-db": "0.1.0",
-    "@workbench/workbench-telemetry": "0.1.0",
+    "@workbench/workbench-content-security": "1.0.0",
+    "@workbench/workbench-contracts": "1.0.0",
+    "@workbench/workbench-db": "1.0.0",
+    "@workbench/workbench-telemetry": "1.0.0",
     "pg-boss": "12.26.0"
   },
   "devDependencies": {

@@ -8,7 +8,7 @@ import {
   renderExportHtml,
   TerminalExportError,
 } from "../src/index.js";
-import { designSystemExportRequest, exportRequest } from "./fixtures.js";
+import { designSystemExportRequest, exportRequest, interactiveExportRequest } from "./fixtures.js";
 
 describe("Workbench export core", () => {
   it("renders a deterministic interactive standalone HTML document", async () => {
@@ -22,6 +22,34 @@ describe("Workbench export core", () => {
     expect(html).toContain("action-next");
     expect(html).toContain('data-wb-screen="screen-success"');
     expect(html).not.toContain("https://");
+  });
+
+  it.each(["literal", "token"] as const)("renders %s text fill as foreground paint in HTML and state overrides", (source) => {
+    const request = interactiveExportRequest();
+    const document = request.source.artifacts[0]!.content as PrototypeDocument;
+    const text = document.nodes.find((node) => node.id === "text-state")!;
+    text.style.fill = source === "token"
+      ? { kind: "token", tokenId: "text-color" }
+      : { kind: "literal", value: "#112233" };
+    document.tokens.push({ id: "text-color", name: "Text", type: "color", value: "#112233" });
+    document.states.find((state) => state.id === "state-ready")!.overrides.push({
+      nodeId: text.id,
+      style: { ...structuredClone(text.style), fill: { kind: "literal", value: "#445566" } },
+    });
+
+    const rendered = renderExportHtml(request);
+    const textMarkup = rendered.bodyMarkup.match(/<div [^>]*data-wb-node="text-state"[^>]*>/)![0];
+    expect(textMarkup).toContain(";color:#112233;");
+    expect(textMarkup).not.toContain("background-color");
+    expect(rendered.bodyMarkup.match(/<form [^>]*data-wb-node="form-home"[^>]*>/)![0])
+      .toContain("background-color:#ffffff");
+    const runtime = rendered.runtimeData as unknown as {
+      prototypes: Array<{ states: Array<{ id: string; overrides: Array<{ nodeId: string; style?: string }> }> }>;
+    };
+    const override = runtime.prototypes[0]!.states.find((state) => state.id === "state-ready")!
+      .overrides.find((candidate) => candidate.nodeId === text.id)!;
+    expect(override.style).toContain(";color:#445566;");
+    expect(override.style).not.toContain("background-color");
   });
 
   it("renders PRD artifacts as structured requirement documents instead of raw JSON", () => {
@@ -79,6 +107,36 @@ describe("Workbench export core", () => {
     expect(app).not.toContain('data-wb-screen="screen-home"');
   }, 30_000);
 
+  it("renders a complete Prototype Preview while honoring its selected initial screen", () => {
+    const request = exportRequest("html");
+    request.selection = {
+      kind: "artifact",
+      artifactId: "artifact-1",
+      artifactVersionId: "version-1",
+    };
+    request.initialScreenId = "screen-success";
+
+    const rendered = renderExportHtml(request);
+    const runtime = rendered.runtimeData as unknown as {
+      prototypes: Array<{
+        initialScreenId: string;
+        screens: Array<{ id: string }>;
+        actions: Array<{ id: string; kind: string; targetScreenId?: string }>;
+      }>;
+    };
+    expect(rendered.document).toContain('data-wb-screen="screen-home"');
+    expect(rendered.document).toContain('data-wb-screen="screen-success"');
+    expect(runtime.prototypes[0]).toMatchObject({
+      initialScreenId: "screen-success",
+      screens: [{ id: "screen-home" }, { id: "screen-success" }],
+    });
+    expect(runtime.prototypes[0]!.actions).toContainEqual(expect.objectContaining({
+      id: "action-next",
+      kind: "navigate",
+      targetScreenId: "screen-success",
+    }));
+  });
+
   it("fails closed when screenId is missing or targets a non-Prototype Artifact", () => {
     const missing = exportRequest("html");
     missing.selection = {
@@ -100,6 +158,17 @@ describe("Workbench export core", () => {
     };
     expect(() => renderExportHtml(wrongKind)).toThrow(expect.objectContaining({
       code: "EXPORT_SELECTION_SCREEN_KIND_INVALID",
+    }));
+
+    const missingInitialScreen = exportRequest("html");
+    missingInitialScreen.selection = {
+      kind: "artifact",
+      artifactId: "artifact-1",
+      artifactVersionId: "version-1",
+    };
+    missingInitialScreen.initialScreenId = "screen-missing";
+    expect(() => renderExportHtml(missingInitialScreen)).toThrow(expect.objectContaining({
+      code: "EXPORT_INITIAL_SCREEN_NOT_FOUND",
     }));
   });
 

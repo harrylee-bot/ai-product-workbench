@@ -1,10 +1,73 @@
 import { mapRunApproval } from "../src/modules/runs/run-approval.mapper.js";
+import { publicRunEventPayload, RunEventStore } from "../src/modules/runs/run-event.store.js";
 import { mapRun } from "../src/modules/runs/run.mapper.js";
+import { RunsService } from "../src/modules/runs/runs.service.js";
 import { mapThreadEntry } from "../src/modules/threads/thread.mapper.js";
 
 const now = new Date("2026-07-12T00:00:00.000Z");
 
 describe("persisted JSON mappers", () => {
+  it("removes private diagnostics from stored and authorized-stream failure events", async () => {
+    const payload = {
+      code: "RUNTIME_EXECUTION_FAILED",
+      message: "PRIVATE_DIAGNOSTIC_MARKER internal provider response",
+      retryable: false,
+    };
+    const publicPayload = {
+      ...payload,
+      message: payload.code,
+    };
+    const run = {
+      id: "run_1",
+      requestId: "request_1",
+      projectId: "project_1",
+      threadId: "thread_1",
+      traceId: "trace_1",
+    };
+    const storedEvent = {
+      id: "event_1",
+      sequence: 1,
+      type: "run.failed",
+      payload,
+      occurredAt: now,
+      run,
+    };
+    const db = {
+      runEvent: { findMany: vi.fn().mockResolvedValue([storedEvent]) },
+      $queryRaw: vi.fn().mockResolvedValue([{
+        runId: run.id,
+        requestId: run.requestId,
+        projectId: run.projectId,
+        threadId: run.threadId,
+        traceId: run.traceId,
+        status: "failed",
+        eventId: storedEvent.id,
+        sequence: storedEvent.sequence,
+        eventType: storedEvent.type,
+        payload,
+        occurredAt: now,
+      }]),
+    };
+    const eventStore = new RunEventStore(db as never);
+    const service = new RunsService(
+      db as never,
+      {} as never,
+      eventStore,
+      {} as never,
+      {} as never,
+      {} as never,
+    );
+
+    const listedEvents = await eventStore.listAfter(run.id, 0);
+    const streamed = await service.pollAuthorizedEventStream("principal_1", run.id, 0);
+
+    expect(listedEvents[0]?.payload).toEqual(publicPayload);
+    expect(streamed?.events[0]?.payload).toEqual(publicPayload);
+    expect(JSON.stringify([listedEvents, streamed])).not.toContain("PRIVATE_DIAGNOSTIC_MARKER");
+    expect(payload.message).toContain("PRIVATE_DIAGNOSTIC_MARKER");
+    expect(publicRunEventPayload("run.started", { attempt: 1 })).toEqual({ attempt: 1 });
+  });
+
   it("restores requested artifact intent from the persisted Run request", () => {
     const persisted = {
       id: "run_1",
@@ -102,6 +165,38 @@ describe("persisted JSON mappers", () => {
       failure: null,
       sources: [{ sourceId: "source_1", snapshot: { blobs: [{ blobId: "blob_1", byteSize: 123 }] } }],
     });
+    expect(mapRun({
+      ...persisted,
+      status: "failed",
+      errorCode: "RUNTIME_PROVIDER_CONTENT_FILTERED",
+      errorDetail: "PRIVATE_DIAGNOSTIC_MARKER https://internal.example.test/?token=secret",
+      errorRetryable: false,
+      finishedAt: now,
+    }).failure).toEqual({
+      code: "RUNTIME_PROVIDER_CONTENT_FILTERED",
+      message: "模型服务商拦截了本次输出，任务已停止。",
+      retryable: false,
+    });
+    expect(mapRun({
+      ...persisted,
+      status: "failed",
+      errorCode: "RUNTIME_EXECUTION_FAILED",
+      errorDetail: "PRIVATE_DIAGNOSTIC_MARKER https://internal.example.test/?token=secret",
+      errorRetryable: false,
+      finishedAt: now,
+    }).failure).toEqual({
+      code: "RUNTIME_EXECUTION_FAILED",
+      message: "RUNTIME_EXECUTION_FAILED",
+      retryable: false,
+    });
+    for (const incomplete of [
+      { errorCode: "RUNTIME_EXECUTION_FAILED" },
+      { errorDetail: "PRIVATE_DIAGNOSTIC_MARKER" },
+      { errorRetryable: false },
+    ]) {
+      expect(() => mapRun({ ...persisted, ...incomplete }))
+        .toThrow("Persisted Run failure snapshot is incomplete");
+    }
     expect(() => mapRun({
       ...persisted,
       request: { ...persisted.request, providerSecret: "must-not-pass" },

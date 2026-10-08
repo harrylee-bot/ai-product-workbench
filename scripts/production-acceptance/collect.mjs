@@ -36,8 +36,8 @@ export const OBSERVATION_COLLECTION_SCHEMA_VERSION = "workbench.production-obser
 
 const moduleDirectory = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(moduleDirectory, "../..");
-const observationSchemaPath = path.join(repoRoot, "docs/evidence/production-control-observation.schema.json");
-const collectionSchemaPath = path.join(repoRoot, "docs/evidence/production-observation-collection.schema.json");
+const observationSchemaPath = path.join(repoRoot, "schemas/evidence/production-control-observation.schema.json");
+const collectionSchemaPath = path.join(repoRoot, "schemas/evidence/production-observation-collection.schema.json");
 const FILE_URI_PATTERN = /^file:\.\/([A-Za-z0-9][A-Za-z0-9._/-]*)$/u;
 const SHA256_PATTERN = /^[a-f0-9]{64}$/u;
 let observationValidatorPromise;

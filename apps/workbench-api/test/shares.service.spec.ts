@@ -28,6 +28,7 @@ function shareRecord(overrides: Record<string, unknown> = {}) {
   return {
     id: "share_1",
     releaseId: "release_1",
+    artifactVersionId: "version_1",
     createdById: "principal_1",
     tokenHash: "b".repeat(64),
     scope: "view" as const,
@@ -337,7 +338,7 @@ describe("ShareGrant security and lifecycle", () => {
     const db = {
       $queryRaw: vi.fn().mockResolvedValue([{ id: "project_1" }]),
       projectMember: { findUnique: vi.fn().mockResolvedValue({ role: "owner" }) },
-      projectRelease: { findFirst: vi.fn().mockResolvedValue(releaseRecord()) },
+      projectRelease: { findFirst: vi.fn().mockResolvedValue(pinnedRelease("prototype")) },
       shareGrant: {
         findFirst: vi.fn().mockResolvedValue(null),
         updateMany: vi.fn()
@@ -368,10 +369,12 @@ describe("ShareGrant security and lifecycle", () => {
 
     expect(result.token).toMatch(/^wbs_[A-Za-z0-9_-]{43}$/);
     expect(result.revokedGrantCount).toBe(2);
+    expect(result.share.artifactVersionId).toBe("version_1");
     expect(createData).toMatchObject({
       projectId: "project_1",
       releaseId: "release_1",
       createdById: "principal_1",
+      artifactVersionId: "version_1",
       idempotencyKey: "share:rotate:12345678",
       requestHash: expect.stringMatching(/^[a-f0-9]{64}$/),
     });
@@ -414,7 +417,7 @@ describe("ShareGrant security and lifecycle", () => {
 
     await expect(service.rotate("principal_1", "project_1", "share:rotate:12345678", {
       releaseId: "release_1",
-      scope: "remix",
+      scope: "view",
       expiresAt: null,
     })).rejects.toMatchObject({
       status: 409,
@@ -431,7 +434,7 @@ describe("ShareGrant security and lifecycle", () => {
       shareGrant: {
         findUnique: vi.fn().mockResolvedValue({
           ...shareRecord({ tokenHash: hashShareToken(token) }),
-          release: releaseRecord(),
+          release: pinnedRelease("prototype"),
         }),
       },
     };
@@ -444,6 +447,61 @@ describe("ShareGrant security and lifecycle", () => {
     expect(wire).not.toContain("tokenHash");
     expect(wire).not.toContain("storageKey");
     expect(wire).not.toContain("blobId");
+  });
+
+  it("does not expose other artifacts in the same immutable Release", async () => {
+    const token = `wbs_${"H".repeat(43)}`;
+    const release = pinnedRelease("prototype");
+    const privateRelease = pinnedRelease("data");
+    const privatePin = privateRelease.artifactPins[0]!;
+    privatePin.artifactId = "artifact-private";
+    privatePin.artifactVersionId = "version-private";
+    privatePin.title = "Private business requirements";
+    privatePin.position = 1;
+    privatePin.artifactVersion = {
+      ...privatePin.artifactVersion, id: privatePin.artifactVersionId, artifactId: privatePin.artifactId,
+      artifact: { id: privatePin.artifactId, projectId: release.projectId },
+    };
+    release.artifactPins.push(privatePin);
+    const manifest = release.manifest as { artifacts: Record<string, unknown>[] };
+    const otherManifest = privateRelease.manifest as { artifacts: Record<string, unknown>[] };
+    manifest.artifacts.push({
+      ...otherManifest.artifacts[0], artifactId: privatePin.artifactId,
+      artifactVersionId: privatePin.artifactVersionId, title: privatePin.title, position: 1,
+    });
+    release.manifestSha256 = canonicalSha256(manifest);
+    const storage = objectStorage();
+    const db = {
+      shareGrant: { findUnique: vi.fn().mockResolvedValue({ ...shareRecord(), release }) },
+      artifactVersion: { findFirst: vi.fn() },
+      artifactVersionAsset: { findFirst: vi.fn() },
+    };
+    const service = new SharesService(db as never, {} as never, storage as never);
+    const result = await service.getPublic(token);
+    expect(result.share.release.artifactPins).toHaveLength(1);
+    expect(result.share.release.artifactPins[0]?.artifactVersionId).toBe("version_1");
+    expect(JSON.stringify(result)).not.toContain("Private business requirements");
+    expect(JSON.stringify(result)).not.toContain("version-private");
+    await expect(service.getPublicArtifactVersion(token, "artifact-private", "version-private"))
+      .rejects.toMatchObject({ status: 404 });
+    await expect(service.getPublicArtifactContent(token, "artifact-private", "version-private"))
+      .rejects.toMatchObject({ status: 404 });
+    await expect(service.getPublicArtifactAssetContent(token, "artifact-private", "version-private", "hero-image"))
+      .rejects.toMatchObject({ status: 404 });
+    expect(db.artifactVersion.findFirst).not.toHaveBeenCalled();
+    expect(db.artifactVersionAsset.findFirst).not.toHaveBeenCalled();
+    expect(storage.getObject).not.toHaveBeenCalled();
+  });
+
+  it("rejects remix scope and unpinned legacy public links", async () => {
+    const db = { shareGrant: { findUnique: vi.fn().mockResolvedValue({
+      ...shareRecord({ artifactVersionId: null }), release: pinnedRelease("prototype"),
+    }) } };
+    const service = new SharesService(db as never, {} as never, objectStorage() as never);
+    await expect(service.rotate("principal_1", "project_1", "share:rotate:12345678", {
+      releaseId: "release_1", scope: "remix", expiresAt: null,
+    })).rejects.toMatchObject({ status: 400 });
+    await expect(service.getPublic(`wbs_${"J".repeat(43)}`)).rejects.toMatchObject({ status: 404 });
   });
 
   it("expires a stale public token atomically and returns the same opaque 404 as an invalid token", async () => {
@@ -506,7 +564,7 @@ describe("ShareGrant security and lifecycle", () => {
 
   it("returns only the exact Release-pinned public ArtifactVersion projection", async () => {
     const token = `wbs_${"C".repeat(43)}`;
-    const release = pinnedRelease("data");
+    const release = pinnedRelease("prototype");
     const db = {
       shareGrant: {
         findUnique: vi.fn().mockResolvedValue({
@@ -522,7 +580,7 @@ describe("ShareGrant security and lifecycle", () => {
           version: 2,
           schemaVersion: 1,
           status: "ready",
-          content: { rows: [1, 2], blobId: "blob_nested_internal" },
+          content: prototypeDocument(),
           checksum,
           citations: [],
           createdAt: now,
@@ -536,9 +594,9 @@ describe("ShareGrant security and lifecycle", () => {
     expect(result.detail).toMatchObject({
       artifactId: "artifact_1",
       artifactVersionId: "version_1",
-      kind: "data",
+      kind: "prototype",
       contentMode: "inline",
-      content: { rows: [1, 2] },
+      content: { title: "Prototype" },
     });
     expect(result.etag).toMatch(/^"[a-f0-9]{64}"$/);
     const wire = JSON.stringify(result.detail);
@@ -635,7 +693,7 @@ describe("ShareGrant security and lifecycle", () => {
 
   it("serves only exact Release-pinned blob Artifact content with immutable byte semantics", async () => {
     const token = `wbs_${"G".repeat(43)}`;
-    const release = pinnedRelease("data");
+    const release = pinnedRelease("prototype");
     const storage = objectStorage();
     const db = {
       shareGrant: {

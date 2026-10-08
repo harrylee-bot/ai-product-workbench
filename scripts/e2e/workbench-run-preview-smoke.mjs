@@ -564,7 +564,14 @@ try {
         reasonCode: "EXPORT_EXTERNAL_AI_STUDIO_UNAVAILABLE",
       };
       return json(route, {
-        formats: { html: unavailable, react: unavailable, figma: unavailable, mcp: unavailable },
+        formats: {
+          html: unavailable,
+          react: unavailable,
+          figma: unavailable,
+          mcp: unavailable,
+          docx: unavailable,
+          pdf: unavailable,
+        },
         packaging: { single_file: unavailable, zip: unavailable },
         external: {
           ai_studio: unavailable,

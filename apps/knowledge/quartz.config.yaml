@@ -9,8 +9,6 @@ configuration:
   baseUrl: localhost:3001
   ignorePatterns:
     - private
-    - 07-来源资产索引
-    - 99-收件箱
     - _templates
     - .obsidian
     - .trash

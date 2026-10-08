@@ -142,6 +142,16 @@ describe("Exports API contracts", () => {
     await expect(create?.clone().json()).resolves.toEqual(request);
   });
 
+  it.each([null, "screen-details"])("accepts legacy preview responses with initialScreenId=%s", async (initialScreenId) => {
+    const legacy = {
+      ...projectPreview,
+      selection: { kind: "artifact", artifactId: "artifact-1", artifactVersionId: "version-1" },
+      initialScreenId,
+    };
+    const api = createApi(async () => Response.json(legacy));
+    await expect(api.getProjectPreview(projectPreview.id)).resolves.toEqual(legacy);
+  });
+
   it("rejects undisclosed capability fields, spoofed Blob bodies, and missing ETags", async () => {
     const invalidCapabilities = {
       ...capabilities(),
@@ -189,6 +199,8 @@ function capabilities() {
       react: available,
       figma: { available: false, authentication: "not_required", reasonCode: "EXPORT_FIGMA_UNAVAILABLE" } as const,
       mcp: available,
+      docx: available,
+      pdf: available,
     },
     packaging: { single_file: available, zip: available },
     external: {

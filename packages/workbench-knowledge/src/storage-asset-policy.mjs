@@ -180,17 +180,19 @@ function extractStorageReferences(raw, header, relativePath) {
 
   for (const [index, line] of lines.entries()) {
     const lineNumber = index + 1;
+    const isFrontmatterLine = lineNumber > 1 && lineNumber <= headerLineCount + 1;
     for (const match of line.matchAll(/`([^`\r\n]+)`/g)) {
       addReferenceCandidates(findings, seen, match[1], relativePath, lineNumber, "inline-code", true);
     }
     for (const match of line.matchAll(/\]\(\s*(?:<([^>]+)>|([^\s)]+))\s*\)/g)) {
       addReferenceCandidates(findings, seen, match[1] ?? match[2], relativePath, lineNumber, "markdown-link", true);
     }
-    if (lineNumber > 1 && lineNumber <= headerLineCount + 1) {
+    if (isFrontmatterLine) {
       const scalar = line.match(/^\s*[A-Za-z0-9_-]+:\s*(.*?)\s*$/)?.[1];
       if (scalar) addReferenceCandidates(findings, seen, unquote(scalar), relativePath, lineNumber, "frontmatter", true);
     }
 
+    if (isFrontmatterLine) continue;
     const withoutStructuredReferences = line
       .replace(/`[^`\r\n]+`/g, " ")
       .replace(/\]\(\s*(?:<[^>]+>|[^\s)]+)\s*\)/g, " ");

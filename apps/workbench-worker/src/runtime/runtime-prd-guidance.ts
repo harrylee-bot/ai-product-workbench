@@ -3,23 +3,20 @@ export function runtimePrdResultGuidance(
   workflow: "generate" | "redesign" | "ideate" | "edit" = "generate",
 ): string | null {
   if (!requestedArtifactKinds.includes("prd")) return null;
-  const mixedArtifactKinds = requestedArtifactKinds.some((kind) => kind === "prototype" || kind === "code");
-  if (mixedArtifactKinds) {
-    return [
-      "<workbench_prd_result_contract>",
-      "Invalid Runtime input: PRD and Prototype/code cannot be requested in one immutable Run. The request must be rejected before model execution and submitted as two sequential Runs, with the successful PRD Run first. Do not use clarification to resume this Run and do not begin artifact work or tool calls.",
-      "</workbench_prd_result_contract>",
-    ].join("\n");
-  }
+  const linkedPrototype = requestedArtifactKinds.includes("prototype");
   const sourceBoundProfile = [
     "Use only explicit request facts, authorized project history, attached sources, and pinned Knowledge. Make conservative assumptions only when business meaning remains clear. Do not invent assets, activity configuration, audit/publish, reporting, AI generation, backend/frontend loops, preview, or data feedback for a short request.",
     "The requirement subject and requested business change must come from the current request or an explicit authorized source. PRD as an Artifact kind is never business evidence. Never turn a generic request to write a PRD into an invented product, page, role, route, flow, state model, or degradation dependency.",
-    "This PRD-only Canvas Run has no free-form clarification resume path. Never call ask_clarification and never end with a question instead of a result. Keep unsupported high-risk behavior out of committed scope, record only conservative typed assumptions and acceptance boundaries, and still complete the requested PRD through the publication and result tools.",
+    linkedPrototype
+      ? "This linked Run must produce a PRD and its Prototype. Complete all PRD stages and publish the PRD at artifact_index 0 before beginning Prototype stages. Base the Prototype on that exact PRD. Publish the Prototype at artifact_index 1 and submit one complete Result containing both drafts in that order. PRD draft publication does not complete this Run."
+      : "This PRD-only Canvas Run has no free-form clarification resume path. Never call ask_clarification and never end with a question instead of a result. Keep unsupported high-risk behavior out of committed scope, record only conservative typed assumptions and acceptance boundaries, and still complete the requested PRD through complete Draft publication; the trusted Runtime submits the successful Draft as the Result.",
+    "Before authoring, successfully retrieve pinned Knowledge with workbench_knowledge_retrieve. Every Artifact must contain nonempty citations copied exactly from this attempt's retrieval results. Empty results are not evidence; request additional knowledge or fail instead of inventing citations.",
     "Artifact and workflow constraints such as PRD-only or no Prototype/code are Runtime metadata, not business scope, and must never appear in the PRD body. Do not invent default values, category members, enabled states, or other business facts that the request and authorized sources do not supply.",
     "Preserve generic delivery-channel labels literally. Never translate or expand 端内 or 端内渠道 into an affirmative APP, app, native app, APP端内Web, 客户端, or mini-program loading, publication, operation, or enabled-surface claim. Add such an affirmative claim only when the current request or an authorized source explicitly supplies it; preserve explicit negative or excluded APP/mini-program facts verbatim. Candidate-authored prose, channel:inApp, and every Runtime targetSurface value, including app and web, are not source evidence and cannot activate safety row 12. Without affirmative authorized input, row 12 must be 不涉及 with null remarks.",
     "When no physical page URL or route is supplied, keep the logical entry generic and put unresolved navigation in typed assumptions. Do not invent a concrete menu hierarchy or claim that an invented hierarchy is irrelevant to acceptance.",
     "Acceptance rows must be substantive, distinct, and directly testable. Cover visibility, rules, permissions, state, empty state, or failure recovery only when the requirement body makes that dimension relevant; do not invent dimensions to fill a generic checklist.",
     "Acceptance rows must state observable states, values, permission outcomes, errors, or recovery actions. Do not use 正常展示, 友好提示, 流转顺畅, 正确显示结果, 符合预期, 满足要求, or a generic promise to improve efficiency or quality as acceptance evidence.",
+    "Every requirement.acceptanceCriterionIds entry must be the ID of a typed acceptanceCriterion block, never an acceptance-table row ID. Each PrdTextInline.text is limited to 10,000 characters; split long prose into meaningful blocks and never paste Runtime JSON into a text field during repair.",
   ];
   const requiredReferenceReads = "Immediately after collecting-prd-context succeeds and before structuring-prd, use the PRD-only read_file capability to read each required reference exactly once in this order: /mnt/skills/public/requirement-doc-template/SKILL.md, /mnt/skills/public/requirement-doc-template/references/structure.md, /mnt/skills/public/requirement-doc-template/references/quality-standards.md, and /mnt/skills/public/workbench/references/prd-runtime-result.schema.json. Read the complete files without ranges; a summary, prompt quotation, cached memory, another path, or arbitrary filesystem access is not evidence.";
   if (workflow === "edit") {
@@ -28,7 +25,7 @@ export function runtimePrdResultGuidance(
       requiredReferenceReads,
       ...sourceBoundProfile,
       "Use the installed requirement-doc-template skill as the canonical authoring source. Apply every content rule expressible by the targeted protocol: keep concrete source-backed content, remove placeholders and unrelated business content, preserve citations and valid existing references, and do not add fields or sections absent from that protocol.",
-      "Revise the complete targeted PRD without changing its protocol or Artifact schemaVersion. Legacy workbench.prd.v1 targets remain v1; workbench.prd.v2 targets remain v2. Retain documentId, advance revision.number, preserve citations, and return the complete next document through workbench_runtime_result_submit.",
+      "Revise the complete targeted PRD without changing its protocol or Artifact schemaVersion. Legacy workbench.prd.v1 targets remain v1; workbench.prd.v2 targets remain v2. Retain documentId, advance revision.number, preserve citations, and publish the complete next document with workbench_artifact_draft_publish at artifact_index 0. After that Draft succeeds, do not call a Draft or Result tool; the trusted Runtime submits the exact normalized Draft once. If automatic Result validation fails, keep the Draft immutable and repair only the reported paths in one complete manual Result.",
       "</workbench_prd_result_contract>",
     ].join("\n");
   }
@@ -46,7 +43,11 @@ export function runtimePrdResultGuidance(
     "Never use a filled PRD example as an authoring source. A business example can silently inject unrelated pages, roles, permissions, states, retry behavior, or acceptance rules into a short request.",
     "The title and cover title must be <workOrderName>需求说明书. Preserve the fixed cover, version history, manual table of contents, sections 1 through 4, exactly one typed channelTable, productFlow followed by productArchitecture, a concrete degradation plan, and all 21 safety rows in canonical order. Safety applicability is only 是, 否, or 不涉及 and must be derived from request facts outside the safety table.",
     "Do not use 待确认, 以实际为准, template reminders, sample links, or other placeholders. Put conservative unresolved implementation details in typed assumptions without placeholder wording. Keep Artifact citations exactly equal to content citations.",
-    "Once the complete PRD candidate passes local reasoning checks, publish that complete renderable candidate with workbench_artifact_draft_publish so the document becomes visible, then submit the identical final candidate through workbench_runtime_result_submit. Do not emit Markdown or add wrapper fields.",
+    "Before the first Draft call, check the exact workbench.prd.v2 shape: revision is one object {number,status,summary,changedAt,changedById}; cover is one object {workOrderName,title}; versionHistory is an array of complete objects {status,author,participants,startDate,endDate,notes}; tableOfContents is one object {title:\"目 录\",entries:[...]}; assumptions is an array of complete assumption objects (or []); sections is one object with exactly introduction, businessRequirements, degradation, and safetyBaseline. Never replace objects with positional arrays or add layout/padding/placeholder keys.",
+    "The PRD is typed IR, not a Word layout description. Each block needs its exact discriminator and fields; inline prose is [{type:\"text\",text:\"...\",marks:[]}]. Copy the fixed safety intro byte-for-byte from the structure reference, including 截图违依据. Use exactly 21 canonical safety rows. The acceptance table has exactly 序号, 验收项, 验收标准 columns, complete cells, and continuous sequence values from 1; include separate typed acceptanceCriterion blocks.",
+    linkedPrototype
+      ? "Publish the complete PRD at artifact_index 0, then generate and publish its Prototype at artifact_index 1. Submit both in one workbench_runtime_result_submit call, preserving the validated PRD. Neither an isolated PRD nor an isolated Prototype can complete this linked Run."
+      : "Once the complete PRD candidate passes local reasoning checks, publish that complete renderable candidate with workbench_artifact_draft_publish at artifact_index 0. After that Draft succeeds, do not call a Draft or Result tool; the trusted Runtime submits the exact normalized Draft once and stops after validation succeeds. If automatic Result validation fails, keep the Draft immutable and repair only the reported paths in one complete manual Result. Do not emit Markdown or add wrapper fields.",
     "</workbench_prd_result_contract>",
   ].join("\n");
 }

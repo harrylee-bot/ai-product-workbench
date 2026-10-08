@@ -4,6 +4,7 @@ import {
   runtimeExecuteQueueOptions,
 } from "@workbench/workbench-contracts";
 import { PrismaClient } from "@workbench/workbench-db";
+import { seedReadyKnowledge } from "../../../scripts/test-support/knowledge-fixture.mjs";
 import { PgBoss } from "pg-boss";
 import { RuntimeExecutionReconciler } from "../src/runs/runtime-execution-reconciler.js";
 
@@ -68,25 +69,45 @@ describeWithPostgres("RuntimeExecutionReconciler PostgreSQL admission", () => {
 
       const reconcilerA = new RuntimeExecutionReconciler(dbA, bossA, 10, 60_000);
       const reconcilerB = new RuntimeExecutionReconciler(dbB, bossB, 10, 60_000);
-      await reconcileConcurrently(reconcilerA, reconcilerB, fixture.firstRunId);
-      await reconcilerA.reconcileRun(fixture.firstRunId);
+      expect(recoveryCount(await reconcileConcurrently(
+        reconcilerA,
+        reconcilerB,
+        fixture.firstRunId,
+      ))).toBe(1);
+      expect(await reconcilerA.reconcileRun(fixture.firstRunId)).toBe(false);
 
       let firstJobs = await bossA.findJobs(runtimeExecuteQueue, { key: fixture.firstRunId });
       expect(firstJobs.map((job) => job.state)).toEqual(["created"]);
 
       await setQueueJobState(dbA, firstJobs[0]!.id, "active");
-      await reconcileConcurrently(reconcilerA, reconcilerB, fixture.firstRunId);
+      expect(recoveryCount(await reconcileConcurrently(
+        reconcilerA,
+        reconcilerB,
+        fixture.firstRunId,
+      ))).toBe(0);
       firstJobs = await bossA.findJobs(runtimeExecuteQueue, { key: fixture.firstRunId });
       expect(firstJobs.map((job) => job.state)).toEqual(["active"]);
 
       await setQueueJobState(dbA, firstJobs[0]!.id, "failed");
-      await reconcileConcurrently(reconcilerA, reconcilerB, fixture.firstRunId);
-      await reconcileConcurrently(reconcilerA, reconcilerB, fixture.firstRunId);
+      expect(recoveryCount(await reconcileConcurrently(
+        reconcilerA,
+        reconcilerB,
+        fixture.firstRunId,
+      ))).toBe(1);
+      expect(recoveryCount(await reconcileConcurrently(
+        reconcilerA,
+        reconcilerB,
+        fixture.firstRunId,
+      ))).toBe(0);
       firstJobs = await bossA.findJobs(runtimeExecuteQueue, { key: fixture.firstRunId });
       expect(firstJobs.map((job) => job.state).sort()).toEqual(["created", "failed"]);
 
       await createSecondRun(dbA, fixture);
-      await reconcileConcurrently(reconcilerA, reconcilerB, fixture.secondRunId);
+      expect(recoveryCount(await reconcileConcurrently(
+        reconcilerA,
+        reconcilerB,
+        fixture.secondRunId,
+      ))).toBe(1);
       await prioritizeRecoveryJobs(dbA, [fixture.firstRunId, fixture.secondRunId]);
       const fetched = await bossA.fetch<{ runId: string }>(runtimeExecuteQueue, {
         batchSize: 2,
@@ -137,9 +158,13 @@ async function reconcileConcurrently(
   second: RuntimeExecutionReconciler,
   runId: string,
 ) {
-  await Promise.all(Array.from({ length: 12 }, (_, index) => (
+  return Promise.all(Array.from({ length: 12 }, (_, index) => (
     index % 2 === 0 ? first : second
   ).reconcileRun(runId)));
+}
+
+function recoveryCount(results: boolean[]) {
+  return results.filter(Boolean).length;
 }
 
 async function seedFixture(db: PrismaClient) {
@@ -188,6 +213,7 @@ async function seedFixture(db: PrismaClient) {
     });
     await tx.run.create({
       data: runtimeRun({
+        knowledgeReleaseId: await seedReadyKnowledge(tx),
         id: firstRunId,
         projectId,
         threadId: firstThreadId,
@@ -212,6 +238,7 @@ async function seedFixture(db: PrismaClient) {
 async function createSecondRun(db: PrismaClient, fixture: Awaited<ReturnType<typeof seedFixture>>) {
   await db.run.create({
     data: runtimeRun({
+      knowledgeReleaseId: (await db.run.findUniqueOrThrow({ where: { id: fixture.firstRunId } })).knowledgeReleaseId!,
       id: fixture.secondRunId,
       projectId: fixture.projectId,
       threadId: fixture.secondThreadId,
@@ -222,6 +249,7 @@ async function createSecondRun(db: PrismaClient, fixture: Awaited<ReturnType<typ
 }
 
 function runtimeRun(input: {
+  knowledgeReleaseId: string;
   id: string;
   projectId: string;
   threadId: string;
@@ -229,6 +257,7 @@ function runtimeRun(input: {
   suffix: string;
 }) {
   return {
+    knowledgeReleaseId: input.knowledgeReleaseId,
     id: input.id,
     projectId: input.projectId,
     threadId: input.threadId,

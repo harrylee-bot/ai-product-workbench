@@ -176,6 +176,21 @@ export function projectPublicProjectRelease(release: ProjectRelease): PublicProj
   });
 }
 
+export function projectPrototypeShareRelease(release: ProjectRelease, versionId: string): ProjectRelease {
+  const pin = release.artifactPins.find((candidate) => candidate.artifactVersionId === versionId && candidate.kind === "prototype");
+  if (!pin) throw new Error("PROTOTYPE_SHARE_PIN_INVALID");
+  const artifactPins = [{ ...pin, position: 0 }];
+  // Retain only the selected artifact. Frames, notes and edges may contain private project text.
+  const nodes = release.boardSnapshot.nodes.filter((node) => node.artifactVersionId === versionId)
+    .map((node, index) => ({ ...node, parentNodeId: null, sortOrder: index }));
+  const boardSnapshot = { ...release.boardSnapshot, nodes, edges: [] };
+  const boardChecksum = canonicalSha256(boardSnapshot);
+  const manifest = { ...release.manifest, board: { ...release.manifest.board, checksum: boardChecksum }, artifacts: artifactPins };
+  return projectReleaseSchema.parse({
+    ...release, boardSnapshot, boardChecksum, artifactPins, manifest, manifestSha256: canonicalSha256(manifest),
+  });
+}
+
 export function releaseDigestEtag(release: Pick<ProjectRelease, "manifestSha256">) {
   return `"${release.manifestSha256}"`;
 }

@@ -145,6 +145,149 @@ describe("Prototype runtime state", () => {
     });
   });
 
+  it("recomputes collection visibility from arbitrary keyword and category inputs", () => {
+    const document = collectionFixture();
+    const keyword = node(document.nodes, "input-keyword", "input");
+    const category = node(document.nodes, "input-category", "input");
+    const empty = node(document.nodes, "text-empty", "text");
+    let runtime = createPrototypeRuntimeState(document);
+    const visibleBooks = () => collectionBooks
+      .filter((book) => projectPrototypeRuntimeNode(
+        document,
+        runtime,
+        node(document.nodes, book.id, "text"),
+      ).visible)
+      .map((book) => book.id);
+
+    expect(visibleBooks()).toEqual(["book-clean-code", "book-ux", "book-management"]);
+    expect(projectPrototypeRuntimeNode(document, runtime, empty).visible).toBe(false);
+
+    const cases = [
+      { keyword: " code ", category: "all", expected: ["book-clean-code"] },
+      { keyword: "CLEAN", category: "tech", expected: ["book-clean-code"] },
+      { keyword: "用户", category: "pm", expected: ["book-ux"] },
+      { keyword: "优秀", category: "manage", expected: ["book-management"] },
+      { keyword: "用户", category: "tech", expected: [] },
+      { keyword: "", category: "pm", expected: ["book-ux"] },
+      { keyword: "", category: "tech", expected: ["book-clean-code"] },
+      { keyword: "没有这本书", category: "all", expected: [] },
+      { keyword: "  ", category: "all", expected: ["book-clean-code", "book-ux", "book-management"] },
+    ];
+    for (const scenario of cases) {
+      runtime = updatePrototypeRuntimeInput(document, runtime, keyword, scenario.keyword);
+      runtime = updatePrototypeRuntimeInput(document, runtime, category, scenario.category);
+
+      expect(visibleBooks(), JSON.stringify(scenario)).toEqual(scenario.expected);
+      expect(projectPrototypeRuntimeNode(document, runtime, empty).visible)
+        .toBe(scenario.expected.length === 0);
+    }
+  });
+
+  it("recomputes calculated bindings when the filter form resets", () => {
+    const document = collectionFixture();
+    const keyword = node(document.nodes, "input-keyword", "input");
+    const category = node(document.nodes, "input-category", "input");
+    const empty = node(document.nodes, "text-empty", "text");
+    let runtime = createPrototypeRuntimeState(document);
+    runtime = updatePrototypeRuntimeInput(document, runtime, keyword, "用户");
+    runtime = updatePrototypeRuntimeInput(document, runtime, category, "tech");
+    expect(projectPrototypeRuntimeNode(document, runtime, empty).visible).toBe(true);
+
+    const reset = resetPrototypeRuntimeForm(document, runtime, "form-search");
+
+    expect(reset.variables).toEqual({ "filter.keyword": "", "filter.category": "all" });
+    expect(projectPrototypeRuntimeNode(document, reset, keyword).value).toBe("");
+    expect(projectPrototypeRuntimeNode(document, reset, category).value).toBe("all");
+    expect(projectPrototypeRuntimeNode(document, reset, empty).visible).toBe(false);
+    for (const book of collectionBooks) {
+      expect(projectPrototypeRuntimeNode(document, reset, node(document.nodes, book.id, "text")).visible)
+        .toBe(true);
+    }
+  });
+
+  it("submits the actual filter values without replacing computed results with a fixed state", () => {
+    const document = collectionFixture();
+    const keyword = node(document.nodes, "input-keyword", "input");
+    const category = node(document.nodes, "input-category", "input");
+    const form = node(document.nodes, "form-search", "form");
+    let runtime = createPrototypeRuntimeState(document);
+    runtime = updatePrototypeRuntimeInput(document, runtime, keyword, "Code");
+    runtime = updatePrototypeRuntimeInput(document, runtime, category, "tech");
+
+    const result = applyPrototypeRuntimeAction(
+      document,
+      runtime,
+      prototypeRuntimeActions(document, form, "submit")[0]!,
+    );
+
+    expect(result.state).toBe(runtime);
+    expect(result.effect).toMatchObject({
+      kind: "submit",
+      values: [
+        { fieldName: "category", value: "tech" },
+        { fieldName: "keyword", value: "Code" },
+      ],
+    });
+    expect(projectPrototypeRuntimeNode(
+      document,
+      result.state,
+      node(document.nodes, "book-clean-code", "text"),
+    ).visible).toBe(true);
+    expect(projectPrototypeRuntimeNode(
+      document,
+      result.state,
+      node(document.nodes, "text-empty", "text"),
+    ).visible).toBe(false);
+  });
+
+  it("recomputes strict numeric equality when a number input is cleared and restored", () => {
+    const mutable = structuredClone(fixture());
+    const input = node(mutable.nodes, "input-email", "input");
+    const text = node(mutable.nodes, "text-email", "text");
+    input.inputType = "number";
+    mutable.variables[0]!.initialValue = 1;
+    const binding = mutable.bindings.find((candidate) => candidate.id === "binding-text-value")!;
+    binding.property = "visible";
+    binding.source = {
+      kind: "expression",
+      expression: {
+        kind: "equals",
+        left: { kind: "variable", path: "form.email" },
+        right: { kind: "literal", value: 1 },
+      },
+    };
+    const document = prototypeDocumentSchema.parse(mutable);
+    let runtime = createPrototypeRuntimeState(document);
+    expect(projectPrototypeRuntimeNode(document, runtime, text).visible).toBe(true);
+
+    runtime = updatePrototypeRuntimeInput(
+      document, runtime, input, prototypeRuntimeInputValue(input, "", false),
+    );
+    expect(runtime.variables["form.email"]).toBeNull();
+    expect(projectPrototypeRuntimeNode(document, runtime, text).visible).toBe(false);
+
+    runtime = updatePrototypeRuntimeInput(
+      document, runtime, input, prototypeRuntimeInputValue(input, "1", false),
+    );
+    expect(runtime.variables["form.email"]).toBe(1);
+    expect(projectPrototypeRuntimeNode(document, runtime, text).visible).toBe(true);
+  });
+
+  it("keeps calculated filters usable after an oversized runtime value bypasses native limits", () => {
+    const document = collectionFixture();
+    const input = node(document.nodes, "input-keyword", "input");
+    const empty = node(document.nodes, "text-empty", "text");
+    const longValue = "x".repeat(10_001);
+    const changed = updatePrototypeRuntimeInput(
+      document, createPrototypeRuntimeState(document), input, longValue,
+    );
+
+    expect(changed.variables["filter.keyword"]).toBe(longValue);
+    expect(projectPrototypeRuntimeNode(document, changed, empty).visible).toBe(true);
+    const reset = resetPrototypeRuntimeForm(document, changed, "form-search");
+    expect(projectPrototypeRuntimeNode(document, reset, empty).visible).toBe(false);
+  });
+
   it("models a radio field as one string variable across explicit option values", () => {
     const mutable = structuredClone(fixture());
     const form = node(mutable.nodes, "form-main", "form");
@@ -239,6 +382,127 @@ describe("Prototype runtime state", () => {
     });
   });
 });
+
+const collectionBooks = [
+  { id: "book-clean-code", title: "Clean Code", category: "tech" },
+  { id: "book-ux", title: "用户体验要素", category: "pm" },
+  { id: "book-management", title: "从优秀到卓越", category: "manage" },
+];
+
+function collectionFixture() {
+  const literal = (value: string) => ({ kind: "literal" as const, value });
+  const variable = (path: string) => ({ kind: "variable" as const, path });
+  const rowExpressions = collectionBooks.map((book) => ({
+    kind: "and" as const,
+    operands: [
+      { kind: "contains" as const, left: literal(book.title), right: variable("filter.keyword") },
+      {
+        kind: "or" as const,
+        operands: [
+          { kind: "equals" as const, left: variable("filter.category"), right: literal("all") },
+          { kind: "equals" as const, left: variable("filter.category"), right: literal(book.category) },
+        ],
+      },
+    ],
+  }));
+  const root = {
+    ...base("root-collection", "screen-collection", null),
+    kind: "frame" as const,
+    childIds: ["form-search", ...collectionBooks.map((book) => book.id), "text-empty"],
+    clipContent: true,
+  };
+  const form = {
+    ...base("form-search", "screen-collection", root.id),
+    kind: "form" as const,
+    childIds: ["input-keyword", "input-category", "button-search", "button-clear"],
+    actionIds: ["action-search"],
+  };
+  const input = {
+    ...base("input-keyword", "screen-collection", form.id),
+    kind: "input" as const,
+    inputType: "text" as const,
+    fieldName: "keyword",
+    label: "书名关键词",
+    placeholder: "",
+    optionValue: null,
+    options: [],
+    required: false,
+    disabled: false,
+    bindingIds: ["binding-keyword"],
+  };
+  const category = {
+    ...input,
+    id: "input-category",
+    name: "Category",
+    inputType: "select" as const,
+    fieldName: "category",
+    label: "分类",
+    options: [
+      { value: "all", label: "全部", disabled: false },
+      { value: "tech", label: "技术", disabled: false },
+      { value: "pm", label: "产品", disabled: false },
+      { value: "manage", label: "管理", disabled: false },
+    ],
+    bindingIds: ["binding-category"],
+  };
+  const button = {
+    ...base("button-search", "screen-collection", form.id),
+    kind: "button" as const,
+    label: "搜索",
+    buttonType: "submit" as const,
+    childIds: [],
+    disabled: false,
+  };
+  return prototypeDocumentSchema.parse({
+    protocol: "workbench.prototype.v1",
+    documentId: "collection-runtime-document",
+    title: "Shared collection",
+    revision: 1,
+    screens: [{
+      id: "screen-collection", name: "Collection", route: "/", rootNodeId: root.id,
+      initialStateId: null, viewport: { width: 390, height: 844 },
+    }],
+    nodes: [
+      root, form, input, category, button,
+      { ...button, id: "button-clear", name: "Clear", label: "清空筛选", buttonType: "reset" },
+      ...collectionBooks.map((book) => ({
+        ...base(book.id, "screen-collection", root.id),
+        kind: "text",
+        text: book.title,
+        maxLines: 1,
+        bindingIds: [`binding-${book.id}`],
+      })),
+      {
+        ...base("text-empty", "screen-collection", root.id),
+        kind: "text", text: "没有匹配的书籍", maxLines: 1, bindingIds: ["binding-empty"],
+      },
+    ],
+    tokens: [],
+    assets: [],
+    variables: [
+      { path: "filter.keyword", initialValue: "" },
+      { path: "filter.category", initialValue: "all" },
+    ],
+    states: [],
+    actions: [{
+      id: "action-search", nodeId: form.id, event: "submit", kind: "submit",
+      bindingIds: ["binding-keyword", "binding-category"], successStateId: null,
+    }],
+    bindings: [
+      { id: "binding-keyword", nodeId: input.id, property: "value", source: variable("filter.keyword") },
+      { id: "binding-category", nodeId: category.id, property: "value", source: variable("filter.category") },
+      ...collectionBooks.map((book, index) => ({
+        id: `binding-${book.id}`, nodeId: book.id, property: "visible",
+        source: { kind: "expression", expression: rowExpressions[index] },
+      })),
+      {
+        id: "binding-empty", nodeId: "text-empty", property: "visible",
+        source: { kind: "expression", expression: { kind: "not", operand: { kind: "or", operands: rowExpressions } } },
+      },
+    ],
+    motions: [],
+  });
+}
 
 function fixture() {
   const root = {
