@@ -253,7 +253,8 @@ jobs:
       - name: Prepare document renderer runtime
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends python3-venv python3-lxml python3-pil
+          sudo apt-get install -y --no-install-recommends \
+            python3-venv python3-lxml python3-pil fonts-noto-cjk libreoffice-writer poppler-utils
           /usr/bin/python3 -m venv --system-site-packages "$RUNNER_TEMP/workbench-export-python"
           "$RUNNER_TEMP/workbench-export-python/bin/python3" -m pip install \
             --disable-pip-version-check --only-binary=:all: --no-deps --require-hashes \

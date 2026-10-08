@@ -1,0 +1,78 @@
+{
+  "schema": "workbench.deerflow-base-recovery.v1",
+  "applicationVersion": "1.0.0",
+  "sourceImageId": "sha256:5643bcdf4ae38060e35b0207f65276a884c201fd6c61a594e6f188be3e3b3b95",
+  "upstreamCommit": "7a6c4a994a86583d2a3c056ee9d0f157d4f030c2",
+  "installedPatchManifestPath": "/opt/workbench/deerflow/source-patch/manifest.json",
+  "installedPatchManifestSha256": "f2bcd543acb4db5b4e14138d3f1f9df533b2e2d62b0cf36ac1b39a009bf7e4ea",
+  "candidatePatchManifestSha256": "fee79cfd2c2f1088d8adc70d42946fa32a224dee2a4ae3ddad7edc837d86db9f",
+  "sourceFileSha256": {
+    "/opt/workbench/deerflow/source-patch/apply.py": "2d18f25f77a489f17771550a32f06efc6e8e780e09ba789f2562d94a4b6bb2fb",
+    "/opt/workbench/deerflow/source-patch/manifest.json": "f2bcd543acb4db5b4e14138d3f1f9df533b2e2d62b0cf36ac1b39a009bf7e4ea",
+    "/opt/workbench/deerflow/source-patch/test_workbench_request_context.py": "c09af390e900a997a8631ac02fd032a96d2f1366ab653ee28b9e203ba6fbbf23",
+    "/opt/workbench/deerflow/source-patch/test_workbench_tool_scope_middleware.py": "c518e3fbb722b797318cc53376bf6e6c92eece9bdf17270d9ecc1dc242ad5f81",
+    "/opt/workbench/deerflow/source-patch/workbench_tool_scope_middleware.py": "3b3ad3c51d5483b1f1c0b5fba20a0ab3e13139182e836d10dceb5bf2e24f4630",
+    "/app/backend/deerflow_workbench_tools/__init__.py": "deba6e065a65e91d4a378ed5804e4213ec634bb01c1110af579bd1a0a6e4c254",
+    "/app/backend/deerflow_workbench_tools/artifact_draft_tool.py": "d40c0410e92c098a02858b0ee1d55dbddd6de8ae159367ebb5235f277382c001",
+    "/app/backend/deerflow_workbench_tools/canvas_client.py": "896de23f1ca0f7df24810a2a55227ec68e21a1e960577dae98c71d668f21bb69",
+    "/app/backend/deerflow_workbench_tools/canvas_tool.py": "5bed00b1dd36289efb5f80d499b62ad7ee26de98b8990b350461d48454ed1253",
+    "/app/backend/deerflow_workbench_tools/generation_stage_tool.py": "c2df719b77fb999fc99781cbee3cccc67b108aa9bf5e8aa8114a7d459d669386",
+    "/app/backend/deerflow_workbench_tools/knowledge_client.py": "e4dad688047afdd3dc5d0dd1018d4c94179289cce41b15aff016899e88f9f8b5",
+    "/app/backend/deerflow_workbench_tools/knowledge_tool.py": "0c5a9e45826f5e37f0db9e6bc6fc99491c97950e3103620418debed662c60d30",
+    "/app/backend/deerflow_workbench_tools/prd_reference_normalizer.py": "6f62f2d6449f9f5bb550ba1124d7f635cebe16d2ab3b4815bbd2fae7d96e782b",
+    "/app/backend/deerflow_workbench_tools/prd_reference_tool.py": "08e1dbeec6173898dbcde282e80d7d6fbe68ceac9e6bdef3a9abe9dd90f20984",
+    "/app/backend/deerflow_workbench_tools/prototype_patch_tool.py": "536e3c954ba0d207140c5320809c674c90e5657793c73fb9761595c7d52c11b4",
+    "/app/backend/deerflow_workbench_tools/prototype_runtime_normalizer.py": "fc0d76078c3470fbde6c3333a059fcade24eb80aeda338c1c604c498b09edd19",
+    "/app/backend/deerflow_workbench_tools/runtime_result_tool.py": "5c35fd8606f5a7cf3c839c615089efca0c0b16c3f847a64342219115015ff89b",
+    "/app/backend/deerflow_workbench_tools/runtime_result_validator.bundle.mjs": "fd090b0daa89c9364845d8f31c9622970d8d56461f5799f2a7c643a1c88858b3",
+    "/app/backend/deerflow_workbench_tools/runtime_result_validator.py": "3e817afb3246a819ee2bba02a9d3216b3cbf248420a19fc2b3e16c17def5abeb",
+    "/app/skills/public/workbench/SKILL.md": "892afd756183136e7230e1b631fb85447a53d11561d7a7ac06d77a9bc6b69315",
+    "/app/skills/public/workbench/references/prd-runtime-result.schema.json": "bd2f09b81bf8538a33ccf9eb0942d364c23dedf071979dad991fe09812f9e747",
+    "/app/skills/public/workbench/references/prototype-runtime-result.example.json": "e76e0c8b8c797a4941e31cc5067b80bb8106d4329b086ef743d6ad76ef958a99",
+    "/app/skills/public/workbench/references/runtime-result-contract.md": "53130d46bb2654b7ef0772b0e939f0a5abf5f6934d6c5a01c876c78e6f919fbb",
+    "/app/skills/public/workbench/references/runtime-result.schema.json": "fa5f89c8a7e9294bd2ae3f58e6d6be4ae296ca5c5de47b2ddaf567b2c15dde1d",
+    "/app/skills/public/requirement-doc-template/SKILL.md": "82ec80d5b8d68916b2fb9259e30db9e0982645ae96e6d189a9d1dd3daf2baf0f",
+    "/app/skills/public/requirement-doc-template/agents/openai.yaml": "f93eee46ee2b76146c7d2b212f6c26da3c16b28d566eac0a3158c92f9425afc0",
+    "/app/skills/public/requirement-doc-template/assets/requirement-template.docx": "3070777f5c624be731bd264f72955ca4d15d5ac68d20867318ce8c0081789ebf",
+    "/app/skills/public/requirement-doc-template/references/quality-standards.md": "ad2206958aee116654a657b1c979e7a0228aee1e080e2a289712bd7ad82b1c76",
+    "/app/skills/public/requirement-doc-template/references/structure.md": "7952eb98fadbbd992f1bdbd227953aacbcbcdea7fdef1f758987750a9ac5bf70",
+    "/app/skills/public/requirement-doc-template/scripts/docx_quality_check.py": "722aa28067ef0d34233191275440285dcee68b0764eb55d65f5bec8e16b8cf21",
+    "/opt/workbench/deerflow/config.fragment.yaml": "788a3c91e72f389c4b6124f08ae874a144b2f669f7a410a67dda434cd652ceaf",
+    "/app/backend/extensions_config.workbench.json": "a3bf037216949034387e0583aa3eb3e59dc9c36a7c1ac243058f5579ddbd8458",
+    "/app/backend/packages/harness/deerflow/agents/lead_agent/agent.py": "fed67066e412add45163ff86267b563ec7fb5210e0d14fbb1701d19a8a41167c",
+    "/app/backend/packages/harness/deerflow/agents/middlewares/deferred_tool_filter_middleware.py": "d0fb92b78bf7d65a3444925a7cef4a1072f464127b75393fdaf5f1fb7d9053f2",
+    "/app/backend/packages/harness/deerflow/agents/middlewares/workbench_tool_scope_middleware.py": "3b3ad3c51d5483b1f1c0b5fba20a0ab3e13139182e836d10dceb5bf2e24f4630",
+    "/app/backend/packages/harness/deerflow/tools/builtins/task_tool.py": "13cb41b838d20a664438318a0e207ef6f8c80e7bc4923bab1e6a0ae0c2c101d8",
+    "/app/backend/app/gateway/services.py": "d6f9f0ec0a2036d45832149d989eb9e15d644d9cbd98787b84a826ad79de8b33",
+    "/app/backend/packages/harness/deerflow/runtime/runs/manager.py": "c8e849c5dfb53495594e139c3adecd04e570a57942940b5f46b93d14be8732b1",
+    "/app/backend/app/gateway/routers/threads.py": "115109b776847239570786e2448539e41bbbc99c28e63bcc2d989625cfa4a6e1",
+    "/app/backend/app/gateway/routers/thread_runs.py": "f829a02bf04c15806c92afaccda2e57a858a67317e1c6091edfdfa4767aafa63",
+    "/app/backend/packages/harness/deerflow/runtime/runs/worker.py": "9424a47369bd557b7dcdd7688ec6e2310ee8aba8f240bde7d0597e1ca2a50d9d",
+    "/opt/workbench/deerflow/fallback-rollback-patch/manifest.json": "1c31b3687bb40fcd6edca3b9acf7a72b9c0f9ecb6d216806b6c05d10888eeddc",
+    "/usr/local/bin/node": "93956de2e59480474a7b46571da1651180b1a050cdf32641ebec4ce6e478e068",
+    "/app/backend/uv.lock": "90a60f15a77e37003c0e477345592313b84d5327c203a6b33e49e9f43df5dad6",
+    "/app/backend/pyproject.toml": "4a60e7fca75714c80f280fda989ad38a78ea8ccd5adcb349b8bb3a7033ae9966"
+  },
+  "restoreSources": [
+    {
+      "manifestGroup": "agent",
+      "path": "/app/backend/packages/harness/deerflow/agents/lead_agent/agent.py"
+    },
+    {
+      "manifestGroup": "additionalSources",
+      "path": "/app/backend/packages/harness/deerflow/tools/builtins/task_tool.py"
+    },
+    {
+      "manifestGroup": "gatewaySources",
+      "path": "/app/backend/app/gateway/services.py"
+    }
+  ],
+  "removeMiddlewarePath": "/app/backend/packages/harness/deerflow/agents/middlewares/workbench_tool_scope_middleware.py",
+  "preservedSourcePaths": [
+    "/app/backend/packages/harness/deerflow/runtime/runs/manager.py",
+    "/app/backend/app/gateway/routers/threads.py",
+    "/app/backend/app/gateway/routers/thread_runs.py",
+    "/app/backend/packages/harness/deerflow/runtime/runs/worker.py"
+  ],
+  "scope": "Restore only candidate-required upstream source inputs. Preserve all other parent-image files, including existing run pagination, history filters, and fallback rollback."
+}

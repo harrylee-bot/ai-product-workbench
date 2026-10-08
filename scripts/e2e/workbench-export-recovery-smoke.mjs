@@ -10,7 +10,7 @@ const origin = normalizedOrigin(
 );
 const timestamp = "2026-07-15T05:00:00.000Z";
 const sha256 = "a".repeat(64);
-const outputDir = fileURLToPath(new URL("../../output/playwright/", import.meta.url));
+const outputDir = fileURLToPath(new URL("../../output/audit/1.0.0/browser-remediation/", import.meta.url));
 const screenshot = path.join(outputDir, "workbench-export-recovery-1501x855.png");
 const mobileScreenshot = path.join(outputDir, "workbench-export-recovery-390x844.png");
 const unknownRequests = [];

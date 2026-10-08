@@ -42,7 +42,7 @@ const legacySyntheticCopy = [
   "image light",
   "Lumina Dark",
 ];
-const outputDir = fileURLToPath(new URL("../../output/playwright/", import.meta.url));
+const outputDir = fileURLToPath(new URL("../../output/audit/1.0.0/browser-remediation/", import.meta.url));
 const desktopScreenshot = path.join(outputDir, "workbench-run-preview-desktop-1501x855.png");
 const mobileScreenshot = path.join(outputDir, "workbench-run-preview-mobile-390x844.png");
 const unknownRequests = [];
@@ -602,6 +602,8 @@ try {
   await page.locator("[data-workbench-project]").waitFor();
   const composer = page.locator("[data-project-composer]");
   await composer.waitFor();
+  await composer.getByRole("button", { name: "选择生成类型" }).click();
+  await composer.getByRole("menuitemradio", { name: /生成原型/u }).click();
   await composer.getByRole("button", { name: "Web" }).click();
   await composer.getByRole("button", { name: "样式" }).click();
   const styleMenu = composer.getByRole("menu");
@@ -714,8 +716,8 @@ try {
     submissionIntentSubmits: submissionIntentSubmits.length,
     currentSubmissionIntentReads,
     screenshots: [
-      "output/playwright/workbench-run-preview-desktop-1501x855.png",
-      "output/playwright/workbench-run-preview-mobile-390x844.png",
+      "output/audit/1.0.0/browser-remediation/workbench-run-preview-desktop-1501x855.png",
+      "output/audit/1.0.0/browser-remediation/workbench-run-preview-mobile-390x844.png",
     ],
   }, null, 2));
 } finally {

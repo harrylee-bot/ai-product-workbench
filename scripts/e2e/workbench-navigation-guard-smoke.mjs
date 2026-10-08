@@ -24,7 +24,7 @@ const homeHref = `${origin}/?new=1#home`;
 const projectHref = `${origin}/projects/p1?old=1&boardNode=n1#canvas`;
 const duplicatedProjectHref = `${origin}/projects/p2`;
 const boardPath = "/api/v1/projects/p1/board";
-const outputDir = fileURLToPath(new URL("../../output/playwright/", import.meta.url));
+const outputDir = fileURLToPath(new URL("../../output/audit/1.0.0/browser-remediation/", import.meta.url));
 const rejectedScreenshot = path.join(outputDir, `workbench-navigation-guard-rejected-1501x855${screenshotSuffix}.png`);
 const acceptedScreenshot = path.join(outputDir, `workbench-navigation-guard-accepted-1501x855${screenshotSuffix}.png`);
 const forwardScreenshot = path.join(outputDir, `workbench-navigation-guard-forward-1501x855${screenshotSuffix}.png`);

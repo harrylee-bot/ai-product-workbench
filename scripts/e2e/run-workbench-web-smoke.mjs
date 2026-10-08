@@ -87,6 +87,7 @@ const serverExit = server
 
 let cleanupPromise;
 let signalHandled = false;
+let completedSmokeCount = 0;
 const cleanupManagedFiles = () => {
   cleanupPromise ??= (async () => {
     if (sourceTsconfig && sourceNextEnv) {
@@ -125,6 +126,7 @@ try {
     const warmedPaths = await warmWorkbenchProtectedRoutes(origin, serverExit);
     console.log(`Workbench Web E2E protected routes ready: ${warmedPaths.join(", ")}`);
   }
+  await run("node", ["scripts/e2e/workbench-prd-remediation-smoke.mjs"]);
   await run("node", ["scripts/e2e/workbench-run-preview-smoke.mjs"]);
   await run("node", ["scripts/e2e/workbench-approval-preferences-smoke.mjs"]);
   await run("node", ["scripts/e2e/workbench-board-tools-smoke.mjs"]);
@@ -138,12 +140,16 @@ try {
   await run("node", ["scripts/e2e/workbench-design-system-import-smoke.mjs"]);
   await run("node", ["scripts/e2e/workbench-export-recovery-smoke.mjs"]);
   await run("node", ["scripts/e2e/workbench-isolated-preview-smoke.mjs"]);
+  if (completedSmokeCount === 0) throw new Error("No browser smoke test matched WORKBENCH_E2E_SMOKE_FILTER");
 } finally {
   if (server && serverExit) await stopServer(server, serverExit);
   await cleanupManagedFiles();
 }
 
 async function run(command, args, environment = {}) {
+  // A local diagnostic filter still uses the same isolated server lifecycle.
+  const filter = process.env.WORKBENCH_E2E_SMOKE_FILTER;
+  if (filter && !args.some((argument) => argument.includes(filter))) return;
   const child = spawn(command, args, {
     cwd: repoRoot,
     env: {
@@ -161,6 +167,7 @@ async function run(command, args, environment = {}) {
   if (result.code !== 0) {
     throw new Error(`${command} ${args.join(" ")} failed: ${JSON.stringify(result)}`);
   }
+  completedSmokeCount += 1;
 }
 
 async function stopServer(child, exitPromise) {

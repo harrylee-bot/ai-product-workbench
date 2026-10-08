@@ -174,14 +174,37 @@ test("the Web and CI builds pin their Linux x64 native dependencies", async () =
   });
 });
 
-test("the API image preserves and probes the musl Sharp runtime", async () => {
+test("the API image keeps native dependency locations and runs a real Sharp image transform", async () => {
   const source = await readFile(path.join(root, "apps/workbench-api/Dockerfile"), "utf8");
-  assert.match(
-    source,
-    /COPY --from=production-dependencies --chown=node:node \/app\/apps\/workbench-api\/node_modules\/@img\/ node_modules\/@img\//u,
-  );
-  assert.match(source, /cp -a node_modules\/@img apps\/workbench-api\/node_modules\/@img/u);
-  assert.match(source, /const sharp = require\('sharp'\); if \(!sharp\.versions\.vips\) process\.exit\(1\)/u);
+  assert.doesNotMatch(source, /cp -a node_modules\/@img/u);
+  assert.doesNotMatch(source, /COPY[^\n]+node_modules\/@img/u);
+  assert.match(source, /RUN cd \/app\/apps\/workbench-api/u);
+  const probe = source.match(/node --input-type=module -e "([^"]+SHARP_RUNTIME_SMOKE_FAILED[^"]+)"/u)?.[1];
+  assert.ok(probe, "the final runner must decode, resize and verify actual image pixels");
+  const result = spawnSync(process.execPath, ["--input-type=module", "-e", probe], {
+    cwd: path.join(root, "apps/workbench-api"), encoding: "utf8",
+  });
+  assert.equal(result.status, 0, result.stderr);
+});
+
+test("the API native Sharp pins match its release's libvips ABI on glibc and musl", async () => {
+  const manifest = JSON.parse(await readFile(path.join(root, "apps/workbench-api/package.json"), "utf8"));
+  const lockfile = JSON.parse(await readFile(path.join(root, "package-lock.json"), "utf8"));
+  const locked = (name) => lockfile.packages[`apps/workbench-api/node_modules/${name}`]
+    ?? lockfile.packages[`node_modules/${name}`];
+  const sharp = locked("sharp");
+  assert.equal(sharp.version, manifest.dependencies.sharp);
+  for (const platform of ["linux-x64", "linuxmusl-x64"]) {
+    const binding = `@img/sharp-${platform}`;
+    const libvips = `@img/sharp-libvips-${platform}`;
+    for (const name of [binding, libvips]) {
+      const required = sharp.optionalDependencies[name];
+      assert.equal(manifest.optionalDependencies[name], required, `${name}: direct pin must match Sharp's ABI release`);
+      assert.equal(lockfile.packages["apps/workbench-api"].optionalDependencies[name], required);
+      assert.equal(locked(name).version, required, `${name}: the installed sibling must use the matching ABI`);
+    }
+    assert.equal(locked(binding).optionalDependencies[libvips], locked(libvips).version);
+  }
 });
 
 test("candidate security dependency fixes remain exactly pinned", async () => {

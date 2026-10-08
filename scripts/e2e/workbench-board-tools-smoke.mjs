@@ -44,13 +44,13 @@ const previewHtml = await readFile(
 const timestamp = "2026-07-14T01:00:00.000Z";
 const checksum = "a".repeat(64);
 const preferenceEtag = (revision) => `"avp1.${revision}.${"a".repeat(43)}"`;
-const projectBaselineScreenshot = "output/playwright/workbench-phase0-baseline-project-complete-1501x855.png";
-const desktopFavouritesPanelScreenshot = "output/playwright/workbench-board-favourites-panel-desktop-1501x855.png";
-const desktopDesignSystemPanelScreenshot = "output/playwright/workbench-board-design-system-panel-desktop-1501x855.png";
-const mobileFavouritesPanelScreenshot = "output/playwright/workbench-board-favourites-panel-mobile-390x844.png";
-const mobileDesignSystemPanelScreenshot = "output/playwright/workbench-board-design-system-panel-mobile-390x844.png";
-const desktopScreenContextToolbarScreenshot = "output/playwright/workbench-screen-context-toolbar-desktop-1501x855.png";
-const mobileScreenContextToolbarScreenshot = "output/playwright/workbench-screen-context-toolbar-mobile-390x844.png";
+const projectBaselineScreenshot = "output/audit/1.0.0/browser-remediation/workbench-phase0-baseline-project-complete-1501x855.png";
+const desktopFavouritesPanelScreenshot = "output/audit/1.0.0/browser-remediation/workbench-board-favourites-panel-desktop-1501x855.png";
+const desktopDesignSystemPanelScreenshot = "output/audit/1.0.0/browser-remediation/workbench-board-design-system-panel-desktop-1501x855.png";
+const mobileFavouritesPanelScreenshot = "output/audit/1.0.0/browser-remediation/workbench-board-favourites-panel-mobile-390x844.png";
+const mobileDesignSystemPanelScreenshot = "output/audit/1.0.0/browser-remediation/workbench-board-design-system-panel-mobile-390x844.png";
+const desktopScreenContextToolbarScreenshot = "output/audit/1.0.0/browser-remediation/workbench-screen-context-toolbar-desktop-1501x855.png";
+const mobileScreenContextToolbarScreenshot = "output/audit/1.0.0/browser-remediation/workbench-screen-context-toolbar-mobile-390x844.png";
 const fixedViewportMatrix = [
   { key: "mobile", width: 375, height: 812 },
   { key: "tablet", width: 768, height: 1024 },
@@ -59,10 +59,10 @@ const fixedViewportMatrix = [
 const fixedViewportScreenshotPaths = Object.fromEntries(
   fixedViewportMatrix.map(({ key, width, height }) => [
     key,
-    `output/playwright/workbench-phase11-${key}-${width}x${height}.png`,
+    `output/audit/1.0.0/browser-remediation/workbench-phase11-${key}-${width}x${height}.png`,
   ]),
 );
-const homeMobileDrawerScreenshot = "output/playwright/workbench-phase11-home-drawer-mobile-375x812.png";
+const homeMobileDrawerScreenshot = "output/audit/1.0.0/browser-remediation/workbench-phase11-home-drawer-mobile-375x812.png";
 const unknownRequests = [];
 const consoleErrors = [];
 const saves = [];
@@ -223,7 +223,7 @@ const workspaceMembers = [
 ];
 
 const browser = await chromium.launch({ headless: true });
-await mkdir("output/playwright", { recursive: true });
+await mkdir("output/audit/1.0.0/browser-remediation", { recursive: true });
 const context = await browser.newContext({ viewport: { width: 1501, height: 855 } });
 await context.addCookies([{
   name: "workbench.session_token",
@@ -1345,7 +1345,7 @@ await page.locator("[data-workbench-project]").waitFor();
 await page.locator(`.react-flow__node[data-id="${frameNode.id}"]`).waitFor();
 await page.locator(`.react-flow__node[data-id="${drawingNode.id}"] svg path`).waitFor();
 await page.screenshot({
-  path: "output/playwright/workbench-board-tools-desktop-1501x855.png",
+  path: "output/audit/1.0.0/browser-remediation/workbench-board-tools-desktop-1501x855.png",
   fullPage: true,
 });
 
@@ -1560,8 +1560,8 @@ console.log(JSON.stringify({
   homeMobileDrawerAudit,
   screenshots: [
     projectBaselineScreenshot,
-    "output/playwright/workbench-board-tools-desktop-1501x855.png",
-    "output/playwright/workbench-board-tools-mobile-390x844.png",
+    "output/audit/1.0.0/browser-remediation/workbench-board-tools-desktop-1501x855.png",
+    "output/audit/1.0.0/browser-remediation/workbench-board-tools-mobile-390x844.png",
     desktopScreenContextToolbarScreenshot,
     mobileScreenContextToolbarScreenshot,
     desktopFavouritesPanelScreenshot,

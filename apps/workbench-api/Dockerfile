@@ -47,8 +47,6 @@ RUN rm -rf packages/workbench-db/generated \
 FROM build AS production-dependencies
 COPY deploy/collect-workspace-runtime-dependencies.mjs /usr/local/lib/collect-workspace-runtime-dependencies.mjs
 RUN npm prune --omit=dev --include=optional --no-audit --no-fund \
-  && install -d apps/workbench-api/node_modules \
-  && cp -a node_modules/@img apps/workbench-api/node_modules/@img \
   && node /usr/local/lib/collect-workspace-runtime-dependencies.mjs /app /app/.runtime-workspace-dependencies \
   && rm -rf /root/.npm
 
@@ -89,7 +87,6 @@ COPY --chown=node:node packages/workbench-preview-token/package.json packages/wo
 COPY --chown=node:node packages/workbench-telemetry/package.json packages/workbench-telemetry/package.json
 COPY --from=production-dependencies --chown=node:node /app/node_modules node_modules
 COPY --from=production-dependencies --chown=node:node /app/.runtime-workspace-dependencies/ ./
-COPY --from=production-dependencies --chown=node:node /app/apps/workbench-api/node_modules/@img/ node_modules/@img/
 COPY --from=build --chown=node:node /app/apps/workbench-api/dist apps/workbench-api/dist
 COPY --from=build --chown=node:node /app/packages/workbench-canvas-tools/dist packages/workbench-canvas-tools/dist
 COPY --from=build --chown=node:node /app/packages/workbench-content-security/dist packages/workbench-content-security/dist
@@ -100,7 +97,8 @@ COPY --from=build --chown=node:node /app/packages/workbench-knowledge/dist packa
 COPY --from=build --chown=node:node /app/packages/workbench-preview-token/dist packages/workbench-preview-token/dist
 COPY --from=build --chown=node:node /app/packages/workbench-telemetry/dist packages/workbench-telemetry/dist
 
-RUN node -e "const sharp = require('sharp'); if (!sharp.versions.vips) process.exit(1)" \
+RUN cd /app/apps/workbench-api \
+  && node --input-type=module -e "import sharp from 'sharp'; const png = await sharp({ create: { width: 2, height: 2, channels: 4, background: '#ff0000' } }).png().toBuffer(); const { data, info } = await sharp(png).resize(1, 1).removeAlpha().raw().toBuffer({ resolveWithObject: true }); if (info.width !== 1 || info.height !== 1 || info.channels !== 3 || !data.equals(Buffer.from([255, 0, 0]))) throw new Error('SHARP_RUNTIME_SMOKE_FAILED');" \
   && install -d -o node -g node -m 0700 /var/lib/workbench-api/ready-object-spool
 
 USER node

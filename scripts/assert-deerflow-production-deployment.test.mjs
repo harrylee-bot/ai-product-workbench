@@ -27,3 +27,11 @@ test("the deployment contract binds the fixed DeerFlow source patch commit", () 
   assert.notEqual(rejected.status, 0);
   assert.match(rejected.stderr, /expected commit must match the audited DeerFlow patch commit/u);
 });
+
+test("the pinned base recovery rejects source drift and verifies Docker-save OCI identities", () => {
+  const suite = fileURLToPath(new URL("../integrations/deerflow/base-recovery/test_recovery.py", import.meta.url));
+  const result = spawnSync("python3", ["-B", suite], { encoding: "utf8" });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stderr, /Ran 10 tests/u);
+  assert.match(result.stderr, /\bOK\b/u);
+});

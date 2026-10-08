@@ -10,7 +10,7 @@ const origin = normalizedOrigin(
 );
 const timestamp = "2026-07-15T08:00:00.000Z";
 const updatedTimestamp = "2026-07-15T08:05:00.000Z";
-const outputDir = fileURLToPath(new URL("../../output/playwright/", import.meta.url));
+const outputDir = fileURLToPath(new URL("../../output/audit/1.0.0/browser-remediation/", import.meta.url));
 const homeBaselineScreenshot = path.join(outputDir, "workbench-phase0-baseline-home-1501x855.png");
 const approvalScreenshot = path.join(outputDir, "workbench-approval-keyboard-1501x855.png");
 const preferencesScreenshot = path.join(outputDir, "workbench-preferences-refresh-1501x855.png");
@@ -326,9 +326,9 @@ try {
     preferenceUpdate: preferenceUpdates[0],
     streamCursors,
     screenshots: [
-      "output/playwright/workbench-phase0-baseline-home-1501x855.png",
-      "output/playwright/workbench-approval-keyboard-1501x855.png",
-      "output/playwright/workbench-preferences-refresh-1501x855.png",
+      "output/audit/1.0.0/browser-remediation/workbench-phase0-baseline-home-1501x855.png",
+      "output/audit/1.0.0/browser-remediation/workbench-approval-keyboard-1501x855.png",
+      "output/audit/1.0.0/browser-remediation/workbench-preferences-refresh-1501x855.png",
     ],
   }, null, 2));
 } finally {

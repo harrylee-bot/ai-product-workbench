@@ -420,14 +420,14 @@ const frameBox = await frame.boundingBox();
 assert(overlayBox && overlayBox.width === 1501 && overlayBox.height === 855, "Preview Overlay must retain the full Workbench viewport");
 assert(frameBox && frameBox.width > 200 && frameBox.height > 300, "Preview iframe must be visibly framed and non-empty");
 await page.screenshot({
-  path: "output/playwright/workbench-isolated-preview-desktop-1501x855.png",
+  path: "output/audit/1.0.0/browser-remediation/workbench-isolated-preview-desktop-1501x855.png",
   fullPage: true,
 });
 
 await page.setViewportSize({ width: 390, height: 844 });
 await page.waitForTimeout(250);
 await page.screenshot({
-  path: "output/playwright/workbench-isolated-preview-mobile-390x844.png",
+  path: "output/audit/1.0.0/browser-remediation/workbench-isolated-preview-mobile-390x844.png",
   fullPage: true,
 });
 
@@ -457,8 +457,8 @@ console.log(JSON.stringify({
   projectPreviewCount,
   previewTokenCount,
   sandbox,
-  desktopScreenshot: "output/playwright/workbench-isolated-preview-desktop-1501x855.png",
-  mobileScreenshot: "output/playwright/workbench-isolated-preview-mobile-390x844.png",
+  desktopScreenshot: "output/audit/1.0.0/browser-remediation/workbench-isolated-preview-desktop-1501x855.png",
+  mobileScreenshot: "output/audit/1.0.0/browser-remediation/workbench-isolated-preview-mobile-390x844.png",
 }, null, 2));
 
 await browser.close();
