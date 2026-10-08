@@ -68,13 +68,16 @@ export function WorkbenchPrdArtifactEditor({
   }, [reference.artifactVersionId]);
 
   useEffect(() => {
+    // useEditor recreates its instance in an earlier effect when the version
+    // changes. This render can still hold the destroyed previous instance.
+    if (!editor || editor.isDestroyed) return;
     if (draftRef.current === draftDocument) return;
     draftRef.current = draftDocument;
-    editor?.commands.setContent(prdDocumentToTiptap(draftDocument), { emitUpdate: false });
+    editor.commands.setContent(prdDocumentToTiptap(draftDocument), { emitUpdate: false });
   }, [draftDocument, editor]);
 
   useEffect(() => {
-    editor?.setEditable(!saving && !editingBusy, false);
+    if (editor && !editor.isDestroyed) editor.setEditable(!saving && !editingBusy, false);
   }, [editingBusy, editor, saving]);
 
   const cancel = useCallback(() => {
@@ -159,9 +162,9 @@ export function WorkbenchPrdArtifactEditor({
         className="workbench-prd-editor-content min-w-0 break-words [overflow-wrap:anywhere]"
         editor={editor}
       />
-      {draftRef.current.protocol === "workbench.prd.v2" && (
+      {draftDocument.protocol === "workbench.prd.v2" && (
         <PrdStructuredFieldsEditor
-          document={draftRef.current}
+          document={draftDocument}
           disabled={busy}
           onChange={updateV2}
         />

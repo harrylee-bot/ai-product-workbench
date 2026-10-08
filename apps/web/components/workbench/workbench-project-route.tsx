@@ -1134,11 +1134,19 @@ function WorkbenchProjectRouteInner() {
     : workbench.designPresetsQuery.isPending
       ? "loading"
       : "ready";
+  // React Flow reports selection changes by node id. Saving a document changes
+  // its pinned version without changing that selection, so read the live pin.
+  const selectedArtifactPin = canvasSelection.artifact && canvasSelection.nodeIds.length === 1
+    ? workbench.boardController.state?.nodes.find((node) => (
+        node.id === canvasSelection.nodeIds[0]
+        && node.workbench.artifactId === canvasSelection.artifact?.artifactId
+      ))?.workbench
+    : undefined;
   const canvasExportSelection: ExportSelection = canvasSelection.artifact
     ? {
         kind: "artifact",
         artifactId: canvasSelection.artifact.artifactId,
-        artifactVersionId: canvasSelection.artifact.artifactVersionId,
+        artifactVersionId: selectedArtifactPin?.artifactVersionId ?? canvasSelection.artifact.artifactVersionId,
         ...(canvasSelection.artifact.screenId
           ? { screenId: canvasSelection.artifact.screenId }
           : {}),

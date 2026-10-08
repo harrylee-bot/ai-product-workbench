@@ -19,6 +19,25 @@ afterEach(() => {
 });
 
 describe("WorkbenchPrdArtifactEditor", () => {
+  it("rebinds the editor to a newly saved version without using the destroyed editor", async () => {
+    const onDocumentCommit = vi.fn(async () => "prd-v2");
+    const next = structuredClone(prdDocumentV2Example);
+    next.versionHistory[0]!.author = "保存后的版本作者";
+    const view = render(<WorkbenchPrdDraftProvider namespace="principal-1"><WorkbenchPrdArtifactEditor
+      document={prdDocumentV2Example} onDocumentCommit={onDocumentCommit}
+      reference={{ projectId: "project-1", artifactId: "artifact-1", artifactVersionId: "prd-v1" }}
+    /></WorkbenchPrdDraftProvider>);
+    await screen.findByRole("textbox", { name: "PRD 编辑器" });
+    view.rerender(<WorkbenchPrdDraftProvider namespace="principal-1"><WorkbenchPrdArtifactEditor
+      document={next} onDocumentCommit={onDocumentCommit}
+      reference={{ projectId: "project-1", artifactId: "artifact-1", artifactVersionId: "prd-v2" }}
+    /></WorkbenchPrdDraftProvider>);
+    expect(await screen.findByRole("textbox", { name: "版本1作者" })).toHaveValue("保存后的版本作者");
+    expect(screen.getByRole("textbox", { name: "PRD 编辑器" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "保存 PRD" })).toBeDisabled();
+    expect(onDocumentCommit).not.toHaveBeenCalled();
+  });
+
   it("restores an edited author after deselection and supports explicit discard", async () => {
     const reference = { artifactId: "artifact-1", artifactVersionId: "version-v2", projectId: "project-1" };
     const onDocumentCommit = vi.fn(async () => "version-v3");
