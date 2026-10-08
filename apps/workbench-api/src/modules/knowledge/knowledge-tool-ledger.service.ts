@@ -234,7 +234,19 @@ export class KnowledgeToolLedgerService {
     reservation: KnowledgeToolReservation,
     response: KnowledgeToolResponse,
   ): Promise<KnowledgeToolResponse> {
-    const canonicalResponse = knowledgeToolResponseSchema.parse(response);
+    const parsed = knowledgeToolResponseSchema.parse(response);
+    // Scores are display/evidence values after ranking. Limit only these two
+    // floating fields to 12 significant digits so Prisma's JSON number codec
+    // preserves their canonical hash across the PostgreSQL JSONB round trip.
+    // Citation text, identifiers, ranks and all other evidence remain exact.
+    const canonicalResponse = {
+      ...parsed,
+      items: parsed.items.map((item) => ({
+        ...item,
+        rrfScore: Number(item.rrfScore.toPrecision(12)),
+        rerankerScore: item.rerankerScore === null ? null : Number(item.rerankerScore.toPrecision(12)),
+      })),
+    };
     const settled = await this.db.$transaction(async (tx) => {
       const scope = await this.lockGrant(tx, grant, false);
       if (!scope.dynamicScopeValid) {

@@ -33,6 +33,7 @@ import {
   httpDiagnosticSuccessEvidence,
 } from "./workbench-postgres-http-e2e-diagnostics.mjs";
 import { executeCanvasToolRequest } from "./workbench-postgres-http-e2e-canvas-client.mjs";
+import { startControlledKnowledgeFixture } from "./workbench-postgres-http-e2e-knowledge.mjs";
 
 const { Client } = pg;
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -121,6 +122,7 @@ const pendingDocumentEvidenceLatencyMs = 10_000;
 
 const services = [];
 let fakeRuntime;
+let controlledKnowledge;
 let cleanupPromise;
 let prdV2DocumentFixture;
 
@@ -149,7 +151,11 @@ for (const signal of ["SIGINT", "SIGTERM"]) {
 
 try {
   console.log("[e2e] target database class: isolated-postgresql");
-  await buildWorkspaces();
+  if (process.env.WORKBENCH_E2E_SKIP_BUILD === "1") {
+    console.log("[e2e] using prebuilt workspace outputs (caller must build this source revision first)");
+  } else {
+    await buildWorkspaces();
+  }
   const { prdDocumentV2Schema } = await import("@workbench/workbench-contracts");
   const { prdDocumentV2Example } = await import("@workbench/workbench-contracts/test-fixtures");
   prdV2DocumentFixture = prdDocumentV2Schema.parse(buildPrdV2DocumentFixture(prdDocumentV2Example));
@@ -157,6 +163,7 @@ try {
   await migrateDatabase();
 
   fakeRuntime = await startFakeDeerFlow(fakeRuntimeToken);
+  controlledKnowledge = await startControlledKnowledgeFixture();
   const apiPort = await reservePort();
   const webPort = runRealStackBrowser ? await reservePort() : null;
   const webOrigin = webPort === null ? "http://127.0.0.1:3000" : `http://127.0.0.1:${webPort}`;
@@ -166,6 +173,7 @@ try {
   const apiBaseUrl = `http://127.0.0.1:${apiPort}/api/v1`;
   const commonEnvironment = {
     ...process.env,
+    ...controlledKnowledge.environment,
     NODE_ENV: "test",
     NO_COLOR: "1",
     FORCE_COLOR: "0",
@@ -208,11 +216,16 @@ try {
     DEERFLOW_GATEWAY_URL: fakeRuntime.url,
     DEERFLOW_INTERNAL_AUTH_TOKEN: fakeRuntimeToken,
   });
+  await waitForHttp(`${apiBaseUrl}/system/live`, api, scenarioTimeoutMs);
+  await assertEmptyKnowledgeBlocksGeneration(createApiClient(apiBaseUrl));
+  await controlledKnowledge.seed(databaseUrl);
   await waitForHttp(`${apiBaseUrl}/system/ready`, api, scenarioTimeoutMs);
+  console.log("[e2e] controlled knowledge baseline ready: synthetic TEI/reranker; real PostgreSQL retrieval and grant ledger");
 
   const worker = spawnService("workbench-worker", process.execPath, ["apps/workbench-worker/dist/main.js"], {
     ...commonEnvironment,
     WORKBENCH_RUNTIME_CONCURRENCY: "2",
+    WORKBENCH_KNOWLEDGE_TOOL_URL: `${apiBaseUrl}/runtime/knowledge/retrieve`,
     WORKBENCH_CANVAS_TOOL_URL: `${apiBaseUrl}/runtime/canvas/tools/execute`,
     WORKBENCH_CANVAS_VISUAL_URL: `${apiBaseUrl}/runtime/canvas/visuals`,
     WORKBENCH_CANVAS_TOOL_SECRET: canvasToolSecret,
@@ -517,6 +530,25 @@ async function startRunThroughSubmissionIntent(
   return { body: submitted.body.run, intent: submitted.body.intent };
 }
 
+async function assertEmptyKnowledgeBlocksGeneration(client) {
+  const identity = await client.json("GET", "/identity/me");
+  const project = await client.json("POST", `/workspaces/${identity.body.defaultWorkspaceId}/projects`, {
+    body: { title: "Controlled empty-knowledge guard" }, expectedStatus: 201,
+  });
+  const bootstrap = await client.json("GET", `/projects/${project.body.id}/bootstrap`);
+  const intent = await createSubmissionIntent(client, {
+    threadId: bootstrap.body.threads[0].id,
+    request: { prompt: "Controlled empty knowledge rejection", modelId: runtimeCatalogModelId, workflow: "generate", targetSurface: "web", designStyle: { kind: "automatic" }, requestedArtifactKinds: ["prd"] },
+    idempotencyKey: `empty-knowledge-${randomUUID()}`,
+  });
+  const rejected = await submitSubmissionIntent(client, intent.body.id, 503);
+  assert.equal(rejected.body.code, "KNOWLEDGE_RELEASE_REQUIRED");
+  assert.equal((await queryDatabase("SELECT count(*)::int AS count FROM runs")).rows[0].count, 0);
+  assert.equal(await runtimeExecuteQueueJobCount(), 0);
+  await cancelPendingSubmissionIntent(client, intent.body.id);
+  console.log("[e2e] empty knowledge rejected with KNOWLEDGE_RELEASE_REQUIRED; no Run or runtime job created");
+}
+
 async function runSuccessScenario(client, outsiderClient) {
   console.log("[e2e] running success, idempotency, and SSE replay scenario");
   const identity = await client.json("GET", "/identity/me");
@@ -576,7 +608,7 @@ async function runSuccessScenario(client, outsiderClient) {
   const beforeMixedProviderRequests = fakeRuntime.state.runRequests.length;
   const mixedIdempotencyKey = `e2e-mixed-request-${randomUUID()}`;
   const mixedRequest = {
-    prompt: "Create a PRD and a prototype",
+    prompt: "Create a customer support ticket workspace with assignment and resolution tracking",
     modelId: runtimeCatalogModelId,
     workflow: "generate",
     generationIntent: null,
@@ -584,7 +616,7 @@ async function runSuccessScenario(client, outsiderClient) {
     designStyle: { kind: "automatic" },
     sourceIds: [],
     artifactTargets: [],
-    requestedArtifactKinds: ["prd", "prototype"],
+    requestedArtifactKinds: ["prd", "code"],
     canvasSnapshot: null,
   };
   const mixedFirst = await createSubmissionIntent(client, {
@@ -609,7 +641,7 @@ async function runSuccessScenario(client, outsiderClient) {
   assert.equal(mixedFirst.body.status, 400);
   assert.equal(mixedFirst.body.code, "VALIDATION_ERROR");
   assert.deepEqual(mixedFirst.body.errors?.["request.requestedArtifactKinds"], [
-    "PRD and Prototype/code must be requested in two sequential Runs: complete the PRD Run first",
+    "PRD can be requested alone or together with Prototype",
   ]);
   assert.deepEqual(
     await browserProjectPersistenceCounts(project.body.id),
@@ -626,6 +658,13 @@ async function runSuccessScenario(client, outsiderClient) {
     beforeMixedProviderRequests,
     "mixed request reached the controlled provider",
   );
+  const dualIntent = await createSubmissionIntent(client, {
+    threadId,
+    request: { ...mixedRequest, requestedArtifactKinds: ["prd", "prototype"] },
+    idempotencyKey: `e2e-dual-output-${randomUUID()}`,
+  });
+  assert.deepEqual(dualIntent.body.request.requestedArtifactKinds, ["prd", "prototype"]);
+  await cancelPendingSubmissionIntent(client, dualIntent.body.id);
 
   const sourceFixtures = await seedRunSourceFixtures({
     projectId: project.body.id,
@@ -839,7 +878,21 @@ async function runSuccessScenario(client, outsiderClient) {
   assert.equal(versionDetail.body.content.title, prdV2Title);
   assert.equal(versionDetail.body.content.cover.workOrderName, prdV2WorkOrderName);
   assert.equal(versionDetail.body.content.cover.title, prdV2Title);
-  assert.equal(versionDetail.body.knowledgeReleaseId, null);
+  assert.equal(versionDetail.body.knowledgeReleaseId, controlledKnowledge.state.releaseId);
+  assert.equal(first.body.knowledgeReleaseId, controlledKnowledge.state.releaseId);
+  const knowledgeResult = controlledKnowledge.state.results.get(first.body.id);
+  assert.ok(knowledgeResult, "successful Run did not retrieve the pinned knowledge release");
+  assert.deepEqual(versionDetail.body.citations, knowledgeResult.items.map((item) => item.citation));
+  const retrievalLedger = await queryDatabase(`
+    SELECT invocation.status, invocation.response
+    FROM knowledge_retrieval_invocations invocation
+    JOIN runtime_attempts attempt ON attempt.id = invocation.runtime_attempt_id
+    WHERE attempt.run_id = $1 AND invocation.status = 'succeeded'
+  `, [first.body.id]);
+  assert.equal(retrievalLedger.rows.length, 1);
+  assert.equal(retrievalLedger.rows[0].response.evidence.release.id, controlledKnowledge.state.releaseId);
+  assert.ok(controlledKnowledge.state.embeddingQueries > 0 && controlledKnowledge.state.rerankQueries > 0);
+  console.log(JSON.stringify({ scenario: "controlled-knowledge-retrieval", provider: "controlled-local-tei-reranker", evidenceLevel: "real-http-postgresql-controlled-provider", emptyKnowledgeRejected: true, releasePinned: true, candidateCounts: knowledgeResult.evidence.candidateCounts, reranker: knowledgeResult.evidence.reranker.status, citations: knowledgeResult.items.length, persistedLedgerReceipts: retrievalLedger.rows.length }));
   const versionNotModified = await client.json(
     "GET",
     `/artifacts/${artifact.id}/versions/${artifact.currentVersion.artifactVersionId}`,
@@ -2161,12 +2214,12 @@ async function runSseRevocationScenario(ownerClient, viewerClient) {
         "request_hash", "request_id", "request", "status", "model_id", "trace_id",
         "event_sequence", "attempt", "execution_owner_id", "execution_epoch",
         "execution_heartbeat_at", "execution_lease_expires_at",
-        "started_at", "created_at", "updated_at"
+        "started_at", "created_at", "updated_at", "knowledge_release_id"
       ) VALUES (
         $1, $2, $3, $4, $5, repeat('a', 64), $6, $7::jsonb, 'running',
         $8, $9, 1, 1, $10, 1, clock_timestamp(),
         clock_timestamp() + interval '5 minutes',
-        clock_timestamp(), clock_timestamp(), clock_timestamp()
+        clock_timestamp(), clock_timestamp(), clock_timestamp(), $12
       )
       RETURNING "id"
     )
@@ -2187,6 +2240,7 @@ async function runSseRevocationScenario(ownerClient, viewerClient) {
     traceId,
     executionOwnerId,
     `sse-revocation-event-${randomUUID()}`,
+    controlledKnowledge.state.releaseId,
   ]);
 
   const stream = await viewerClient.openSse(`/runs/${runId}/events?afterSequence=0`);
@@ -2479,14 +2533,14 @@ async function runRetryScenario(client) {
     INSERT INTO workbench.runs (
       id, project_id, thread_id, created_by_id, idempotency_key, request_hash,
       request_id, request, status, model_id, trace_id, error_code, error_detail,
-      error_retryable, finished_at, created_at, updated_at
+      error_retryable, finished_at, created_at, updated_at, knowledge_release_id
     ) VALUES
       ($1, $2, $3, $4, $5, repeat('e', 64), $6, $7::jsonb, 'failed', $8, $9,
        'TEMPORARY_RUNTIME_FAILURE', 'Retryable E2E source', TRUE,
-       clock_timestamp(), clock_timestamp(), clock_timestamp()),
+       clock_timestamp(), clock_timestamp(), clock_timestamp(), $14),
       ($10, $2, $3, $4, $11, repeat('f', 64), $12, $7::jsonb, 'failed', $8, $13,
        'INVALID_REQUEST', 'Terminal E2E source', FALSE,
-       clock_timestamp(), clock_timestamp(), clock_timestamp())
+       clock_timestamp(), clock_timestamp(), clock_timestamp(), $14)
   `, [
     sourceRunId,
     project.body.id,
@@ -2501,6 +2555,7 @@ async function runRetryScenario(client) {
     `terminal-${randomUUID()}`,
     `terminal-request-${randomUUID()}`,
     `terminal-trace-${randomUUID()}`,
+    controlledKnowledge.state.releaseId,
   ]);
 
   const terminalRetry = await client.json("POST", `/runs/${terminalSourceRunId}/retry`, {
@@ -3629,6 +3684,7 @@ async function handleFakeDeerFlow(
     state.runtimeRuns.set(externalRunId, run);
     state.runRequests.push({ kind, body });
     state.requests.push({ method: request.method, path: url.pathname, kind, externalRunId });
+    await controlledKnowledge.retrieve(body);
     response.setHeader("content-location", `/threads/${externalThreadId}/runs/${externalRunId}`);
     if (browserFailureRecovery) {
       state.browserFailureRecoveryRuns += 1;
@@ -3677,7 +3733,7 @@ async function handleFakeDeerFlow(
         schemaVersion: 1,
         operation: { kind: "create" },
         content: interactiveBrowserPrototypeDocument(),
-        citations: [],
+        citations: knowledgeCitationsFor(body),
       }, "Controlled browser prototype ready");
       run.status = "success";
     } else {
@@ -3755,13 +3811,14 @@ async function writeSuccessfulRuntimeStream(
   { finalizationGate = null, streamStages = false } = {},
 ) {
   const scope = runtimeScopeFromRequest(requestBody);
+  const citations = knowledgeCitationsFor(requestBody);
   const draft = {
     kind: "prd",
     title: prdV2Title,
     schemaVersion: 2,
     operation: { kind: "create" },
-    content: minimalPrdDocument(),
-    citations: [],
+    content: { ...minimalPrdDocument(), citations },
+    citations,
   };
   const result = {
     protocol: "workbench.runtime.result.v1",
@@ -3865,7 +3922,7 @@ async function writePrototypePatchRuntimeStream(response, requestBody) {
     schemaVersion: 1,
     operation: { kind: "create" },
     content: initialDocument,
-    citations: [],
+    citations: knowledgeCitationsFor(requestBody),
   };
   const finalDraft = { ...initialDraft, content: finalDocument };
   const firstPatch = {
@@ -3999,7 +4056,7 @@ async function writeSourcePrototypeRuntimeStream(response, requestBody) {
       schemaVersion: 1,
       operation: { kind: "create" },
       content: document,
-      citations: [],
+      citations: knowledgeCitationsFor(requestBody),
     },
     "Source Prototype seeded",
   );
@@ -4025,7 +4082,7 @@ async function writeGeneratePrototypeRuntimeStream(response, requestBody) {
       schemaVersion: 1,
       operation: { kind: "create" },
       content: document,
-      citations: [],
+      citations: knowledgeCitationsFor(requestBody),
     },
     "Generate Prototype completed",
   );
@@ -4200,6 +4257,13 @@ function runtimeScopeFromRequest(body) {
   return { runId, runtimeAttemptId };
 }
 
+function knowledgeCitationsFor(requestBody) {
+  const { runId } = runtimeScopeFromRequest(requestBody);
+  const result = controlledKnowledge.state.results.get(runId);
+  assert.ok(result?.items.length, "controlled runtime must retrieve nonempty pinned knowledge before producing artifacts");
+  return result.items.map((item) => item.citation);
+}
+
 function declaredToolMessages(toolName, toolCallId, artifact, args = {}) {
   return [
     {
@@ -4324,7 +4388,7 @@ async function writeCanvasRuntimeStream(response, requestBody, mode, state) {
       kind: "prototype",
       schemaVersion: 1,
       title: "Canvas E2E Prototype",
-      citations: [],
+      citations: knowledgeCitationsFor(requestBody),
       operation: { kind: "create" },
       content: minimalPrototypeDocument(),
     };
@@ -4412,7 +4476,7 @@ async function writeCanvasRuntimeStream(response, requestBody, mode, state) {
       kind: "prototype",
       schemaVersion: 1,
       title: mode === "quick-edit" ? "Quick-edited prototype" : "Direct-edited prototype",
-      citations: [],
+      citations: knowledgeCitationsFor(requestBody),
       operation: {
         kind: "revise",
         target: {
@@ -6582,6 +6646,10 @@ async function cleanup() {
     if (fakeRuntime) {
       await fakeRuntime.close().catch(() => undefined);
       fakeRuntime = undefined;
+    }
+    if (controlledKnowledge) {
+      await controlledKnowledge.close().catch(() => undefined);
+      controlledKnowledge = undefined;
     }
   })();
   return cleanupPromise;

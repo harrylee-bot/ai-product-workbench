@@ -117,7 +117,6 @@ describeWithPostgres("PreviewService PostgreSQL authorization", () => {
             manifest,
             manifestSha256: "c".repeat(64),
             exportJobId: exportJob.id,
-          principalId: viewer.id,
             createdById: viewer.id,
             idempotencyKey,
             requestHash,

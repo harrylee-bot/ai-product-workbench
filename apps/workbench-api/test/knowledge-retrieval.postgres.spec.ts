@@ -1,4 +1,6 @@
 import { createHash } from "node:crypto";
+import { canonicalJson, type KnowledgeToolResponse, type RuntimeResult } from "@workbench/workbench-contracts";
+import { assertGenerationKnowledgeEvidence } from "../../workbench-worker/src/runs/generation-knowledge-evidence.js";
 import { ConfigService } from "@nestjs/config";
 import { Prisma, PrismaClient } from "@workbench/workbench-db";
 import {
@@ -444,6 +446,46 @@ describeWithPostgres("Knowledge retrieval PostgreSQL boundaries", () => {
     }
     expect(verified).toBe(true);
   });
+
+  it("keeps retrieval receipt hashes stable through JSONB and passes the actual Worker evidence check", async () => {
+    const db = new PrismaClient({ datasourceUrl: databaseUrl });
+    try {
+      const fixture = await db.$transaction((tx) => seedFixture(tx), { timeout: 60_000 });
+      const harness = await createLedgerHarness(db, fixture, "score-round-trip");
+      const key = invocationKey(`score-round-trip-${fixture.releaseId}`);
+      const reservation = reserved(await harness.ledger.reserve(harness.grant, key, "fractional score query"));
+      const chunk = await db.knowledgeChunk.findUniqueOrThrow({ where: { id: fixture.productionChunkId }, include: { document: true } });
+      const scores = [1 / 62, 2 / 61, Math.PI, 0.1 + 0.2, Math.PI * 1e-28, Number.MAX_VALUE, Number.MIN_VALUE, 0];
+      const response: KnowledgeToolResponse = {
+        ...ledgerResponse(fixture),
+        items: scores.map((score, index) => ({
+          rank: index + 1, rrfScore: score, rerankerScore: index === 7 ? null : -score,
+          citation: {
+            id: `score-citation-${index}`, documentId: chunk.documentId, chunkId: chunk.id,
+            sourcePath: chunk.document.sourcePath, title: chunk.document.title,
+            quote: 'Exact business text: 0.016129032258064516 / false / 额度 0',
+            locator: { heading: "Requirements", startLine: null, endLine: null },
+          },
+        })),
+      };
+      const committed = await harness.ledger.commit(harness.grant, reservation, response);
+      const receipt = await db.knowledgeRetrievalInvocation.findUniqueOrThrow({ where: { id: reservation.id } });
+      expect(committed.items[0]!.rrfScore).toBe(0.0161290322581);
+      expect(committed.items.map((item) => item.citation)).toEqual(response.items.map((item) => item.citation));
+      expect(receipt.response).toEqual(committed);
+      expect(receipt.responseSha256).toBe(createHash("sha256").update(canonicalJson(receipt.response)).digest("hex"));
+      expect(await harness.ledger.reserve(harness.grant, key, "fractional score query")).toEqual({ kind: "replay", response: committed });
+      const result: RuntimeResult = {
+        protocol: "workbench.runtime.result.v1", message: "Source-grounded result",
+        artifacts: [{ kind: "document", schemaVersion: 1, title: "Result", operation: { kind: "create" },
+          content: { text: "Business rules" }, citations: committed.items.map((item) => item.citation) }],
+      };
+      await expect(db.$transaction((tx) => assertGenerationKnowledgeEvidence(tx, {
+        runId: harness.grant.runId, runtimeAttemptId: harness.grant.runtimeAttemptId,
+        projectId: fixture.projectId, principalId: fixture.ownerId, releaseId: fixture.releaseId,
+      }, result))).resolves.toBeUndefined();
+    } finally { await db.$disconnect(); }
+  }, 30_000);
 
   it("settles a failed receipt with the database clock when the API clock is behind", async () => {
     const db = new PrismaClient({ datasourceUrl: databaseUrl });

@@ -140,7 +140,7 @@ describePostgres("Finalization and ingestion PostgreSQL lifecycle", () => {
         manifestCanonicalJson: canonicalJson(changedManifest as unknown as JsonValue),
         manifestChecksum: canonicalSha256(changedManifest as unknown as JsonValue),
       })).rejects.toThrow("KNOWLEDGE_RELEASE_REPLAY_CONFLICT");
-      expect(reader.readSnapshot).toHaveBeenCalledTimes(1);
+      expect(reader.readSnapshot).toHaveBeenCalledTimes(2);
       const ingested = await service.get(fixture.principalId, fixture.artifactId, fixture.versionId);
       expect(mapArtifactFinalization(ingested)?.status).toBe("ingested");
       expect(ingested?.ingestionJob?.status).toBe("published");

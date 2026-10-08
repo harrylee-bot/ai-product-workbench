@@ -8,8 +8,8 @@
 
 1. **输入需求**：创建项目，在对话中描述业务目标、使用角色、流程和交付要求，可附加相关资料。
 2. **使用知识库**：生成任务绑定已发布的知识版本，检索业务规则、文档规范和原型规范，并保留来源引用。
-3. **生成文档与原型**：按需求生成对应产物，在项目中查看版本、继续修改，跟踪生成状态，取消或重试任务。
-4. **预览与下载文档**：在线阅读需求文档，创建导出任务，完成后下载 Word/PDF 文件。
+3. **生成文档与原型**：默认同时生成需求文档和原型，也可选择单一产物；在项目中查看版本、继续修改，跟踪生成状态，取消或重试任务。
+4. **预览与下载文档**：在线阅读和编辑需求文档，草稿按账号、项目和产物保存在当前浏览器；预览、发布和导出先保存修改，再下载对应版本的 Word/PDF 文件。
 5. **分享原型**：在项目中预览原型，为固定版本创建分享链接，供接收者在线访问；可管理和撤销分享。
 
 知识源位于 `knowledge-vault/`，大文件原件位于 `storage/`，数据库保存已发布知识版本及项目引用。知识更新需要重新发布；已固定的运行版本保持可追溯。未经明确授权，不向外部知识库同步内容。
@@ -36,7 +36,7 @@ docker compose --env-file deploy/workbench.env \
   up -d --build
 ```
 
-空数据库还需要有效用户、已采用的知识检索配置和首个 ready 知识发布；首次初始化的现存阻断见本版本审计。主页面与预览应使用各自配置的独立访问来源。数据库迁移、事件与产物合同位于 `packages/workbench-db/`、`packages/workbench-contracts/`；机器验收合同位于 `schemas/`。
+空数据库须先完成下面的首次知识初始化。Web 可在 API 启动后提供登录，API 的业务就绪检查仍要求有效知识发布和真实检索服务。主页面与预览使用独立访问来源。数据库迁移、事件与产物合同位于 `packages/workbench-db/`、`packages/workbench-contracts/`；机器验收合同位于 `schemas/`。
 
 ## 产品工作台 DeerFlow 部署合同
 
@@ -54,7 +54,21 @@ npm run deerflow:deployment:check
 
 ## 知识维护
 
-先完成迁移、EmbeddingProfile/RetrievalProfile 的校验与采用，并确保 File/Knowledge Worker 正常消费队列。以下命令面向已有主体和配置，参数由运维环境提供；专用 migrator 连接不能替换为运行时数据库连接。
+首次部署先完成迁移、共享包及 API/File Worker 构建，配置真实 TEI、reranker、固定模型版本和本地 tokenizer 文件。由受控环境注入 `WORKBENCH_MIGRATOR_DATABASE_URL`、`BETTER_AUTH_URL`、`WORKBENCH_BOOTSTRAP_ACCOUNT_EMAIL`、`WORKBENCH_BOOTSTRAP_ACCOUNT_USERNAME`、`WORKBENCH_BOOTSTRAP_ACCOUNT_PASSWORD`，以及 operator 的 `AUTHORIZED_BY` 和 `CHANGE_REFERENCE`。凭据不写入仓库或命令参数。
+
+```sh
+node scripts/workbench-knowledge-bootstrap.mjs \
+  --embedding-profile=/private/embedding-profile.json \
+  --retrieval-profile=/private/retrieval-profile.json \
+  --embedding-probe=/private/embedding-probe.json \
+  --reranker-probe=/private/reranker-probe.json \
+  --key=production --version=1
+# 核对计划后，用相同参数增加 --execute 执行。
+```
+
+该入口依次建立专用账号与知识维护身份，运行真实模型一致性检查，采用配置并将知识发布入队。File Worker 完成构建、发布状态变为 `ready` 后才开放生成业务。普通账号可单独通过 `node scripts/workbench-bootstrap-account.mjs --execute` 创建，不会获得 operator 权限；重跑不会覆盖现有密码或开放公众注册。
+
+后续维护使用下列命令。参数由运维环境提供，专用 migrator 连接不能替换为运行时数据库连接。
 
 ```sh
 WORKBENCH_MIGRATOR_DATABASE_URL="${WORKBENCH_MIGRATOR_DATABASE_URL:?由受控环境注入}" \
@@ -75,7 +89,9 @@ npm run knowledge:release -- \
   --retrieval-profile="$WORKBENCH_KNOWLEDGE_RETRIEVAL_PROFILE_ID"
 ```
 
-工作区发布增加 `--workspace=<workspace-id>`；不指定时创建全局发布。发布成功以任务完成且状态为 `ready` 为准，入队成功不代表知识已可用。已有项目如何采用更新后的知识，按本版本审计中的待完成事项处理。
+工作区发布增加 `--workspace=<workspace-id>`；不指定时创建全局发布。发布成功以任务完成且状态为 `ready` 为准，入队成功不代表知识已可用。
+
+已有项目更新知识基线时，先运行 `node scripts/workbench-project-knowledge-refresh.mjs --project=<项目ID> --principal=<项目所有者ID> --baseline=<ready发布ID>` 预览差异，再用相同参数和输出中的 `--expected-plan-sha256=<摘要> --execute` 执行。新版本保留项目定稿知识和可复用向量；已执行 Run 的知识快照保持不变。此入口只接受相同的检索及向量模型配置，模型变更须重新构建知识。
 
 ## 执行控制项
 
