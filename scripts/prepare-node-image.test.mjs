@@ -128,13 +128,51 @@ test("all candidate Node Dockerfiles use the hardened Alpine helper", async () =
   const workflow = await readFile(path.join(root, ".github/workflows/workbench-ci.yml"), "utf8");
   assert.doesNotMatch(workflow, /node:22-bookworm-slim/u, "CI retains the vulnerable Debian Node fallback");
   assert.doesNotMatch(workflow, /nginx:1\.27\.5-alpine/u, "CI retains the vulnerable Nginx fallback");
-  assert.match(workflow, /NODE_IMAGE=.*node:22-alpine/u);
+  assert.match(workflow, /NODE_IMAGE=\$\{\{ vars\.WORKBENCH_NODE_IMAGE \}\}/u);
   assert.match(workflow, /NGINX_IMAGE: .*nginx:stable-alpine/u);
 });
 
-test("the Web image gives production type checking enough heap", async () => {
+test("the Web image keeps the isolated compiler heap below the three-GiB builder limit", async () => {
   const source = await readFile(path.join(root, "apps/web/Dockerfile"), "utf8");
-  assert.match(source, /NODE_OPTIONS=--max-old-space-size=4096/u);
+  assert.match(source, /NODE_OPTIONS=--max-old-space-size=2048/u);
+});
+
+test("Web production type checking excludes test-only workspaces while full type checking retains every test", async () => {
+  const requireWeb = createRequire(path.join(root, "apps/web/package.json"));
+  const ts = requireWeb("typescript");
+  const web = path.join(root, "apps/web");
+  const readConfig = (filename) => {
+    const config = ts.readConfigFile(path.join(web, filename), ts.sys.readFile);
+    assert.equal(config.error, undefined);
+    const parsed = ts.parseJsonConfigFileContent(config.config, ts.sys, web);
+    assert.deepEqual(parsed.errors, []);
+    return parsed;
+  };
+  const full = readConfig("tsconfig.json");
+  const production = readConfig("tsconfig.build.json");
+  const isTest = (filename) => /(?:\.(?:spec|test)\.[^/]+$|\/(?:__tests__|__mocks__)\/|\/vitest\.[^/]+\.ts$)/u.test(filename);
+  const bootstrapTest = path.join(web, "lib/auth/bootstrap-account.postgres.spec.ts");
+  assert(full.fileNames.includes(bootstrapTest), "full type checking must retain the real database authentication regression");
+  assert(!production.fileNames.includes(bootstrapTest), "the production compiler must not require the test-only database workspace");
+  assert(full.fileNames.some(isTest), "the complete config must still include tests");
+  assert(!production.fileNames.some(isTest), "production roots must exclude spec/test files and the Vitest runner config");
+  assert.deepEqual(production.fileNames, full.fileNames.filter((filename) => !isTest(filename)),
+    "the production boundary must retain every non-test source and generated route declaration");
+  for (const option of ["strict", "noEmit", "moduleResolution", "jsx", "paths"]) {
+    assert.deepEqual(production.options[option], full.options[option], `production must preserve ${option}`);
+  }
+  const program = ts.createProgram(production.fileNames, production.options);
+  assert(!program.getSourceFiles().some((source) => source.fileName.includes("/workbench-db/")),
+    "production imports must not pull the database workspace back into the program");
+  const manifest = JSON.parse(await readFile(path.join(web, "package.json"), "utf8"));
+  assert.match(manifest.scripts.typecheck, /tsc -p tsconfig\.json --noEmit/u);
+  assert.equal(manifest.dependencies["@workbench/workbench-db"], undefined);
+  const dockerfile = await readFile(path.join(web, "Dockerfile"), "utf8");
+  assert.match(dockerfile, /next typegen && npx tsc -p tsconfig\.build\.json --noEmit/u);
+  assert.match(dockerfile, /COPY --from=build \/app\/apps\/web\/tsconfig\.json \/app\/apps\/web\/tsconfig\.build\.json apps\/web\//u);
+  assert.doesNotMatch(dockerfile, /COPY packages\/workbench-db/u);
+  const nextConfig = await readFile(path.join(web, "next.config.ts"), "utf8");
+  assert.match(nextConfig, /tsconfigPath: configuredTsconfigPath \?\? "tsconfig\.build\.json"/u);
 });
 
 test("the Web and CI builds pin their Linux x64 native dependencies", async () => {

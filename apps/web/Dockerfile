@@ -31,7 +31,7 @@ ENV NEXT_PUBLIC_WORKBENCH_PRIVACY_URL=$NEXT_PUBLIC_WORKBENCH_PRIVACY_URL
 ENV WORKBENCH_PREVIEW_ORIGIN=$WORKBENCH_PREVIEW_ORIGIN
 ENV WORKBENCH_S3_BROWSER_UPLOAD_BUCKET_URL=$WORKBENCH_S3_BROWSER_UPLOAD_BUCKET_URL
 ENV NEXT_TELEMETRY_DISABLED=1 \
-    NODE_OPTIONS=--max-old-space-size=4096 \
+    NODE_OPTIONS=--max-old-space-size=2048 \
     WORKBENCH_NEXT_BUILD_CPUS=1
 COPY apps/web apps/web
 COPY packages/workbench-contracts packages/workbench-contracts
@@ -43,7 +43,7 @@ RUN npm --workspace @workbench/workbench-contracts run validate:openapi \
 WORKDIR /app/apps/web
 # Type checking in a separate process avoids retaining the compiler heap while
 # Next starts its TypeScript worker on memory-constrained builders.
-RUN npx next typegen && npx tsc -p tsconfig.json --noEmit
+RUN npx next typegen && npx tsc -p tsconfig.build.json --noEmit
 ENV WORKBENCH_TYPES_PREVALIDATED=1
 RUN npm run build
 
@@ -73,6 +73,7 @@ COPY --from=prod-deps /app/node_modules node_modules
 COPY --from=prod-deps /app/.runtime-workspace-dependencies/ ./
 COPY --from=build /app/apps/web/.next apps/web/.next
 COPY --from=build /app/apps/web/next.config.ts apps/web/next.config.ts
+COPY --from=build /app/apps/web/tsconfig.json /app/apps/web/tsconfig.build.json apps/web/
 COPY --from=build /app/apps/web/lib/security-headers.ts apps/web/lib/security-headers.ts
 COPY --from=build /app/apps/web/public apps/web/public
 COPY --from=build /app/packages/workbench-contracts/dist packages/workbench-contracts/dist

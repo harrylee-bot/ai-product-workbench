@@ -25,7 +25,7 @@ const nextConfig: NextConfig = {
   devIndicators: false,
   poweredByHeader: false,
   typescript: {
-    ...(configuredTsconfigPath ? { tsconfigPath: configuredTsconfigPath } : {}),
+    tsconfigPath: configuredTsconfigPath ?? "tsconfig.build.json",
     ignoreBuildErrors: typesPrevalidated,
   },
   env: {
