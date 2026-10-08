@@ -55,7 +55,7 @@ describe("worker database configuration", () => {
         runtimeCancellationQueryBatchSize: 100,
         knowledgeTool: {
           endpoint: "https://workbench.test/api/v1/runtime/knowledge/retrieve",
-          maximumTtlSeconds: 900,
+          maximumTtlSeconds: 3_600,
         },
         canvasTool: {
           endpoint: "https://workbench.test/api/v1/runtime/canvas/tools/execute",
@@ -139,6 +139,18 @@ describe("worker database configuration", () => {
     expect(() => loadWorkerConfig()).toThrow(
       /must be less than the pg-boss handler deadline/u,
     );
+  });
+
+  it("rejects a Knowledge grant that expires before the execution and cancellation budgets", () => {
+    stubMinimumWorkerConfig();
+    vi.stubEnv("WORKBENCH_KNOWLEDGE_TOOL_URL", "https://workbench.test/api/v1/runtime/knowledge/retrieve");
+    vi.stubEnv("WORKBENCH_KNOWLEDGE_TOOL_SECRET", Buffer.alloc(32, 7).toString("base64url"));
+    vi.stubEnv("WORKBENCH_KNOWLEDGE_TOOL_MAX_TTL_SECONDS", "900");
+    expect(() => loadWorkerConfig()).toThrow(/must cover the Runtime wall clock/u);
+    vi.stubEnv("WORKBENCH_KNOWLEDGE_TOOL_MAX_TTL_SECONDS", "1890");
+    expect(loadWorkerConfig().knowledgeTool?.maximumTtlSeconds).toBe(1890);
+    vi.stubEnv("WORKBENCH_RUNTIME_EXECUTION_MAX_WALL_CLOCK_MS", "1860000");
+    expect(() => loadWorkerConfig()).toThrow(/must cover the Runtime wall clock/u);
   });
 
   it("requires the Knowledge tool endpoint and signing secret as one configuration unit", () => {

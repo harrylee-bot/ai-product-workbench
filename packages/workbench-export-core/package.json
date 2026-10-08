@@ -17,12 +17,15 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "1.30.0",
+    "@modelcontextprotocol/sdk": "1.32.1",
     "@workbench/workbench-contracts": "1.0.0",
     "archiver": "8.0.0",
     "esbuild": "0.28.1",
     "html-to-jsx-transform": "1.2.1",
     "lucide-react": "0.446.0",
+    "mdast-util-from-markdown": "2.0.3",
+    "mdast-util-gfm": "3.1.0",
+    "micromark-extension-gfm": "3.0.0",
     "perfect-freehand": "1.2.2",
     "prettier": "3.6.2",
     "react": "19.2.3",
@@ -38,6 +41,6 @@
     "jsdom": "26.1.0",
     "playwright-core": "1.61.1",
     "typescript": "^5.9.2",
-    "vitest": "4.1.9"
+    "vitest": "4.1.11"
   }
 }

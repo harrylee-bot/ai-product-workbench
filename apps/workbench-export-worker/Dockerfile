@@ -38,7 +38,9 @@ RUN rm -rf packages/workbench-db/generated \
   && npm --workspace @workbench/workbench-export-worker run build
 
 FROM build AS production-dependencies
+COPY deploy/collect-workspace-runtime-dependencies.mjs /usr/local/lib/collect-workspace-runtime-dependencies.mjs
 RUN npm prune --omit=dev --no-audit --no-fund \
+  && node /usr/local/lib/collect-workspace-runtime-dependencies.mjs /app /app/.runtime-workspace-dependencies \
   && rm -rf /root/.npm
 
 FROM ${NODE_IMAGE} AS runner
@@ -76,7 +78,7 @@ COPY --chown=node:node packages/workbench-db/package.json packages/workbench-db/
 COPY --chown=node:node packages/workbench-export-core/package.json packages/workbench-export-core/package.json
 COPY --chown=node:node packages/workbench-telemetry/package.json packages/workbench-telemetry/package.json
 COPY --from=production-dependencies --chown=node:node /app/node_modules node_modules
-COPY --from=production-dependencies --chown=node:node /app/packages/workbench-export-core/node_modules packages/workbench-export-core/node_modules
+COPY --from=production-dependencies --chown=node:node /app/.runtime-workspace-dependencies/ ./
 COPY --from=build --chown=node:node /app/apps/workbench-export-worker/dist apps/workbench-export-worker/dist
 COPY --from=build --chown=node:node /app/packages/workbench-content-security/dist packages/workbench-content-security/dist
 COPY --from=build --chown=node:node /app/packages/workbench-contracts/dist packages/workbench-contracts/dist

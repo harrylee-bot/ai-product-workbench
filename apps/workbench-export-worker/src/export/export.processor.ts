@@ -41,7 +41,8 @@ export class ExportProcessor {
           ? { initialScreenId: started.command.preview.initialScreenId }
           : {}),
       };
-      const output = await buildExport(request);
+      const output = await buildExport(request, { signal });
+      if (signal?.aborted) throw abortError(signal);
       if (output.bytes.byteLength <= 0 || output.bytes.byteLength > this.config.maximumOutputBytes) {
         throw new TerminalExportError("EXPORT_OUTPUT_SIZE_LIMIT_EXCEEDED", "Generated export output exceeded its byte limit");
       }

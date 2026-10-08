@@ -1,5 +1,6 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
+import { createRequire } from "node:module";
 import { access, copyFile, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 
@@ -24,7 +25,7 @@ export async function runWebTypegen({
   await rm(distDir, { recursive: true, force: true });
   await copyFile(path.join(web, "tsconfig.json"), temporaryTsconfigPath);
 
-  const nextBin = path.join(repoRoot, "node_modules", "next", "dist", "bin", "next");
+  const nextBin = createRequire(path.join(web, "package.json")).resolve("next/dist/bin/next");
   const childEnvironment = {
     ...environment,
     // next.config.ts validates this value while loading. Type generation is

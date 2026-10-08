@@ -20,6 +20,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vite
 
 import { WorkbenchArtifactContent } from "./workbench-artifact-content";
 import { workbenchPrototypeSubmitEventName } from "../../lib/workbench/prototype-runtime";
+import { WorkbenchPrdDraftProvider } from "../../lib/workbench/prd-editor/draft-context";
 
 const mocks = vi.hoisted(() => ({
   animate: vi.fn(),
@@ -128,6 +129,7 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
+  localStorage.clear();
   mocks.useArtifactVersion.mockReset();
   mocks.useArtifactVersionAsset.mockReset();
   mocks.usePublicArtifactVersion.mockReset();
@@ -417,6 +419,22 @@ describe("Workbench Artifact content", () => {
     expect(screen.getByRole("textbox", { name: "PRD 编辑器" }).closest(".nowheel"))
       .not.toBeNull();
     expect((screen.getByRole("button", { name: "保存 PRD" }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("keeps the visible draft when switching from editing to preview and back", async () => {
+    mocks.useArtifactVersion.mockReturnValue(artifactQuery("prd", prdV2Document()));
+    const commit = vi.fn(async () => "version-2");
+    const content = (editable: boolean) => <WorkbenchPrdDraftProvider namespace="principal-1">
+      <WorkbenchArtifactContent editable={editable} onPrdDocumentCommit={commit} reference={reference()} />
+    </WorkbenchPrdDraftProvider>;
+    const rendered = render(content(true));
+    fireEvent.change(await screen.findByRole("textbox", { name: "版本1作者" }), { target: { value: "审计保留草稿" } });
+    rendered.rerender(content(false));
+    expect(screen.getByText("审计保留草稿")).not.toBeNull();
+    expect(screen.getByText(/未保存草稿/)).not.toBeNull();
+    rendered.rerender(content(true));
+    expect(await screen.findByRole("textbox", { name: "版本1作者" })).toHaveValue("审计保留草稿");
+    expect(commit).not.toHaveBeenCalled();
   });
 
   it("keeps PRD v2 diagrams visible while editing", () => {

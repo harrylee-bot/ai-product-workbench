@@ -27,6 +27,7 @@ import {
 } from "react";
 
 import { workbenchQueryKeys } from "../query/keys";
+import { useWorkbenchPrdDraftStore } from "../prd-editor/draft-context";
 import { useWorkbenchProjectSession } from "../project-session";
 import type { Versioned } from "../transport/contracts";
 import {
@@ -124,6 +125,7 @@ export function useWorkbenchController({
   projectRelationship?: ProjectRelationship;
 } = {}) {
   const projectOperations = useWorkbenchProjectOperations();
+  const prdDrafts = useWorkbenchPrdDraftStore();
   const queryClient = useQueryClient();
   const fileTransferService = useWorkbenchFileTransferService();
   const uploadRegistry = useWorkbenchUploadRegistry(fileTransferService);
@@ -305,8 +307,9 @@ export function useWorkbenchController({
 
   const flushSelectedBoard = useCallback(async () => {
     if (!selectedProjectId || !boardController.store) return;
+    await prdDrafts?.saveProject(selectedProjectId);
     await flushWorkbenchBoard(boardController);
-  }, [boardController, selectedProjectId]);
+  }, [boardController, prdDrafts, selectedProjectId]);
 
   const prepareProjectOpen = useCallback(async (projectId: string, signal?: AbortSignal) => {
     if (!projectId || projectId === selectedProjectIdRef.current || signal?.aborted) return;

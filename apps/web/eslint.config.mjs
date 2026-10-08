@@ -166,12 +166,9 @@ export default tseslint.config(
   },
   {
     files: ["**/*.{ts,tsx}"],
-    languageOptions: {
-      parserOptions: {
-        projectService: true,
-        tsconfigRootDir: import.meta.dirname,
-      },
-    },
+    // These are syntax-based rules. Loading the TypeScript project here adds
+    // the entire application/dependency graph to ESLint's heap without any
+    // rule consuming its type information. Type checking runs separately.
     rules: {
       "@typescript-eslint/no-explicit-any": "off",
       "@typescript-eslint/no-empty-object-type": "off",

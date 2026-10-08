@@ -50,16 +50,25 @@ export class GithubImportProvider implements ImportProvider {
     let total = 0;
     for (const entry of selected) {
       const path = String(entry.path);
-      const response = await this.client.get(`https://raw.githubusercontent.com/${encodeURIComponent(owner!)}/${encodeURIComponent(repo!)}/${commitSha}/${path.split("/").map(encodeURIComponent).join("/")}`, {
+      const blobSha = String(entry.sha);
+      if (!/^[0-9a-f]{40}$/iu.test(blobSha)) throw new TerminalImportError("GITHUB_BLOB_INVALID", "GitHub did not return a valid file SHA");
+      const authenticated = Boolean(this.options.token);
+      const sourceUrl = authenticated
+        ? `https://api.github.com/repos/${encodeURIComponent(owner!)}/${encodeURIComponent(repo!)}/git/blobs/${blobSha}`
+        : `https://raw.githubusercontent.com/${encodeURIComponent(owner!)}/${encodeURIComponent(repo!)}/${commitSha}/${path.split("/").map(encodeURIComponent).join("/")}`;
+      const response = await this.client.get(sourceUrl, {
         maximumBytes: Math.min(this.options.maximumBytes - total, 10 * 1024 * 1024),
         timeoutMs: this.options.timeoutMs,
         maximumRedirects: this.options.maximumRedirects,
-        allowedHosts: ["raw.githubusercontent.com"],
+        allowedHosts: [authenticated ? "api.github.com" : "raw.githubusercontent.com"],
+        headers: authenticated
+          ? { accept: "application/vnd.github.raw+json", authorization: `Bearer ${this.options.token}` }
+          : undefined,
         signal,
       });
       total += response.body.byteLength;
       if (total > this.options.maximumBytes) throw new TerminalImportError("GITHUB_SIZE_LIMIT", "The repository exceeds the import size limit");
-      blobs.push({ path, mediaType: response.mediaType ?? mediaTypeForPath(path), bytes: response.body });
+      blobs.push({ path, mediaType: authenticated ? mediaTypeForPath(path) : response.mediaType ?? mediaTypeForPath(path), bytes: response.body });
     }
     return freezeImport({
       label: request.label ?? `${request.repository}@${commitSha.slice(0, 12)}`,

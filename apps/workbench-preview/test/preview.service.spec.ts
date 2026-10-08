@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, createHmac } from "node:crypto";
 import { Readable } from "node:stream";
 import { createPreviewToken } from "@workbench/workbench-preview-token";
 import { describe, expect, it, vi } from "vitest";
@@ -9,6 +9,43 @@ const html = Buffer.from("<!doctype html><html><head><style>body{margin:0}</styl
 const sha256 = createHash("sha256").update(html).digest("hex");
 
 describe("PreviewService", () => {
+  it.each(["export", "preview"] as const)("checks the %s token requester independently of the job creator", async (purpose) => {
+    const members = new Set(["recipient"]);
+    const db = {
+      exportJob: { findFirst: vi.fn(async () => ({
+        id: "export-1", purpose, createdById: "former-author",
+        release: purpose === "export" ? { projectId: "project-1" } : null,
+        preview: purpose === "preview" ? { projectId: "project-1" } : null,
+        outputBlob: { storageKey: "blobs/output", mediaType: "text/html", byteSize: BigInt(html.byteLength), sha256 },
+      })) },
+      projectMember: { findFirst: vi.fn(async ({ where }) => members.has(where.principalId) ? { projectId: "project-1" } : null) },
+    };
+    const service = new PreviewService(db as never, previewStorage(html) as never, config());
+    const token = createPreviewToken({ exportJobId: "export-1", principalId: "recipient", expiresAt: new Date(Date.now() + 60_000) }, secret);
+    await expect(service.resolve(token)).resolves.toMatchObject({ capabilityToken: token });
+    expect(db.projectMember.findFirst.mock.calls[0]![0].where.principalId).toBe("recipient");
+    members.delete("recipient");
+    members.add("former-author");
+    await expect(service.resolve(token)).rejects.toThrow("PREVIEW_NOT_FOUND");
+  });
+
+  it("keeps the existing creator check for unexpired legacy capabilities", async () => {
+    const db = {
+      exportJob: { findFirst: vi.fn(async () => ({
+        id: "export-1", purpose: "preview", createdById: "legacy-author", release: null,
+        preview: { projectId: "project-1" },
+        outputBlob: { storageKey: "blobs/output", mediaType: "text/html", byteSize: BigInt(html.byteLength), sha256 },
+      })) },
+      projectMember: { findFirst: vi.fn(async () => ({ projectId: "project-1" })) },
+    };
+    const encoded = Buffer.from(JSON.stringify({ v: 1, exportJobId: "export-1", exp: Math.floor(Date.now() / 1000) + 60 })).toString("base64url");
+    const unsigned = `wbpv1.${encoded}`;
+    const token = `${unsigned}.${createHmac("sha256", secret).update(unsigned).digest("base64url")}`;
+    await new PreviewService(db as never, previewStorage(html) as never, config()).resolve(token);
+    expect(db.projectMember.findFirst).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({ principalId: "legacy-author" }),
+    }));
+  });
   it("resolves a valid capability only to a succeeded HTML Export Blob", async () => {
     const db = {
       exportJob: {
@@ -32,7 +69,7 @@ describe("PreviewService", () => {
     };
     const storage = previewStorage(html);
     const service = new PreviewService(db as never, storage as never, config());
-    const token = createPreviewToken({ exportJobId: "export-1", expiresAt: new Date(Date.now() + 60_000) }, secret);
+    const token = createPreviewToken({ exportJobId: "export-1", principalId: "principal-1", expiresAt: new Date(Date.now() + 60_000) }, secret);
     const result = await service.get(token);
     const rendered = await readAll(result.body);
     await result.dispose();
@@ -61,6 +98,7 @@ describe("PreviewService", () => {
       where: {
         projectId: "project-1",
         principalId: "principal-1",
+        role: { in: ["owner", "editor"] },
         principal: { status: "active" },
       },
       select: { projectId: true },
@@ -92,7 +130,7 @@ describe("PreviewService", () => {
     const storage = previewStorage(html);
     const service = new PreviewService(db as never, storage as never, config());
     const token = createPreviewToken({
-      exportJobId: "preview-export-1",
+      exportJobId: "preview-export-1", principalId: "viewer-1",
       expiresAt: new Date(Date.now() + 60_000),
     }, secret);
 
@@ -126,7 +164,7 @@ describe("PreviewService", () => {
     const storage = { stageHtml: vi.fn() };
     const service = new PreviewService(db as never, storage as never, config());
     const token = createPreviewToken({
-      exportJobId: "preview-export-1",
+      exportJobId: "preview-export-1", principalId: "viewer-1",
       expiresAt: new Date(Date.now() + 60_000),
     }, secret);
 
@@ -140,9 +178,9 @@ describe("PreviewService", () => {
       projectMember: { findFirst: vi.fn() },
     };
     const service = new PreviewService(db as never, { stageHtml: vi.fn() } as never, config());
-    const valid = createPreviewToken({ exportJobId: "export-1", expiresAt: new Date(Date.now() + 60_000) }, secret);
+    const valid = createPreviewToken({ exportJobId: "export-1", principalId: "principal-1", expiresAt: new Date(Date.now() + 60_000) }, secret);
     await expect(service.get(valid)).rejects.toThrow("PREVIEW_NOT_FOUND");
-    const wrong = createPreviewToken({ exportJobId: "export-1", expiresAt: new Date(Date.now() + 60_000) }, Buffer.alloc(32, 4));
+    const wrong = createPreviewToken({ exportJobId: "export-1", principalId: "principal-1", expiresAt: new Date(Date.now() + 60_000) }, Buffer.alloc(32, 4));
     await expect(service.get(wrong)).rejects.toThrow("PREVIEW_TOKEN_SIGNATURE_INVALID");
     expect(db.exportJob.findFirst).toHaveBeenCalledOnce();
   });

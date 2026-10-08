@@ -4,7 +4,7 @@ import { canonicalJson, canonicalSha256, parseEmbeddingProfileV1, parseRetrieval
 import { ArtifactFinalizationsService, artifactKnowledgeMarkdown, mapArtifactFinalization } from "../src/modules/artifacts/artifact-finalizations.service.js";
 import { AccessService } from "../src/modules/access/access.service.js";
 import { PrismaKnowledgeRetrievalStore } from "../src/modules/knowledge/prisma-knowledge-retrieval.store.js";
-import { PrismaKnowledgeBuildStore } from "../../workbench-file-worker/src/knowledge/prisma-knowledge-build.store.js";
+import { createBatches, PrismaKnowledgeBuildStore } from "../../workbench-file-worker/src/knowledge/prisma-knowledge-build.store.js";
 import { KnowledgeReleaseProcessor } from "../../workbench-file-worker/src/knowledge/knowledge-release.processor.js";
 import { JiebaSegmenterAdapter, knowledgeSegmenterId, knowledgeSegmenterVersion, knowledgeDefaultDictionaryChecksum } from "../../workbench-file-worker/src/knowledge/jieba-segmenter.adapter.js";
 import { TerminalKnowledgeBuildError } from "../../workbench-file-worker/src/knowledge/knowledge.errors.js";
@@ -82,6 +82,8 @@ describePostgres("Finalization and ingestion PostgreSQL lifecycle", () => {
         .rejects.toThrow(/RUN_KNOWLEDGE_SCOPE_INVALID/u);
       expect(await db.run.count({ where: { threadId: thread.id } })).toBe(0);
       expect(await build(fixture.base.id)).toBe("ready");
+      const projectBaseline = await createProjectBaseline(db, fixture);
+      expect(await build(projectBaseline.id)).toBe("ready");
       await expect(db.run.create({ data: {
         ...runData, knowledgeReleaseId: fixture.base.id, status: "succeeded",
         startedAt: new Date(), finishedAt: new Date(), progress: 1,
@@ -104,7 +106,7 @@ describePostgres("Finalization and ingestion PostgreSQL lifecycle", () => {
         .rejects.toThrow("TEST_QUEUE_UNAVAILABLE");
       expect(await service.get(fixture.principalId, fixture.artifactId, fixture.versionId)).toBeNull();
       expect(await db.knowledgeIngestionJob.count({ where: { finalization: { projectId: fixture.projectId } } })).toBe(0);
-      expect(await db.knowledgeRelease.count({ where: { projectId: fixture.projectId } })).toBe(0);
+      expect(await db.knowledgeRelease.count({ where: { projectId: fixture.projectId } })).toBe(1);
       queue.sendInTransaction.mockClear();
       const [confirmed, duplicate] = await Promise.all([
         service.confirm(fixture.principalId, fixture.artifactId, fixture.versionId, fixture.checksum),
@@ -201,13 +203,122 @@ describePostgres("Finalization and ingestion PostgreSQL lifecycle", () => {
       const withdrawn = await withdrawing;
       expect(withdrawn.status).toBe("withdrawn");
       expect((await db.knowledgeRelease.findUniqueOrThrow({ where: { id: racingReleaseId } })).status).toBe("retired");
-      expect(await db.knowledgeRelease.count({ where: { projectId: fixture.projectId, status: "ready" } })).toBe(0);
+      expect((await db.knowledgeRelease.findMany({ where: { projectId: fixture.projectId, status: "ready" }, select: { id: true } })).map((release) => release.id)).toEqual([projectBaseline.id]);
       expect((await db.knowledgeRelease.findUniqueOrThrow({ where: { id: base.id } })).status).toBe("ready");
       await expect(service.retry(fixture.principalId, fixture.artifactId, fixture.versionId))
         .rejects.toMatchObject({ response: expect.objectContaining({ detail: "ARTIFACT_FINALIZATION_WITHDRAWN" }) });
     } finally {
       await db.$disconnect();
     }
+  }, 60_000);
+});
+
+describePostgres("Offline Knowledge bootstrap", () => {
+  it("creates candidates without publication, adopts through receipts and safely replays", async () => {
+    const url = new URL(databaseUrl!);
+    if (!["localhost", "127.0.0.1"].includes(url.hostname) || !url.pathname.includes("test")) throw new Error("LOCAL_TEST_DATABASE_REQUIRED");
+    const db = new PrismaClient({ datasourceUrl: databaseUrl });
+    const modulePath = new URL("../../../scripts/workbench-knowledge-bootstrap-lib.mjs", import.meta.url).href;
+    const { parseBootstrapProfiles, prepareKnowledgeBootstrap, adoptBootstrapProfiles } = await import(modulePath);
+    try {
+      const fixture = await seed(db);
+      const suffix = randomUUID();
+      const existingEmbedding = await db.embeddingProfile.findUniqueOrThrow({ where: { id: fixture.base.embeddingProfileId } });
+      const existingRetrieval = await db.retrievalProfile.findUniqueOrThrow({ where: { id: fixture.base.retrievalProfileId } });
+      const embeddingSpec = { ...(existingEmbedding.spec as Record<string, Prisma.JsonValue>), id: `bootstrap-embedding-${suffix}` };
+      const retrievalSpec = { ...(existingRetrieval.spec as Record<string, Prisma.JsonValue>), id: `bootstrap-retrieval-${suffix}`, embedding: { profileId: embeddingSpec.id, profileSpecSha256: canonicalSha256(embeddingSpec), dimension: 3 } };
+      const profiles = parseBootstrapProfiles(embeddingSpec, retrievalSpec);
+      const username = `boot_${suffix.slice(0, 12)}`;
+      const input = { profiles, account: { name: username, username, email: `${username}@example.test`, password: `Test-only-${suffix}` }, issuer: "http://localhost:3000", authorizedBy: "local-test", changeReference: `bootstrap-${suffix}` };
+      const prepared = await prepareKnowledgeBootstrap(db, input);
+      expect(prepared.accountCreated).toBe(true);
+      expect(await db.embeddingProfile.findUniqueOrThrow({ where: { id: embeddingSpec.id } })).toMatchObject({ status: "candidate" });
+      expect(await db.knowledgeProfileAdoptionReceipt.count({ where: { embeddingProfileId: embeddingSpec.id } })).toBe(0);
+      expect(await db.knowledgeRelease.count({ where: { embeddingProfileId: embeddingSpec.id } })).toBe(0);
+      // The CLI calls adoption only after its independently tested live conformance succeeds.
+      await adoptBootstrapProfiles(db, prepared.principalId, profiles);
+      expect(await db.embeddingProfile.findUniqueOrThrow({ where: { id: embeddingSpec.id } })).toMatchObject({ status: "adopted" });
+      expect(await db.retrievalProfile.findUniqueOrThrow({ where: { id: retrievalSpec.id } })).toMatchObject({ status: "adopted" });
+      expect(await db.knowledgeProfileAdoptionReceipt.count({ where: { actorPrincipalId: prepared.principalId } })).toBe(2);
+      expect(await prepareKnowledgeBootstrap(db, input)).toMatchObject({ accountId: prepared.accountId, principalId: prepared.principalId, accountCreated: false });
+      await adoptBootstrapProfiles(db, prepared.principalId, profiles);
+      expect(await db.knowledgeProfileAdoptionReceipt.count({ where: { actorPrincipalId: prepared.principalId } })).toBe(2);
+      await db.knowledgeProfileOperatorEvent.create({ data: { principalId: prepared.principalId, action: "revoke", authorizedBy: "local-test", changeReference: `revoke-${suffix}` } });
+      await expect(adoptBootstrapProfiles(db, prepared.principalId, profiles)).rejects.toThrow("BOOTSTRAP_OPERATOR_NOT_GRANTED");
+    } finally { await db.$disconnect(); }
+  }, 30_000);
+});
+
+describePostgres("Project knowledge baseline refresh", () => {
+  it("keeps fixed Run pins, retained finalizations and embedding evidence while advancing the baseline", async () => {
+    const url = new URL(databaseUrl!);
+    if (!["localhost", "127.0.0.1"].includes(url.hostname) || !url.pathname.includes("test")) throw new Error("LOCAL_TEST_DATABASE_REQUIRED");
+    const db = new PrismaClient({ datasourceUrl: databaseUrl });
+    // Operator scripts import their built adapters in production; inject this source implementation for regression.
+    const modulePath = new URL("../../../scripts/workbench-project-knowledge-refresh-lib.mjs", import.meta.url).href;
+    const { planProjectKnowledgeRefresh, refreshProjectKnowledge } = await import(modulePath);
+    try {
+      const fixture = await seed(db);
+      const service = new ArtifactFinalizationsService(db as never, new AccessService(db as never), { sendInTransaction: vi.fn().mockResolvedValue("test-job") } as never);
+      const store = new PrismaKnowledgeBuildStore(db);
+      const reader = { readSnapshot: vi.fn(async () => ({
+        sources: [{ path: "00-rules/base.md", content: artifactKnowledgeMarkdown("Base", { text: "Baseline before revision" }) }],
+        assets: [], storageDirectoryReferences: [],
+      })) };
+      const embedDocuments = vi.fn(async (_profile: unknown, inputs: readonly unknown[]) => ({ vectors: inputs.map(() => [1, 0, 0]), tokenCounts: inputs.map(() => 1) }));
+      const processor = new KnowledgeReleaseProcessor(store, reader, {
+        count: () => 1, split: ({ text }: { text: string }) => [{ text }], assertProfile: () => undefined,
+      } as never, segmenter, { segmenter: segmenterPin }, { assertProfile: async () => undefined, embedDocuments });
+      const build = async (releaseId: string) => {
+        const started = await store.beginDelivery(releaseId, { queueJobId: randomUUID(), retryCount: 0, retryLimit: 5 }, 6, 60_000);
+        if (started.kind !== "run") throw new Error("BUILD_NOT_STARTED");
+        expect(await processor.build(started.command)).toBe("ready");
+      };
+      await build(fixture.base.id);
+      const projectBaseline = await createProjectBaseline(db, fixture);
+      await build(projectBaseline.id);
+      embedDocuments.mockClear();
+      const finalized = await service.confirm(fixture.principalId, fixture.artifactId, fixture.versionId, fixture.checksum);
+      const snapshotId = finalized.ingestionJob!.releases[0]!.id;
+      await build(snapshotId);
+      expect(embedDocuments.mock.calls.flatMap((call) => call[1])).not.toEqual([]);
+      expect(JSON.stringify(embedDocuments.mock.calls)).not.toContain("Baseline before revision");
+      const snapshot = await db.knowledgeRelease.findUniqueOrThrow({ where: { id: snapshotId } });
+      const base = await db.knowledgeRelease.findUniqueOrThrow({ where: { id: fixture.base.id } });
+      const nextBase = await db.knowledgeRelease.create({ data: {
+        key: base.key, version: 2, workspaceId: fixture.workspaceId,
+        embeddingProfileId: base.embeddingProfileId, embeddingProfileSpecSha256: base.embeddingProfileSpecSha256, embeddingDimension: base.embeddingDimension,
+        retrievalProfileId: base.retrievalProfileId, retrievalProfileSpecSha256: base.retrievalProfileSpecSha256,
+        manifest: fixture.base.manifest as Prisma.InputJsonValue, manifestSha256: fixture.base.manifestSha256,
+      } });
+      reader.readSnapshot.mockResolvedValueOnce({ sources: [{ path: "00-rules/base.md", content: artifactKnowledgeMarkdown("Base", { text: "Baseline after revision" }) }], assets: [], storageDirectoryReferences: [] });
+      await build(nextBase.id);
+      const thread = await db.thread.create({ data: { projectId: fixture.projectId, createdById: fixture.principalId, title: "Pinned before refresh" } });
+      const run = await db.run.create({ data: {
+        projectId: fixture.projectId, threadId: thread.id, createdById: fixture.principalId, knowledgeReleaseId: snapshotId,
+        idempotencyKey: randomUUID(), requestId: randomUUID(), requestHash: "b".repeat(64), modelId: "test-model", traceId: randomUUID(),
+        request: { prompt: "Generate", modelId: "test-model", workflow: "generate", targetSurface: "web", designStyle: { kind: "automatic" }, sourceIds: [], artifactTargets: [], requestedArtifactKinds: ["document"] },
+      } });
+      const input = { projectId: fixture.projectId, principalId: fixture.principalId, baselineReleaseId: nextBase.id };
+      await expect(planProjectKnowledgeRefresh(db, { ...input, principalId: "not-an-owner" })).rejects.toThrow("KNOWLEDGE_REFRESH_PROJECT_OWNER_REQUIRED");
+      const plan = await planProjectKnowledgeRefresh(db, input);
+      expect(plan.changed).toEqual(["00-rules/base.md"]);
+      expect(plan.retainedFinalizations).toHaveLength(1);
+      await expect(refreshProjectKnowledge(db, { ...input, expectedPlanSha256: "0".repeat(64) }, { PrismaKnowledgeBuildStore, createBatches })).rejects.toThrow("KNOWLEDGE_REFRESH_PLAN_STALE");
+      const published = await refreshProjectKnowledge(db, { ...input, expectedPlanSha256: plan.planSha256 }, { PrismaKnowledgeBuildStore, createBatches });
+      expect(published).toMatchObject({ status: "ready", created: true });
+      expect(await refreshProjectKnowledge(db, { ...input, expectedPlanSha256: plan.planSha256 }, { PrismaKnowledgeBuildStore, createBatches })).toMatchObject({ releaseId: published.releaseId, created: false });
+      const refreshed = await db.knowledgeRelease.findUniqueOrThrow({ where: { id: published.releaseId }, include: { documents: { include: { chunks: true, source: true } }, embeddingBatches: true } });
+      expect(refreshed.parentReleaseId).toBe(snapshotId);
+      expect(refreshed.documents).toHaveLength(2);
+      expect(refreshed.documents.filter((doc) => doc.source)).toHaveLength(1);
+      expect(refreshed.documents.flatMap((doc) => doc.chunks.map((chunk) => chunk.content)).join(" ")).toContain("Baseline after revision");
+      expect(refreshed.embeddingBatches.every((batch) => batch.status === "ready")).toBe(true);
+      expect((await db.run.findUniqueOrThrow({ where: { id: run.id } })).knowledgeReleaseId).toBe(snapshotId);
+      expect((await db.knowledgeRelease.findUniqueOrThrow({ where: { id: snapshotId } })).manifestSha256).toBe(snapshot.manifestSha256);
+      await service.withdraw(fixture.principalId, fixture.artifactId, fixture.versionId);
+      expect((await db.knowledgeRelease.findUniqueOrThrow({ where: { id: published.releaseId } })).status).toBe("retired");
+    } finally { await db.$disconnect(); }
   }, 60_000);
 });
 
@@ -226,6 +337,19 @@ async function createDocument(db: PrismaClient, projectId: string, text: string)
   } });
   await db.artifact.update({ where: { id: artifact.id }, data: { currentVersionId: version.id } });
   return version;
+}
+
+async function createProjectBaseline(db: PrismaClient, fixture: Awaited<ReturnType<typeof seed>>) {
+  // Scope the fixture before calling production's latest-release selection: other
+  // concurrently running suites may publish newer global releases in this database.
+  return db.knowledgeRelease.create({ data: {
+    key: `project:${fixture.projectId}`, version: 1, projectId: fixture.projectId, workspaceId: fixture.workspaceId,
+    parentReleaseId: fixture.base.id,
+    embeddingProfileId: fixture.base.embeddingProfileId, embeddingProfileSpecSha256: fixture.base.embeddingProfileSpecSha256,
+    embeddingDimension: fixture.base.embeddingDimension, retrievalProfileId: fixture.base.retrievalProfileId,
+    retrievalProfileSpecSha256: fixture.base.retrievalProfileSpecSha256,
+    manifest: fixture.base.manifest as Prisma.InputJsonValue, manifestSha256: fixture.base.manifestSha256,
+  } });
 }
 
 async function seed(db: PrismaClient) {

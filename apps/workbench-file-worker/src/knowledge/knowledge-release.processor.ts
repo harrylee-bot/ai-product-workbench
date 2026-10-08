@@ -74,7 +74,20 @@ export class KnowledgeReleaseProcessor {
         const batch = await this.store.claimNextEmbeddingBatch(command);
         if (batch === null) return this.store.finalize(command);
         if (typeof batch === "string") return batch;
-        const result = await this.embedding.embedDocuments(command.embeddingProfile, batch.inputs, signal);
+        const reused = await this.store.reusableEmbeddingVectors?.(command, batch) ?? new Map<string, readonly number[]>();
+        const pending = batch.inputs.filter((input) => !reused.has(input.chunkId));
+        const fresh = pending.length
+          ? await this.embedding.embedDocuments(command.embeddingProfile, pending, signal)
+          : { vectors: [], tokenCounts: [] };
+        if (fresh.vectors.length !== pending.length || fresh.tokenCounts.length !== pending.length) {
+          throw new TerminalKnowledgeBuildError("TEI_BATCH_OUTPUT_COUNT_INVALID", "Embedding output count is invalid");
+        }
+        let next = 0;
+        const result = {
+          vectors: batch.inputs.map((input) => reused.get(input.chunkId) ?? fresh.vectors[next++]!),
+          // Reuse consumes no provider tokens; retain batch identities and output seals.
+          tokenCounts: batch.inputs.map((input) => reused.has(input.chunkId) ? 0 : fresh.tokenCounts[pending.findIndex((item) => item.chunkId === input.chunkId)]!),
+        };
         throwIfAborted(signal);
         const published = await this.store.publishEmbeddingBatch(command, batch, result);
         if (published !== "published") return published;

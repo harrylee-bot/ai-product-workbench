@@ -93,6 +93,40 @@ describe("Word and PDF document selection", () => {
     vi.unstubAllEnvs();
   });
 
+  it("preserves Markdown tables, nested lists, emphasis, links, quotes and code as Word structures", async () => {
+    const request = exportRequest("docx");
+    request.packaging = "single_file";
+    request.source.artifacts[0] = {
+      ...request.source.artifacts[0]!, kind: "document", schemaVersion: 1, title: "结构化会议纪要",
+      content: { markdown: [
+        "# 验收范围", "", "| 条件 | 结果 |", "| --- | --- |", "| 登录 | **成功** |", "",
+        "3. 确认需求", "4. 下载文档", "   - 子步骤", "", "- [x] 已评审", "- [ ] 待发布", "",
+        "**必须验收**、*评审意见*、~~废弃内容~~和`原文代码`。", "",
+        "[安全链接](https://example.com/approval) [不安全链接](javascript:alert%281%29)", "",
+        "![结构示意图](https://example.com/diagram.png)", "",
+        "> 业务引用保留", "", "```text", "const original = '<业务>';", "```",
+      ].join("\n") },
+    };
+    const { archive, document, text } = readDocx((await buildExport(request)).bytes);
+    expect(document.getElementsByTagName("w:tbl")).toHaveLength(1);
+    expect(document.getElementsByTagName("w:numPr").length).toBeGreaterThanOrEqual(5);
+    expect(document.getElementsByTagName("w:hyperlink")).toHaveLength(2);
+    for (const literal of ["验收范围", "条件", "结果", "成功", "确认需求", "子步骤", "☑", "☐", "必须验收", "评审意见", "废弃内容", "原文代码", "业务引用保留", "const original = '<业务>';", "[图片：结构示意图]"]) {
+      expect(text).toContain(literal);
+    }
+    expect(text).not.toContain("**必须验收**");
+    expect(text).not.toContain("| 条件 | 结果 |");
+    for (const [label, tag] of [["必须验收", "w:b"], ["评审意见", "w:i"], ["废弃内容", "w:strike"]]) {
+      const run = [...document.getElementsByTagName("w:r")].find((node) => node.textContent === label)!;
+      expect(run.getElementsByTagName(tag!)).toHaveLength(1);
+    }
+    const relationships = strFromU8(archive["word/_rels/document.xml.rels"]!);
+    expect(relationships).toContain("https://example.com/approval");
+    expect(relationships).not.toContain("javascript:");
+    expect(strFromU8(archive["word/numbering.xml"]!)).toContain('w:start w:val="3"');
+    expect(Object.keys(archive).filter((name) => name.startsWith("word/media/"))).toHaveLength(0);
+  }, 120_000);
+
   it.each(["docx", "pdf"] as const)("renders a valid PRD v2 document artifact for %s", async (format) => {
     const request = exportRequest(format);
     request.packaging = "single_file";

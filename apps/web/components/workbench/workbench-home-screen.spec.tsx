@@ -117,7 +117,7 @@ describe("Workbench home inspiration templates", () => {
 
     await waitFor(() => expect(onSubmitPrompt).toHaveBeenCalledWith(expect.objectContaining({
       prompt: editedPrompt,
-      requestedArtifactKinds: ["prototype"],
+      requestedArtifactKinds: ["prd", "prototype"],
       targetSurface: "web",
     })));
   });
@@ -143,6 +143,43 @@ describe("Workbench home inspiration templates", () => {
 });
 
 describe("Workbench home responsive shell", () => {
+  it("keeps IME confirmation and Shift+Enter separate from submission", async () => {
+    const onSubmitPrompt = vi.fn(async () => "project-1");
+    render(<HomeScreenHarness onSubmitPrompt={onSubmitPrompt} />);
+    const prompt = screen.getByRole("textbox", { name: "提示词" });
+    fireEvent.change(prompt, { target: { value: "为门店增加预约管理" } });
+    fireEvent.keyDown(prompt, { key: "Enter", isComposing: true });
+    fireEvent.keyDown(prompt, { key: "Enter", shiftKey: true });
+    expect(onSubmitPrompt).not.toHaveBeenCalled();
+    fireEvent.keyDown(prompt, { key: "Enter", isComposing: false });
+    await waitFor(() => expect(onSubmitPrompt).toHaveBeenCalledWith(expect.objectContaining({ requestedArtifactKinds: ["prd", "prototype"] })));
+  });
+
+  it("switches from a single document back to explicit paired output", async () => {
+    const onSubmitPrompt = vi.fn(async () => "project-1");
+    render(<HomeScreenHarness onSubmitPrompt={onSubmitPrompt} />);
+    fireEvent.change(screen.getByRole("textbox", { name: "提示词" }), { target: { value: "为门店增加预约管理" } });
+    fireEvent.click(screen.getByRole("button", { name: "选择生成类型" }));
+    fireEvent.click(screen.getByRole("menuitemradio", { name: /生成文档/ }));
+    fireEvent.click(screen.getByRole("button", { name: "提交提示" }));
+    await waitFor(() => expect(onSubmitPrompt).toHaveBeenLastCalledWith(expect.objectContaining({ requestedArtifactKinds: ["prd"] })));
+    fireEvent.click(screen.getByRole("button", { name: "选择生成类型" }));
+    fireEvent.click(screen.getByRole("menuitemradio", { name: /需求文档＋原型/ }));
+    fireEvent.click(screen.getByRole("button", { name: "提交提示" }));
+    await waitFor(() => expect(onSubmitPrompt).toHaveBeenLastCalledWith(expect.objectContaining({ requestedArtifactKinds: ["prd", "prototype"] })));
+  });
+
+  it("exposes a knowledge action alongside the small-screen project menu", () => {
+    const open = vi.spyOn(window, "open").mockImplementation(() => null);
+    render(<HomeScreenHarness onSubmitPrompt={vi.fn(async () => "project-1")} />);
+    const knowledge = screen.getByRole("button", { name: "知识库" });
+    expect(knowledge.parentElement?.className).toContain("md:hidden");
+    fireEvent.click(knowledge);
+    expect(String(open.mock.calls[0]?.[0])).toContain("/knowledge/");
+    expect(open.mock.calls[0]?.slice(1)).toEqual(["_blank", "noopener,noreferrer"]);
+    open.mockRestore();
+  });
+
   it("collapses the artifact output menu after selecting an output kind", async () => {
     render(<HomeScreenHarness onSubmitPrompt={vi.fn(async () => "project")} />);
 

@@ -58,6 +58,10 @@ export interface KnowledgeBuildStore {
   claimNextEmbeddingBatch(
     command: KnowledgeBuildCommand,
   ): Promise<KnowledgeEmbeddingBatchWork | KnowledgeBuildOutcome | null>;
+  reusableEmbeddingVectors?(
+    command: KnowledgeBuildCommand,
+    batch: KnowledgeEmbeddingBatchWork,
+  ): Promise<ReadonlyMap<string, readonly number[]>>;
   publishEmbeddingBatch(
     command: KnowledgeBuildCommand,
     batch: KnowledgeEmbeddingBatchWork,

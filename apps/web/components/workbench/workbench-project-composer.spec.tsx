@@ -63,6 +63,7 @@ describe("Project Composer Edit workflow", () => {
       expect.objectContaining({
         artifactTargets: [],
         modelChoiceKey: createChoice.key,
+        requestedArtifactKinds: ["prd", "prototype"],
       }),
     ));
   });

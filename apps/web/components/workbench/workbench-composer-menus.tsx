@@ -20,7 +20,15 @@ import { popoverTransition } from "./workbench-motion";
 
 type ModelName = string;
 
-export type WorkbenchArtifactOutputKind = "prd" | "prototype";
+export type WorkbenchArtifactOutputKind = "both" | "prd" | "prototype";
+
+export function artifactKindsForOutput(kind: WorkbenchArtifactOutputKind): Array<"prd" | "prototype"> {
+  return kind === "both" ? ["prd", "prototype"] : [kind];
+}
+
+export function artifactOutputLabel(kind: WorkbenchArtifactOutputKind): string {
+  return kind === "both" ? "需求文档＋原型" : kind === "prd" ? "生成文档" : "生成原型";
+}
 
 export function ComposerArtifactOutputMenu({
   kind,
@@ -32,6 +40,7 @@ export function ComposerArtifactOutputMenu({
   placement?: "home" | "project";
 }) {
   const options = [
+    { icon: SparklesIcon, kind: "both" as const, label: "需求文档＋原型", description: "生成关联的文档与可交互原型" },
     { icon: FileTextIcon, kind: "prd" as const, label: "生成文档", description: "输出需求说明书" },
     { icon: FrameIcon, kind: "prototype" as const, label: "生成原型", description: "输出可交互原型" },
   ];

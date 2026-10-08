@@ -260,6 +260,22 @@ function serviceWith(
 }
 
 describe("ExportJob API invariants", () => {
+  it.each(["quarantined", "deleted", "missing"])("isolates a %s output from the other jobs in a list", async (unavailable) => {
+    const blob = { id: "blob_1", status: "ready", deletedAt: null, mediaType: "text/html", byteSize: 128n, sha256: "b".repeat(64) };
+    const healthy = queuedJob({ status: "succeeded", startedAt: now, finishedAt: now, outputBlob: blob });
+    const broken = { ...healthy, id: "export_broken", outputBlob: unavailable === "missing" ? null : {
+      ...blob, status: unavailable === "quarantined" ? "quarantined" : "ready", deletedAt: unavailable === "deleted" ? now : null,
+    } };
+    const db = { exportJob: { findMany: vi.fn().mockResolvedValue([broken, healthy]), findFirst: vi.fn().mockResolvedValue(broken) } };
+    const service = serviceWith(db);
+    const result = await service.list("principal_1", "project_1");
+    expect(result.items).toHaveLength(2);
+    expect(result.items[0]).toMatchObject({ id: "export_broken", status: "failed", output: null, failure: { code: "EXPORT_OUTPUT_BLOB_NOT_READABLE" } });
+    expect(result.items[1]).toMatchObject({ id: "export_1", status: "succeeded", output: { blobId: "blob_1" }, failure: null });
+    await expect(service.get("principal_1", "export_broken")).resolves.toEqual(result.items[0]);
+    await expect(service.getContent("principal_1", "export_broken")).rejects.toMatchObject({ status: 409 });
+    expect(broken.status).toBe("succeeded");
+  });
   it("keeps HTTP status metadata aligned with the 202 command and 200 state transitions", () => {
     expect(Reflect.getMetadata(HTTP_CODE_METADATA, ExportsController.prototype.create)).toBe(202);
     expect(Reflect.getMetadata(HTTP_CODE_METADATA, ExportsController.prototype.cancel)).toBe(200);
@@ -822,6 +838,7 @@ describe("ExportJob API invariants", () => {
       url: "https://preview.example.com/preview/signed-token",
       expiresAt: "2026-07-13T01:00:00.000Z",
     });
+    expect(preview.createCapability).toHaveBeenCalledWith("export_1", "principal_1");
     const query = JSON.stringify(db.exportJob.findFirst.mock.calls[0]![0]);
     expect(query).not.toContain("storageKey");
     expect(query).not.toContain("sha256");
@@ -1120,12 +1137,13 @@ describe("ExportJob API invariants", () => {
     expect(JSON.stringify(db.projectPreview.findFirst.mock.calls[0]![0])).not.toContain("storageKey");
     expect(previewConfig.createCapability).toHaveBeenCalledWith(
       "preview-export-1",
+      "viewer_1",
       expect.any(Date),
       preview.expiresAt,
     );
   });
 
-  it("uses a server-fixed short TTL and a token payload containing only Export identity and expiry", () => {
+  it("uses a server-fixed short TTL and a token payload containing Export identity, authorized requester and expiry", () => {
     const secret = Buffer.alloc(32, 7);
     const values: Record<string, string> = {
       WORKBENCH_PREVIEW_ORIGIN: "https://preview.example.com",
@@ -1141,13 +1159,13 @@ describe("ExportJob API invariants", () => {
       },
       get: (name: string) => values[name],
     } as ConfigService);
-    const capability = config.createCapability("export_1", now);
+    const capability = config.createCapability("export_1", "viewer_1", now);
     const token = new URL(capability.url).pathname.split("/").at(-1)!;
     const payload = verifyPreviewToken(token, secret, { now, maximumTtlSeconds: 60 });
 
-    expect(payload).toEqual({ exportJobId: "export_1", expiresAt: capability.expiresAt });
+    expect(payload).toEqual({ exportJobId: "export_1", principalId: "viewer_1", expiresAt: capability.expiresAt });
     expect(Buffer.from(token.split(".")[1]!, "base64url").toString("utf8"))
-      .toBe('{"v":1,"exportJobId":"export_1","exp":1783900860}');
+      .toBe('{"v":2,"exportJobId":"export_1","principalId":"viewer_1","exp":1783900860}');
   });
 
   it("rejects a Preview origin that shares the Web origin", () => {

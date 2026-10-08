@@ -15,7 +15,7 @@ const providerOptions = {
 };
 
 describe("GithubImportProvider", () => {
-  it("resolves a mutable ref once and downloads every file through the pinned commit SHA", async () => {
+  it("freezes private repository files through authenticated immutable GitHub blobs", async () => {
     const client = clientWith([
       json({ sha: commitSha, commit: { tree: { sha: treeSha } } }),
       json({ tree: [
@@ -42,8 +42,8 @@ describe("GithubImportProvider", () => {
     expect(client.get.mock.calls[0]![0]).toBe("https://api.github.com/repos/acme/product/commits/main");
     expect(client.get.mock.calls[1]![0]).toContain(`/git/trees/${treeSha}?recursive=1`);
     expect(client.get.mock.calls.slice(2).map(([url]) => url)).toEqual([
-      `https://raw.githubusercontent.com/acme/product/${commitSha}/README.md`,
-      `https://raw.githubusercontent.com/acme/product/${commitSha}/src/app.ts`,
+      `https://api.github.com/repos/acme/product/git/blobs/${"d".repeat(40)}`,
+      `https://api.github.com/repos/acme/product/git/blobs/${"c".repeat(40)}`,
     ]);
     expect(client.get.mock.calls.slice(2).every(([url]) => !String(url).includes("/main/"))).toBe(true);
     expect(client.get.mock.calls[0]![1]).toMatchObject({
@@ -51,6 +51,24 @@ describe("GithubImportProvider", () => {
       allowedMediaTypes: [/^application\/json$/u],
       headers: { authorization: "Bearer github-secret" },
     });
+    for (const [, options] of client.get.mock.calls.slice(2)) {
+      expect(options).toMatchObject({
+        allowedHosts: ["api.github.com"],
+        headers: { accept: "application/vnd.github.raw+json", authorization: "Bearer github-secret" },
+      });
+    }
+  });
+
+  it("keeps public files pinned to the commit and sends no authentication", async () => {
+    const client = clientWith([
+      json({ sha: commitSha, commit: { tree: { sha: treeSha } } }),
+      json({ tree: [{ type: "blob", path: "README.md", sha: "c".repeat(40) }] }),
+      response("# Product", "text/markdown"),
+    ]);
+    await new GithubImportProvider(client as never, providerOptions).freeze({ kind: "github_snapshot", repository: "acme/product", ref: "main" });
+    expect(client.get.mock.calls[2]![0]).toBe(`https://raw.githubusercontent.com/acme/product/${commitSha}/README.md`);
+    expect(client.get.mock.calls[2]![1]).toMatchObject({ allowedHosts: ["raw.githubusercontent.com"] });
+    expect(client.get.mock.calls[2]![1].headers).toBeUndefined();
   });
 
   it("uses the manifest limit of 50 and fails before downloading an oversized tree", async () => {

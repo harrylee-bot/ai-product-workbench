@@ -48,7 +48,10 @@ ENV WORKBENCH_TYPES_PREVALIDATED=1
 RUN npm run build
 
 FROM build AS prod-deps
-RUN npm prune --omit=dev --include=optional --no-audit --no-fund && rm -rf /root/.npm
+COPY deploy/collect-workspace-runtime-dependencies.mjs /usr/local/lib/collect-workspace-runtime-dependencies.mjs
+RUN npm prune --omit=dev --include=optional --no-audit --no-fund \
+  && node /usr/local/lib/collect-workspace-runtime-dependencies.mjs /app /app/.runtime-workspace-dependencies \
+  && rm -rf /root/.npm
 
 FROM ${NODE_IMAGE} AS runner
 WORKDIR /app
@@ -67,12 +70,14 @@ COPY apps/web/package.json apps/web/package.json
 COPY packages/workbench-contracts/package.json packages/workbench-contracts/package.json
 COPY packages/workbench-telemetry/package.json packages/workbench-telemetry/package.json
 COPY --from=prod-deps /app/node_modules node_modules
+COPY --from=prod-deps /app/.runtime-workspace-dependencies/ ./
 COPY --from=build /app/apps/web/.next apps/web/.next
 COPY --from=build /app/apps/web/next.config.ts apps/web/next.config.ts
 COPY --from=build /app/apps/web/lib/security-headers.ts apps/web/lib/security-headers.ts
 COPY --from=build /app/apps/web/public apps/web/public
 COPY --from=build /app/packages/workbench-contracts/dist packages/workbench-contracts/dist
 COPY --from=build /app/packages/workbench-telemetry/dist packages/workbench-telemetry/dist
+RUN cd apps/web && node -e "require.resolve('next/dist/bin/next'); if (require('next/package.json').version !== require('./package.json').dependencies.next) process.exit(1)"
 WORKDIR /app/apps/web
 USER node
 EXPOSE 3000

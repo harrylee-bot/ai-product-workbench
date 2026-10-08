@@ -89,6 +89,19 @@ function harness() {
 }
 
 describe("ExportProcessor", () => {
+  it("does not build or publish after queue cancellation during source loading", async () => {
+    const test = harness();
+    const controller = new AbortController();
+    const reason = new Error("queue cancelled");
+    test.loader.load.mockImplementationOnce(async () => {
+      controller.abort(reason);
+      return source();
+    });
+    await expect(test.processor.process("export-1", controller.signal, { retryCount: 0, retryLimit: 5 })).rejects.toBe(reason);
+    expect(test.storage.putVerified).not.toHaveBeenCalled();
+    expect(test.store.publishSucceeded).not.toHaveBeenCalled();
+    expect(test.store.fail).not.toHaveBeenCalled();
+  });
   it("builds, browser-validates, writes and atomically publishes a real HTML output", async () => {
     const test = harness();
     const result = await test.processor.process("export-1", undefined, { retryCount: 0, retryLimit: 5 });

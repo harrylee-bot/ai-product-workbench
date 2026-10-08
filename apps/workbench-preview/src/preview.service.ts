@@ -61,7 +61,12 @@ export class PreviewService {
       ? await this.db.projectMember.findFirst({
           where: {
             projectId,
-            principalId: job.createdById,
+            // Legacy capabilities keep their original short-lived semantics.
+            // Newly issued capabilities follow the authorized requester.
+            principalId: payload.principalId ?? job.createdById,
+            ...(payload.principalId && job.purpose === "export"
+              ? { role: { in: ["owner", "editor"] as ("owner" | "editor")[] } }
+              : {}),
             principal: { status: "active" },
           },
           select: { projectId: true },

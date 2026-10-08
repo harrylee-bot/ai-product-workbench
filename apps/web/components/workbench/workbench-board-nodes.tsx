@@ -77,7 +77,7 @@ type WorkbenchPrdEditContextValue = {
   onDocumentCommit: (
     reference: WorkbenchArtifactReference,
     document: PrdDocument,
-  ) => Promise<void>;
+  ) => Promise<void | string>;
 };
 
 const WorkbenchCanvasEditContext = createContext(false);

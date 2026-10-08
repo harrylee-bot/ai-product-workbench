@@ -38,7 +38,6 @@ import {
 } from "@/lib/workbench/features/import-sources";
 import {
   isValidEditArtifactTargets,
-  requestedArtifactKindsForPrompt,
   workbenchRunIsActive,
 } from "@/lib/workbench/run";
 import type {
@@ -58,6 +57,8 @@ import {
 import {
   ComposerAttachmentMenu,
   ComposerArtifactOutputMenu,
+  artifactKindsForOutput,
+  artifactOutputLabel,
   ComposerCommandMenu,
 } from "./workbench-composer-menus";
 import type { WorkbenchArtifactOutputKind } from "./workbench-composer-menus";
@@ -153,7 +154,7 @@ export function ProjectComposer({
     session,
     () => automaticDesignStyleSelection,
   );
-  const [outputKind, setOutputKind] = useWorkbenchProjectState<WorkbenchArtifactOutputKind | null>(session, () => null);
+  const [outputKind, setOutputKind] = useWorkbenchProjectState<WorkbenchArtifactOutputKind>(session, () => "both");
   const [customDesignOpen, setCustomDesignOpen] = useWorkbenchProjectState(session, () => false);
   const [importSourcesOpen, setImportSourcesOpen] = useWorkbenchProjectState(session, () => false);
   const [selectedSourceIds, setSelectedSourceIds] = useWorkbenchProjectState<string[]>(session, () => []);
@@ -217,9 +218,7 @@ export function ProjectComposer({
         : targetedGenerateArtifactTargets,
       requestedArtifactKinds: targetedGenerate
         ? ["prototype"]
-        : outputKind ? [outputKind] : requestedArtifactKindsForPrompt(nextPrompt, {
-            prdContext: hasDocumentChip,
-          }),
+        : artifactKindsForOutput(outputKind),
       sourceIds: selectedSourceIds,
     });
     if (!accepted || !session.isCurrent()) return;
@@ -474,7 +473,7 @@ export function ProjectComposer({
             type="button"
           >
             <FileTextIcon className="size-[15px]" />
-            {outputKind === "prd" ? "生成文档" : outputKind === "prototype" ? "生成原型" : "生成类型"}
+            {targetedGenerate ? "生成原型" : artifactOutputLabel(outputKind)}
           </button>
           <AnimatePresence>
             {modelCatalog.status === "ready" && modelMenuOpen && (

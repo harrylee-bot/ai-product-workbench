@@ -6,6 +6,7 @@ import { notFoundProblem, validationProblem } from "../../common/problem-details
 import { WorkbenchDbService } from "../../platform/database/workbench-db.service.js";
 import { WorkbenchQueueService } from "../../platform/queue/workbench-queue.service.js";
 import { AccessService } from "../access/access.service.js";
+import { artifactKnowledgeMarkdown } from "./artifact-knowledge-markdown.js";
 import { assertProjectCapability } from "../projects/project-lock.js";
 
 const detailInclude = { ingestionJob: { include: { releases: {
@@ -143,27 +144,7 @@ export class ArtifactFinalizationsService {
   }
 }
 
-export function artifactKnowledgeMarkdown(title: string, content: Prisma.JsonValue): string {
-  const lines: string[] = [];
-  const visit = (value: Prisma.JsonValue, key = "") => {
-    if (typeof value === "string") {
-      if (["text", "title", "label", "description", "summary", "markdown", "name", "remarks",
-        "statement", "actor", "trigger", "outcome", "notes", "needs", "painPoints", "successMetric"].includes(key)) lines.push(value);
-    } else if (Array.isArray(value)) {
-      value.forEach((item) => visit(item, key));
-    } else if (value) {
-      for (const [childKey, child] of Object.entries(value)) {
-        if (child !== undefined && !["citations", "assets", "source", "metadata"].includes(childKey)) visit(child, childKey);
-      }
-    }
-  };
-  visit(content, "text");
-  if (!lines.some((line) => line.trim())) throw validationProblem("ARTIFACT_KNOWLEDGE_TEXT_REQUIRED");
-  // Escape source markup so a document cannot inject vault links or storage declarations.
-  const escape = (line: string) => line.replace(/[\\`*_[\]<>#]/gu, "\\$&").replace(/storage\//gu, "storage&#47;");
-  const escaped = lines.map(escape).join("\n\n");
-  return `---\ntitle: ${JSON.stringify(title)}\nstatus: 已生效\ntags: [finalized]\naliases: []\n---\n\n# ${escape(title.replace(/[\r\n]/gu, " "))}\n\n${escaped}\n`.normalize("NFC");
-}
+export { artifactKnowledgeMarkdown } from "./artifact-knowledge-markdown.js";
 
 function digest(value: string) { return createHash("sha256").update(value).digest("hex"); }
 

@@ -38,6 +38,20 @@ const netlifyCapabilities = {
 afterEach(cleanup);
 
 describe("ExportDialog persisted job state", () => {
+  it("creates a new job for an unavailable output instead of downloading or cancelling it", async () => {
+    const props = documentDialogProps();
+    props.onStartExport.mockResolvedValue(exportJob({ format: "docx", status: "queued" }));
+    const prdSelection = { kind: "artifact" as const, artifactId: "artifact-prd", artifactVersionId: "version-prd" };
+    const job = { ...exportJob({ format: "docx", status: "succeeded" }), selection: prdSelection, status: "failed" as const, output: null, failure: { code: "EXPORT_OUTPUT_BLOB_NOT_READABLE", detail: null } };
+    render(<ExportDialog {...props} activeExport={job} activeExportSelection={prdSelection}
+      documentExport={{ selection: prdSelection, title: "需求文档", reason: null }} />);
+    expect(await screen.findByText("文件已不可用，请重新导出。")).not.toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "重试导出 Download Word" }));
+    await waitFor(() => expect(props.onStartExport).toHaveBeenCalledOnce());
+    expect(props.onDownload).not.toHaveBeenCalled();
+    expect(props.onCancelExport).not.toHaveBeenCalled();
+  });
+
   it.each(["Download Word", "Download PDF"] as const)("starts %s with the sole PRD pin without requiring canvas selection", async (target) => {
     const prdSelection = { kind: "artifact" as const, artifactId: "artifact-prd", artifactVersionId: "version-prd" };
     const onStartExport = vi.fn(async () => exportJob({ format: "docx", status: "queued" }));

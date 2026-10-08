@@ -305,17 +305,20 @@ export class PrismaKnowledgeBuildStore implements KnowledgeBuildStore {
           if (document.source) await tx.knowledgeDocumentSource.create({ data: {
             documentId, artifactVersionId: document.source.artifactVersionId, checksum: document.source.checksum,
           } });
-          for (const chunk of document.chunks) {
-            const id = chunkIds.get(chunk.id)!;
-            await tx.knowledgeChunk.create({ data: {
-              id, documentId, releaseId: command.releaseId, sequence: chunk.sequence, headingPath: chunk.headingPath as Prisma.InputJsonValue,
-              content: chunk.content, tokenCount: chunk.tokenCount,
-            } });
+          if (document.chunks.length) await tx.knowledgeChunk.createMany({ data: document.chunks.map((chunk) => ({
+            id: chunkIds.get(chunk.id)!, documentId, releaseId: command.releaseId,
+            sequence: chunk.sequence, headingPath: chunk.headingPath as Prisma.InputJsonValue,
+            content: chunk.content, tokenCount: chunk.tokenCount,
+          })) });
+          for (let offset = 0; offset < document.chunks.length; offset += 250) {
+            const chunks = document.chunks.slice(offset, offset + 250);
             await tx.$executeRaw(Prisma.sql`
-              UPDATE knowledge_chunks SET search_vector = source.search_vector
-              FROM knowledge_chunks source WHERE knowledge_chunks.id = ${id} AND source.id = ${chunk.id}
+              UPDATE knowledge_chunks target SET search_vector = source.search_vector
+              FROM knowledge_chunks source,
+                (VALUES ${Prisma.join(chunks.map((chunk) => Prisma.sql`(${chunkIds.get(chunk.id)!}, ${chunk.id})`))}) AS mapping(target_id, source_id)
+              WHERE target.id = mapping.target_id AND source.id = mapping.source_id
             `);
-            embeddingRows.push({ id, content: chunk.content, tokenCount: chunk.tokenCount });
+            for (const chunk of chunks) embeddingRows.push({ id: chunkIds.get(chunk.id)!, content: chunk.content, tokenCount: chunk.tokenCount });
           }
         }
         const merged = mergeIngestionManifest(parent.manifest, bundle.manifest);
@@ -391,6 +394,38 @@ export class PrismaKnowledgeBuildStore implements KnowledgeBuildStore {
       if (batch.status !== "running" || batch.leaseToken !== command.leaseToken) return "busy";
       return loadBatchWork(tx, command.embeddingProfile, batch);
     }, { maxWait: 10_000, timeout: 30_000 });
+  }
+
+  async reusableEmbeddingVectors(
+    command: KnowledgeBuildCommand,
+    batch: KnowledgeEmbeddingBatchWork,
+  ): Promise<ReadonlyMap<string, readonly number[]>> {
+    if (!command.ingestion || !batch.inputs.length) return new Map();
+    const rows = await this.db.$queryRaw<Array<{ chunkId: string; vector: string; sha256: string }>>(Prisma.sql`
+      SELECT DISTINCT ON (target.id) target.id AS "chunkId",
+        embedding.embedding::TEXT AS vector, embedding.embedding_sha256 AS sha256
+      FROM knowledge_chunks target
+      JOIN knowledge_chunks source ON source.content = target.content
+        AND source.release_id = ${command.ingestion.parentReleaseId}
+      JOIN knowledge_releases parent ON parent.id = source.release_id AND parent.status = 'ready'
+      JOIN knowledge_chunk_embeddings embedding ON embedding.chunk_id = source.id
+        AND embedding.release_id = parent.id
+      WHERE target.release_id = ${command.releaseId}
+        AND target.id IN (${Prisma.join(batch.inputs.map((input) => input.chunkId))})
+        AND embedding.profile_id = ${command.embeddingProfile.spec.id}
+        AND embedding.profile_spec_sha256 = ${command.embeddingProfile.specSha256}
+        AND embedding.dimension = ${command.embeddingProfile.dimension}
+      ORDER BY target.id, source.id
+    `);
+    return new Map(rows.map((row) => {
+      const vector = JSON.parse(row.vector) as number[];
+      if (!Array.isArray(vector) || vector.length !== command.embeddingProfile.dimension
+        || vector.some((value) => !Number.isFinite(value))
+        || embeddingVectorSha256(vector) !== row.sha256) {
+        throw new TerminalKnowledgeBuildError("KNOWLEDGE_REUSED_EMBEDDING_INVALID", "Parent embedding failed its immutable checksum");
+      }
+      return [row.chunkId, vector] as const;
+    }));
   }
 
   async publishEmbeddingBatch(
@@ -583,7 +618,7 @@ async function loadBatchWork(
   return { batchId: batch.id, sequence: batch.sequence, inputSha256, inputs };
 }
 
-function createBatches(
+export function createBatches(
   command: KnowledgeBuildCommand,
   chunks: readonly { id: string; content: string; tokenCount: number }[],
 ): Prisma.KnowledgeEmbeddingBatchCreateManyInput[] {

@@ -136,6 +136,24 @@ describe("PrismaKnowledgeToolGrantIssuer", () => {
     expect(harness.budgetCreationCount()).toBe(1);
   });
 
+  it("does not reuse a nearly expired submission grant even if it remains valid for a minute", async () => {
+    const harness = issuerHarness();
+    const first = await harness.issuer.issue(scope);
+    vi.setSystemTime(new Date(now.getTime() + 120_000));
+    const replacement = await harness.issuer.issue(scope);
+    expect(replacement!.token).not.toBe(first!.token);
+    expect(new Date(replacement!.expiresAt).getTime() - Date.now()).toBe(config.maximumTtlSeconds * 1_000);
+    expect(harness.budgetCreationCount()).toBe(1);
+  });
+
+  it("keeps a default-duration capability valid after a 30 minute generation", async () => {
+    const harness = issuerHarness();
+    const issuer = new PrismaKnowledgeToolGrantIssuer(harness.db as never, { ...config, maximumTtlSeconds: 3600 });
+    const issued = await issuer.issue(scope);
+    expect(verifyKnowledgeToolGrant(issued!.token, secret, { now: new Date(now.getTime() + 1_800_000), maximumTtlSeconds: 3600 }).runId).toBe(scope.runId);
+    expect(() => verifyKnowledgeToolGrant(issued!.token, secret, { now: new Date(now.getTime() + 3_600_000), maximumTtlSeconds: 3600 })).toThrow("KNOWLEDGE_TOOL_GRANT_EXPIRED");
+  });
+
   it("fails closed for a pinned release when Knowledge tool configuration is absent", async () => {
     const db = { $transaction: vi.fn() };
     const issuer = new PrismaKnowledgeToolGrantIssuer(db as never, null);

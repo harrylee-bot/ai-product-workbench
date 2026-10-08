@@ -49,6 +49,11 @@ export type ExportBuildRequest = {
   source: ExportReleaseSource;
 };
 
+export type ExportBuildExecution = {
+  signal?: AbortSignal;
+  timeoutMs?: number;
+};
+
 export type ExportBuildOutput = {
   bytes: Uint8Array;
   mediaType: string;

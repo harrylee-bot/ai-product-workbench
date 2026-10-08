@@ -65,7 +65,6 @@ import {
   HomeProjectList,
   type WorkbenchHomeProjectItem,
 } from "@/lib/workbench/features/projects";
-import { requestedArtifactKindsForPrompt } from "@/lib/workbench/run";
 import type { ImportSourceDraft } from "@/lib/workbench/features/import-sources";
 
 import { WorkbenchAccountMenu } from "./workbench-account-menu";
@@ -73,6 +72,8 @@ import {
   ComposerAttachmentMenu,
   ComposerCommandMenu,
   ComposerArtifactOutputMenu,
+  artifactKindsForOutput,
+  artifactOutputLabel,
 } from "./workbench-composer-menus";
 import type { WorkbenchArtifactOutputKind } from "./workbench-composer-menus";
 import {
@@ -244,11 +245,21 @@ export function HomeScreen({
         transition={{ ...viewTransition, delay: 0.04 }}
       >
         <div className="flex items-center gap-[10px]">
-          <div className="text-[29px] font-semibold leading-none tracking-normal">产品工作台</div>
+          <div className="text-[29px] font-semibold leading-none tracking-normal max-sm:text-[22px]">产品工作台</div>
           <span className="rounded-full border border-white/80 px-[9px] py-[4px] text-[11px] font-semibold uppercase leading-none">
             Beta
           </span>
         </div>
+        <div className="flex items-center gap-[8px] md:hidden">
+        <button
+          aria-label="知识库"
+          className="grid size-[36px] place-items-center rounded-full border border-white/[0.10] bg-[#1c1d20]/86 text-[#f1f3f4]"
+          onClick={() => openWorkbenchKnowledgePage()}
+          title="知识库"
+          type="button"
+        >
+          <FileTextIcon className="size-[18px]" />
+        </button>
         <button
           aria-expanded={mobileProjectsOpen}
           aria-label="项目列表"
@@ -261,6 +272,7 @@ export function HomeScreen({
         >
           {mobileProjectsOpen ? <XIcon className="size-[18px]" /> : <Grid3X3Icon className="size-[18px]" />}
         </button>
+        </div>
         <div className="hidden items-center gap-[12px] text-[#e8eaed] md:flex" data-home-more-menu onMouseDown={(event) => event.stopPropagation()}>
           <button
             className="flex h-[34px] items-center gap-[7px] rounded-full px-[4px] text-[14px] font-semibold hover:bg-white/[0.05]"
@@ -663,7 +675,7 @@ function HomeComposer({
   const [composerFocused, setComposerFocused] = useState(false);
   const [composerPanel, setComposerPanel] = useState<"attachments" | "commands" | null>(null);
   const [selectedStyle, setSelectedStyle] = useState<WorkbenchDesignStyleSelection>(automaticDesignStyleSelection);
-  const [outputKind, setOutputKind] = useState<WorkbenchArtifactOutputKind | null>(null);
+  const [outputKind, setOutputKind] = useState<WorkbenchArtifactOutputKind>("both");
   const [customDesignOpen, setCustomDesignOpen] = useState(false);
   const [suggestionOffset, setSuggestionOffset] = useState(0);
   const attachments = useWorkbenchComposerAttachments();
@@ -699,7 +711,7 @@ function HomeComposer({
       designSystemProvision: selectedStyle.provision,
       files: selectedFiles,
       sourceIds: [],
-      requestedArtifactKinds: outputKind ? [outputKind] : requestedArtifactKindsForPrompt(text),
+      requestedArtifactKinds: artifactKindsForOutput(outputKind),
     });
   };
 
@@ -791,7 +803,7 @@ function HomeComposer({
             onChange={(event) => setPrompt(event.target.value)}
             onFocus={() => setComposerFocused(true)}
             onKeyDown={(event) => {
-              if (!busy && event.key === "Enter" && !event.shiftKey) {
+              if (!busy && event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
                 event.preventDefault();
                 submit(prompt);
               }
@@ -867,7 +879,7 @@ function HomeComposer({
               type="button"
             >
               <SparklesIcon className="size-[15px]" />
-              {outputKind === "prd" ? "生成文档" : outputKind === "prototype" ? "生成原型" : "生成类型"}
+              {artifactOutputLabel(outputKind)}
               <ChevronDownIcon className="size-[14px]" />
             </button>
             <button

@@ -5,18 +5,51 @@ import {
   prdTableOfContentsEntriesFor,
 } from "@workbench/workbench-contracts";
 import { prdDocumentV2Example } from "@workbench/workbench-contracts/test-fixtures";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { WorkbenchPrdArtifactEditor } from "./workbench-prd-editor";
 import { prdDocument } from "./workbench-prd-test-fixture";
+import { WorkbenchPrdDraftProvider } from "../../lib/workbench/prd-editor/draft-context";
 
 afterEach(() => {
   cleanup();
+  localStorage.clear();
   vi.restoreAllMocks();
 });
 
 describe("WorkbenchPrdArtifactEditor", () => {
+  it("restores an edited author after deselection and supports explicit discard", async () => {
+    const reference = { artifactId: "artifact-1", artifactVersionId: "version-v2", projectId: "project-1" };
+    const onDocumentCommit = vi.fn(async () => "version-v3");
+    const editor = <WorkbenchPrdArtifactEditor document={prdDocumentV2Example} onDocumentCommit={onDocumentCommit} reference={reference} />;
+    const rendered = render(<WorkbenchPrdDraftProvider namespace="principal-1">{editor}</WorkbenchPrdDraftProvider>);
+    fireEvent.change(await screen.findByRole("textbox", { name: "版本1作者" }), { target: { value: "审计保留草稿" } });
+    rendered.rerender(<WorkbenchPrdDraftProvider namespace="principal-1"><div>其他产物</div></WorkbenchPrdDraftProvider>);
+    rendered.rerender(<WorkbenchPrdDraftProvider namespace="principal-1">{editor}</WorkbenchPrdDraftProvider>);
+    expect(await screen.findByRole("textbox", { name: "版本1作者" })).toHaveValue("审计保留草稿");
+    expect(screen.getByRole("button", { name: "保存 PRD" })).toBeEnabled();
+    fireEvent.click(screen.getByRole("button", { name: "放弃 PRD 修改" }));
+    expect(screen.getByRole("textbox", { name: "版本1作者" })).toHaveValue(prdDocumentV2Example.versionHistory[0]!.author);
+    expect(onDocumentCommit).not.toHaveBeenCalled();
+  });
+
+  it("retains failed edits and saves the edited structured document on retry", async () => {
+    const onDocumentCommit = vi.fn().mockRejectedValueOnce(new Error("网络暂不可用")).mockResolvedValue("v3");
+    render(<WorkbenchPrdDraftProvider namespace="principal-1"><WorkbenchPrdArtifactEditor
+      document={prdDocumentV2Example} onDocumentCommit={onDocumentCommit}
+      reference={{ artifactId: "artifact-1", artifactVersionId: "version-v2", projectId: "project-1" }}
+    /></WorkbenchPrdDraftProvider>);
+    fireEvent.change(await screen.findByRole("textbox", { name: "版本1作者" }), { target: { value: "已编辑作者" } });
+    fireEvent.click(screen.getByRole("button", { name: "保存 PRD" }));
+    expect(await screen.findByText("网络暂不可用")).not.toBeNull();
+    expect(screen.getByRole("textbox", { name: "版本1作者" })).toHaveValue("已编辑作者");
+    fireEvent.click(screen.getByRole("button", { name: "保存 PRD" }));
+    await waitFor(() => expect(onDocumentCommit).toHaveBeenCalledTimes(2));
+    expect(onDocumentCommit.mock.calls[1]?.[1].versionHistory[0].author).toBe("已编辑作者");
+    expect(onDocumentCommit.mock.calls[1]?.[1]).toEqual(onDocumentCommit.mock.calls[0]?.[1]);
+  });
+
   it("mounts the Tiptap editor over the persisted PRD projection", async () => {
     const onDocumentCommit = vi.fn(async () => undefined);
     render(

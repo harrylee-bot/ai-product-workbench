@@ -22,13 +22,13 @@ describe("ExportPreviewConfig", () => {
       WORKBENCH_PREVIEW_ORIGIN: "http://preview.localhost:4300",
       WORKBENCH_WEB_ORIGIN: "http://localhost:3000",
     });
-    expect(config.createCapability("export_1").url)
+    expect(config.createCapability("export_1", "viewer_1").url)
       .toMatch(/^http:\/\/preview\.localhost:4300\/preview\//u);
   });
 
   it("mints only HTTPS capabilities in a valid production configuration", () => {
     const config = createConfig({ NODE_ENV: "production" });
-    expect(config.createCapability("export_1").url)
+    expect(config.createCapability("export_1", "viewer_1").url)
       .toMatch(/^https:\/\/preview\.workbench\.example\/preview\//u);
   });
 
@@ -37,9 +37,9 @@ describe("ExportPreviewConfig", () => {
     const now = new Date("2026-07-15T00:00:00.000Z");
     const previewExpiry = new Date(now.getTime() + 15_000);
 
-    expect(config.createCapability("preview-export-1", now, previewExpiry).expiresAt)
+    expect(config.createCapability("preview-export-1", "viewer_1", now, previewExpiry).expiresAt)
       .toEqual(previewExpiry);
-    expect(() => config.createCapability("preview-export-1", now, now))
+    expect(() => config.createCapability("preview-export-1", "viewer_1", now, now))
       .toThrow("PREVIEW_CAPABILITY_EXPIRY_INVALID");
   });
 });

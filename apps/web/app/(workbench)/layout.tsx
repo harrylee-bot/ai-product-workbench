@@ -1,11 +1,12 @@
 "use client";
 
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useEffect } from "react";
 import { Toaster } from "sonner";
 
 import { WorkbenchRuntimeProvider } from "@/components/workbench/workbench-runtime";
 import { useWorkbenchAuth } from "@/lib/auth/workbench-auth";
+import { authRouteWithReturnPath, safeAuthReturnPath } from "@/lib/auth/auth-return-path";
 import { WorkbenchQueryProvider } from "@/lib/workbench/query";
 import { WorkbenchTransportProvider } from "@/lib/workbench/transport";
 
@@ -35,13 +36,17 @@ function WorkbenchDataProviders({ children }: { children: React.ReactNode }) {
 
 function WorkbenchAuthenticatedShell({ children }: { children: React.ReactNode }) {
   const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
   const { user, loading } = useWorkbenchAuth();
 
   useEffect(() => {
     if (!loading && !user) {
-      router.replace("/login");
+      const query = searchParams.toString();
+      const next = safeAuthReturnPath(`${pathname}${query ? `?${query}` : ""}${window.location.hash}`);
+      router.replace(authRouteWithReturnPath("/login", next));
     }
-  }, [loading, router, user]);
+  }, [loading, pathname, router, searchParams, user]);
 
   if (loading || !user) {
     return <div className="flex h-screen bg-background" />;

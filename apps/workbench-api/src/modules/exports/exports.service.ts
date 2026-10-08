@@ -441,7 +441,7 @@ export class ExportsService {
     ) {
       throw exportStateConflictProblem("Only a succeeded Project preview with a readable output can be opened");
     }
-    const capability = this.preview.createCapability(job.id, now, preview.expiresAt);
+    const capability = this.preview.createCapability(job.id, principalId, now, preview.expiresAt);
     return exportPreviewTokenResponseSchema.parse({
       url: capability.url,
       expiresAt: capability.expiresAt.toISOString(),
@@ -493,7 +493,7 @@ export class ExportsService {
     ) {
       throw exportStateConflictProblem("Only a succeeded HTML Export with a readable output can be previewed");
     }
-    const capability = this.preview.createCapability(job.id);
+    const capability = this.preview.createCapability(job.id, principalId);
     return exportPreviewTokenResponseSchema.parse({
       url: capability.url,
       expiresAt: capability.expiresAt.toISOString(),

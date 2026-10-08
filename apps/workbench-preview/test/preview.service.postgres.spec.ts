@@ -117,6 +117,7 @@ describeWithPostgres("PreviewService PostgreSQL authorization", () => {
             manifest,
             manifestSha256: "c".repeat(64),
             exportJobId: exportJob.id,
+          principalId: viewer.id,
             createdById: viewer.id,
             idempotencyKey,
             requestHash,
@@ -162,6 +163,7 @@ describeWithPostgres("PreviewService PostgreSQL authorization", () => {
         });
         const token = createPreviewToken({
           exportJobId: exportJob.id,
+          principalId: viewer.id,
           expiresAt: new Date(Date.now() + 60_000),
         }, secret);
 

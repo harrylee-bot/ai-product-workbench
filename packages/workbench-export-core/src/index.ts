@@ -5,7 +5,7 @@ import { htmlOutput, htmlZipOutput } from "./html-renderer.js";
 import { mcpOutput } from "./mcp-export.js";
 import { docxOutput, pdfOutput } from "./prd-docx-renderer.js";
 import { reactOutput } from "./react-export.js";
-import type { ExportBuildRequest, ExportBuildOutput } from "./types.js";
+import type { ExportBuildRequest, ExportBuildOutput, ExportBuildExecution } from "./types.js";
 
 export * from "./archive.js";
 export * from "./errors.js";
@@ -23,7 +23,8 @@ const allowedOptions: Record<ExportFormat, ReadonlySet<string>> = {
   pdf: new Set(),
 };
 
-export async function buildExport(request: ExportBuildRequest): Promise<ExportBuildOutput> {
+export async function buildExport(request: ExportBuildRequest, execution: ExportBuildExecution = {}): Promise<ExportBuildOutput> {
+  execution.signal?.throwIfAborted();
   assertOptions(request);
   if (request.format === "html") {
     return request.packaging === "zip" ? htmlZipOutput(request) : htmlOutput(request);
@@ -35,7 +36,7 @@ export async function buildExport(request: ExportBuildRequest): Promise<ExportBu
         `${request.format} exports require single_file packaging`,
       );
     }
-    return request.format === "docx" ? docxOutput(request) : pdfOutput(request);
+    return request.format === "docx" ? docxOutput(request, execution) : pdfOutput(request, execution);
   }
   if (request.packaging !== "zip") {
     throw new TerminalExportError("EXPORT_PACKAGING_UNSUPPORTED", `${request.format} exports require zip packaging`);

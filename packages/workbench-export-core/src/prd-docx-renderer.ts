@@ -1,4 +1,4 @@
-import type { ExportBuildRequest, ExportBuildOutput } from "./types.js";
+import type { ExportBuildRequest, ExportBuildOutput, ExportBuildExecution } from "./types.js";
 import { TerminalExportError } from "./errors.js";
 import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -8,6 +8,9 @@ import { randomBytes } from "node:crypto";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { businessDocumentSchema, prdDocumentV2Schema } from "@workbench/workbench-contracts";
 import { runDocumentExportCommand } from "./document-export-command.js";
+import { fromMarkdown } from "mdast-util-from-markdown";
+import { gfmFromMarkdown } from "mdast-util-gfm";
+import { gfm } from "micromark-extension-gfm";
 
 const workspaceRoot = existsSync(join(process.cwd(), "integrations"))
   ? process.cwd()
@@ -21,7 +24,8 @@ const PYTHON_PATH = process.env.WORKBENCH_EXPORT_PYTHON_PATH ?? "python3";
 const RENDERER_PATH = fileURLToPath(new URL("../scripts/render_prd_docx.py", import.meta.url));
 const DOCUMENT_RENDERER_PATH = fileURLToPath(new URL("../scripts/render_business_docx.py", import.meta.url));
 
-export async function docxOutput(request: ExportBuildRequest): Promise<ExportBuildOutput> {
+export async function docxOutput(request: ExportBuildRequest, execution: ExportBuildExecution = {}): Promise<ExportBuildOutput> {
+  execution.signal?.throwIfAborted();
   const artifact = request.source.artifacts[0];
   if (request.source.artifacts.length !== 1
     || !artifact
@@ -46,12 +50,19 @@ export async function docxOutput(request: ExportBuildRequest): Promise<ExportBui
   try {
     const sourcePath = join(workDir, "source.json");
     if (businessDocument?.success) {
-      await writeFile(sourcePath, JSON.stringify({ ...businessDocument.data, title: artifact.title }), "utf-8");
-      await runDocumentExportCommand(PYTHON_PATH, [DOCUMENT_RENDERER_PATH, "--source", sourcePath, "--output", docxPath]);
+      const markdown = "markdown" in businessDocument.data ? businessDocument.data.markdown : undefined;
+      await writeFile(sourcePath, JSON.stringify({
+        ...businessDocument.data,
+        title: artifact.title,
+        ...(markdown === undefined ? {} : {
+          markdownAst: fromMarkdown(markdown, { extensions: [gfm()], mdastExtensions: [gfmFromMarkdown()] }),
+        }),
+      }), "utf-8");
+      await runDocumentExportCommand(PYTHON_PATH, [DOCUMENT_RENDERER_PATH, "--source", sourcePath, "--output", docxPath], execution);
     } else if (parsed.success) {
       await writeFile(sourcePath, JSON.stringify(parsed.data), "utf-8");
-      await runDocumentExportCommand(PYTHON_PATH, [RENDERER_PATH, "--source", sourcePath, "--template", TEMPLATE_PATH, "--output", docxPath]);
-      await runDocumentExportCommand(PYTHON_PATH, [CHECKER_PATH, docxPath]);
+      await runDocumentExportCommand(PYTHON_PATH, [RENDERER_PATH, "--source", sourcePath, "--template", TEMPLATE_PATH, "--output", docxPath], execution);
+      await runDocumentExportCommand(PYTHON_PATH, [CHECKER_PATH, docxPath], execution);
     }
     
     const bytes = await readFile(docxPath);
@@ -66,7 +77,7 @@ export async function docxOutput(request: ExportBuildRequest): Promise<ExportBui
     await rm(workDir, { recursive: true, force: true }).catch(() => {});
   }
 }
-export async function pdfOutput(request: ExportBuildRequest): Promise<ExportBuildOutput> {
+export async function pdfOutput(request: ExportBuildRequest, execution: ExportBuildExecution = {}): Promise<ExportBuildOutput> {
   const artifact = request.source.artifacts[0];
   if (request.source.artifacts.length !== 1
     || !artifact
@@ -74,7 +85,7 @@ export async function pdfOutput(request: ExportBuildRequest): Promise<ExportBuil
     throw new TerminalExportError("EXPORT_CONTENT_INVALID", "PDF export requires exactly one PRD artifact");
   }
 
-  const docxResult = await docxOutput(request);
+  const docxResult = await docxOutput(request, execution);
   const workDir = join(tmpdir(), `prd-pdf-${randomBytes(8).toString("hex")}`);
   await mkdir(workDir, { recursive: true });
   const docxPath = join(workDir, "input.docx");
@@ -91,7 +102,7 @@ export async function pdfOutput(request: ExportBuildRequest): Promise<ExportBuil
       "--outdir",
       workDir,
       docxPath,
-    ]);
+    ], execution);
 
     const bytes = await readFile(pdfPath);
 

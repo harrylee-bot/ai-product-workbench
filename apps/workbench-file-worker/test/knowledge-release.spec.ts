@@ -170,6 +170,32 @@ describe("Knowledge release construction", () => {
     expect(bundle.projections[0]?.lexemes).not.toContain("的");
   });
 
+  it("embeds only new inputs while retaining complete mixed-batch publication evidence", async () => {
+    const store = knowledgeStore();
+    const batch = { batchId: "batch", sequence: 0, inputSha256: "a".repeat(64), inputs: [
+      { chunkId: "copied", text: "Existing rule" }, { chunkId: "new", text: "New rule" },
+    ] };
+    vi.mocked(store.claimNextEmbeddingBatch).mockResolvedValueOnce(batch);
+    store.reusableEmbeddingVectors = vi.fn(async () => new Map([["copied", [0, 1, 0]]]));
+    const embedding = embeddingPort();
+    const segmenter = new JiebaSegmenterAdapter(["的"]);
+    const processor = new KnowledgeReleaseProcessor(store, { readSnapshot: vi.fn() }, releaseTestTokenizer(), segmenter, {
+      segmenter: { id: knowledgeSegmenterId, version: knowledgeSegmenterVersion,
+        dictionaryChecksum: knowledgeDefaultDictionaryChecksum, stopwordsChecksum: segmenter.stopwordsChecksum },
+    }, embedding);
+    const build = { ...command(), chunksReady: true };
+    await expect(processor.build(build)).resolves.toBe("ready");
+    expect(embedding.embedDocuments).toHaveBeenCalledWith(embeddingProfile, [batch.inputs[1]], undefined);
+    expect(store.publishEmbeddingBatch).toHaveBeenCalledWith(build, batch, {
+      vectors: [[0, 1, 0], [1, 0, 0]], tokenCounts: [0, 3],
+    });
+    vi.mocked(store.claimNextEmbeddingBatch).mockResolvedValueOnce(batch);
+    store.reusableEmbeddingVectors = vi.fn(async () => new Map([["copied", [0, 1, 0]], ["new", [1, 0, 0]]]));
+    embedding.embedDocuments.mockClear();
+    await expect(processor.build(build)).resolves.toBe("ready");
+    expect(embedding.embedDocuments).not.toHaveBeenCalled();
+  });
+
   it("splits long Unicode text without violating the configured token ceiling", () => {
     const tokenizer = new TestTokenizer();
     const text = "知识库用于产品决策。".repeat(100);

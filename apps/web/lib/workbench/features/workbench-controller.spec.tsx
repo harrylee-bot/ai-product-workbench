@@ -24,8 +24,10 @@ const mocks = vi.hoisted(() => ({
   getProjectBootstrap: vi.fn(),
   releaseProjectUploads: vi.fn(),
   saveBoard: vi.fn(),
+  savePrdDrafts: vi.fn(),
   selectedStore: null as ReturnType<typeof createBoardStore> | null,
 }));
+vi.mock("../prd-editor/draft-context", () => ({ useWorkbenchPrdDraftStore: () => ({ saveProject: mocks.savePrdDrafts }) }));
 
 vi.mock("../transport/context", () => ({
   useWorkbenchTransport: () => ({ api: {}, baseUrl: "" }),
@@ -134,6 +136,7 @@ vi.mock("./runtime-models", async (importOriginal) => {
 });
 
 beforeEach(() => {
+  mocks.savePrdDrafts.mockReset().mockResolvedValue([]);
   mocks.getProjectBootstrap.mockImplementation(async (projectId: string) => bootstrap(projectId));
 });
 
@@ -486,6 +489,19 @@ describe("Workbench controller Project save barriers", () => {
     expect(mocks.archiveProject).toHaveBeenCalledWith({ projectId: "project-1", ifMatch: undefined });
     expect(mocks.saveBoard.mock.invocationCallOrder[0])
       .toBeLessThan(mocks.archiveProject.mock.invocationCallOrder[0]);
+    expect(rendered.result.current.selectedProjectId).toBe("project-1");
+    rendered.unmount();
+  });
+
+  it("retains the project when its PRD draft cannot be saved before navigation", async () => {
+    mocks.selectedStore = createBoardStore(board());
+    const rendered = renderController();
+    await openControllerProject(rendered, "project-1");
+    mocks.savePrdDrafts.mockRejectedValue(new Error("草稿保存失败"));
+    await act(async () => {
+      await expect(rendered.result.current.prepareProjectClose()).rejects.toThrow("草稿保存失败");
+      await expect(rendered.result.current.prepareProjectOpen("project-2")).rejects.toThrow("草稿保存失败");
+    });
     expect(rendered.result.current.selectedProjectId).toBe("project-1");
     rendered.unmount();
   });

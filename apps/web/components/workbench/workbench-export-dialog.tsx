@@ -310,6 +310,11 @@ export function ExportDialog({
                 )}
               </div>
               <div className="border-t border-white/[0.12] p-[12px]">
+                {activeExportMatches && activeExport.failure?.code === "EXPORT_OUTPUT_BLOB_NOT_READABLE" && (
+                  <p className="mb-[8px] text-[11px] leading-[16px] text-[#f2a7a7]" role="alert">
+                    文件已不可用，请重新导出。
+                  </p>
+                )}
                 {downloadFailed && !busy && (
                   <p className="mb-[8px] text-[11px] leading-[16px] text-[#f2a7a7]" role="alert">
                     文件下载失败，请重试。

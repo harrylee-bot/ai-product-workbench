@@ -45,7 +45,7 @@ export class KnowledgeRetrievalConfig {
     this.grantMaximumTtlSeconds = integerValue(
       config,
       "WORKBENCH_KNOWLEDGE_TOOL_MAX_TTL_SECONDS",
-      900,
+      3_600,
       60,
       3_600,
     );

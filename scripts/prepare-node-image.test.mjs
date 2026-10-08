@@ -1,9 +1,11 @@
 import assert from "node:assert/strict";
-import { chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, cp, mkdir, mkdtemp, readFile, readlink, rm, symlink, writeFile } from "node:fs/promises";
+import { createRequire } from "node:module";
 import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import test from "node:test";
+import { collectWorkspaceRuntimeDependencies } from "../deploy/collect-workspace-runtime-dependencies.mjs";
 
 const root = path.resolve(import.meta.dirname, "..");
 const helper = path.join(root, "deploy/prepare-node-image.sh");
@@ -140,7 +142,7 @@ test("the Web and CI builds pin their Linux x64 native dependencies", async () =
   const lockfile = JSON.parse(await readFile(path.join(root, "package-lock.json"), "utf8"));
   const nativePins = {
     "@esbuild/linux-x64": "0.28.1",
-    "@next/swc-linux-x64-musl": "16.2.12",
+    "@next/swc-linux-x64-musl": "16.3.8",
     "@rolldown/binding-linux-x64-gnu": "1.1.4",
     "@rolldown/binding-linux-x64-musl": "1.1.4",
     "@tailwindcss/oxide-linux-x64-gnu": "4.3.1",
@@ -185,7 +187,7 @@ test("the API image preserves and probes the musl Sharp runtime", async () => {
 test("candidate security dependency fixes remain exactly pinned", async () => {
   const manifest = JSON.parse(await readFile(path.join(root, "package.json"), "utf8"));
   assert.equal(manifest.overrides?.["fast-xml-parser"], "5.10.1");
-  assert.equal(manifest.overrides?.["js-yaml"], "4.3.0");
+  assert.equal(manifest.overrides?.["js-yaml"], "4.3.2");
 
   const figmaManifest = JSON.parse(
     await readFile(path.join(root, "apps/workbench-figma-importer/package.json"), "utf8"),
@@ -208,4 +210,80 @@ test("candidate security dependency fixes remain exactly pinned", async () => {
     await readFile(path.join(root, "apps/workbench-api/package.json"), "utf8"),
   );
   assert.equal(apiManifest.dependencies?.["@aws-sdk/s3-request-presigner"], "3.896.0");
+});
+
+test("every workspace runner preserves production dependency directories after pruning", async () => {
+  const lockfile = JSON.parse(await readFile(path.join(root, "package-lock.json"), "utf8"));
+  for (const relativePath of nodeDockerfiles.filter((name) => name !== "apps/knowledge/Dockerfile")) {
+    const source = await readFile(path.join(root, relativePath), "utf8");
+    const stage = relativePath === "apps/web/Dockerfile" ? "prod-deps" : "production-dependencies";
+    const production = source.split(`FROM build AS ${stage}\n`)[1]?.split(/^FROM /mu)[0];
+    assert.ok(production, `${relativePath} must have a production dependency stage`);
+    assert.match(production, /COPY deploy\/collect-workspace-runtime-dependencies\.mjs /u);
+    const prune = production.indexOf("npm prune --omit=dev");
+    const collect = production.indexOf("node /usr/local/lib/collect-workspace-runtime-dependencies.mjs /app /app/.runtime-workspace-dependencies");
+    assert.ok(prune >= 0 && collect > prune, `${relativePath} must collect only pruned production dependencies`);
+    const runner = source.split(/^FROM .* AS runner\n/mu)[1];
+    assert.ok(runner, `${relativePath} must have a runner stage`);
+    assert.match(runner, new RegExp(`COPY --from=${stage}(?: --chown=node:node)? /app/node_modules node_modules`, "u"));
+    assert.match(runner, new RegExp(`COPY --from=${stage}(?: --chown=node:node)? /app/\\.runtime-workspace-dependencies/ \\./`, "u"));
+    const workspaces = new Set([...source.matchAll(/^COPY (?:--chown=\S+ )?((?:apps|packages)\/[^/]+)\/package\.json /gmu)].map((match) => match[1]));
+    const nestedProduction = Object.entries(lockfile.packages)
+      .filter(([name, metadata]) => !metadata.dev && workspaces.has(name.split("/node_modules/")[0]) && name.includes("/node_modules/"));
+    assert.ok(nestedProduction.length > 0, `${relativePath} fixture must exercise the current nested dependency layout`);
+  }
+  const web = await readFile(path.join(root, "apps/web/Dockerfile"), "utf8");
+  assert.match(web, /require\.resolve\('next\/dist\/bin\/next'\)/u);
+  assert.match(web, /require\('next\/package\.json'\)\.version !== require\('\.\/package\.json'\)\.dependencies\.next/u);
+});
+
+test("runtime dependency collection keeps nested module resolution and executable symlinks intact", async (t) => {
+  const fixture = await mkdtemp(path.join(os.tmpdir(), "workbench-runtime-dependencies-"));
+  t.after(() => rm(fixture, { recursive: true, force: true }));
+  const build = path.join(fixture, "build");
+  const collected = path.join(fixture, "collected");
+  const runner = path.join(fixture, "runner");
+  const put = async (relativePath, content) => {
+    const filename = path.join(build, relativePath);
+    await mkdir(path.dirname(filename), { recursive: true });
+    await writeFile(filename, content);
+  };
+  for (const workspace of ["apps/web", "packages/workbench-contracts", "packages/workbench-export-core", "packages/hoisted-only"]) {
+    await put(`${workspace}/package.json`, "{}");
+    await put(`${workspace}/source.js`, "throw new Error('must not be copied');");
+  }
+  await put("node_modules/zod/index.js", "exports.version = '4.0.0';");
+  await put("packages/workbench-contracts/node_modules/zod/index.js", "exports.version = '3.0.0';");
+  await put("packages/workbench-export-core/node_modules/@modelcontextprotocol/sdk/index.js", "exports.version = '1.32.1';");
+  await put("apps/web/node_modules/next/dist/bin/next", "console.log('Next.js 16.3.8');");
+  await mkdir(path.join(build, "apps/web/node_modules/.bin"));
+  await symlink("../next/dist/bin/next", path.join(build, "apps/web/node_modules/.bin/next"));
+  await put("apps/not-in-image/node_modules/unselected/index.js", "throw new Error('not a selected workspace');");
+
+  assert.deepEqual(collectWorkspaceRuntimeDependencies(build, collected), [
+    "apps/web", "packages/workbench-contracts", "packages/workbench-export-core",
+  ]);
+  await cp(collected, runner, { recursive: true, verbatimSymlinks: true });
+  await cp(path.join(build, "node_modules"), path.join(runner, "node_modules"), { recursive: true });
+  assert.equal(await readlink(path.join(runner, "apps/web/node_modules/.bin/next")), "../next/dist/bin/next");
+  const cli = spawnSync(process.execPath, [path.join(runner, "apps/web/node_modules/.bin/next"), "--version"], { encoding: "utf8" });
+  assert.equal(cli.status, 0, cli.stderr);
+  assert.equal(cli.stdout.trim(), "Next.js 16.3.8");
+  const requireRoot = createRequire(path.join(runner, "package.json"));
+  const requireContracts = createRequire(path.join(runner, "packages/workbench-contracts/package.json"));
+  const requireExport = createRequire(path.join(runner, "packages/workbench-export-core/package.json"));
+  assert.equal(requireRoot("zod").version, "4.0.0");
+  assert.equal(requireContracts("zod").version, "3.0.0");
+  assert.equal(requireExport("@modelcontextprotocol/sdk").version, "1.32.1");
+  for (const omitted of ["apps/web/source.js", "apps/not-in-image/node_modules/unselected/index.js", "packages/hoisted-only/node_modules"]) {
+    await assert.rejects(readFile(path.join(runner, omitted)), { code: "ENOENT" });
+  }
+});
+
+test("a fully hoisted install still produces a valid empty Docker COPY source", async (t) => {
+  const fixture = await mkdtemp(path.join(os.tmpdir(), "workbench-hoisted-dependencies-"));
+  t.after(() => rm(fixture, { recursive: true, force: true }));
+  const destination = path.join(fixture, "collected");
+  assert.deepEqual(collectWorkspaceRuntimeDependencies(path.join(fixture, "empty"), destination), []);
+  await cp(destination, path.join(fixture, "runner"), { recursive: true });
 });

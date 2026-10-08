@@ -2,9 +2,7 @@
 
 import { EditorContent, useEditor } from "@tiptap/react";
 import {
-  canonicalJson,
   prdChannelLabels,
-  prdDocumentSchema,
   prdSafetyBaselineItems,
   type PrdDocument,
   type PrdDocumentV2,
@@ -17,7 +15,9 @@ import {
   Undo2Icon,
   XIcon,
 } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { PrdDraftStore, type PrdDraftCommit } from "../../lib/workbench/prd-editor/draft-store";
+import { useWorkbenchPrdDraftStore } from "../../lib/workbench/prd-editor/draft-context";
 
 import {
   applyTiptapToPrdDocument,
@@ -27,10 +27,7 @@ import {
 import type { WorkbenchArtifactReference } from "./workbench-artifact-reference";
 import { WorkbenchPrdDiagramCanvas } from "./workbench-prd-diagram-canvas";
 
-type PrdDocumentCommit = (
-  reference: WorkbenchArtifactReference,
-  document: PrdDocument,
-) => Promise<void>;
+type PrdDocumentCommit = PrdDraftCommit;
 
 export function WorkbenchPrdArtifactEditor({
   document,
@@ -43,16 +40,18 @@ export function WorkbenchPrdArtifactEditor({
   onDocumentCommit: PrdDocumentCommit;
   reference: WorkbenchArtifactReference;
 }) {
-  const [_draft, setDraft] = useState(document);
-  const [dirty, setDirty] = useState(false);
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const baselineRef = useRef(document);
-  const draftRef = useRef(document);
-  const baselineVersionRef = useRef(reference.artifactVersionId);
+  const sharedStore = useWorkbenchPrdDraftStore();
+  const [localStore] = useState(() => new PrdDraftStore());
+  const store = sharedStore ?? localStore;
+  const draft = useSyncExternalStore(store.subscribe, () => store.get(reference), () => undefined);
+  const dirty = Boolean(draft);
+  const saving = draft?.saving ?? false;
+  const error = draft?.error ?? null;
+  const draftDocument = draft?.document ?? document;
+  const draftRef = useRef(draftDocument);
   const editor = useEditor({
     extensions: workbenchPrdExtensions,
-    content: prdDocumentToTiptap(document),
+    content: prdDocumentToTiptap(draftDocument),
     immediatelyRender: false,
     editorProps: {
       attributes: {
@@ -64,71 +63,32 @@ export function WorkbenchPrdArtifactEditor({
     onUpdate({ editor: activeEditor }) {
       const next = applyTiptapToPrdDocument(draftRef.current, activeEditor.getJSON());
       draftRef.current = next;
-      setDraft(next);
-      setDirty(canonicalJson(next) !== canonicalJson(baselineRef.current));
-      setError(null);
+      store.update(reference, document, next);
     },
   }, [reference.artifactVersionId]);
 
   useEffect(() => {
-    if (
-      !editor
-      || dirty
-      || saving
-      || baselineVersionRef.current === reference.artifactVersionId
-    ) return;
-    baselineRef.current = document;
-    baselineVersionRef.current = reference.artifactVersionId;
-    editor.commands.setContent(prdDocumentToTiptap(document), { emitUpdate: false });
-    draftRef.current = document;
-    setDraft(document);
-    setError(null);
-  }, [dirty, document, editor, reference.artifactVersionId, saving]);
+    if (draftRef.current === draftDocument) return;
+    draftRef.current = draftDocument;
+    editor?.commands.setContent(prdDocumentToTiptap(draftDocument), { emitUpdate: false });
+  }, [draftDocument, editor]);
 
   useEffect(() => {
-    editor?.setEditable(!saving && !editingBusy);
+    editor?.setEditable(!saving && !editingBusy, false);
   }, [editingBusy, editor, saving]);
 
   const cancel = useCallback(() => {
-    const baseline = baselineRef.current;
-    editor?.commands.setContent(prdDocumentToTiptap(baseline), { emitUpdate: false });
-    draftRef.current = baseline;
-    setDraft(baseline);
-    setDirty(false);
-    setError(null);
-  }, [editor]);
+    store.discard(reference);
+    editor?.commands.setContent(prdDocumentToTiptap(document), { emitUpdate: false });
+    draftRef.current = document;
+  }, [document, editor, reference, store]);
 
   const save = useCallback(async () => {
     if (!dirty || saving || editingBusy) return;
-    const parsed = prdDocumentSchema.safeParse({
-      ...draftRef.current,
-      revision: {
-        ...draftRef.current.revision,
-        number: Math.max(draftRef.current.revision.number, baselineRef.current.revision.number) + 1,
-        changedAt: new Date().toISOString(),
-        summary: draftRef.current.revision.summary.trim() || "Manual PRD edit",
-      },
-    });
-    if (!parsed.success) {
-      setError(parsed.error.issues[0]?.message ?? "PRD 内容不完整");
-      return;
-    }
-
-    setSaving(true);
-    setError(null);
     try {
-      await onDocumentCommit(reference, parsed.data);
-      baselineRef.current = parsed.data;
-      draftRef.current = parsed.data;
-      editor?.commands.setContent(prdDocumentToTiptap(parsed.data), { emitUpdate: false });
-      setDraft(parsed.data);
-      setDirty(false);
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "PRD 保存失败，请重试");
-    } finally {
-      setSaving(false);
-    }
-  }, [dirty, editingBusy, editor, onDocumentCommit, reference, saving]);
+      await store.save(reference, onDocumentCommit);
+    } catch { /* The shared draft retains the failure and the editable content. */ }
+  }, [dirty, editingBusy, onDocumentCommit, reference, saving, store]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -136,27 +96,26 @@ export function WorkbenchPrdArtifactEditor({
         event.preventDefault();
         void save();
       }
-      if (event.key === "Escape" && dirty && !saving) cancel();
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [cancel, dirty, save, saving]);
+  }, [save]);
 
   const busy = saving || editingBusy;
   const updateV2 = useCallback((update: (document: PrdDocumentV2) => PrdDocumentV2) => {
     if (draftRef.current.protocol !== "workbench.prd.v2") return;
     const next = update(draftRef.current);
     draftRef.current = next;
-    setDraft(next);
-    setDirty(canonicalJson(next) !== canonicalJson(baselineRef.current));
-    setError(null);
-  }, []);
+    store.update(reference, document, next);
+    editor?.commands.setContent(prdDocumentToTiptap(next), { emitUpdate: false });
+  }, [document, editor, reference, store]);
   return (
     <article
       className="relative h-full w-full overflow-auto break-words bg-[#1d1d1f] px-[38px] py-[34px] text-[#e8eaed] [overflow-wrap:anywhere]"
       data-prd-editor="active"
     >
       <div className="absolute right-[38px] top-[34px] z-10 flex items-center gap-[8px] bg-[#1d1d1f] py-[2px]">
+        {dirty && <span className="text-[12px] text-[#d6cfff]">未保存草稿</span>}
         {error && <span className="max-w-[220px] text-[12px] text-[#f2a6a6]">{error}</span>}
         <button
           aria-label="撤销 PRD 编辑"
@@ -178,7 +137,7 @@ export function WorkbenchPrdArtifactEditor({
         </button>
         {dirty && !busy && (
           <button
-            aria-label="取消 PRD 编辑"
+            aria-label="放弃 PRD 修改"
             className="inline-flex size-[30px] items-center justify-center rounded-[6px] border border-white/[0.14] text-[#c7cad0] transition-colors hover:bg-white/[0.08]"
             onClick={cancel}
             type="button"

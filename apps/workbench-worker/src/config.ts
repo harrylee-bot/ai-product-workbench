@@ -90,6 +90,11 @@ export function loadWorkerConfig() {
       "Runtime max wall clock plus deadline cancellation must be less than the pg-boss handler deadline",
     );
   }
+  const knowledgeToolMaximumTtlSeconds = boundedInteger("WORKBENCH_KNOWLEDGE_TOOL_MAX_TTL_SECONDS", 3_600, 60, 3_600);
+  if (knowledgeToolEndpoint && knowledgeToolMaximumTtlSeconds * 1_000
+    < runtimeExecutionMaximumWallClockMs + runtimeExecutionDeadlineCancelMs + 60_000) {
+    throw new Error("WORKBENCH_KNOWLEDGE_TOOL_MAX_TTL_SECONDS must cover the Runtime wall clock, cancellation budget and 60-second clock margin");
+  }
   return {
     databaseUrl,
     queueConnectionString: pgConnectionString(databaseUrl),
@@ -168,7 +173,7 @@ export function loadWorkerConfig() {
     knowledgeTool: knowledgeToolEndpoint && knowledgeToolSecretValue ? {
       endpoint: knowledgeToolEndpoint,
       secret: decodeKnowledgeToolSecret(knowledgeToolSecretValue),
-      maximumTtlSeconds: boundedInteger("WORKBENCH_KNOWLEDGE_TOOL_MAX_TTL_SECONDS", 900, 60, 3_600),
+      maximumTtlSeconds: knowledgeToolMaximumTtlSeconds,
     } : null,
     canvasTool: canvasToolEndpoint && canvasToolSecretValue ? {
       endpoint: canvasToolEndpoint,

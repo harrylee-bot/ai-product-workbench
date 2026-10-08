@@ -58,7 +58,12 @@ export type ExportJobRecord = {
 export function mapExportJob(record: ExportJobRecord): ExportJob {
   const publicOptions = exportOptionsSchema.parse(record.options);
   const selection = mapExportSelection(record);
-  const output = record.outputBlob === null
+  // A completed job is immutable, but its Blob can later be quarantined.
+  // Report the unavailable delivery without hiding other jobs on the page.
+  const outputUnavailable = record.status === "succeeded" && (
+    record.outputBlob?.status !== "ready" || record.outputBlob.deletedAt !== null
+  );
+  const output = record.outputBlob === null || outputUnavailable
     ? null
     : {
         blobId: record.outputBlob.id,
@@ -67,11 +72,6 @@ export function mapExportJob(record: ExportJobRecord): ExportJob {
         sha256: record.outputBlob.sha256,
         fileName: outputFileName(record.id, record.format, record.packaging),
       };
-  if (record.status === "succeeded" && (
-    record.outputBlob?.status !== "ready" || record.outputBlob.deletedAt !== null
-  )) {
-    throw new Error("EXPORT_OUTPUT_BLOB_NOT_READABLE");
-  }
   return exportJobSchema.parse({
     id: record.id,
     releaseId: requireValue(record.releaseId, "releaseId"),
@@ -79,11 +79,13 @@ export function mapExportJob(record: ExportJobRecord): ExportJob {
     format: record.format,
     packaging: record.packaging,
     selection,
-    status: record.status,
+    status: outputUnavailable ? "failed" : record.status,
     revision: record.revision,
     options: publicOptions,
     output,
-    failure: exportFailure(record),
+    failure: outputUnavailable
+      ? { code: "EXPORT_OUTPUT_BLOB_NOT_READABLE", detail: "The generated file is unavailable. Create a new export to regenerate it." }
+      : exportFailure(record),
     createdAt: record.createdAt.toISOString(),
     startedAt: record.startedAt?.toISOString() ?? null,
     finishedAt: record.finishedAt?.toISOString() ?? null,

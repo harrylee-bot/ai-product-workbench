@@ -24,7 +24,8 @@ import type {
 } from "react";
 import { ArrowRightIcon, RefreshCwIcon } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
-import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { useWorkbenchPrdDraftStore } from "../../lib/workbench/prd-editor/draft-context";
 
 import {
   useWorkbenchArtifactVersion,
@@ -42,6 +43,7 @@ import {
 } from "../../lib/workbench/features/public-shares";
 import { workbenchQueryKeys } from "../../lib/workbench/query/keys";
 import { WorkbenchPrdArtifactEditor } from "./workbench-prd-editor";
+import { WorkbenchBusinessDocument } from "./workbench-business-document";
 import { WorkbenchPrdDiagramCanvas, type PrdDiagram } from "./workbench-prd-diagram-canvas";
 import type { WorkbenchArtifactReference } from "./workbench-artifact-reference";
 
@@ -123,7 +125,7 @@ export function WorkbenchArtifactContent({
   onPrdDocumentCommit?: (
     reference: WorkbenchArtifactReference,
     document: PrdDocument,
-  ) => Promise<void>;
+  ) => Promise<void | string>;
   pendingContent?: ReactNode;
   reference: WorkbenchArtifactReference;
 }) {
@@ -274,7 +276,7 @@ export function WorkbenchArtifactContent({
         </div>
       );
     }
-    return <PrdArtifact document={version.content} />;
+    return isPublic ? <PrdArtifact document={version.content} /> : <PrdDraftArtifact document={version.content} reference={reference} />;
   }
   if (version.kind === "prototype") {
     return (
@@ -288,6 +290,7 @@ export function WorkbenchArtifactContent({
       />
     );
   }
+  if (version.kind === "document") return <WorkbenchBusinessDocument content={version.content} />;
   return (
     <pre className="h-full w-full overflow-auto whitespace-pre-wrap p-[24px] text-[14px] leading-[22px] text-[#e8eaed]">
       {JSON.stringify(version.content, null, 2)}
@@ -442,6 +445,21 @@ function readBlobTextPreview(blob: Blob): Promise<string> {
     };
     reader.readAsText(preview);
   });
+}
+
+function PrdDraftArtifact({ document, reference }: { document: PrdDocument; reference: WorkbenchArtifactReference }) {
+  const store = useWorkbenchPrdDraftStore();
+  const draft = useSyncExternalStore(store?.subscribe ?? (() => () => {}), () => store?.get(reference), () => undefined);
+  if (!draft) return <PrdArtifact document={document} />;
+  return <div className="flex h-full flex-col">
+    <div className="flex flex-wrap items-center gap-[12px] bg-[#2b2548] px-[18px] py-[10px] text-[13px]" role="status">
+      <span>{draft.saving ? "正在保存 PRD…" : "未保存草稿 · 预览、导出和离开项目前会自动保存"}</span>
+      <button disabled={draft.saving} onClick={() => { void store?.save(reference).catch(() => undefined); }} type="button">保存 PRD</button>
+      <button disabled={draft.saving} onClick={() => store?.discard(reference)} type="button">放弃修改</button>
+      {draft.error && <span className="text-[#f2a6a6]">{draft.error}</span>}
+    </div>
+    <div className="min-h-0 flex-1"><PrdArtifact document={draft.document} /></div>
+  </div>;
 }
 
 function PrdArtifact({ document }: { document: PrdDocument }) {

@@ -47,7 +47,8 @@ export class PrismaKnowledgeToolGrantIssuer implements KnowledgeToolGrantIssuer 
     if (!this.config) throw new Error("KNOWLEDGE_TOOL_NOT_CONFIGURED");
 
     const now = floorToSecond(new Date());
-    const reusableAfter = new Date(now.getTime() + 60_000);
+    // Submission retries must not reuse a grant whose remaining lifetime is shorter than the configured budget.
+    const reusableAfter = new Date(now.getTime() + this.config.maximumTtlSeconds * 1_000 - 1_000);
     const payload = await this.db.$transaction(async (tx) => {
       await tx.knowledgeToolBudget.createMany({
         data: {

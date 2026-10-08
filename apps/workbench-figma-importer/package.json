@@ -32,6 +32,6 @@
     "@create-figma-plugin/tsconfig": "4.0.3",
     "@figma/plugin-typings": "1.130.0",
     "typescript": "^5.9.2",
-    "vitest": "4.1.9"
+    "vitest": "4.1.11"
   }
 }

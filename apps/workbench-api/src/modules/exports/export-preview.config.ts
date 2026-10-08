@@ -42,6 +42,7 @@ export class ExportPreviewConfig {
 
   createCapability(
     exportJobId: string,
+    principalId: string,
     now = new Date(),
     expiresNoLaterThan?: Date,
   ) {
@@ -55,7 +56,7 @@ export class ExportPreviewConfig {
     }
     const expiresAt = new Date(boundedExpirySeconds * 1_000);
     const token = createPreviewToken(
-      { exportJobId, expiresAt },
+      { exportJobId, expiresAt, principalId },
       this.tokenSecret,
       { now, maximumTtlSeconds: this.maximumTtlSeconds },
     );

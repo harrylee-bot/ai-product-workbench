@@ -8,7 +8,9 @@ import type {
   CreateArtifactRequest,
   CreateArtifactVersionRequest,
   UpdateArtifactVersionPreferenceRequest,
+  PrdDocument,
 } from "@workbench/workbench-contracts";
+import { createArtifactVersionRequestSchema } from "@workbench/workbench-contracts";
 import {
   keepPreviousData,
   useInfiniteQuery,
@@ -26,6 +28,37 @@ import {
 } from "../../../transport/contracts";
 import { useWorkbenchArtifactsApi } from "../api-adapter";
 import type { ArtifactListOptions } from "../domain";
+import { prdDocumentEditIdempotencyKey } from "../../prd-edit";
+import type { PrdDraftReference } from "../../../prd-editor/draft-store";
+
+export function usePersistWorkbenchPrdVersion(projectId: string) {
+  const api = useWorkbenchArtifactsApi();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationKey: [...workbenchQueryKeys.artifacts(projectId), "save-prd-draft"],
+    mutationFn: async ({ reference, document }: { reference: PrdDraftReference; document: PrdDocument }) => {
+      if (reference.projectId !== projectId) throw new Error("文档草稿不属于当前项目。");
+      const artifact = await api.getArtifact(reference.artifactId);
+      if (artifact.value.projectId !== projectId) throw new Error("文档不属于当前项目。");
+      return api.createArtifactVersion(reference.artifactId, createArtifactVersionRequestSchema.parse({
+        kind: "prd",
+        baseArtifactVersionId: reference.artifactVersionId,
+        document,
+      }), artifact.etag, prdDocumentEditIdempotencyKey(reference.artifactVersionId, document));
+    },
+    async onSuccess(result, { reference }) {
+      queryClient.setQueryData(
+        workbenchQueryKeys.artifactVersion(projectId, reference.artifactId, result.value.artifactVersionId),
+        result,
+      );
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: workbenchQueryKeys.artifact(projectId, reference.artifactId) }),
+        queryClient.invalidateQueries({ queryKey: workbenchQueryKeys.artifactLists(projectId) }),
+        queryClient.invalidateQueries({ queryKey: workbenchQueryKeys.bootstraps(projectId) }),
+      ]);
+    },
+  });
+}
 
 export function useWorkbenchArtifacts(
   projectId: string,

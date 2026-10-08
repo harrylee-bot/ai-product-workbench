@@ -45,9 +45,11 @@ RUN rm -rf packages/workbench-db/generated \
   && npm --workspace @workbench/workbench-api run build
 
 FROM build AS production-dependencies
+COPY deploy/collect-workspace-runtime-dependencies.mjs /usr/local/lib/collect-workspace-runtime-dependencies.mjs
 RUN npm prune --omit=dev --include=optional --no-audit --no-fund \
   && install -d apps/workbench-api/node_modules \
   && cp -a node_modules/@img apps/workbench-api/node_modules/@img \
+  && node /usr/local/lib/collect-workspace-runtime-dependencies.mjs /app /app/.runtime-workspace-dependencies \
   && rm -rf /root/.npm
 
 # Migrations are a one-shot deployment concern. This target intentionally keeps
@@ -86,6 +88,7 @@ COPY --chown=node:node packages/workbench-knowledge/package.json packages/workbe
 COPY --chown=node:node packages/workbench-preview-token/package.json packages/workbench-preview-token/package.json
 COPY --chown=node:node packages/workbench-telemetry/package.json packages/workbench-telemetry/package.json
 COPY --from=production-dependencies --chown=node:node /app/node_modules node_modules
+COPY --from=production-dependencies --chown=node:node /app/.runtime-workspace-dependencies/ ./
 COPY --from=production-dependencies --chown=node:node /app/apps/workbench-api/node_modules/@img/ node_modules/@img/
 COPY --from=build --chown=node:node /app/apps/workbench-api/dist apps/workbench-api/dist
 COPY --from=build --chown=node:node /app/packages/workbench-canvas-tools/dist packages/workbench-canvas-tools/dist

@@ -34,6 +34,7 @@ import type {
 } from "@workbench/workbench-contracts";
 import { cn } from "@/lib/utils";
 import { useWorkbenchAuth } from "@/lib/auth/workbench-auth";
+import { useWorkbenchPrdDraftStore } from "@/lib/workbench/prd-editor/draft-context";
 import {
   CanvasAgentCommandPoller,
   captureCanvasVisual,
@@ -66,8 +67,10 @@ import {
   useWorkbenchProjectActionsController,
   useWorkbenchCanvasMediaController,
   useWorkbenchPublicationController,
+  flushWorkbenchBoard,
   useWorkbenchRunActions,
   useCreateWorkbenchArtifactVersion,
+  usePersistWorkbenchPrdVersion,
   useWorkbenchArtifact,
   useWorkbenchArtifactVersion,
   useWorkbenchArtifactVersionBatch,
@@ -1244,6 +1247,7 @@ function WorkbenchProjectRouteInner() {
                   resultVersionId,
                 ) ?? []
               ),
+              onFlushBoard: () => flushWorkbenchBoard(workbench.boardController),
               setActivePanel,
               setActiveTool,
               onUndoBoard: () => workbench.boardController.store?.getState().undo(),
@@ -1447,6 +1451,7 @@ type ProjectScreenProps = {
       baseArtifactVersionId: string,
       resultArtifactVersionId: string,
     ) => string[];
+    onFlushBoard: () => Promise<{ id: string; revision: number }>;
     setActivePanel: (panel: CanvasPanel) => void;
     setActiveTool: (tool: CanvasInteractionMode) => void;
     onUndoBoard: () => void;
@@ -1538,6 +1543,7 @@ function ProjectScreen({
     onNudgeBoardNodes,
     onRenameBoardNode,
     onReplaceArtifactVersionPins,
+    onFlushBoard,
     setActivePanel,
     setActiveTool,
     onUndoBoard,
@@ -1607,6 +1613,7 @@ function ProjectScreen({
   },
 }: ProjectScreenProps) {
   const projectSession = useWorkbenchProjectSession(projectId);
+  const prdDrafts = useWorkbenchPrdDraftStore();
   const { baseUrl } = useWorkbenchTransport();
   const canvasAgentTransport = useMemo(
     () => createWorkbenchCanvasAgentCommandApi({ baseUrl }),
@@ -1930,10 +1937,8 @@ function ProjectScreen({
     projectId,
     artifactSelection.prdTargetReference?.artifactId ?? "",
   );
-  const createPrdVersion = useCreateWorkbenchArtifactVersion(
-    projectId,
-    artifactSelection.prdTargetReference?.artifactId ?? "",
-  );
+  const createPrdVersion = usePersistWorkbenchPrdVersion(projectId);
+  const savedPrdVersionsRef = useWorkbenchProjectRef(projectSession, () => new Map<string, string>());
   const artifactPreferenceQuery = useWorkbenchArtifactVersionPreference(
     principalCacheNamespace,
     projectId,
@@ -2353,7 +2358,7 @@ function ProjectScreen({
   const {
     closePreview,
     hideReadyToast,
-    openPreview,
+    openPreview: openPersistedPreview,
     previewOpen,
     previewReferences,
     readyToastOpen,
@@ -2363,6 +2368,20 @@ function ProjectScreen({
     onBeforeOpen: closeTransientPanels,
     projectId,
   });
+  const openPreview = useCallback((references?: WorkbenchArtifactReference | readonly WorkbenchArtifactReference[]) => {
+    if (!prdDrafts?.hasDrafts(projectId)) return openPersistedPreview(references);
+    if (!capabilities.canPreview) return false;
+    void prdDrafts.saveProject(projectId).then((saved) => {
+      if (!projectSession.isCurrent()) return;
+      const selected = references ? Array.isArray(references) ? references : [references] : [];
+      openPersistedPreview(selected.map((reference) => {
+        const replacement = saved.find((entry) => entry.artifactId === reference.artifactId
+          && entry.artifactVersionId === reference.artifactVersionId);
+        return replacement ? { ...reference, artifactVersionId: replacement.savedArtifactVersionId } : reference;
+      }));
+    }).catch((error: unknown) => toast.error(errorMessage(error, "文档草稿保存失败，未打开预览。")));
+    return true;
+  }, [capabilities.canPreview, openPersistedPreview, prdDrafts, projectId, projectSession]);
 
   const previewArtifacts: ProjectPreviewArtifact[] = capabilities.canPreview
     ? [
@@ -3233,41 +3252,52 @@ function ProjectScreen({
     reference: WorkbenchArtifactReference,
     document: PrdDocument,
   ) => {
+    const commandKey = prdDocumentEditIdempotencyKey(reference.artifactVersionId, document);
+    const previouslySavedVersion = savedPrdVersionsRef.current.get(commandKey);
+    const pinnedVersions = getCurrentBoardSnapshot()?.nodes.filter((node) => (
+      node.workbench.artifactId === reference.artifactId
+    )).map((node) => node.workbench.artifactVersionId) ?? [];
     if (
       activeRunRef.current
       || !capabilities.canEdit
-      || !artifactSelection.prdTargetReference
-      || reference.artifactId !== artifactSelection.prdTargetReference.artifactId
-      || reference.artifactVersionId !== artifactSelection.prdTargetReference.artifactVersionId
-      || !prdArtifactQuery.data?.etag
-      || createPrdVersion.isPending
+      || !projectSession.isCurrent()
+      || reference.projectId !== projectId
+      || (!pinnedVersions.includes(reference.artifactVersionId)
+        && (!previouslySavedVersion || !pinnedVersions.includes(previouslySavedVersion)))
     ) {
-      throw new Error("The selected PRD version changed before the edit could be saved");
+      throw new Error("PRD 当前正在生成或画布版本已变化；草稿已保留，请恢复原版本后保存，或放弃修改。");
     }
-    const result = await createPrdVersion.mutateAsync({
-      ifMatch: prdArtifactQuery.data.etag,
-      idempotencyKey: prdDocumentEditIdempotencyKey(reference.artifactVersionId, document),
-      request: createPrdVersionEditRequest(reference.artifactVersionId, document),
-    });
-    if (!projectSession.isCurrent() || activeRunRef.current) return;
-    const updatedNodeIds = onReplaceArtifactVersionPins(
+    const savedVersion = previouslySavedVersion ?? (await createPrdVersion.mutateAsync({
+      reference,
+      document,
+    })).value.artifactVersionId;
+    savedPrdVersionsRef.current.set(commandKey, savedVersion);
+    if (!projectSession.isCurrent() || activeRunRef.current) throw new Error("项目状态已变化，文档草稿已保留。");
+    const updatedNodeIds = pinnedVersions.includes(savedVersion) ? [savedVersion] : onReplaceArtifactVersionPins(
       reference.artifactId,
       reference.artifactVersionId,
-      result.value.artifactVersionId,
+      savedVersion,
     );
     if (updatedNodeIds.length === 0) {
       throw new Error("The edited PRD is no longer pinned on the active Board");
     }
+    await onFlushBoard();
+    savedPrdVersionsRef.current.delete(commandKey);
     if (projectSession.isCurrent()) toast.success("PRD 已保存");
+    return savedVersion;
   }, [
     activeRunRef,
     capabilities.canEdit,
     createPrdVersion,
+    getCurrentBoardSnapshot,
+    onFlushBoard,
     onReplaceArtifactVersionPins,
     projectSession,
-    prdArtifactQuery.data?.etag,
-    artifactSelection.prdTargetReference,
+    projectId,
+    savedPrdVersionsRef,
   ]);
+
+  useEffect(() => prdDrafts?.registerProject(projectId, commitPrdDocument), [commitPrdDocument, prdDrafts, projectId]);
 
   const commitBoardFrame = useCallback((bounds: BoardRect) => {
     if (activeRunRef.current || !capabilities.canEdit) return;
@@ -4073,7 +4103,9 @@ function ProjectScreen({
       onOpenVersionHistory: artifactIntent.openVersionHistory,
       onPinArtifactVersion: async (artifactId, pinnedVersionId, targetVersionId) => {
         if (!capabilities.canEdit || activeRunRef.current) return [];
-        return onPinArtifactVersion(artifactId, pinnedVersionId, targetVersionId);
+        const saved = await prdDrafts?.saveProject(projectId) ?? [];
+        const replacement = saved.find((entry) => entry.artifactId === artifactId && entry.artifactVersionId === pinnedVersionId);
+        return onPinArtifactVersion(artifactId, replacement?.savedArtifactVersionId ?? pinnedVersionId, targetVersionId);
       },
       onVersionHistoryOpenChange: (open) => {
         if (!open) artifactIntent.closeVersionHistory();

@@ -45,7 +45,10 @@ import {
   canonicalizeExportSelection,
   exportSelectionIdentityKey,
   exportSelectionsEqual,
+  rebaseSavedPrdSelection,
+  alignArtifactSelectionWithPins,
 } from "./export-selection";
+import { useWorkbenchPrdDraftStore } from "../prd-editor/draft-context";
 
 export type WorkbenchExportTarget =
   | "AI Studio"
@@ -106,6 +109,7 @@ export function useWorkbenchPublicationController({
   projectId: string;
 }) {
   const session = useWorkbenchProjectSession(projectId);
+  const prdDrafts = useWorkbenchPrdDraftStore();
   const exportOperations = useWorkbenchExportOperations();
   const releasesQuery = useWorkbenchReleases(canExport || canShare ? projectId : "", { limit: 100 });
   const sharesQuery = useWorkbenchShareGrants(canShare ? projectId : "", { limit: 100 });
@@ -301,6 +305,7 @@ export function useWorkbenchPublicationController({
 
   const ensureRelease = useCallback(async (): Promise<ProjectRelease> => {
     if (!projectId) throw new Error("Open a Project before publishing");
+    await prdDrafts?.saveProject(projectId);
     const board = await flushWorkbenchBoard(boardController);
     const releases = (await releasesQuery.refetch()).data?.items ?? [];
     const existing = releases.find((release) => (
@@ -315,17 +320,17 @@ export function useWorkbenchPublicationController({
       ifMatch: `"${board.revision}"`,
     });
     return created.value;
-  }, [boardController, createRelease, projectId, releasesQuery]);
+  }, [boardController, createRelease, prdDrafts, projectId, releasesQuery]);
 
   const enableShare = useCallback(async () => {
     if (!canShare) throw new Error("This Project role cannot create Share grants");
     setShareOperationError(null);
     try {
-      const selectionKey = shareSelectionKey(boardController.store);
       const selectedVersions = new Set(boardController.store?.getState().nodes
         .filter((node) => node.selected)
         .map((node) => node.workbench.artifactVersionId));
       const release = await ensureRelease();
+      const selectionKey = shareSelectionKey(boardController.store);
       const prototypes = release.artifactPins.filter((pin) => pin.kind === "prototype"
         && (selectedVersions.size === 0 || selectedVersions.has(pin.artifactVersionId)));
       if (prototypes.length !== 1) throw new Error("请选择一个已完成的原型进行分享");
@@ -376,9 +381,10 @@ export function useWorkbenchPublicationController({
   const ensureShareLink = useCallback(async () => {
     if (!canShare) throw new Error("This Project role cannot create Share grants");
     if (shareSession?.projectId === projectId
+      && !prdDrafts?.hasDrafts(projectId)
       && shareSession.selectionKey === shareSelectionKey(boardController.store)) return shareSession.url;
     return enableShare();
-  }, [boardController.store, canShare, enableShare, projectId, shareSession]);
+  }, [boardController.store, canShare, enableShare, prdDrafts, projectId, shareSession]);
 
   const toggleShare = useCallback(async () => {
     if (!canShare) throw new Error("This Project role cannot manage Share grants");
@@ -420,8 +426,11 @@ export function useWorkbenchPublicationController({
         throw new Error("The selected Export format is unavailable on this deployment");
       }
       const descriptor = exportTargetDescriptor(target);
+      const savedDrafts = await prdDrafts?.saveProject(projectId) ?? [];
       const release = await ensureRelease();
-      const canonicalSelection = canonicalizeExportSelection(selection);
+      const canonicalSelection = canonicalizeExportSelection(alignArtifactSelectionWithPins(
+        rebaseSavedPrdSelection(selection, savedDrafts), release.artifactPins,
+      ));
       const result = await createExport.mutateAsync({
         request: {
           releaseId: release.id,
@@ -447,6 +456,7 @@ export function useWorkbenchPublicationController({
     ensureRelease,
     exportCapabilitiesQuery,
     hydratedExternalDeliveryRef,
+    prdDrafts,
     projectId,
     session,
     setActiveExportSession,
@@ -636,9 +646,14 @@ export function useWorkbenchPublicationController({
     setPreviewOperationError(null);
     setPreviewOperationCount((count) => count + 1);
     try {
+      const savedDrafts = await prdDrafts?.saveProject(projectId) ?? [];
       const board = await persistedPreviewBoard(boardController, canExport);
+      const savedSelection = alignArtifactSelectionWithPins(
+        rebaseSavedPrdSelection(selection, savedDrafts),
+        boardController.store?.getState().nodes.map((node) => node.workbench) ?? [],
+      );
       throwIfPreviewAborted(signal);
-      const cacheKey = previewSelectionKey(`${board.id}:${board.revision}`, selection);
+      const cacheKey = previewSelectionKey(`${board.id}:${board.revision}`, savedSelection);
       let previewId = previewIdsRef.current.get(cacheKey);
       let preview: ProjectPreview | null = null;
 
@@ -652,7 +667,7 @@ export function useWorkbenchPublicationController({
           : current.selection;
         if (current.boardId === board.id
           && current.boardRevision === board.revision
-          && exportSelectionsEqual(currentSelection, selection)
+          && exportSelectionsEqual(currentSelection, savedSelection)
           && current.status !== "failed"
           && current.status !== "cancelled"
           && current.status !== "expired") {
@@ -664,18 +679,18 @@ export function useWorkbenchPublicationController({
       }
 
       if (!preview) {
-        const previewSelection: ExportSelection = selection.kind === "artifact"
+        const previewSelection: ExportSelection = savedSelection.kind === "artifact"
           ? {
               kind: "artifact",
-              artifactId: selection.artifactId,
-              artifactVersionId: selection.artifactVersionId,
+              artifactId: savedSelection.artifactId,
+              artifactVersionId: savedSelection.artifactVersionId,
             }
-          : selection;
+          : savedSelection;
         preview = await exportOperations.createProjectPreview(projectId, {
           boardId: board.id,
           boardRevision: board.revision,
           selection: previewSelection,
-          initialScreenId: selection.kind === "artifact" ? selection.screenId ?? null : null,
+          initialScreenId: savedSelection.kind === "artifact" ? savedSelection.screenId ?? null : null,
         });
         previewId = preview.id;
         previewIdsRef.current.set(cacheKey, previewId);
@@ -700,6 +715,7 @@ export function useWorkbenchPublicationController({
     canPreview,
     exportOperations,
     previewIdsRef,
+    prdDrafts,
     projectId,
     session,
     setPreviewOperationCount,
