@@ -81,11 +81,15 @@ export class TeiEmbeddingAdapter implements KnowledgeEmbeddingPort {
       );
     }
     const texts = inputs.map((input) => input.text);
-    const tokenized = await this.requestJson("/tokenize", {
-      method: "POST",
-      body: JSON.stringify({ inputs: texts, add_special_tokens: true }),
-    }, signal);
-    const tokenCounts = parseTokenCounts(tokenized, inputs.length);
+    const tokenCounts: number[] = [];
+    for (let offset = 0; offset < texts.length; offset += PROVIDER_EMBED_BATCH_LIMIT) {
+      const batch = texts.slice(offset, offset + PROVIDER_EMBED_BATCH_LIMIT);
+      const tokenized = await this.requestJson("/tokenize", {
+        method: "POST",
+        body: JSON.stringify({ inputs: batch, add_special_tokens: true }),
+      }, signal);
+      tokenCounts.push(...parseTokenCounts(tokenized, batch.length));
+    }
     if (tokenCounts.some((count) => count > profile.spec.tokenizer.chunkMaximumTokens)) {
       throw new TerminalKnowledgeBuildError(
         "TEI_INPUT_TOKEN_LIMIT_EXCEEDED",

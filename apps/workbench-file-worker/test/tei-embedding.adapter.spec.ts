@@ -39,26 +39,28 @@ describe("TeiEmbeddingAdapter", () => {
       ...profile.spec,
       batch: { maximumInputs: 32, maximumTokens: 64 },
     });
-    const inputs = Array.from({ length: 5 }, (_, index) => ({ chunkId: `chunk-${index}`, text: `Text ${index}` }));
+    const inputs = Array.from({ length: 6 }, (_, index) => ({ chunkId: `chunk-${index}`, text: `Text ${index}` }));
     const fetchImplementation = vi.fn()
-      .mockResolvedValueOnce(json(inputs.map(() => [{ id: 1 }])))
+      .mockResolvedValueOnce(json([[{ id: 1 }], [{ id: 1 }]]))
+      .mockResolvedValueOnce(json([[{ id: 1 }], [{ id: 1 }]]))
+      .mockResolvedValueOnce(json([[{ id: 1 }], [{ id: 1 }]]))
       .mockResolvedValueOnce(json(Array.from({ length: 2 }, () => [1, 0, 0])))
       .mockResolvedValueOnce(json(Array.from({ length: 2 }, () => [0, 1, 0])))
-      .mockResolvedValueOnce(json([[1, 0, 0]]));
+      .mockResolvedValueOnce(json(Array.from({ length: 2 }, () => [1, 0, 0])));
     const adapter = new TeiEmbeddingAdapter(config(largeProfile), fetchImplementation as never);
 
     await expect(adapter.embedDocuments(largeProfile, inputs)).resolves.toEqual({
       vectors: [
         ...Array.from({ length: 2 }, () => [1, 0, 0]),
         ...Array.from({ length: 2 }, () => [0, 1, 0]),
-        [1, 0, 0],
+        ...Array.from({ length: 2 }, () => [1, 0, 0]),
       ],
-      tokenCounts: Array.from({ length: 5 }, () => 1),
+      tokenCounts: Array.from({ length: 6 }, () => 1),
     });
-    expect(fetchImplementation).toHaveBeenCalledTimes(4);
-    expect(JSON.parse(String(fetchImplementation.mock.calls[1]?.[1]?.body)).inputs).toHaveLength(2);
-    expect(JSON.parse(String(fetchImplementation.mock.calls[2]?.[1]?.body)).inputs).toHaveLength(2);
-    expect(JSON.parse(String(fetchImplementation.mock.calls[3]?.[1]?.body)).inputs).toHaveLength(1);
+    expect(fetchImplementation).toHaveBeenCalledTimes(6);
+    for (const call of fetchImplementation.mock.calls.slice(0, 6)) {
+      expect(JSON.parse(String(call[1]?.body)).inputs).toHaveLength(2);
+    }
   });
 
   it("rejects runtime identity drift before any embedding request", async () => {
