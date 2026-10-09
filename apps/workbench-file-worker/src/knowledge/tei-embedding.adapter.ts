@@ -30,6 +30,11 @@ const infoSchema = z.object({
 
 const RETRYABLE_STATUS = new Set([408, 425, 429, 500, 502, 503, 504]);
 const L2_TOLERANCE = 0.001;
+// The CPU Candle backend used by the pinned production TEI image advertises a
+// client batch size of 32 but currently accepts at most 16 inputs per model
+// request. Keep the profile contract at 32 and split provider calls here so a
+// valid knowledge batch does not fail with HTTP 429 Model is overloaded.
+const PROVIDER_EMBED_BATCH_LIMIT = 16;
 
 export class TeiEmbeddingAdapter implements KnowledgeEmbeddingPort {
   constructor(
@@ -95,16 +100,20 @@ export class TeiEmbeddingAdapter implements KnowledgeEmbeddingPort {
       );
     }
 
-    const response = await this.requestJson("/embed", {
-      method: "POST",
-      body: JSON.stringify({
-        inputs: texts,
-        dimensions: profile.dimension,
-        normalize: true,
-        truncate: false,
-      }),
-    }, signal);
-    const vectors = parseVectors(response, inputs.length, profile.dimension);
+    const vectors: (readonly number[])[] = [];
+    for (let offset = 0; offset < texts.length; offset += PROVIDER_EMBED_BATCH_LIMIT) {
+      const batch = texts.slice(offset, offset + PROVIDER_EMBED_BATCH_LIMIT);
+      const response = await this.requestJson("/embed", {
+        method: "POST",
+        body: JSON.stringify({
+          inputs: batch,
+          dimensions: profile.dimension,
+          normalize: true,
+          truncate: false,
+        }),
+      }, signal);
+      vectors.push(...parseVectors(response, batch.length, profile.dimension));
+    }
     return { vectors, tokenCounts };
   }
 

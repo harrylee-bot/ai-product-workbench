@@ -34,6 +34,30 @@ describe("TeiEmbeddingAdapter", () => {
     });
   });
 
+  it("splits provider embedding requests at the runtime-safe batch limit", async () => {
+    const largeProfile = parseEmbeddingProfileV1({
+      ...profile.spec,
+      batch: { maximumInputs: 32, maximumTokens: 64 },
+    });
+    const inputs = Array.from({ length: 20 }, (_, index) => ({ chunkId: `chunk-${index}`, text: `Text ${index}` }));
+    const fetchImplementation = vi.fn()
+      .mockResolvedValueOnce(json(inputs.map(() => [{ id: 1 }])))
+      .mockResolvedValueOnce(json(Array.from({ length: 16 }, () => [1, 0, 0])))
+      .mockResolvedValueOnce(json(Array.from({ length: 4 }, () => [0, 1, 0])));
+    const adapter = new TeiEmbeddingAdapter(config(largeProfile), fetchImplementation as never);
+
+    await expect(adapter.embedDocuments(largeProfile, inputs)).resolves.toEqual({
+      vectors: [
+        ...Array.from({ length: 16 }, () => [1, 0, 0]),
+        ...Array.from({ length: 4 }, () => [0, 1, 0]),
+      ],
+      tokenCounts: Array.from({ length: 20 }, () => 1),
+    });
+    expect(fetchImplementation).toHaveBeenCalledTimes(3);
+    expect(JSON.parse(String(fetchImplementation.mock.calls[1]?.[1]?.body)).inputs).toHaveLength(16);
+    expect(JSON.parse(String(fetchImplementation.mock.calls[2]?.[1]?.body)).inputs).toHaveLength(4);
+  });
+
   it("rejects runtime identity drift before any embedding request", async () => {
     const fetchImplementation = vi.fn().mockResolvedValue(json({
       model_id: "different/model",
@@ -140,15 +164,15 @@ const profile: CanonicalEmbeddingProfileV1 = parseEmbeddingProfileV1({
   conformanceProbeSha256: "4".repeat(64),
 });
 
-function config() {
+function config(target: CanonicalEmbeddingProfileV1 = profile) {
   return {
     origin: "http://tei:8080",
     requestTimeoutMs: 1_000,
     maximumRequestBytes: 1_024 * 1_024,
     maximumResponseBytes: 1_024 * 1_024,
-    imageDigest: profile.spec.engine.imageDigest!,
-    profileId: profile.spec.id,
-    profileSpecSha256: profile.specSha256,
+    imageDigest: target.spec.engine.imageDigest!,
+    profileId: target.spec.id,
+    profileSpecSha256: target.specSha256,
   };
 }
 
