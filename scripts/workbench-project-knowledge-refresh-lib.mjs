@@ -9,7 +9,13 @@ export async function planProjectKnowledgeRefresh(db, input) {
 export async function refreshProjectKnowledge(db, input, buildTools) {
   if (!/^[a-f0-9]{64}$/u.test(input.expectedPlanSha256 ?? "")) throw new Error("KNOWLEDGE_REFRESH_PLAN_REQUIRED");
   const tools = buildTools ?? await import("../apps/workbench-file-worker/dist/knowledge/prisma-knowledge-build.store.js");
-  const { embeddingVectorSha256 } = await import("../apps/workbench-file-worker/dist/knowledge/embedding-input.js");
+  // Keep the source hash helper behind the same injection boundary as the
+  // build store.  Production CLI calls use the built File Worker modules by
+  // default; tests can inject source implementations without requiring a
+  // File Worker dist tree to exist in the CI workspace.
+  const { embeddingVectorSha256 } = typeof tools.embeddingVectorSha256 === "function"
+    ? tools
+    : await import("../apps/workbench-file-worker/dist/knowledge/embedding-input.js");
   return db.$transaction(async (tx) => {
     await tx.$queryRaw(Prisma.sql`SELECT id FROM projects WHERE id = ${input.projectId} FOR UPDATE`);
     await assertOwner(tx, input);

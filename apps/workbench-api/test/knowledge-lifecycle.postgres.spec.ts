@@ -5,6 +5,7 @@ import { ArtifactFinalizationsService, artifactKnowledgeMarkdown, mapArtifactFin
 import { AccessService } from "../src/modules/access/access.service.js";
 import { PrismaKnowledgeRetrievalStore } from "../src/modules/knowledge/prisma-knowledge-retrieval.store.js";
 import { createBatches, PrismaKnowledgeBuildStore } from "../../workbench-file-worker/src/knowledge/prisma-knowledge-build.store.js";
+import { embeddingVectorSha256 } from "../../workbench-file-worker/src/knowledge/embedding-input.js";
 import { KnowledgeReleaseProcessor } from "../../workbench-file-worker/src/knowledge/knowledge-release.processor.js";
 import { JiebaSegmenterAdapter, knowledgeSegmenterId, knowledgeSegmenterVersion, knowledgeDefaultDictionaryChecksum } from "../../workbench-file-worker/src/knowledge/jieba-segmenter.adapter.js";
 import { TerminalKnowledgeBuildError } from "../../workbench-file-worker/src/knowledge/knowledge.errors.js";
@@ -16,6 +17,7 @@ const segmenterPin = {
   id: knowledgeSegmenterId, version: knowledgeSegmenterVersion,
   dictionaryChecksum: knowledgeDefaultDictionaryChecksum, stopwordsChecksum: segmenter.stopwordsChecksum,
 };
+const buildTools = { PrismaKnowledgeBuildStore, createBatches, embeddingVectorSha256 };
 
 describe("Artifact knowledge conversion", () => {
   it("keeps source text and emits a valid project-local knowledge source", async () => {
@@ -304,10 +306,10 @@ describePostgres("Project knowledge baseline refresh", () => {
       const plan = await planProjectKnowledgeRefresh(db, input);
       expect(plan.changed).toEqual(["00-rules/base.md"]);
       expect(plan.retainedFinalizations).toHaveLength(1);
-      await expect(refreshProjectKnowledge(db, { ...input, expectedPlanSha256: "0".repeat(64) }, { PrismaKnowledgeBuildStore, createBatches })).rejects.toThrow("KNOWLEDGE_REFRESH_PLAN_STALE");
-      const published = await refreshProjectKnowledge(db, { ...input, expectedPlanSha256: plan.planSha256 }, { PrismaKnowledgeBuildStore, createBatches });
+      await expect(refreshProjectKnowledge(db, { ...input, expectedPlanSha256: "0".repeat(64) }, buildTools)).rejects.toThrow("KNOWLEDGE_REFRESH_PLAN_STALE");
+      const published = await refreshProjectKnowledge(db, { ...input, expectedPlanSha256: plan.planSha256 }, buildTools);
       expect(published).toMatchObject({ status: "ready", created: true });
-      expect(await refreshProjectKnowledge(db, { ...input, expectedPlanSha256: plan.planSha256 }, { PrismaKnowledgeBuildStore, createBatches })).toMatchObject({ releaseId: published.releaseId, created: false });
+      expect(await refreshProjectKnowledge(db, { ...input, expectedPlanSha256: plan.planSha256 }, buildTools)).toMatchObject({ releaseId: published.releaseId, created: false });
       const refreshed = await db.knowledgeRelease.findUniqueOrThrow({ where: { id: published.releaseId }, include: { documents: { include: { chunks: true, source: true } }, embeddingBatches: true } });
       expect(refreshed.parentReleaseId).toBe(snapshotId);
       expect(refreshed.documents).toHaveLength(2);
