@@ -273,13 +273,15 @@ export function ProjectScreenView({
 }: {
   controller: ProjectScreenViewContract;
 }) {
-  const showTransientPendingArtifact = canvas.activeRun
-    && (
-      (runPanels.motionKind === "prd"
-        && !canvas.nodes.some((node) => node.type === "documentCanvas"))
-      || (runPanels.motionKind === "prototype"
-        && !canvas.nodes.some((node) => node.type === "generatedScreen"))
-    );
+  const hasReadyArtifactNode = canvas.nodes.some((node) => (
+    (runPanels.motionKind === "prd"
+      && node.type === "documentCanvas"
+      && node.data.phase === "complete")
+    || (runPanels.motionKind === "prototype"
+      && node.type === "generatedScreen"
+      && node.data.phase === "complete")
+  ));
+  const showTransientPendingArtifact = canvas.activeRun && !hasReadyArtifactNode;
 
   return (
     <motion.section
