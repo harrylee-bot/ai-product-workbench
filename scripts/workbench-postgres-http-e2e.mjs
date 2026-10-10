@@ -3889,12 +3889,12 @@ async function writeSuccessfulRuntimeStream(
       }, String(index + 3));
       await delay(controlledProviderDelayMs);
     }
+    if (finalizationGate) await finalizationGate.wait();
+    else await delay(controlledProviderDelayMs);
     sendSse(response, "values", {
       node: "generate_prd",
       values: { messages: draftSnapshot },
     }, String(stageSnapshots.length + 3));
-    if (finalizationGate) await finalizationGate.wait();
-    else await delay(controlledProviderDelayMs);
     sendSse(response, "values", {
       node: "finalize",
       values: { messages },
@@ -5655,6 +5655,10 @@ async function runRealStackBrowserScenario({
     };
     throw error;
   } finally {
+    // A failed visual assertion can happen before the browser-specific
+    // finalization block below. Release the gate first so any open provider
+    // SSE response can finish before closing the browser context.
+    fakeRuntime?.releaseBrowserPrdFinalization();
     await context?.close();
     await browser?.close();
     if (web) await stopService(web);
