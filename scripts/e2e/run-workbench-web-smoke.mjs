@@ -95,7 +95,15 @@ const cleanupManagedFiles = () => {
       await writeFile(sourceNextEnvPath, sourceNextEnv);
     }
     if (managedDistDirPath) {
-      await rm(managedDistDirPath, { recursive: true, force: true });
+      // Next/Turbopack can finish a filesystem write just after the dev
+      // process exits. Retry recursive removal so a late cache entry cannot
+      // turn an otherwise successful fixture run into a CI failure.
+      await rm(managedDistDirPath, {
+        recursive: true,
+        force: true,
+        maxRetries: 8,
+        retryDelay: 150,
+      });
       try {
         await rmdir(path.dirname(managedDistDirPath));
       } catch (error) {
