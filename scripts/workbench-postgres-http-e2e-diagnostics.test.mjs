@@ -290,6 +290,7 @@ test("the real-stack harness prepares every shared package before application bu
   assert.ok(apiBuild > prepare, "shared package preparation must finish before API and Worker builds");
   assert.doesNotMatch(source, /runCommand\("contracts:build"/u);
   assert.doesNotMatch(source, /runCommand\("canvas-tools:build"/u);
+  assert.match(source, /waitForHttp\(`\$\{webOrigin\}\/`, web, Math\.max\(scenarioTimeoutMs, 120_000\)\)/u);
 });
 
 test("the real-stack visual lane proves early pending surfaces and responsive control separation", async () => {

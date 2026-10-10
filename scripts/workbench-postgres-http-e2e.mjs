@@ -4872,6 +4872,11 @@ async function runRealStackBrowserScenario({
     DEERFLOW_INTERNAL_AUTH_TOKEN: fakeRuntimeToken,
   });
   await waitForHttp(`${oidcApiBaseUrl}/system/ready`, oidcApi, scenarioTimeoutMs);
+  // Next's first compilation of the authenticated Workbench shell can exceed
+  // the ordinary browser assertion budget on a cold Turbopack cache. Warm the
+  // root route before the registration flow so the form-submit navigation is
+  // measuring auth and routing behavior instead of initial compilation.
+  await waitForHttp(`${webOrigin}/`, web, Math.max(scenarioTimeoutMs, 120_000));
 
   browser = await chromium.launch({ headless: true });
   evidenceManifest.browser = `chromium ${browser.version()}`;
