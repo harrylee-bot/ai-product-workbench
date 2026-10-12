@@ -95,9 +95,24 @@ test("the migrator reconciles Runtime queues before services start", async () =>
   const realStackRunIndex = realStackBrowser.steps?.findIndex(
     (step) => step.name === "Run real-stack browser-only smoke",
   );
+  const chromiumInstallIndex = realStackBrowser.steps?.findIndex(
+    (step) => step.name === "Install Chromium runtime",
+  );
+  const viewportTestIndex = realStackBrowser.steps?.findIndex(
+    (step) => step.name === "Test browser viewport stabilization",
+  );
   assert.ok(
     realStackRunIndex > realStackPrepareIndex,
     "real-stack browser preparation must finish before browser smoke",
+  );
+  assert.ok(chromiumInstallIndex >= 0, "real-stack browser must install Chromium before browser tests");
+  assert.ok(
+    viewportTestIndex > chromiumInstallIndex && viewportTestIndex < realStackRunIndex,
+    "viewport stabilization regression must run after Chromium installation and before browser smoke",
+  );
+  assert.equal(
+    realStackBrowser.steps?.[viewportTestIndex]?.run,
+    "node --test scripts/e2e/workbench-browser-viewport.test.mjs",
   );
   assert.equal(realStackBrowser.steps?.[realStackPrepareIndex]?.run, "npm run workbench:prepare");
   assert.equal(realStackRun?.run, "npm run e2e:web:real-stack:browser-only");
