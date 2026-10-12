@@ -427,7 +427,9 @@ jobs:
         run: npx playwright install --with-deps chromium
 
       - name: Run real-stack browser-only smoke
-        run: npm run e2e:web:real-stack:browser-only
+        run: |
+          node --test scripts/e2e/workbench-browser-viewport.test.mjs
+          npm run e2e:web:real-stack:browser-only
 
       - name: Upload real-stack browser evidence
         if: always()

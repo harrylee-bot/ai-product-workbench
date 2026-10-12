@@ -36,6 +36,7 @@ import { executeCanvasToolRequest } from "./workbench-postgres-http-e2e-canvas-c
 import { startControlledKnowledgeFixture } from "./workbench-postgres-http-e2e-knowledge.mjs";
 import { spawnProcessTree, stopProcessTree } from "./workbench-e2e-process.mjs";
 import { managedWorkbenchWebDistDir, warmWorkbenchProtectedRoutes } from "./e2e/workbench-web-startup.mjs";
+import { waitForStableViewportLayout } from "./e2e/workbench-browser-viewport.mjs";
 
 const { Client } = pg;
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -120,6 +121,11 @@ const generationVisualViewports = [
   { width: 375, height: 812 },
   { width: 768, height: 1024 },
   { width: 1440, height: 900 },
+];
+const visualLayoutSelectors = [
+  '[data-panel-motion="agent-card"]', "[data-left-task-stack]", "[data-mobile-run-status]",
+  "[data-project-composer]", ".workbench-transient-artifact-surface", ".react-flow__node-documentCanvas",
+  "[data-right-tool-rail]", "[data-selected-action]", "[data-project-suggestions]", "[data-utility-pill]",
 ];
 const pendingDocumentEvidenceLatencyMs = 10_000;
 
@@ -5922,11 +5928,13 @@ async function captureActiveGenerationVisualEvidence({ evidence, kind, outputDir
   const selector = `[data-canvas-generation-motion="${kind}"]`;
   for (const reducedMotion of [false, true]) {
     await page.emulateMedia({ reducedMotion: reducedMotion ? "reduce" : "no-preference" });
-    if (reducedMotion) await page.waitForTimeout(20);
     for (const viewport of generationVisualViewports) {
       await page.setViewportSize(viewport);
       const motionElement = page.locator(selector);
       await motionElement.waitFor({ state: "visible", timeout: scenarioTimeoutMs });
+      const viewportLayout = await waitForStableViewportLayout(page, viewport, {
+        selectors: visualLayoutSelectors, timeoutMs: scenarioTimeoutMs,
+      });
       const motion = await motionElement.evaluate(async (element) => {
         const sample = () => {
           const style = getComputedStyle(element);
@@ -6006,6 +6014,7 @@ async function captureActiveGenerationVisualEvidence({ evidence, kind, outputDir
       const bytes = await page.screenshot({ path: screenshotPath, fullPage: false });
       evidence.push({
         viewport: `${viewport.width}x${viewport.height}`,
+        viewportLayout,
         reducedMotion,
         colorScheme: "dark",
         runState,
@@ -6061,6 +6070,7 @@ function assertActiveGenerationVisualEvidence(evidence, kind) {
   }
   for (const item of evidence) {
     const [width, height] = item.viewport.split("x").map(Number);
+    assert.deepEqual(item.viewportLayout, { width, height, stableFrames: 3 }, "visual evidence used an unsettled viewport");
     assert.equal(item.layout.composer.visible, true, `Project Composer was not visible at ${kind} ${item.viewport}`);
     assert.equal(item.layout.agentCard.visible, width >= 768, `Agent card breakpoint was incorrect at ${kind} ${item.viewport}`);
     assert.equal(item.layout.taskStack.visible, width >= 1280, `task stack breakpoint was incorrect at ${kind} ${item.viewport}`);
@@ -6126,10 +6136,12 @@ async function capturePendingDocumentVisualEvidence({ outputDir, page, pendingDo
   const evidence = [];
   for (const reducedMotion of [false, true]) {
     await page.emulateMedia({ reducedMotion: reducedMotion ? "reduce" : "no-preference" });
-    if (reducedMotion) await page.waitForTimeout(20);
     for (const viewport of generationVisualViewports) {
       await page.setViewportSize(viewport);
       await pendingDocument.waitFor({ state: "visible", timeout: scenarioTimeoutMs });
+      const viewportLayout = await waitForStableViewportLayout(page, viewport, {
+        selectors: visualLayoutSelectors, timeoutMs: scenarioTimeoutMs,
+      });
       const observation = await pendingDocument.evaluate(async (element) => {
         const metric = (selector) => {
           const candidate = document.querySelector(selector);
@@ -6188,6 +6200,7 @@ async function capturePendingDocumentVisualEvidence({ outputDir, page, pendingDo
       evidence.push({
         ...observation,
         viewport: `${viewport.width}x${viewport.height}`,
+        viewportLayout,
         reducedMotion,
         screenshot: path.relative(root, screenshotPath),
         sha256: sha256(bytes),
