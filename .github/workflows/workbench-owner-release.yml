@@ -38,6 +38,8 @@ jobs:
           cache: npm
       - name: Install verifier dependencies
         run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Build contracts used by delivery verifier
+        run: npm run build --workspace @workbench/workbench-contracts
       - name: Install browser for delivery verifier regressions
         run: npx playwright install --with-deps chromium
       - name: Validate owner release contract
