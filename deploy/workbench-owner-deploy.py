@@ -20,6 +20,30 @@ QUEUE = ("workbench-api", "workbench-worker", "workbench-file-worker", "workbenc
 APPLICATION = (*QUEUE, "workbench-web", "knowledge")
 GATEWAYS = ("preview-gateway", "gateway")
 NGINX_TMPFS = ("/var/cache/nginx", "/var/run", "/tmp")
+WORKER_SIGNING_ENV = (
+    "WORKBENCH_RUNTIME_WORKER_EXECUTION_PRIVATE_KEY_PATH",
+    "WORKBENCH_RUNTIME_WORKER_EXECUTION_KEY_ID",
+    "WORKBENCH_RUNTIME_WORKER_EXECUTION_SIGNER_ID",
+    "WORKBENCH_ENVIRONMENT_ID",
+    "WORKBENCH_SOURCE_COMMIT",
+    "WORKBENCH_RUNTIME_WORKER_IMAGE_REF",
+)
+WORKER_SIGNER_CHECK = """
+try {
+  const { loadRuntimeWorkerExecutionSignerFromEnvironment } = await import(
+    '/app/apps/workbench-worker/dist/runtime/runtime-worker-execution-attestation.js');
+  const signer = await loadRuntimeWorkerExecutionSignerFromEnvironment();
+  if (signer.candidateCommit !== process.env.WORKBENCH_SOURCE_COMMIT ||
+      signer.runtimeWorkerImageDigest !== process.env.WORKBENCH_RUNTIME_WORKER_IMAGE_REF.split('@')[1]) {
+    throw new Error('identity mismatch');
+  }
+  signer.attest({ preflight: true }, { jobId: 'deployment-preflight', runtimeAttemptId: null });
+  process.stdout.write('Runtime worker signer preflight passed\\n');
+} catch {
+  process.stderr.write('Runtime worker signing configuration or private-key access is invalid\\n');
+  process.exit(1);
+}
+"""
 LIMITS = {
     "migrate": (1024, 1, 128),
     "workbench-api": (1024, 1, 256),
@@ -86,8 +110,10 @@ def gateway_tmpfs(entries):
     return result
 
 
-def prepare_config(original, images, runtime=False):
-    """Only rewrite managed images/limits; preserve shared topology and data mounts."""
+def prepare_config(original, images, source_commit, runtime=False):
+    """Bind managed images and worker identity to the verified release; retain data topology."""
+    if not isinstance(source_commit, str) or not re.fullmatch(r"[a-f0-9]{40}", source_commit):
+        fail("Verified release source commit is required")
     config = copy.deepcopy(original)
     if not re.fullmatch(r"[a-z0-9][a-z0-9_-]*", config.get("name", "")):
         fail("Resolved Compose project name is required")
@@ -104,6 +130,18 @@ def prepare_config(original, images, runtime=False):
         services[name]["image"] = image["imageRef"]
     managed = [image["composeService"] for image in selected]
     if not runtime:
+        workers = [image for image in selected if image["id"] == "runtime-worker"]
+        if len(workers) != 1 or workers[0]["composeService"] != "workbench-worker":
+            fail("Runtime signing requires exactly one verified Runtime worker image")
+        environment = services["workbench-worker"].get("environment")
+        if not isinstance(environment, dict):
+            fail("Runtime worker requires resolved signing environment")
+        for key in WORKER_SIGNING_ENV[:4]:
+            if not isinstance(environment.get(key), str) or not environment[key].strip():
+                fail(f"Runtime worker signing configuration is missing {key}")
+        environment["NODE_ENV"] = "production"
+        environment["WORKBENCH_SOURCE_COMMIT"] = source_commit
+        environment["WORKBENCH_RUNTIME_WORKER_IMAGE_REF"] = workers[0]["imageRef"]
         quartz = [image for image in selected if image["id"] == "quartz"]
         if len(quartz) != 1:
             fail("Gateways require exactly one verified Quartz image")
@@ -147,6 +185,28 @@ def gateway_preflight_config(candidate):
         service["network_mode"] = "none"
         for field in ("networks", "ports", "depends_on", "container_name"):
             service.pop(field, None)
+    return config
+
+
+def worker_signer_preflight_config(candidate):
+    """Load/sign with the real image, UID and key mounts, without production network access."""
+    config = copy.deepcopy(candidate)
+    config["name"] += "-signer-check"
+    service = config["services"]["workbench-worker"]
+    config["services"] = {"workbench-worker": service}
+    environment = service["environment"]
+    service["environment"] = {key: environment[key] for key in WORKER_SIGNING_ENV}
+    service["environment"]["NODE_ENV"] = "production"
+    service["network_mode"] = "none"
+    service["read_only"] = True
+    service["healthcheck"] = {"disable": True}
+    service["restart"] = "no"
+    for field in ("networks", "ports", "depends_on", "container_name", "env_file", "extra_hosts"):
+        service.pop(field, None)
+    for mount in service.get("volumes", []):
+        if not isinstance(mount, dict):
+            fail("Runtime worker preflight requires resolved volume mounts")
+        mount["read_only"] = True
     return config
 
 
@@ -298,10 +358,12 @@ class Deployment:
     def execute(self):
         self.check_resources()
         release = self.verify()
+        if release.get("status") != "PASS" or release.get("sourceCommit") != self.args.commit:
+            fail("Verified owner release must match the requested source commit")
         self.app_original = self.resolve(self.args.app_compose)
         self.runtime_original = self.resolve(self.args.runtime_compose)
-        app = prepare_config(self.app_original, release["images"])
-        runtime = prepare_config(self.runtime_original, release["images"], runtime=True)
+        app = prepare_config(self.app_original, release["images"], release["sourceCommit"])
+        runtime = prepare_config(self.runtime_original, release["images"], release["sourceCommit"], runtime=True)
         previous_app = self.running(app["name"])
         previous_runtime = self.running(runtime["name"])
         if "postgres" not in previous_app:
@@ -310,7 +372,7 @@ class Deployment:
                 "applicationProject": app["name"], "runtimeProject": runtime["name"],
                 "images": [{"id": image["id"], "imageRef": image["imageRef"]} for image in release["images"]],
                 "gatewayImages": {name: app["services"][name]["image"] for name in GATEWAYS},
-                "sequence": ["pull all images", "verify local labels", "check gateway configuration and permissions", "verified database backup", "stop queue participants", "migrate", "preview", "deerflow", "api and workers and web and knowledge", "gateways", "health"],
+                "sequence": ["pull all images", "verify local labels", "check Runtime worker signing identity and key permissions", "check gateway configuration and permissions", "verified database backup", "stop queue participants", "migrate", "preview", "deerflow", "api and workers and web and knowledge", "gateways", "health"],
                 "runningApplicationServices": sorted(previous_app), "runningRuntimeServices": sorted(previous_runtime)}
         print(json.dumps(plan, ensure_ascii=False, indent=2), flush=True)
         if not self.args.execute:
@@ -336,6 +398,12 @@ class Deployment:
             self.run(["docker", "pull", image["imageRef"]], f"Pull {image['id']}", timeout=1200)
         self.verify(inspect_local=True)
         self.check_resources(after_pull=True)
+        signer_check = worker_signer_preflight_config(app)
+        signer_check_file = self.backup / "worker-signer-check.json"
+        write_compose(signer_check_file, signer_check)
+        self.run(self.compose(signer_check_file, signer_check["name"], "run", "--rm", "--no-deps",
+                              "--entrypoint", "node", "workbench-worker", "--input-type=module", "-e",
+                              WORKER_SIGNER_CHECK), "Check Runtime worker signing identity and key permissions", timeout=120)
         gateway_check = gateway_preflight_config(app)
         gateway_check_file = self.backup / "gateway-check.json"
         write_compose(gateway_check_file, gateway_check)
