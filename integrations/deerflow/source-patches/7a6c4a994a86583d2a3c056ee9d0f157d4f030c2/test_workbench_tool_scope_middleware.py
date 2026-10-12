@@ -4,10 +4,13 @@ import hashlib
 import importlib.util
 import copy
 import json
+import os
 from pathlib import Path
 import sys
+import tempfile
 import types
 import unittest
+from unittest.mock import patch
 from typing import TypedDict
 
 
@@ -378,6 +381,390 @@ class AutomaticPrdResultTest(unittest.IsolatedAsyncioTestCase):
                     ),
                     sentinel,
                 )
+
+
+class PrototypeTransportContextTests(unittest.IsolatedAsyncioTestCase):
+    marker = "<workbench_prototype_transport_context>"
+    reference_directory = SKILL_ROOT / "workbench" / "references"
+
+    def setUp(self):
+        self.reference_patch = patch.object(
+            middleware_module, "_PROTOTYPE_REFERENCE_DIRECTORY", self.reference_directory,
+        )
+        self.reference_patch.start()
+        self.addCleanup(self.reference_patch.stop)
+
+    @staticmethod
+    def middleware(kinds):
+        return WorkbenchToolScopeMiddleware(None, kinds, run_scope=("run-auto", "attempt-auto"))
+
+    @staticmethod
+    def sign_envelope(artifact):
+        envelope = {key: artifact[key] for key in (
+            "protocol", "runId", "runtimeAttemptId", "toolCallId", "artifactIndex", "ok", "draftChecksum",
+        )}
+        artifact["checksum"] = hashlib.sha256(json.dumps(
+            envelope, ensure_ascii=False, sort_keys=True, separators=(",", ":"),
+        ).encode("utf-8")).hexdigest()
+
+    def request(self, kinds, *, accepted=False):
+        if accepted:
+            request = automatic_prd_request()
+            messages = request.state["messages"]
+            artifact = messages[-1]["artifact"]
+            messages[-2]["tool_calls"][0]["args"]["draft"] = copy.deepcopy(artifact["draft"])
+            artifact["draftChecksum"] = hashlib.sha256(json.dumps(
+                artifact["draft"], sort_keys=True, separators=(",", ":"),
+            ).encode("utf-8")).hexdigest()
+            self.sign_envelope(artifact)
+        else:
+            request = FakeModelRequest([], state={"messages": [{"type": "human", "content": "Build my actual product"}]})
+        request.runtime.context = {"workbench": {
+            "runId": "run-auto", "runtimeAttemptId": "attempt-auto", "requestedArtifactKinds": kinds,
+        }}
+        request.system_message = middleware_module.SystemMessage(content="Existing system instructions")
+        request.tools = [FakeTool(name) for name in (
+            RUNTIME_RESULT_TOOL_NAME, READ_FILE_TOOL_NAME, KNOWLEDGE_TOOL_NAME,
+            CLARIFICATION_TOOL_NAME, *ARTIFACT_PROGRESS_TOOL_NAMES, *PROTOTYPE_ONLY_TOOL_NAMES,
+        )]
+        return request
+
+    def assert_context(self, text):
+        self.assertEqual(text.count(self.marker), 1)
+        for virtual_path, digest in middleware_module.PROTOTYPE_REFERENCE_FILES:
+            source = (self.reference_directory / Path(virtual_path).name).read_text(encoding="utf-8")
+            self.assertEqual(text.count(source), 1)
+            self.assertIn(digest, text)
+        self.assertIn("not authorized facts", text)
+        self.assertIn("real authorized Knowledge retrieval", text)
+        self.assertIn("ignore their generic instructions to read files", text)
+        self.assertIn("keep the accepted PRD immutable", text)
+        self.assertIn("both exact accepted Drafts in PRD/Prototype order", text)
+
+    def test_exact_prototype_injects_only_system_context_without_expanding_capabilities(self):
+        request = self.request(["prototype"])
+        before = copy.deepcopy(request.state)
+        middleware = self.middleware(["prototype"])
+        scoped = middleware.wrap_model_call(request, lambda captured: captured)
+        self.assert_context(scoped.system_message.text)
+        self.assertTrue(scoped.system_message.text.startswith("Existing system instructions"))
+        self.assertEqual(request.system_message.text, "Existing system instructions")
+        self.assertEqual(request.state, before)
+        self.assertIs(scoped.state, request.state)
+        self.assertEqual([tool.name for tool in scoped.tools], [
+            RUNTIME_RESULT_TOOL_NAME, CLARIFICATION_TOOL_NAME,
+            *ARTIFACT_PROGRESS_TOOL_NAMES, *PROTOTYPE_ONLY_TOOL_NAMES,
+        ])
+        self.assertFalse(middleware._prototype_reference_enabled)
+        self.assertFalse(middleware._prototype_stage_gate_enabled)
+        again = middleware.wrap_model_call(scoped, lambda captured: captured)
+        self.assertEqual(again.system_message.text, scoped.system_message.text)
+
+    def test_joint_context_requires_accepted_prd_for_either_requested_order(self):
+        for kinds in (["prd", "prototype"], ["prototype", "prd"]):
+            with self.subTest(kinds=kinds):
+                middleware = self.middleware(kinds)
+                before = self.request(kinds)
+                with patch.object(middleware_module, "_prototype_transport_reference_context", side_effect=AssertionError("premature read")):
+                    self.assertNotIn(self.marker, middleware._filter_tools(before).system_message.text)
+                accepted = self.request(kinds, accepted=True)
+                state_before = copy.deepcopy(accepted.state)
+                scoped = middleware.wrap_model_call(accepted, lambda captured: captured)
+                self.assert_context(scoped.system_message.text)
+                self.assertIn(READ_FILE_TOOL_NAME, [tool.name for tool in scoped.tools])
+                self.assertEqual(accepted.state, state_before)
+                self.assertEqual(middleware_module._stage_progress(scoped.state, "run-auto", "attempt-auto"), (4, False))
+                self.assertEqual(middleware_module._successful_runtime_results(scoped.state, "run-auto", "attempt-auto"), (0, False))
+
+    def test_runtime_and_constructor_scope_must_be_exact_and_trusted(self):
+        cases = (
+            "missing-context", "missing-workbench", "missing-run", "wrong-run", "wrong-attempt",
+            "missing-constructor", "wrong-constructor", "kind-disagreement", "missing-kinds",
+        )
+        for case in cases:
+            with self.subTest(case=case):
+                request = self.request(["prototype"])
+                middleware = self.middleware(["prototype"])
+                scope = request.runtime.context["workbench"]
+                if case == "missing-context":
+                    request.runtime.context = None
+                elif case == "missing-workbench":
+                    request.runtime.context = {}
+                elif case == "missing-run":
+                    scope.pop("runId")
+                elif case == "wrong-run":
+                    scope["runId"] = "run-other"
+                elif case == "wrong-attempt":
+                    scope["runtimeAttemptId"] = "attempt-other"
+                elif case == "missing-constructor":
+                    middleware = WorkbenchToolScopeMiddleware(None, ["prototype"])
+                elif case == "wrong-constructor":
+                    middleware = WorkbenchToolScopeMiddleware(None, ["prototype"], run_scope=("run-auto", "attempt-other"))
+                elif case == "kind-disagreement":
+                    scope["requestedArtifactKinds"] = ["prd", "prototype"]
+                else:
+                    scope.pop("requestedArtifactKinds")
+                # Model-authored fields cannot replace trusted runtime context.
+                request.state["workbench"] = {"runId": "run-auto", "runtimeAttemptId": "attempt-auto", "requestedArtifactKinds": ["prototype"]}
+                with patch.object(middleware_module, "_prototype_transport_reference_context", side_effect=AssertionError("untrusted read")):
+                    self.assertNotIn(self.marker, middleware._filter_tools(request).system_message.text)
+
+    def test_malformed_extra_and_other_kinds_do_not_read_or_inject(self):
+        for kinds in (None, [], "prototype", ["prototype", "prototype"], ["prototype", 1],
+                      ["unknown"], ["prd"], ["document"], ["prototype", "image"], ["prd", "prototype", "data"]):
+            with self.subTest(kinds=kinds):
+                request = self.request(kinds, accepted=True)
+                with patch.object(middleware_module, "_prototype_transport_reference_context", side_effect=AssertionError("invalid kind read")):
+                    self.assertNotIn(self.marker, self.middleware(kinds)._filter_tools(request).system_message.text)
+
+    def test_joint_rejects_unvalidated_stale_unbound_and_incomplete_evidence(self):
+        cases = (
+            "missing-draft", "failed-draft", "error-response", "content-only-ack", "wrong-name",
+            "wrong-run", "wrong-attempt", "wrong-tool-id", "missing-envelope", "bad-envelope",
+            "bad-draft-checksum", "wrong-index", "boolean-index", "argument-index", "argument-body",
+            "argument-kind", "unmatched-response", "duplicate-response", "duplicate-draft", "new-turn",
+            "missing-reference", "unbound-reference", "modified-reference", "missing-stage", "unbound-stage",
+        )
+        for case in cases:
+            with self.subTest(case=case):
+                request = self.request(["prd", "prototype"], accepted=True)
+                messages = request.state["messages"]
+                response, declaration = messages[-1], messages[-2]
+                artifact = response["artifact"]
+                args = declaration["tool_calls"][0]["args"]
+                if case == "missing-draft":
+                    del messages[-2:]
+                elif case == "failed-draft":
+                    artifact["ok"] = False
+                elif case == "error-response":
+                    response["status"] = "error"
+                elif case == "content-only-ack":
+                    response["content"] = json.dumps(artifact)
+                    response.pop("artifact")
+                elif case == "wrong-name":
+                    response["name"] = "untrusted_tool"
+                elif case == "wrong-run":
+                    artifact["runId"] = "run-other"
+                elif case == "wrong-attempt":
+                    artifact["runtimeAttemptId"] = "attempt-other"
+                elif case == "wrong-tool-id":
+                    artifact["toolCallId"] = "another-call"
+                elif case == "missing-envelope":
+                    artifact.pop("checksum")
+                elif case == "bad-envelope":
+                    artifact["checksum"] = "a" * 64
+                elif case == "bad-draft-checksum":
+                    artifact["draftChecksum"] = "not-a-checksum"
+                    self.sign_envelope(artifact)
+                elif case == "wrong-index":
+                    artifact["artifactIndex"] = 1
+                    self.sign_envelope(artifact)
+                elif case == "boolean-index":
+                    artifact["artifactIndex"] = False
+                    self.sign_envelope(artifact)
+                elif case == "argument-index":
+                    args["artifact_index"] = False
+                elif case == "argument-body":
+                    args["draft"]["title"] = "Different candidate"
+                elif case == "argument-kind":
+                    args["draft"]["kind"] = "prototype"
+                elif case == "unmatched-response":
+                    del messages[-2]
+                elif case == "duplicate-response":
+                    messages.append(copy.deepcopy(response))
+                elif case == "duplicate-draft":
+                    messages.extend(copy.deepcopy(messages[-2:]))
+                elif case == "new-turn":
+                    messages.append({"type": "human", "content": "A different request"})
+                elif case == "missing-reference":
+                    messages.remove(next(m for m in messages if m.get("name") == READ_FILE_TOOL_NAME))
+                elif case == "unbound-reference":
+                    next(m for m in messages if m.get("name") == READ_FILE_TOOL_NAME)["artifact"]["runId"] = "other"
+                elif case == "modified-reference":
+                    next(m for m in messages if m.get("name") == READ_FILE_TOOL_NAME)["content"] = "altered reference"
+                elif case == "missing-stage":
+                    messages.remove(next(m for m in messages if m.get("name") == "workbench_generation_stage_update"))
+                else:
+                    next(m for m in messages if m.get("name") == "workbench_generation_stage_update")["artifact"]["runtimeAttemptId"] = "other"
+                with patch.object(middleware_module, "_prototype_transport_reference_context", side_effect=AssertionError("invalid PRD read")):
+                    self.assertNotIn(self.marker, self.middleware(["prd", "prototype"])._filter_tools(request).system_message.text)
+
+    def test_trusted_node_canonical_draft_checksum_is_not_recomputed_with_python(self):
+        request = self.request(["prd", "prototype"], accepted=True)
+        messages = request.state["messages"]
+        artifact = messages[-1]["artifact"]
+        draft = {"kind": "prd", "revision": 1.0}
+        artifact["draft"] = copy.deepcopy(draft)
+        messages[-2]["tool_calls"][0]["args"]["draft"] = copy.deepcopy(draft)
+        # RFC8785/Node represents 1.0 as 1; this is the accepted tool's checksum.
+        artifact["draftChecksum"] = hashlib.sha256(b'{"kind":"prd","revision":1}').hexdigest()
+        python_digest = hashlib.sha256(json.dumps(draft, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+        self.assertNotEqual(artifact["draftChecksum"], python_digest)
+        self.sign_envelope(artifact)
+        self.assert_context(self.middleware(["prd", "prototype"])._filter_tools(request).system_message.text)
+
+    def test_joint_evidence_must_finish_in_causal_order_within_the_current_turn(self):
+        for case in ("late-references", "early-draft", "overlapping-stages", "batched-draft",
+                     "new-turn-only-references", "new-turn-only-stages", "new-turn-only-draft"):
+            with self.subTest(case=case):
+                request = self.request(["prd", "prototype"], accepted=True)
+                messages = request.state["messages"]
+                if case == "late-references":
+                    messages[3:10] = [*messages[8:10], *messages[3:8]]
+                elif case == "early-draft":
+                    messages[12:16] = [*messages[14:16], *messages[12:14]]
+                elif case == "overlapping-stages":
+                    messages[8:12] = [messages[8], messages[10], messages[9], messages[11]]
+                elif case == "batched-draft":
+                    messages[12]["tool_calls"].extend(messages[14]["tool_calls"])
+                    del messages[14]
+                else:
+                    new_turn = [{"type": "human", "content": "Start a new request"}]
+                    if case == "new-turn-only-references":
+                        new_turn.extend(copy.deepcopy(messages[1:8]))
+                    elif case == "new-turn-only-stages":
+                        new_turn.extend(copy.deepcopy([*messages[1:3], *messages[8:14]]))
+                    else:
+                        new_turn.extend(copy.deepcopy(messages[14:16]))
+                    messages.extend(new_turn)
+                with patch.object(middleware_module, "_prototype_transport_reference_context", side_effect=AssertionError("noncausal context read")):
+                    self.assertNotIn(self.marker, self.middleware(["prd", "prototype"])._filter_tools(request).system_message.text)
+
+    def test_successful_bound_runtime_result_stops_context_for_both_workflows(self):
+        for kinds in (["prototype"], ["prd", "prototype"]):
+            for bound in (True, False):
+                with self.subTest(kinds=kinds, bound=bound):
+                    request = self.request(kinds, accepted="prd" in kinds)
+                    append_tool_batch(request.state["messages"], [call(RUNTIME_RESULT_TOOL_NAME, "terminal-result")], [tool_message(
+                        RUNTIME_RESULT_TOOL_NAME, "terminal-result", artifact={
+                            "protocol": "workbench.runtime.validated-result.v1", "ok": True,
+                            "runId": "run-auto", "runtimeAttemptId": "attempt-auto" if bound else "stale-attempt",
+                            "toolCallId": "terminal-result", "result": {"message": "Done"},
+                        },
+                    )])
+                    middleware = self.middleware(kinds)
+                    if bound:
+                        with patch.object(middleware_module, "_prototype_transport_reference_context", side_effect=AssertionError("post-result read")):
+                            self.assertNotIn(self.marker, middleware._filter_tools(request).system_message.text)
+                    else:
+                        self.assert_context(middleware._filter_tools(request).system_message.text)
+
+    def test_transport_context_does_not_open_any_new_read_file_paths_or_windows(self):
+        for kinds in (["prototype"], ["prd", "prototype"]):
+            middleware = self.middleware(kinds)
+            request = self.request(kinds, accepted="prd" in kinds)
+            self.assert_context(middleware._filter_tools(request).system_message.text)
+            for path in (*[item[0] for item in middleware_module.PROTOTYPE_REFERENCE_FILES], PRD_REFERENCE_FILES[0][0], "/etc/passwd"):
+                with self.subTest(kinds=kinds, path=path):
+                    state = copy.deepcopy(request.state)
+                    tool_request = request_in_state(state["messages"], READ_FILE_TOOL_NAME, "blocked-read", {"path": path})
+                    blocked = middleware.wrap_tool_call(tool_request, lambda _request: self.fail("read_file executed outside its existing scope"))
+                    self.assertEqual(blocked.status, "error")
+
+    def test_fixed_reference_reader_rejects_missing_symlink_nonregular_size_utf8_and_hash_failures(self):
+        variants = ("missing", "symlink", "directory", "fifo", "empty", "oversized", "invalid-utf8", "hash-mismatch")
+        for virtual_path, _digest in middleware_module.PROTOTYPE_REFERENCE_FILES:
+            for variant in variants:
+                with self.subTest(file=virtual_path, variant=variant), tempfile.TemporaryDirectory() as directory:
+                    root = Path(directory)
+                    for source_path, _ in middleware_module.PROTOTYPE_REFERENCE_FILES:
+                        filename = Path(source_path).name
+                        (root / filename).write_bytes((self.reference_directory / filename).read_bytes())
+                    target = root / Path(virtual_path).name
+                    if variant in {"missing", "symlink", "directory", "fifo"}:
+                        target.unlink()
+                    if variant == "symlink":
+                        target.symlink_to(self.reference_directory / target.name)
+                    elif variant == "directory":
+                        target.mkdir()
+                    elif variant == "fifo":
+                        os.mkfifo(target)
+                    elif variant == "empty":
+                        target.write_bytes(b"")
+                    elif variant == "oversized":
+                        target.write_bytes(b"x" * (middleware_module._PROTOTYPE_REFERENCE_MAX_BYTES + 1))
+                    elif variant == "invalid-utf8":
+                        target.write_bytes(b"\xff")
+                    elif variant == "hash-mismatch":
+                        target.write_text("substituted instructions", encoding="utf-8")
+                    expected = {
+                        "empty": "SIZE_INVALID", "oversized": "SIZE_INVALID", "invalid-utf8": "UTF8_INVALID",
+                        "hash-mismatch": "CONTENT_MISMATCH", "fifo": "FILE_INVALID",
+                    }.get(variant, "UNAVAILABLE")
+                    with patch.object(middleware_module, "_PROTOTYPE_REFERENCE_DIRECTORY", root):
+                        with self.assertRaisesRegex(ValueError, f"WORKBENCH_PROTOTYPE_REFERENCE_{expected}"):
+                            self.middleware(["prototype"]).wrap_model_call(
+                                self.request(["prototype"]), lambda _request: self.fail("model received invalid references"),
+                            )
+
+    def test_reader_opens_only_the_two_fixed_files_and_propagates_permission_failure(self):
+        with patch.object(middleware_module.os, "open", wraps=os.open) as reader:
+            context = middleware_module._prototype_transport_reference_context()
+        self.assert_context(context)
+        self.assertEqual([args.args[0] for args in reader.call_args_list], [
+            self.reference_directory / Path(virtual_path).name
+            for virtual_path, _ in middleware_module.PROTOTYPE_REFERENCE_FILES
+        ])
+        with patch.object(middleware_module.os, "open", side_effect=PermissionError("denied")):
+            with self.assertRaisesRegex(ValueError, "WORKBENCH_PROTOTYPE_REFERENCE_UNAVAILABLE"):
+                middleware_module._prototype_transport_reference_context()
+
+    def real_graph(self, kinds):
+        from langchain.agents import create_agent
+        from langchain_core.language_models.fake_chat_models import FakeMessagesListChatModel
+        from langchain_core.messages import AIMessage
+
+        observed = []
+
+        class CapturingModel(FakeMessagesListChatModel):
+            def _generate(self, messages, *args, **kwargs):
+                observed.append(copy.deepcopy(messages))
+                return super()._generate(messages, *args, **kwargs)
+
+        graph = create_agent(
+            CapturingModel(responses=[AIMessage(content="Captured model request")]),
+            system_prompt="Existing system instructions",
+            middleware=[self.middleware(kinds)],
+        )
+        return graph, observed
+
+    def assert_real_capture(self, request, result, observed, *, expected):
+        from langchain_core.messages import SystemMessage
+
+        self.assertEqual(len(observed), 1)
+        system = [message for message in observed[0] if isinstance(message, SystemMessage)]
+        self.assertEqual(len(system), 1)
+        if expected:
+            self.assert_context(system[0].text)
+        else:
+            self.assertNotIn(self.marker, system[0].text)
+        for message in observed[0]:
+            if not isinstance(message, SystemMessage):
+                self.assertNotIn(self.marker, str(message.content))
+        input_messages = request.state["messages"]
+        for predicate in (middleware_module._is_human_message, middleware_module._is_tool_message):
+            self.assertEqual(sum(predicate(message) for message in result["messages"]), sum(predicate(message) for message in input_messages))
+        self.assertEqual(len(result["messages"]), len(input_messages) + 1)
+        self.assertNotIn(self.marker, str(result))
+        self.assertNotIn(self.marker, str(request.state))
+
+    @unittest.skipIf(USING_IMPORT_STUBS, "requires actual LangChain model-request serialization")
+    def test_real_sync_graph_injects_system_context_only_at_the_correct_boundary(self):
+        for kinds, accepted in ((["prototype"], False), (["prd", "prototype"], False), (["prd", "prototype"], True)):
+            with self.subTest(kinds=kinds, accepted=accepted):
+                request = self.request(kinds, accepted=accepted)
+                graph, observed = self.real_graph(kinds)
+                result = graph.invoke(copy.deepcopy(request.state), context=request.runtime.context)
+                self.assert_real_capture(request, result, observed, expected=accepted or kinds == ["prototype"])
+
+    @unittest.skipIf(USING_IMPORT_STUBS, "requires actual LangChain async model-request serialization")
+    async def test_real_async_graph_injects_system_context_only_at_the_correct_boundary(self):
+        for kinds, accepted in ((["prototype"], False), (["prototype", "prd"], False), (["prototype", "prd"], True)):
+            with self.subTest(kinds=kinds, accepted=accepted):
+                request = self.request(kinds, accepted=accepted)
+                graph, observed = self.real_graph(kinds)
+                result = await graph.ainvoke(copy.deepcopy(request.state), context=request.runtime.context)
+                self.assert_real_capture(request, result, observed, expected=accepted or kinds == ["prototype"])
 
 
 def request_in_state(

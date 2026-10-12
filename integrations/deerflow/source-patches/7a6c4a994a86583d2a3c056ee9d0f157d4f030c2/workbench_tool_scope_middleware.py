@@ -13,8 +13,11 @@ from __future__ import annotations
 from collections.abc import Awaitable, Callable, Mapping
 import hashlib
 import json
+import os
+from pathlib import Path
 import posixpath
 import re
+import stat
 from typing import Annotated, Any
 
 try:
@@ -111,13 +114,60 @@ PRD_REFERENCE_FILES = (
 PROTOTYPE_REFERENCE_FILES = (
     (
         "/mnt/skills/public/workbench/references/prototype-runtime-result.example.json",
-        "e76e0c8b8c797a4941e31cc5067b80bb8106d4329b086ef743d6ad76ef958a99",
+        "2998623ec6b2b4c2a35b77a57c6287432b1e3608c3512beb47ccc0681d0a0bf3",
     ),
     (
         "/mnt/skills/public/workbench/references/runtime-result-contract.md",
-        "b7a3aaf96e8e88dd0c5c7be1f91dd79711bec28626a4eec0783c8f90b4682159",
+        "2e5260cbc09813e14ea56b064b71a3b3084b77559f916640f6d514389a1b8a8c",
     ),
 )
+_PROTOTYPE_REFERENCE_DIRECTORY = Path("/app/skills/public/workbench/references")
+_PROTOTYPE_REFERENCE_MAX_BYTES = 65_536
+
+
+def _prototype_transport_reference_context() -> str:
+    references = []
+    for virtual_path, expected_digest in PROTOTYPE_REFERENCE_FILES:
+        # Only source-pinned filenames reach this reader. Model/tool arguments
+        # never select a path, and symlinks/non-regular/oversized files fail closed.
+        path = _PROTOTYPE_REFERENCE_DIRECTORY / posixpath.basename(virtual_path)
+        try:
+            descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+            with os.fdopen(descriptor, "rb") as source:
+                info = os.fstat(source.fileno())
+                if not stat.S_ISREG(info.st_mode):
+                    raise ValueError("WORKBENCH_PROTOTYPE_REFERENCE_FILE_INVALID")
+                if not 0 < info.st_size <= _PROTOTYPE_REFERENCE_MAX_BYTES:
+                    raise ValueError("WORKBENCH_PROTOTYPE_REFERENCE_SIZE_INVALID")
+                content = source.read(_PROTOTYPE_REFERENCE_MAX_BYTES + 1)
+                if len(content) != info.st_size:
+                    raise ValueError("WORKBENCH_PROTOTYPE_REFERENCE_SIZE_INVALID")
+        except OSError as exc:
+            raise ValueError("WORKBENCH_PROTOTYPE_REFERENCE_UNAVAILABLE") from exc
+        try:
+            text = content.decode("utf-8", errors="strict")
+        except UnicodeDecodeError as exc:
+            raise ValueError("WORKBENCH_PROTOTYPE_REFERENCE_UTF8_INVALID") from exc
+        if hashlib.sha256(content).hexdigest() != expected_digest:
+            raise ValueError("WORKBENCH_PROTOTYPE_REFERENCE_CONTENT_MISMATCH")
+        references.append(f"<reference name=\"{path.name}\" sha256=\"{expected_digest}\">\n{text}\n</reference>")
+    return (
+        "<workbench_prototype_transport_context>\n"
+        "These verified references describe transport structure only. Example business content, IDs, URLs, "
+        "citations and sources are not authorized facts and must not be copied as project evidence. Author "
+        "the Prototype from the current request, its accepted PRD when present, and real authorized Knowledge "
+        "retrieval; create appropriate IDs and copy citations only from successful retrieval. "
+        "These references are already provided in full: ignore their generic instructions to read files or "
+        "inspect other schemas. read_file still accepts only the four PRD paths during their collecting window, "
+        "and is unavailable for Prototype-only Runs. This context grants no extra tools or filesystem access. "
+        "In a linked Run keep the accepted PRD immutable, publish the Prototype at artifact_index 1, and submit "
+        "both exact accepted Drafts in PRD/Prototype order. The example's single-Prototype Result does not "
+        "replace that linked contract.\n"
+        + "\n".join(references)
+        + "\n</workbench_prototype_transport_context>"
+    )
+
+
 RUNTIME_ARTIFACT_KINDS = (
     "prd",
     "prototype",
@@ -1400,6 +1450,7 @@ class WorkbenchToolScopeMiddleware(AgentMiddleware[AgentState]):
         super().__init__()
         normalized_canvas = normalize_workbench_canvas_policy(canvas_policy)
         normalized_kinds = normalize_workbench_requested_artifact_kinds(requested_artifact_kinds)
+        self._requested_artifact_kinds = frozenset(normalized_kinds) if normalized_kinds is not None else None
         self._workbench_run_enabled = normalized_kinds is not None
         self._declared_canvas = frozenset(
             normalized_canvas["declaredTools"] if normalized_canvas is not None else ()
@@ -1433,6 +1484,82 @@ class WorkbenchToolScopeMiddleware(AgentMiddleware[AgentState]):
             )
         ):
             self._run_id, self._runtime_attempt_id = run_scope
+
+    def _prototype_transport_ready(self, request: ModelRequest) -> bool:
+        scope = _value(_value(request.runtime, "context"), "workbench")
+        kinds = normalize_workbench_requested_artifact_kinds(_value(scope, "requestedArtifactKinds"))
+        if (
+            not self._run_id or not self._runtime_attempt_id
+            or _value(scope, "runId") != self._run_id
+            or _value(scope, "runtimeAttemptId") != self._runtime_attempt_id
+            or kinds is None or frozenset(kinds) != self._requested_artifact_kinds
+            or self._requested_artifact_kinds not in (frozenset({"prototype"}), frozenset({"prd", "prototype"}))
+        ):
+            return False
+        result_count, result_invalid = _successful_runtime_results(request.state, self._run_id, self._runtime_attempt_id)
+        if result_count or result_invalid:
+            return False
+        if self._requested_artifact_kinds == frozenset({"prototype"}):
+            return True
+        draft, index, invalid = _successful_prd_draft(request.state, self._run_id, self._runtime_attempt_id)
+        references, reference_invalid = _reference_progress(request.state, self._run_id, self._runtime_attempt_id)
+        stages, stage_invalid = _stage_progress(request.state, self._run_id, self._runtime_attempt_id)
+        if (
+            draft is None or index != 0 or invalid or reference_invalid or stage_invalid
+            or len(references) != len(PRD_REFERENCE_FILES) or stages != len(PRD_STAGE_SEQUENCE)
+        ):
+            return False
+        completed, _ = _completed_tool_calls(request.state)
+        messages = _state_messages(request.state)
+        stage_calls = [
+            call for call in completed
+            if call["name"] == GENERATION_STAGE_TOOL_NAME
+            and _tool_succeeded(call["response"])
+            and _value(call["response"], "name") == GENERATION_STAGE_TOOL_NAME
+            and call["args"].get("stage") in PRD_STAGE_SEQUENCE
+            and _value(_value(call["response"], "artifact"), "protocol") == _PRD_STAGE_PROTOCOL
+            and _value(_value(call["response"], "artifact"), "stage") == call["args"]["stage"]
+            and _workbench_call_is_bound(_value(call["response"], "artifact"), call["id"], self._run_id, self._runtime_attempt_id)
+        ]
+        if len(stage_calls) != len(PRD_STAGE_SEQUENCE):
+            return False
+        for stage_index, stage_call in enumerate(stage_calls):
+            before_stage = {"messages": messages[:stage_call["message_index"]]}
+            if _stage_progress(before_stage, self._run_id, self._runtime_attempt_id) != (stage_index, False):
+                return False
+            if stage_index == 1:
+                preceding_references, preceding_invalid = _reference_progress(before_stage, self._run_id, self._runtime_attempt_id)
+                if preceding_invalid or len(preceding_references) != len(PRD_REFERENCE_FILES):
+                    return False
+        for call in completed:
+            if _successful_prd_draft_from_call(call, self._run_id, self._runtime_attempt_id) != (draft, 0):
+                continue
+            before_draft = {"messages": messages[:call["message_index"]]}
+            if _stage_progress(before_draft, self._run_id, self._runtime_attempt_id) != (len(PRD_STAGE_SEQUENCE), False):
+                return False
+            artifact = _value(call["response"], "artifact")
+            if (
+                _value(call["response"], "name") != ARTIFACT_DRAFT_TOOL_NAME
+                or type(call["args"].get("artifact_index")) is not int or call["args"]["artifact_index"] != 0
+                or call["args"].get("draft") != draft
+                or not isinstance(artifact.get("draftChecksum"), str)
+                or re.fullmatch(r"[0-9a-f]{64}", artifact["draftChecksum"]) is None
+            ):
+                return False
+            envelope = {key: artifact.get(key) for key in (
+                "protocol", "runId", "runtimeAttemptId", "toolCallId", "artifactIndex", "ok", "draftChecksum",
+            )}
+            try:
+                # The trusted Draft tool uses this Python serialization for its
+                # metadata envelope. Its draftChecksum uses Node canonicalize;
+                # recomputing that body digest with Python would reject valid
+                # floats and Unicode keys. The accepted body must instead match
+                # its causal declared args; final validation remains authoritative.
+                encoded = json.dumps(envelope, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False).encode("utf-8")
+                return hashlib.sha256(encoded).hexdigest() == artifact.get("checksum")
+            except (TypeError, ValueError):
+                return False
+        return False
 
     def _linked_recovery_scope(self, runtime: Any) -> bool:
         context = _value(runtime, "context")
@@ -1585,6 +1712,12 @@ class WorkbenchToolScopeMiddleware(AgentMiddleware[AgentState]):
             system_message = overrides.get("system_message", request.system_message)
             system_text = system_message.text if system_message is not None else ""
             overrides["system_message"] = SystemMessage(content=f"{system_text.rstrip()}\n\n{repair_policy}".strip())
+        if self._prototype_transport_ready(request):
+            transport_context = _prototype_transport_reference_context()
+            system_message = overrides.get("system_message", request.system_message)
+            system_text = system_message.text if system_message is not None else ""
+            if transport_context not in system_text:
+                overrides["system_message"] = SystemMessage(content=f"{system_text.rstrip()}\n\n{transport_context}".strip())
         scoped_request = request if not overrides else request.override(**overrides)
         return _provider_safe_tool_messages(scoped_request)
 
