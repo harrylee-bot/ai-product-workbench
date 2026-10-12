@@ -28,6 +28,8 @@ def workbench_artifact_draft_publish(
 
     Call this after an Artifact becomes complete enough to render. Publish another
     checkpoint only after its renderable content materially changes.
+    A rejected draft is not accepted: correct the returned issues and publish the
+    complete repaired draft in this run. Do not stop and ask the user to retry.
 
     Args:
         artifact_index: Stable zero-based index used by the final Runtime result.
@@ -99,6 +101,21 @@ def workbench_artifact_draft_publish(
 
 
 def _artifact_draft_repair_instruction(candidate: Any, issues: list[Any]) -> str:
+    misplaced_sections = _misplaced_prd_sections(candidate, issues)
+    if misplaced_sections:
+        moves = "; ".join(
+            f"content.sections.introduction.{name} to content.sections.{name}"
+            for name in misplaced_sections
+        )
+        return (
+            f"Move each complete existing section object: {moves}. "
+            "These sections must be siblings of introduction, not children. "
+            "Preserve their entire contents and every other valid field; remove "
+            "only the misplaced copies from introduction. No draft was accepted. "
+            "Correct any remaining returned issues and publish the complete repaired "
+            "draft directly in this run. Do not repeat generation stages, call "
+            "read_file again, resubmit an unchanged candidate, or ask the user to retry."
+        )
     if _has_prd_shape_failure(candidate, issues):
         return (
             "Repair the invalid top-level PRD structure using the workbench.prd.v2 "
@@ -115,7 +132,9 @@ def _artifact_draft_repair_instruction(candidate: Any, issues: list[Any]) -> str
         "No draft was accepted. Do not resubmit an unchanged candidate: the same "
         "candidateChecksum will produce the same validation issues. Correct an "
         "identified field before publishing again; if the same issue persists, "
-        "re-read its contract and compare the named field's value and type."
+        "compare the named field's value and type with the contract already provided. "
+        "Publish the repaired draft directly; do not repeat generation stages or "
+        "call read_file again, and do not stop merely to ask the user to retry."
     )
     if _has_checkbox_initial_value_failure(candidate, issues):
         instruction += (
@@ -125,6 +144,38 @@ def _artifact_draft_repair_instruction(candidate: Any, issues: list[Any]) -> str
             "checked state and existing binding ids; do not choose a new default."
         )
     return instruction
+
+
+def _misplaced_prd_sections(candidate: Any, issues: list[Any]) -> list[str]:
+    if (
+        not isinstance(candidate, dict)
+        or candidate.get("kind") != "prd"
+        or candidate.get("schemaVersion") != 2
+    ):
+        return []
+    content = candidate.get("content")
+    sections = content.get("sections") if isinstance(content, dict) else None
+    introduction = sections.get("introduction") if isinstance(sections, dict) else None
+    if not isinstance(introduction, dict):
+        return []
+    if not any(
+        isinstance(issue, dict)
+        and issue.get("code") == "unrecognized_keys"
+        and issue.get("path") == ["content", "sections", "introduction"]
+        for issue in issues
+    ):
+        return []
+    return [
+        name for name in ("businessRequirements", "degradation", "safetyBaseline")
+        if name not in sections
+        and isinstance(introduction.get(name), dict)
+        and any(
+            isinstance(issue, dict)
+            and issue.get("code") == "invalid_type"
+            and issue.get("path") == ["content", "sections", name]
+            for issue in issues
+        )
+    ]
 
 
 def _has_checkbox_initial_value_failure(candidate: Any, issues: list[Any]) -> bool:

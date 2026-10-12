@@ -15,7 +15,7 @@ import hashlib
 import json
 import posixpath
 import re
-from typing import Any
+from typing import Annotated, Any
 
 try:
     from typing import override
@@ -31,10 +31,12 @@ try:
         ModelCallResult,
         ModelRequest,
         ModelResponse,
+        PrivateStateAttr,
         hook_config,
     )
 except ImportError:  # pragma: no cover - compatibility for the focused contract stub.
     from langchain.agents.middleware.types import ModelCallResult, ModelRequest, ModelResponse
+    PrivateStateAttr = object()
 
     class ExtendedModelResponse:
         def __init__(self, *, model_response: Any, command: Any):
@@ -157,6 +159,7 @@ This PRD-only Workbench Run cannot resume free-form clarification. The ask_clari
 </workbench_prd_clarification_policy>"""
 _LINKED_PRD_SYSTEM_POLICY = """<workbench_linked_prd_policy>
 This Workbench Run requests a linked PRD and Prototype. Free-form clarification is unavailable; record conservative typed assumptions for unsupported behavior. Complete the PRD reference reads and all PRD stages, then publish exactly one PRD Draft at artifact_index 0. Keep that Draft unchanged. Continue with the Prototype stages and a complete Prototype Draft at artifact_index 1 based on that PRD. Finally submit one complete Result containing both exact Drafts in that order. A PRD Draft alone does not finish this Run; there is no automatic PRD-only submission.
+The read_file tool accepts only the four fixed PRD reference paths, only after collecting-prd-context and before structuring-prd. It cannot read Prototype references. After a Draft validation rejection, use the already-read contract, repair the reported fields while preserving all other content, and call workbench_artifact_draft_publish again with the complete repaired Draft. Do not repeat completed stages or reference reads, and do not stop with a request for the user to retry.
 </workbench_linked_prd_policy>"""
 _PROTOTYPE_STAGE_SYSTEM_POLICY = """<workbench_prototype_stage_policy>
 This Prototype-only Workbench Run must keep Prototype publication tools scoped to the
@@ -179,6 +182,88 @@ _WORKBENCH_TOOL_NAMES = frozenset(
         *PROTOTYPE_ONLY_TOOL_NAMES,
     }
 )
+_LINKED_DRAFT_RECOVERY_KEY = "workbench_linked_draft_recovery"
+_LINKED_DRAFT_RECOVERY_LIMIT = 2
+
+
+class WorkbenchToolScopeState(AgentState, total=False):
+    # Checkpointed control state cannot be supplied through the graph input or
+    # exposed as product output. Never use a HumanMessage as a retry counter:
+    # it would reset the current-turn stage and reference evidence.
+    workbench_linked_draft_recovery: Annotated[dict[str, Any], PrivateStateAttr]
+
+
+def _ordinary_model_stop(message: Any) -> bool:
+    if not _is_ai_message(message) or _message_tool_calls(message):
+        return False
+    additional = _value(message, "additional_kwargs") or {}
+    metadata = _value(message, "response_metadata") or {}
+    if not isinstance(additional, Mapping) or not isinstance(metadata, Mapping):
+        return False
+    if (
+        _value(message, "invalid_tool_calls")
+        or additional.get("tool_calls")
+        or additional.get("function_call")
+        or additional.get("deerflow_error_fallback")
+        or additional.get("safety_termination")
+        or additional.get("error")
+        or additional.get("refusal")
+        or metadata.get("refusal")
+        or metadata.get("safety_termination")
+        or metadata.get("error")
+        or metadata.get("deerflow_error_fallback")
+    ):
+        return False
+    reasons = [
+        container[key] for container in (metadata, additional)
+        for key in ("finish_reason", "stop_reason") if container.get(key) is not None
+    ]
+    if not reasons or any(reason not in ("stop", "end_turn") for reason in reasons):
+        return False
+    content = _value(message, "content")
+    if isinstance(content, list) and any(
+        isinstance(block, Mapping) and block.get("type") == "refusal" for block in content
+    ):
+        return False
+    text = content if isinstance(content, str) else "\n".join(
+        block if isinstance(block, str) else str(block.get("text", ""))
+        for block in content or [] if isinstance(block, (str, Mapping))
+    )
+    # These upstream middleware stops currently have no structured marker.
+    return not any(marker in text for marker in (
+        "[TOKEN BUDGET EXCEEDED]", "[FORCED STOP]", "[LOOP DETECTED]",
+    ))
+
+
+def _unrepaired_linked_draft(state: Any, run_id: str, attempt_id: str) -> dict[str, Any] | None:
+    completed, invalid = _completed_tool_calls(state)
+    if invalid:
+        return None
+    rejected: dict[int, dict[str, Any]] = {}
+    for call in completed:
+        artifact = _value(call["response"], "artifact")
+        if not _tool_succeeded(call["response"]) or not _workbench_call_is_bound(
+            artifact, call["id"], run_id, attempt_id,
+        ) or not isinstance(artifact, Mapping):
+            continue
+        if artifact.get("protocol") == _PRD_RESULT_PROTOCOL and artifact.get("ok") is True:
+            return None
+        if call["name"] != ARTIFACT_DRAFT_TOOL_NAME or artifact.get("protocol") != _PRD_DRAFT_PROTOCOL:
+            continue
+        index = artifact.get("artifactIndex")
+        candidate = call["args"].get("draft")
+        if (
+            type(index) is not int or index not in (0, 1)
+            or call["args"].get("artifact_index") != index
+            or not isinstance(candidate, Mapping)
+            or candidate.get("kind") != ("prd" if index == 0 else "prototype")
+        ):
+            continue
+        if artifact.get("ok") is True:
+            rejected.pop(index, None)
+        elif artifact.get("ok") is False and isinstance(artifact.get("issues"), list) and artifact["issues"]:
+            rejected[index] = {"toolCallId": call["id"], "artifactIndex": index, "responseIndex": call["response_index"]}
+    return max(rejected.values(), key=lambda item: item["responseIndex"], default=None)
 
 
 def _is_llm_error_fallback_message(message: Any) -> bool:
@@ -1303,6 +1388,8 @@ def _error_tool_message(request: ToolCallRequest, code: str, instruction: str) -
 class WorkbenchToolScopeMiddleware(AgentMiddleware[AgentState]):
     """Apply request-scoped Workbench declarations to model and ToolNode calls."""
 
+    state_schema = WorkbenchToolScopeState
+
     def __init__(
         self,
         canvas_policy: Any = None,
@@ -1328,6 +1415,9 @@ class WorkbenchToolScopeMiddleware(AgentMiddleware[AgentState]):
         self._prototype_stage_gate_enabled = False
         self._prd_gate_enabled = normalized_kinds is not None and "prd" in normalized_kinds
         self._prd_auto_enabled = normalized_kinds == ["prd"]
+        self._linked_draft_recovery_enabled = (
+            normalized_kinds is not None and set(normalized_kinds) == {"prd", "prototype"}
+        )
         self._knowledge_catalog_bound = isinstance(knowledge_enabled, bool)
         self._knowledge_enabled = knowledge_enabled is True
         self._run_id: str | None = None
@@ -1343,6 +1433,104 @@ class WorkbenchToolScopeMiddleware(AgentMiddleware[AgentState]):
             )
         ):
             self._run_id, self._runtime_attempt_id = run_scope
+
+    def _linked_recovery_scope(self, runtime: Any) -> bool:
+        context = _value(runtime, "context")
+        scope = _value(context, "workbench")
+        kinds = normalize_workbench_requested_artifact_kinds(_value(scope, "requestedArtifactKinds"))
+        return bool(
+            self._linked_draft_recovery_enabled and self._run_id and self._runtime_attempt_id
+            and _value(scope, "runId") == self._run_id
+            and _value(scope, "runtimeAttemptId") == self._runtime_attempt_id
+            and kinds is not None and set(kinds) == {"prd", "prototype"}
+        )
+
+    def _linked_recovery_marker(self, state: Any) -> Mapping[str, Any] | None:
+        marker = _value(state, _LINKED_DRAFT_RECOVERY_KEY)
+        if not isinstance(marker, Mapping) or (
+            marker.get("runId"), marker.get("runtimeAttemptId")
+        ) != (self._run_id, self._runtime_attempt_id):
+            return None
+        if (
+            marker.get("protocol") != "workbench.linked-draft-recovery.v1"
+            or type(marker.get("count")) is not int
+            or not 1 <= marker["count"] <= _LINKED_DRAFT_RECOVERY_LIMIT
+            or any(not isinstance(marker.get(key), str) or not marker[key] for key in ("messageId", "toolCallId", "taskId"))
+            or type(marker.get("artifactIndex")) is not int or marker["artifactIndex"] not in (0, 1)
+            or ("exhausted" in marker and type(marker["exhausted"]) is not bool)
+        ):
+            raise ValueError("WORKBENCH_LINKED_DRAFT_REPAIR_STATE_INVALID")
+        return marker
+
+    def _recover_linked_draft_stop(self, state: AgentState, runtime: Any) -> dict[str, Any] | None:
+        if (
+            not self._linked_recovery_scope(runtime)
+            or state.get("jump_to") is not None
+            or state.get("__interrupt__")
+            or state.get("interrupts")
+            or _value(_value(runtime, "control"), "drain_requested")
+        ):
+            return None
+        messages = _state_messages(state)
+        if not messages or not _ordinary_model_stop(messages[-1]):
+            return None
+        message_id = _value(messages[-1], "id")
+        task_id = _value(_value(runtime, "execution_info"), "task_id")
+        if any(not isinstance(value, str) or not value for value in (message_id, task_id)):
+            return None
+        rejected = _unrepaired_linked_draft(state, self._run_id, self._runtime_attempt_id)
+        if rejected is None:
+            return None
+        marker = self._linked_recovery_marker(state)
+        if marker is not None and marker.get("exhausted") is True:
+            return {"jump_to": "end"}
+        # Provider message IDs can be reused. Only the trusted graph task ID
+        # distinguishes replay of this hook from a new model/after-model turn.
+        if marker is not None and marker["taskId"] == task_id:
+            return {"jump_to": "model"}
+        count = marker["count"] if marker is not None else 0
+        if count >= _LINKED_DRAFT_RECOVERY_LIMIT:
+            # End the graph with the original rejection intact. The Worker
+            # diagnoses that trusted failed Draft instead of losing the cause
+            # behind a generic provider execution error. No Result is created.
+            return {
+                "jump_to": "end",
+                _LINKED_DRAFT_RECOVERY_KEY: {
+                    **marker, "messageId": message_id, "taskId": task_id, "exhausted": True,
+                    "code": "WORKBENCH_LINKED_DRAFT_REPAIR_EXHAUSTED",
+                },
+            }
+        return {
+            "jump_to": "model",
+            _LINKED_DRAFT_RECOVERY_KEY: {
+                "protocol": "workbench.linked-draft-recovery.v1",
+                "runId": self._run_id, "runtimeAttemptId": self._runtime_attempt_id,
+                "count": count + 1, "messageId": message_id, "taskId": task_id, "exhausted": False,
+                "toolCallId": rejected["toolCallId"], "artifactIndex": rejected["artifactIndex"],
+            },
+        }
+
+    def _linked_repair_policy(self, request: ModelRequest) -> str | None:
+        if not self._linked_recovery_scope(request.runtime):
+            return None
+        marker = self._linked_recovery_marker(request.state)
+        messages = _state_messages(request.state)
+        if marker is None or marker.get("exhausted") or not messages or _value(messages[-1], "id") != marker["messageId"]:
+            return None
+        rejected = _unrepaired_linked_draft(request.state, self._run_id, self._runtime_attempt_id)
+        if rejected is None or rejected["toolCallId"] != marker["toolCallId"]:
+            return None
+        return (
+            "<workbench_linked_draft_repair>\n"
+            f"The Draft at artifact_index {marker['artifactIndex']} was rejected, and no complete Result exists. "
+            "Continue this Run now: repair the issue paths in the last rejected complete Draft, preserve every "
+            "other field, and call workbench_artifact_draft_publish with that complete repaired Draft. "
+            "Do not repeat completed generation stages or read_file calls. read_file accepts only the four PRD "
+            "references during collecting-prd-context; use their already-read contract, not a new reference read. "
+            "Do not ask the user to retry or end with a prose summary. After validation succeeds, continue the "
+            "remaining linked workflow and submit both validated Drafts through workbench_runtime_result_submit.\n"
+            "</workbench_linked_draft_repair>"
+        )
 
     def _filter_tools(self, request: ModelRequest) -> ModelRequest:
         visible = []
@@ -1392,6 +1580,11 @@ class WorkbenchToolScopeMiddleware(AgentMiddleware[AgentState]):
                     if system_text.strip()
                     else _PROTOTYPE_STAGE_SYSTEM_POLICY
                 ))
+        repair_policy = self._linked_repair_policy(request)
+        if repair_policy is not None:
+            system_message = overrides.get("system_message", request.system_message)
+            system_text = system_message.text if system_message is not None else ""
+            overrides["system_message"] = SystemMessage(content=f"{system_text.rstrip()}\n\n{repair_policy}".strip())
         scoped_request = request if not overrides else request.override(**overrides)
         return _provider_safe_tool_messages(scoped_request)
 
@@ -2131,11 +2324,11 @@ class WorkbenchToolScopeMiddleware(AgentMiddleware[AgentState]):
             self._catalog_observation(scoped_request),
         )
 
-    @hook_config(can_jump_to=["end"])
-    def after_model(self, state: AgentState, runtime: Any = None) -> dict[str, str] | None:
+    @hook_config(can_jump_to=["end", "model"])
+    def after_model(self, state: AgentState, runtime: Any = None) -> dict[str, Any] | None:
         if self._workbench_run_enabled and _contains_llm_error_fallback(state.get("messages")):
             return {"jump_to": "end"}
-        return None
+        return self._recover_linked_draft_stop(state, runtime)
 
     @override
     def wrap_tool_call(
@@ -2212,15 +2405,15 @@ class WorkbenchToolScopeMiddleware(AgentMiddleware[AgentState]):
             self._catalog_observation(scoped_request),
         )
 
-    @hook_config(can_jump_to=["end"])
+    @hook_config(can_jump_to=["end", "model"])
     async def aafter_model(
         self,
         state: AgentState,
         runtime: Any = None,
-    ) -> dict[str, str] | None:
+    ) -> dict[str, Any] | None:
         if self._workbench_run_enabled and _contains_llm_error_fallback(state.get("messages")):
             return {"jump_to": "end"}
-        return None
+        return self._recover_linked_draft_stop(state, runtime)
 
     @override
     async def awrap_tool_call(

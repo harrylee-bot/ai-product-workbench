@@ -4062,6 +4062,8 @@ function controlledRuntimePublicErrorCode(error: unknown): string | null {
     if (candidate instanceof RuntimeCancelledError) return "RUNTIME_CANCELLED";
     if (candidate instanceof RuntimeSubmissionUnknownError) return candidate.code;
     if (candidate.message === "RUNTIME_PROVIDER_TEMPORARILY_UNAVAILABLE") return candidate.message;
+    if (candidate.message === "RUNTIME_RESULT_SUBMISSION_MISSING"
+      || candidate.message === "RUNTIME_ARTIFACT_DRAFT_VALIDATION_FAILED") return candidate.message;
     if (/^KNOWLEDGE_[A-Z_]+$/u.test(candidate.message)) return candidate.message;
     seen.add(candidate);
     candidate = candidate.cause;
@@ -4072,6 +4074,9 @@ function controlledRuntimePublicErrorCode(error: unknown): string | null {
 export function isRetryableRuntimeError(error: unknown) {
   if (error instanceof RuntimeProviderContentFilterError) return false;
   if (error instanceof RuntimeLivenessError) return error.retryable;
+  const controlledCode = controlledRuntimePublicErrorCode(error);
+  if (controlledCode === "RUNTIME_RESULT_SUBMISSION_MISSING"
+    || controlledCode === "RUNTIME_ARTIFACT_DRAFT_VALIDATION_FAILED") return false;
   if (knownRuntimeProviderStateErrorCode(error)) return false;
   if (!(error instanceof Error)) return true;
   if (error.name === "ZodError") return false;

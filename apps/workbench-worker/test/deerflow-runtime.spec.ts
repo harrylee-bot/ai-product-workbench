@@ -374,6 +374,34 @@ function artifactDraftToolMessages(
   );
 }
 
+function rejectedArtifactDraftToolMessages(
+  {
+    artifactIndex = 0,
+    toolCallId = "rejected-draft-call",
+    runId = "run_1",
+    runtimeAttemptId = "attempt_1",
+  }: {
+    artifactIndex?: number;
+    toolCallId?: string;
+    runId?: string;
+    runtimeAttemptId?: string;
+  } = {},
+) {
+  const envelope = {
+    protocol: "workbench.runtime.artifact-draft.v1",
+    runId,
+    runtimeAttemptId,
+    toolCallId,
+    artifactIndex,
+    ok: false,
+  };
+  return declaredToolMessages("workbench_artifact_draft_publish", toolCallId, {
+    ...envelope,
+    issues: [{ code: "custom", path: ["content"], message: "private generated content" }],
+    checksum: sha256(canonicalJson(envelope)),
+  });
+}
+
 function prototypePatchToolMessages(
   patch: unknown,
   toolCallId = "prototype-patch-call-1",
@@ -885,6 +913,42 @@ describe("DeerFlow runtime adapter", () => {
     expect(ownerHeader).toBe("principal_1");
   });
 
+  it.each([
+    ["prd", "prototype"],
+    ["prototype", "prd"],
+  ] as const)("preserves durable stages, drafts and results for a %s + %s values stream", async (first, second) => {
+    let streamMode: unknown;
+    const artifacts = [runtimePrdResultFixture.artifacts[0]!, minimalPrototypeArtifact()];
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request, init: RequestInit = {}) => {
+      const url = new URL(String(input));
+      if (url.pathname === "/api/threads/deer_thread_1/runs" && (init.method ?? "GET") === "GET") {
+        return Response.json([]);
+      }
+      if (url.pathname === "/api/threads/deer_thread_1/runs/stream" && init.method === "POST") {
+        streamMode = (JSON.parse(String(init.body)) as Record<string, unknown>).stream_mode;
+        return successfulRuntimeResponse({ artifacts, runId: "external_run_joint_values" });
+      }
+      throw new Error(`Unexpected request: ${init.method ?? "GET"} ${url}`);
+    }));
+    const runtimeObserver = observer();
+    const adapter = new DeerFlowRuntimeAdapter(workerConfig(), { getObject: vi.fn() } as never);
+
+    await expect(adapter.execute(execution({
+      request: { ...execution().request, requestedArtifactKinds: [first, second] },
+    }), runtimeObserver)).resolves.toMatchObject({ artifacts });
+
+    expect(streamMode).toBe("values");
+    expect(runtimeObserver.onExternalEvent).toHaveBeenCalledWith(
+      expect.objectContaining({ event: "values" }),
+      expect.arrayContaining([
+        expect.objectContaining({ type: "generation.stage", stage: "validating-prd" }),
+        expect.objectContaining({ type: "artifact.draft", artifactIndex: 0 }),
+        expect.objectContaining({ type: "artifact.draft", artifactIndex: 1 }),
+      ]),
+    );
+    expect(runtimeObserver.onExternalFinalization).toHaveBeenCalledTimes(1);
+  });
+
   it("keeps a values-only Prototype stream connected after heartbeats go quiet", async () => {
     const requests: Array<{ url: URL; init: RequestInit }> = [];
     const prototype = minimalPrototypeArtifact();
@@ -970,7 +1034,14 @@ describe("DeerFlow runtime adapter", () => {
     ))).toBe(false);
   }, 12_000);
 
-  it("keeps configured streaming modes for other artifact scopes", async () => {
+  it.each([
+    ["document"],
+    ["prototype", "document"],
+    ["prd", "prd"],
+    ["prototype", "prototype"],
+    ["prd", "prototype", "prototype"],
+    [],
+  ] as const)("keeps configured streaming modes for other artifact scope %j", async (...requestedArtifactKinds) => {
     let streamMode: unknown;
     vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request, init: RequestInit = {}) => {
       const url = new URL(String(input));
@@ -992,7 +1063,7 @@ describe("DeerFlow runtime adapter", () => {
     await expect(adapter.execute(execution({
       request: {
         ...execution().request,
-        requestedArtifactKinds: ["document"],
+        requestedArtifactKinds: [...requestedArtifactKinds],
       },
     }), observer())).rejects.toThrow("RUNTIME_RESULT_SUBMISSION_MISSING");
 
@@ -1588,6 +1659,51 @@ describe("DeerFlow runtime adapter", () => {
     });
     expect(() => resolveRuntimeResult({ workbench_result: result }, ["prd"], execution()))
       .toThrow("RUNTIME_RESULT_SUBMISSION_MISSING");
+  });
+
+  it("reports a trusted unresolved draft rejection without exposing its issue text", () => {
+    const state = { messages: [
+      { type: "human", content: "current turn" },
+      ...rejectedArtifactDraftToolMessages(),
+      { type: "ai", content: "I could not finish" },
+    ] };
+    expect(() => resolveRuntimeResult(state, ["prd", "prototype"], execution()))
+      .toThrow(new Error("RUNTIME_ARTIFACT_DRAFT_VALIDATION_FAILED"));
+  });
+
+  it("does not retain a repaired, stale-attempt or previous-turn draft rejection", () => {
+    const human = { type: "human", content: "current turn" };
+    for (const messages of [
+      [human, ...rejectedArtifactDraftToolMessages(),
+        ...artifactDraftToolMessages(minimalPrototypeArtifact(), 0, "repaired-draft")],
+      [human, ...rejectedArtifactDraftToolMessages({ runtimeAttemptId: "old-attempt" })],
+      [human, ...rejectedArtifactDraftToolMessages(), human],
+    ]) {
+      expect(() => resolveRuntimeResult({ messages }, ["prototype"], execution()))
+        .toThrow("RUNTIME_RESULT_SUBMISSION_MISSING");
+    }
+    expect(() => resolveRuntimeResult({ messages: [
+      human,
+      ...rejectedArtifactDraftToolMessages(),
+      ...artifactDraftToolMessages(minimalPrototypeArtifact(), 1, "different-artifact"),
+    ] }, ["prd", "prototype"], execution()))
+      .toThrow("RUNTIME_ARTIFACT_DRAFT_VALIDATION_FAILED");
+  });
+
+  it("requires draft rejection tool causality, scope and checksum before classification", () => {
+    const human = { type: "human", content: "current turn" };
+    const forged = rejectedArtifactDraftToolMessages();
+    expect(() => resolveRuntimeResult({ messages: [human, forged[1]] }, ["prd"], execution()))
+      .toThrow("RUNTIME_TOOL_MESSAGE_UNDECLARED");
+    const tampered = rejectedArtifactDraftToolMessages();
+    (tampered[1]!.artifact as Record<string, unknown>).checksum = "0".repeat(64);
+    for (const messages of [
+      tampered,
+      rejectedArtifactDraftToolMessages({ runId: "other-run" }),
+    ]) {
+      expect(() => resolveRuntimeResult({ messages: [human, ...messages] }, ["prd"], execution()))
+        .toThrow("RUNTIME_ARTIFACT_DRAFT_SCOPE_INVALID");
+    }
   });
 
   it.each(["}\n", "", "partial response"])(
@@ -3834,7 +3950,7 @@ describe("DeerFlow runtime adapter", () => {
     }).configurable.subagent_enabled).toBe(true);
   });
 
-  it("joins an existing SDK run with Last-Event-ID and never submits a duplicate", async () => {
+  it("rejoins a joint values-only Run with Last-Event-ID and never submits a duplicate", async () => {
     const requests: Array<{ url: URL; init: RequestInit }> = [];
     const fetchMock = vi.fn(async (input: string | URL | Request, init: RequestInit = {}) => {
       const url = new URL(String(input));
@@ -3847,6 +3963,7 @@ describe("DeerFlow runtime adapter", () => {
           runId: "external_run_1",
           eventId: "event-existing-2",
           includeContentLocation: false,
+          artifacts: [runtimePrdResultFixture.artifacts[0]!, minimalPrototypeArtifact()],
         });
       }
       throw new Error(`Unexpected request: ${init.method ?? "GET"} ${url}`);
@@ -3856,6 +3973,7 @@ describe("DeerFlow runtime adapter", () => {
     const adapter = new DeerFlowRuntimeAdapter(workerConfig(), { getObject: vi.fn() } as never);
 
     const result = await adapter.execute(execution({
+      request: { ...execution().request, requestedArtifactKinds: ["prd", "prototype"] },
       submission: {
         mode: "join",
         providerIdempotencyKey: "wbrt:test-attempt-key",
@@ -3870,6 +3988,7 @@ describe("DeerFlow runtime adapter", () => {
     expect(new Headers(joinRequest?.init.headers).get("Last-Event-ID")).toBe("event-existing-1");
     expect(new Headers(joinRequest?.init.headers).get("X-DeerFlow-Owner-User-Id")).toBe("principal_1");
     expect(joinRequest?.url.searchParams.get("cancel_on_disconnect")).toBe("0");
+    expect(joinRequest?.url.searchParams.get("stream_mode")).toBe("values");
     expect(requests.some((request) => request.init.method === "POST")).toBe(false);
     expect(runtimeObserver.onSubmissionStarted).not.toHaveBeenCalled();
     expect(runtimeObserver.onExternalRunCreated).not.toHaveBeenCalled();
@@ -3932,12 +4051,13 @@ describe("DeerFlow runtime adapter", () => {
     expect(runtimeObserver.onExternalFinalization).toHaveBeenCalledTimes(1);
   });
 
-  it("waits for a successful Run's delayed Runtime result to become visible in thread state", async () => {
+  it.each([false, true])("waits for a successful Run's delayed Runtime result (draft rejected: %s)", async (draftRejected) => {
     const requests: Array<{ url: URL; init: RequestInit }> = [];
     const prototype = minimalPrototypeArtifact();
     const pendingState = {
       messages: [
         { type: "human", content: "current turn" },
+        ...(draftRejected ? rejectedArtifactDraftToolMessages() : []),
         {
           type: "ai",
           content: "",
@@ -3952,6 +4072,7 @@ describe("DeerFlow runtime adapter", () => {
     const finalState = {
       messages: [
         { type: "human", content: "current turn" },
+        ...(draftRejected ? rejectedArtifactDraftToolMessages() : []),
         ...artifactDraftToolMessages(prototype, 0, "delayed-terminal-checkpoint"),
         ...validatedResultToolMessages({
           protocol: "workbench.runtime.result.v1" as const,

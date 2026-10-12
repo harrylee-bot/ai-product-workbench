@@ -1140,7 +1140,7 @@ export class DeerFlowRuntimeAdapter implements RuntimePort {
           resolveRuntimeResult(finalState, execution.request.requestedArtifactKinds, execution);
           break;
         } catch (error) {
-          if (!isRuntimeResultSubmissionMissing(error)) throw error;
+          if (!isRuntimeResultIncomplete(error)) throw error;
         }
         const remainingMs = settleDeadline - performance.now();
         if (remainingMs <= 0) break;
@@ -1474,8 +1474,11 @@ export class DeerFlowRuntimeAdapter implements RuntimePort {
     // tools found in values snapshots. Persisting every token-sized messages event
     // creates enough backpressure to outrun DeerFlow's retained stream buffer.
     if (
-      requestedArtifactKinds.length === 1
-      && (requestedArtifactKinds[0] === "prd" || requestedArtifactKinds[0] === "prototype")
+      (requestedArtifactKinds.length === 1
+        && (requestedArtifactKinds[0] === "prd" || requestedArtifactKinds[0] === "prototype"))
+      || (requestedArtifactKinds.length === 2
+        && requestedArtifactKinds.includes("prd")
+        && requestedArtifactKinds.includes("prototype"))
     ) {
       return "values";
     }
@@ -1909,8 +1912,11 @@ function abortError(signal?: AbortSignal) {
   return signal?.reason instanceof Error ? signal.reason : new Error("RUNTIME_ABORTED");
 }
 
-function isRuntimeResultSubmissionMissing(error: unknown) {
-  return error instanceof Error && error.message === "RUNTIME_RESULT_SUBMISSION_MISSING";
+function isRuntimeResultIncomplete(error: unknown) {
+  return error instanceof Error && (
+    error.message === "RUNTIME_RESULT_SUBMISSION_MISSING"
+    || error.message === "RUNTIME_ARTIFACT_DRAFT_VALIDATION_FAILED"
+  );
 }
 
 function delayWithAbort(delayMs: number, signal: AbortSignal): Promise<void> {
@@ -2033,7 +2039,16 @@ export function resolveRuntimeResult(
 ): RuntimeResult {
   assertNoProviderContentFilter(finalState);
   const submissions = validatedRuntimeSubmissions(finalState, execution);
-  if (submissions.length === 0) throw new Error("RUNTIME_RESULT_SUBMISSION_MISSING");
+  if (submissions.length === 0) {
+    // Preserve the trusted tool's rejection without publishing its potentially
+    // private issue text. A later accepted draft clears that artifact's failure.
+    const rejectedDraftIndexes = new Set<number>();
+    validatedArtifactDraftSubmissions(finalState, execution, rejectedDraftIndexes);
+    if (rejectedDraftIndexes.size > 0) {
+      throw new Error("RUNTIME_ARTIFACT_DRAFT_VALIDATION_FAILED");
+    }
+    throw new Error("RUNTIME_RESULT_SUBMISSION_MISSING");
+  }
   if (submissions.length !== 1) throw new Error("RUNTIME_RESULT_SUBMISSION_MULTIPLE");
   const result = submissions[0]!.result;
   const missing = requestedKinds.filter((kind) => !result.artifacts.some((artifact) => artifact.kind === kind));
@@ -2124,6 +2139,7 @@ function validatedRuntimeSubmissions(
 function validatedArtifactDraftSubmissions(
   finalState: unknown,
   execution: Pick<RuntimeExecution, "runId" | "runtimeAttemptId">,
+  rejectedDraftIndexes?: Set<number>,
 ) {
   const messages = runtimeMessages(finalState);
   const currentTurnStart = currentTurnStartIndex(messages);
@@ -2163,7 +2179,11 @@ function validatedArtifactDraftSubmissions(
       throw new Error("RUNTIME_ARTIFACT_DRAFT_SCOPE_INVALID");
     }
     if (parsed.data.runtimeAttemptId !== execution.runtimeAttemptId) continue;
-    if (!parsed.data.ok) continue;
+    if (!parsed.data.ok) {
+      rejectedDraftIndexes?.add(parsed.data.artifactIndex);
+      continue;
+    }
+    rejectedDraftIndexes?.delete(parsed.data.artifactIndex);
     submissions.push({
       artifactIndex: parsed.data.artifactIndex,
       draft: parsed.data.draft,

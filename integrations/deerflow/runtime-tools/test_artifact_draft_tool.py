@@ -34,6 +34,7 @@ sys.modules.update({
 
 from deerflow_workbench_tools.artifact_draft_tool import (
     _has_prd_shape_failure,
+    _misplaced_prd_sections,
     workbench_artifact_draft_publish,
 )
 
@@ -250,6 +251,58 @@ class ArtifactDraftToolTests(unittest.TestCase):
                 )
                 self.assertIn("tableOfContents.entries", response["repairInstruction"])
                 self.assertNotIn("draft", artifact)
+
+    def test_misplaced_prd_sections_are_rejected_then_preserved_by_explicit_repair(self) -> None:
+        for names in (
+            ("businessRequirements", "degradation", "safetyBaseline"),
+            ("degradation",),
+        ):
+            with self.subTest(names=names):
+                invalid = copy.deepcopy(self.prd_draft)
+                sections = invalid["content"]["sections"]
+                for name in names:
+                    sections["introduction"][name] = sections.pop(name)
+                before = copy.deepcopy(invalid)
+                content, artifact = workbench_artifact_draft_publish.func(self.prd_runtime, 0, invalid)
+                response = json.loads(content)
+                self.assertFalse(response["ok"])
+                self.assertNotIn("draft", artifact)
+                self.assertEqual(invalid, before)
+                self.assertEqual(_misplaced_prd_sections(invalid, response["issues"]), list(names))
+                for name in names:
+                    self.assertIn(
+                        f"content.sections.introduction.{name} to content.sections.{name}",
+                        response["repairInstruction"],
+                    )
+                self.assertIn("Do not repeat generation stages", response["repairInstruction"])
+                repaired = copy.deepcopy(invalid)
+                for name in names:
+                    repaired["content"]["sections"][name] = repaired["content"]["sections"]["introduction"].pop(name)
+                repaired_content, accepted = workbench_artifact_draft_publish.func(self.prd_runtime, 0, repaired)
+                self.assertTrue(json.loads(repaired_content)["ok"])
+                self.assertEqual(accepted["draft"], self.prd_draft)
+
+    def test_misplaced_section_guidance_never_overwrites_existing_or_wrong_type_fields(self) -> None:
+        for case in ("existing", "wrong_type", "missing_parent_issue", "missing_sibling_issue", "non_prd"):
+            with self.subTest(case=case):
+                invalid = copy.deepcopy(self.prd_draft)
+                sections = invalid["content"]["sections"]
+                sections["introduction"]["degradation"] = sections.pop("degradation")
+                issues = [
+                    {"code": "unrecognized_keys", "path": ["content", "sections", "introduction"]},
+                    {"code": "invalid_type", "path": ["content", "sections", "degradation"]},
+                ]
+                if case == "existing":
+                    sections["degradation"] = None
+                elif case == "wrong_type":
+                    sections["introduction"]["degradation"] = []
+                elif case == "missing_parent_issue":
+                    issues.pop(0)
+                elif case == "missing_sibling_issue":
+                    issues.pop()
+                else:
+                    invalid["kind"] = "prototype"
+                self.assertEqual(_misplaced_prd_sections(invalid, issues), [])
 
     def test_nested_prd_type_errors_and_extra_keys_need_only_local_repairs(self) -> None:
         for mutate in (

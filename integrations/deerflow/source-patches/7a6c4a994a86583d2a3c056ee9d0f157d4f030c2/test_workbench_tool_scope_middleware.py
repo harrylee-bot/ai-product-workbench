@@ -3,10 +3,12 @@ from __future__ import annotations
 import hashlib
 import importlib.util
 import copy
+import json
 from pathlib import Path
 import sys
 import types
 import unittest
+from typing import TypedDict
 
 
 PATCH_ROOT = Path(__file__).resolve().parent
@@ -24,7 +26,7 @@ def install_import_stubs() -> bool:
         def __class_getitem__(cls, _item):
             return cls
 
-    class AgentState(dict):
+    class AgentState(TypedDict, total=False):
         pass
 
     class SystemMessage:
@@ -77,6 +79,7 @@ spec = importlib.util.spec_from_file_location(
 if spec is None or spec.loader is None:
     raise RuntimeError("WORKBENCH_TOOL_SCOPE_TEST_IMPORT_FAILED")
 middleware_module = importlib.util.module_from_spec(spec)
+sys.modules[spec.name] = middleware_module
 spec.loader.exec_module(middleware_module)
 
 CANVAS_TOOL_NAMES = middleware_module.CANVAS_TOOL_NAMES
@@ -1301,6 +1304,262 @@ class WorkbenchToolScopeMiddlewareTests(unittest.TestCase):
         )
         result = middleware.wrap_tool_call(request, lambda _request: self.fail("handler called"))
         self.assertIn("WORKBENCH_PRD_DRAFT_REQUIRED", result.content)
+
+
+class LinkedDraftRecoveryTests(unittest.IsolatedAsyncioTestCase):
+    scope = {"runId": "run-auto", "runtimeAttemptId": "attempt-auto", "requestedArtifactKinds": ["prd", "prototype"]}
+
+    def middleware(self, kinds=None, scope=("run-auto", "attempt-auto")):
+        return WorkbenchToolScopeMiddleware(None, kinds or ["prd", "prototype"], run_scope=scope)
+
+    def runtime(self, scope=None, task_id="hook-task"):
+        return types.SimpleNamespace(context={"run_id": "external-provider-id", "workbench": scope or self.scope}, execution_info=types.SimpleNamespace(task_id=task_id))
+
+    def state(self):
+        state = automatic_prd_request().state
+        state["messages"] = state["messages"][:-2]
+        issues = [{"code": "invalid_type", "path": ["content", "sections", "businessRequirements"], "message": "Required"}]
+        append_tool_batch(state["messages"], [call("workbench_artifact_draft_publish", "rejected-draft", {
+            "artifact_index": 0, "draft": {"kind": "prd", "title": "Keep this title"},
+        })], [tool_message("workbench_artifact_draft_publish", "rejected-draft", json.dumps({
+            "protocol": "workbench.runtime.artifact-draft-ack.v1", "ok": False,
+            "artifactIndex": 0, "candidateChecksum": "a" * 64, "issues": issues,
+        }), artifact={
+            "protocol": "workbench.runtime.artifact-draft.v1", "ok": False,
+            "runId": "run-auto", "runtimeAttemptId": "attempt-auto", "toolCallId": "rejected-draft",
+            "artifactIndex": 0, "issues": issues,
+        })])
+        return state
+
+    def stop(self, state, message_id="ordinary-stop", **overrides):
+        message = {"type": "ai", "id": message_id, "content": "Please retry.",
+                   "tool_calls": [], "response_metadata": {"finish_reason": "stop"}, **overrides}
+        state["messages"].append(message)
+        return message
+
+    def apply(self, state, update):
+        self.assertIsNotNone(update)
+        self.assertEqual(update["jump_to"], "model")
+        self.assertNotIn("messages", update)
+        state.update({key: value for key, value in update.items() if key != "jump_to"})
+
+    async def test_rejected_draft_wrong_stage_then_repair_preserves_publication_gates(self):
+        for asynchronous in (False, True):
+            with self.subTest(asynchronous=asynchronous):
+                middleware = self.middleware()
+                state = self.state()
+                repeat = request_in_state(state["messages"], "workbench_generation_stage_update", "repeat-validating", {"stage": "validating-prd"})
+                blocked = middleware.wrap_tool_call(repeat, lambda _request: self.fail("repeated stage executed"))
+                self.assertIn("WORKBENCH_PRD_STAGE_ORDER_INVALID", blocked.content)
+                state["messages"].append(blocked)
+                self.stop(state)
+                update = await middleware.aafter_model(state, self.runtime()) if asynchronous else middleware.after_model(state, self.runtime())
+                self.apply(state, update)
+                request = FakeModelRequest([FakeTool("workbench_artifact_draft_publish")], state=state, context=self.runtime().context)
+
+                async def capture(scoped):
+                    return scoped
+
+                scoped = await middleware.awrap_model_call(request, capture) if asynchronous else middleware.wrap_model_call(request, lambda scoped: scoped)
+                self.assertIn("preserve every other field", scoped.system_message.text)
+                self.assertIn("Do not repeat completed generation stages", scoped.system_message.text)
+                self.assertIn("only the four PRD", scoped.system_message.text)
+                self.assertIsNone(request.system_message)
+                repaired = {"kind": "prd", "title": "Keep this title"}
+                retry = request_in_state(state["messages"], "workbench_artifact_draft_publish", "repaired-draft", {"artifact_index": 0, "draft": repaired})
+                accepted = middleware_module.ToolMessage(content='{"ok":true}', name="workbench_artifact_draft_publish", tool_call_id="repaired-draft", status="success", artifact={
+                    "protocol": "workbench.runtime.artifact-draft.v1", "ok": True,
+                    "runId": "run-auto", "runtimeAttemptId": "attempt-auto", "toolCallId": "repaired-draft",
+                    "artifactIndex": 0, "draft": repaired,
+                })
+
+                async def publish(_request):
+                    return accepted
+
+                result = await middleware.awrap_tool_call(retry, publish) if asynchronous else middleware.wrap_tool_call(retry, lambda _request: accepted)
+                self.assertIs(result, accepted)
+                state["messages"].append(result)
+                self.assertEqual(middleware_module._stage_progress(state, "run-auto", "attempt-auto"), (4, False))
+                self.assertEqual(middleware_module._successful_prd_drafts(state, "run-auto", "attempt-auto"), (1, False))
+                self.stop(state, "after-repair")
+                self.assertIsNone(middleware.after_model(state, self.runtime()))
+                self.assertEqual(sum(middleware_module._is_human_message(m) for m in state["messages"]), 1)
+                self.assertEqual(middleware_module._successful_runtime_results(state, "run-auto", "attempt-auto"), (0, False))
+
+    async def test_retry_budget_is_checkpointed_idempotent_and_survives_reconstruction(self):
+        state = self.state()
+        key = middleware_module._LINKED_DRAFT_RECOVERY_KEY
+        for count in (1, 2):
+            self.stop(state, f"stop-{count}")
+            middleware = self.middleware()
+            runtime = self.runtime(task_id=f"hook-task-{count}")
+            self.apply(state, await middleware.aafter_model(state, runtime))
+            self.assertEqual(state[key]["count"], count)
+            self.assertEqual(middleware.after_model(state, runtime), {"jump_to": "model"})
+            state = json.loads(json.dumps(state))
+        self.stop(state, "third-stop")
+        ended = self.middleware().after_model(state, self.runtime(task_id="third-hook"))
+        self.assertEqual(ended["jump_to"], "end")
+        self.assertEqual(ended[key]["count"], 2)
+        self.assertTrue(ended[key]["exhausted"])
+        self.assertEqual(ended[key]["code"], "WORKBENCH_LINKED_DRAFT_REPAIR_EXHAUSTED")
+        state[key] = ended[key]
+        self.assertEqual(await self.middleware().aafter_model(state, self.runtime()), {"jump_to": "end"})
+
+    def test_recovery_requires_exact_joint_and_matching_trusted_runtime(self):
+        state = self.state()
+        self.stop(state)
+        for kinds in (["prd"], ["prototype"], ["prd", "prototype", "document"], ["prd", "prd"]):
+            self.assertIsNone(self.middleware(kinds=kinds).after_model(state, self.runtime()))
+        for scope in (None, ("other", "attempt-auto"), ("run-auto", "other")):
+            self.assertIsNone(self.middleware(scope=scope).after_model(state, self.runtime()))
+        for runtime in (None, types.SimpleNamespace(context={}), self.runtime({**self.scope, "runtimeAttemptId": "other"})):
+            self.assertIsNone(self.middleware().after_model(state, runtime))
+        self.assertEqual(self.middleware(kinds=["prototype", "prd"]).after_model(state, self.runtime())["jump_to"], "model")
+
+    def test_old_attempt_budget_is_ignored_but_matching_malformed_budget_fails_closed(self):
+        state = self.state()
+        self.stop(state)
+        self.apply(state, self.middleware().after_model(state, self.runtime()))
+        key = middleware_module._LINKED_DRAFT_RECOVERY_KEY
+        marker = copy.deepcopy(state[key])
+        for bad_count in (True, -1, 0, 3, "1"):
+            state[key] = {**marker, "count": bad_count}
+            with self.assertRaisesRegex(ValueError, "WORKBENCH_LINKED_DRAFT_REPAIR_STATE_INVALID"):
+                self.middleware().after_model(state, self.runtime())
+        state[key] = {**marker, "runtimeAttemptId": "old-attempt", "count": 2}
+        self.assertEqual(self.middleware().after_model(state, self.runtime())[key]["count"], 1)
+
+    def test_no_rejection_unbound_rejection_and_completed_result_do_not_recover(self):
+        state = self.state()
+        rejected = state["messages"][-1]
+        for changes in ({"runId": "other"}, {"runtimeAttemptId": "other"}, {"toolCallId": "other"}, {"artifactIndex": 1}, {"ok": True}, {"issues": []}):
+            altered = copy.deepcopy(state)
+            altered["messages"][-1]["artifact"].update(changes)
+            self.stop(altered)
+            self.assertIsNone(self.middleware().after_model(altered, self.runtime()))
+        no_rejection = automatic_prd_request().state
+        self.stop(no_rejection)
+        self.assertIsNone(self.middleware().after_model(no_rejection, self.runtime()))
+        append_tool_batch(state["messages"], [call(RUNTIME_RESULT_TOOL_NAME, "final-result", {})], [tool_message(RUNTIME_RESULT_TOOL_NAME, "final-result", artifact={
+            "protocol": "workbench.runtime.validated-result.v1", "ok": True,
+            "runId": "run-auto", "runtimeAttemptId": "attempt-auto", "toolCallId": "final-result",
+        })])
+        self.stop(state)
+        self.assertIsNone(self.middleware().after_model(state, self.runtime()))
+        self.assertFalse(rejected["artifact"]["ok"])
+
+    def test_provider_safety_interrupt_and_tool_intent_never_restart(self):
+        endings = [
+            {"response_metadata": {}},
+            *[{"response_metadata": {"finish_reason": reason}} for reason in ("length", "content_filter", "SAFETY", "tool_calls")],
+            {"response_metadata": {"finish_reason": "stop", "stop_reason": "refusal"}},
+            {"additional_kwargs": {"stop_reason": "refusal"}},
+            *[{"additional_kwargs": {key: True}} for key in ("refusal", "safety_termination", "error")],
+            {"content": [{"type": "refusal", "refusal": "Refused"}]},
+            *[{"content": [{"type": "text", "text": marker}]} for marker in ("[TOKEN BUDGET EXCEEDED]", "[FORCED STOP]", "[LOOP DETECTED]")],
+            *[{"content": [{"type": "thinking", "thinking": "Reasoning"}, {"type": "text", "text": marker}]} for marker in ("[TOKEN BUDGET EXCEEDED]", "[FORCED STOP]", "[LOOP DETECTED]")],
+            {"invalid_tool_calls": [{"name": "workbench_artifact_draft_publish", "id": "invalid", "args": "{"}]},
+            {"additional_kwargs": {"tool_calls": [{"id": "raw"}]}},
+            {"additional_kwargs": {"function_call": {"name": "raw"}}},
+            {"tool_calls": [call("workbench_artifact_draft_publish", "pending", {})]},
+        ]
+        for ending in endings:
+            with self.subTest(ending=ending):
+                state = self.state()
+                self.stop(state, **ending)
+                self.assertIsNone(self.middleware().after_model(state, self.runtime()))
+        for boundary in ({"jump_to": "end"}, {"__interrupt__": ["pause"]}, {"interrupts": ["pause"]}):
+            state = self.state()
+            self.stop(state)
+            state.update(boundary)
+            self.assertIsNone(self.middleware().after_model(state, self.runtime()))
+        state = self.state()
+        self.stop(state)
+        runtime = self.runtime()
+        runtime.control = types.SimpleNamespace(drain_requested=True)
+        self.assertIsNone(self.middleware().after_model(state, runtime))
+
+    @unittest.skipIf(USING_IMPORT_STUBS, "requires real LangChain routing and checkpoint schemas")
+    def test_real_graph_routes_repair_without_forging_messages_or_replaying_stages(self):
+        from langchain.agents import create_agent
+        from langchain_core.language_models.fake_chat_models import FakeMessagesListChatModel
+        from langchain_core.messages import AIMessage
+        from langchain_core.tools import StructuredTool
+        from langgraph.checkpoint.memory import InMemorySaver
+
+        observed_requests = []
+        publications = []
+
+        class CapturingModel(FakeMessagesListChatModel):
+            def bind_tools(self, tools, *, tool_choice=None, **kwargs):
+                return self
+
+            def _generate(self, messages, *args, **kwargs):
+                observed_requests.append(messages)
+                return super()._generate(messages, *args, **kwargs)
+
+        def publish(artifact_index: int, draft: dict):
+            publications.append(copy.deepcopy(draft))
+            return '{"ok":true}', {
+                "protocol": "workbench.runtime.artifact-draft.v1", "ok": True,
+                "runId": "run-auto", "runtimeAttemptId": "attempt-auto", "toolCallId": "real-repair",
+                "artifactIndex": artifact_index, "draft": draft,
+            }
+
+        def stage(stage: str):
+            self.fail("already completed stage was executed")
+
+        stop = lambda ident: AIMessage(id=ident, content="Please retry.", response_metadata={"finish_reason": "stop"})
+        repaired = {"kind": "prd", "title": "Keep this title"}
+        model = CapturingModel(responses=[
+            AIMessage(content="", tool_calls=[call("workbench_generation_stage_update", "real-repeat-stage", {"stage": "validating-prd"})]),
+            stop("real-first-stop"),
+            AIMessage(content="", tool_calls=[call("workbench_artifact_draft_publish", "real-repair", {"artifact_index": 0, "draft": repaired})]),
+            stop("real-after-repair"),
+        ])
+        graph = create_agent(model, tools=[
+            StructuredTool.from_function(publish, name="workbench_artifact_draft_publish", description="Publish a validated fixture", response_format="content_and_artifact"),
+            StructuredTool.from_function(stage, name="workbench_generation_stage_update", description="Record a fixture stage"),
+        ], middleware=[self.middleware()], checkpointer=InMemorySaver())
+        config = {"configurable": {"thread_id": "linked-repair-test"}, "recursion_limit": 60}
+        result = graph.invoke(self.state(), config=config, context=self.runtime().context)
+        self.assertEqual(publications, [repaired])
+        self.assertEqual(len(observed_requests), 4)
+        self.assertTrue(any("<workbench_linked_draft_repair>" in str(message.content) for message in observed_requests[2]))
+        self.assertEqual(sum(middleware_module._is_human_message(m) for m in result["messages"]), 1)
+        self.assertEqual(middleware_module._stage_progress(result, "run-auto", "attempt-auto"), (4, False))
+        self.assertEqual(middleware_module._successful_prd_drafts(result, "run-auto", "attempt-auto"), (1, False))
+        self.assertEqual(middleware_module._successful_runtime_results(result, "run-auto", "attempt-auto"), (0, False))
+        key = middleware_module._LINKED_DRAFT_RECOVERY_KEY
+        self.assertNotIn(key, result)
+        self.assertEqual(graph.get_state(config).values[key]["count"], 1)
+        self.assertNotIn(key, json.dumps(graph.get_input_schema().model_json_schema()))
+        self.assertNotIn(key, json.dumps(graph.get_output_schema().model_json_schema()))
+
+    @unittest.skipIf(USING_IMPORT_STUBS, "requires real LangChain routing and checkpoint schemas")
+    async def test_real_async_graph_exhausts_private_checkpointed_budget(self):
+        from langchain.agents import create_agent
+        from langchain_core.language_models.fake_chat_models import FakeMessagesListChatModel
+        from langchain_core.messages import AIMessage
+        from langgraph.checkpoint.memory import InMemorySaver
+
+        # A provider may reuse a message ID. The cap must depend on graph task
+        # identity, not on that model-controlled field.
+        responses = [AIMessage(id="reused-provider-id", content="Please retry.", response_metadata={"finish_reason": "stop"}) for _ in range(3)]
+        graph = create_agent(FakeMessagesListChatModel(responses=responses), middleware=[self.middleware()], checkpointer=InMemorySaver())
+        config = {"configurable": {"thread_id": "linked-limit-test"}, "recursion_limit": 60}
+        state = self.state()
+        key = middleware_module._LINKED_DRAFT_RECOVERY_KEY
+        state[key] = {"runId": "run-auto", "runtimeAttemptId": "attempt-auto", "count": 999}
+        result = await graph.ainvoke(state, config=config, context=self.runtime().context)
+        checkpoint = await graph.aget_state(config)
+        self.assertEqual(checkpoint.values[key]["count"], 2)
+        self.assertTrue(checkpoint.values[key]["exhausted"])
+        self.assertEqual(checkpoint.values[key]["messageId"], "reused-provider-id")
+        self.assertEqual(checkpoint.values[key]["code"], "WORKBENCH_LINKED_DRAFT_REPAIR_EXHAUSTED")
+        self.assertEqual(middleware_module._successful_runtime_results(result, "run-auto", "attempt-auto"), (0, False))
+        self.assertEqual(sum(middleware_module._is_human_message(m) for m in result["messages"]), 1)
 
 
 class WorkbenchToolScopeMiddlewareAsyncTests(unittest.IsolatedAsyncioTestCase):

@@ -105,6 +105,39 @@ const prototypePatchCoordinator = () => ({
 });
 
 describe("Runtime retry classification", () => {
+  it.each([
+    "RUNTIME_RESULT_SUBMISSION_MISSING",
+    "RUNTIME_ARTIFACT_DRAFT_VALIDATION_FAILED",
+  ])("persists the controlled generation failure %s without provider content", async (code) => {
+    const tx = eventTransaction();
+    const { processor } = processorWithTransaction(tx);
+    const error = new Error("SDK wrapper with private generated content", { cause: new Error(code) });
+
+    expect(runtimeExecutionErrorCode(error)).toBe(code);
+    expect(publicErrorMessage(error)).toBe(code);
+    expect(isRetryableRuntimeError(error)).toBe(false);
+    expect(publicErrorMessage(new Error(`${code}: private generated content`)))
+      .toBe("Runtime execution failed");
+    expect(runtimeExecutionErrorCode(new Error(`${code}: private generated content`)))
+      .toBe("RUNTIME_EXECUTION_FAILED");
+
+    await processor.failRun("run-1", "runtime-attempt-1", error, isRetryableRuntimeError(error));
+
+    const failure = { errorCode: code, errorDetail: code, errorRetryable: false };
+    expect(tx.run.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ status: "failed", ...failure }),
+    }));
+    expect(tx.runtimeAttempt.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ status: "failed", ...failure }),
+    }));
+    expect(tx.runEvent.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        type: "run.failed",
+        payload: { code, message: code, retryable: false },
+      }),
+    });
+  });
+
   it("exposes a stable provider-filter failure without retrying or leaking provider metadata", () => {
     const error = new RuntimeProviderContentFilterError();
     expect(isRetryableRuntimeError(error)).toBe(false);
