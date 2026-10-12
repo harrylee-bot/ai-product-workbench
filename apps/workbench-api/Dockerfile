@@ -55,10 +55,13 @@ RUN npm prune --omit=dev --include=optional --no-audit --no-fund \
 FROM build AS migrator
 ENV NODE_ENV=production
 COPY deploy/workbench-migrate.sh deploy/workbench-migrate.sh
+COPY deploy/run-workspace-cli.mjs deploy/run-workspace-cli.mjs
 COPY scripts/assert-workbench-postgres-extensions.mjs scripts/assert-workbench-postgres-extensions.mjs
 COPY scripts/provision-workbench-database-roles.mjs scripts/provision-workbench-database-roles.mjs
 COPY scripts/reconcile-workbench-runtime-queues.mjs scripts/reconcile-workbench-runtime-queues.mjs
 RUN chmod 0555 deploy/workbench-migrate.sh
+COPY deploy/remove-node-package-managers.mjs /usr/local/lib/remove-node-package-managers.mjs
+RUN node /usr/local/lib/remove-node-package-managers.mjs
 USER node
 ENTRYPOINT ["/app/deploy/workbench-migrate.sh"]
 
@@ -101,6 +104,8 @@ RUN cd /app/apps/workbench-api \
   && node --input-type=module -e "import sharp from 'sharp'; const png = await sharp({ create: { width: 2, height: 2, channels: 4, background: '#ff0000' } }).png().toBuffer(); const { data, info } = await sharp(png).resize(1, 1).removeAlpha().raw().toBuffer({ resolveWithObject: true }); if (info.width !== 1 || info.height !== 1 || info.channels !== 3 || !data.equals(Buffer.from([255, 0, 0]))) throw new Error('SHARP_RUNTIME_SMOKE_FAILED');" \
   && install -d -o node -g node -m 0700 /var/lib/workbench-api/ready-object-spool
 
+COPY deploy/remove-node-package-managers.mjs /usr/local/lib/remove-node-package-managers.mjs
+RUN node /usr/local/lib/remove-node-package-managers.mjs
 USER node
 EXPOSE 4100
 HEALTHCHECK --interval=15s --timeout=5s --start-period=15s --retries=4 \

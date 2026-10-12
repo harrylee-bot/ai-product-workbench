@@ -90,6 +90,8 @@ COPY --chown=node:node integrations/deerflow/skills/requirement-doc-template/ass
 COPY --chown=node:node integrations/deerflow/skills/requirement-doc-template/scripts/docx_quality_check.py integrations/deerflow/skills/requirement-doc-template/scripts/docx_quality_check.py
 COPY --chown=node:node deploy/check-workbench-document-export.mjs deploy/check-workbench-document-export.mjs
 
+COPY deploy/remove-node-package-managers.mjs /usr/local/lib/remove-node-package-managers.mjs
+RUN node /usr/local/lib/remove-node-package-managers.mjs
 USER node
 RUN node deploy/check-workbench-document-export.mjs
 HEALTHCHECK --interval=20s --timeout=5s --start-period=30s --retries=4 \

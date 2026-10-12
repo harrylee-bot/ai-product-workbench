@@ -16,9 +16,9 @@ import {
   verifyCosignManifestBlob,
   verifyLocalProductionImageBindings,
   verifyProductionImageManifest,
-  verifyProductionImageSignatureBundles,
 } from "./production-image-inventory.mjs";
 import { readDeploymentEnv } from "./workbench-origin-manifest.mjs";
+import { verifyOwnerImageAttestations } from "./owner-image-attestations.mjs";
 
 export const OWNER_RELEASE_SCHEMA = "workbench.owner-release.v1";
 export const OWNER_WORKFLOW = ".github/workflows/workbench-owner-release.yml";
@@ -32,7 +32,7 @@ const COMMIT = /^[a-f0-9]{40}$/u;
 const HASH = /^[a-f0-9]{64}$/u;
 const REPOSITORY = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/u;
 const OIDC_ISSUER = "https://token.actions.githubusercontent.com";
-const REQUIRED_SOURCE_FILES = ["package.json", "package-lock.json", "scripts/owner-release.mjs", "scripts/production-image-inventory.mjs", "deploy/workbench-owner-deploy.py"];
+const REQUIRED_SOURCE_FILES = ["package.json", "package-lock.json", "scripts/owner-release.mjs", "scripts/owner-image-attestations.mjs", "scripts/production-image-inventory.mjs", "deploy/workbench-owner-deploy.py"];
 
 export function verifyCiEvidence(evidence, { repository, sourceCommit }) {
   const run = evidence?.run;
@@ -140,6 +140,15 @@ export function assertOwnerReleaseWorkflow(workflow) {
   assert(build?.with?.push === true && build.with.load === false && build.with.provenance === "mode=max" && build.with.sbom === true, "owner images must preserve provenance and SBOM");
   const scan = workflow.jobs.images.steps.find((step) => step.uses?.startsWith("aquasecurity/trivy-action@"));
   assert(scan?.with?.["exit-code"] === "1" && scan.with.severity === "CRITICAL,HIGH", "owner images must preserve vulnerability blocking");
+  assert(scan.with["ignore-unfixed"] !== true && scan.with["ignore-unfixed"] !== "true", "owner images must block unfixed vulnerabilities");
+  const attestations = workflow.jobs.images.steps.find((step) => step.name === "Sign SLSA provenance and SPDX image attestations")?.run ?? "";
+  assert(attestations.includes("cosign attest --yes --type slsaprovenance1") && attestations.includes("cosign attest --yes --type spdxjson")
+    && attestations.includes("--bundle") && attestations.includes("owner-image-attestations.mjs predicate"), "owner images require signed SLSA v1 and SPDX attestations");
+  assert(workflow.jobs.images.steps.some((step) => step.run?.includes("owner-image-attestations.mjs verify")), "owner images must verify attestation signatures and exact payload bindings");
+  const packaging = workflow.jobs.release.steps.find((step) => step.name === "Assemble exact candidate release package")?.run ?? "";
+  for (const evidence of ["provenance-*.bundle.json", "sbom-attestation-*.bundle.json", "sbom-*.spdx.json"]) {
+    assert(packaging.includes(evidence), "owner release must retain signed attestation evidence for deployment verification");
+  }
   return true;
 }
 
@@ -227,13 +236,13 @@ function verifyFiles(args) {
     imageManifestBytes: readFileSync(args["image-manifest"]),
   });
   if (args["source-root"]) verifySourceFiles(document, args["source-root"]);
-  verifyProductionImageSignatureBundles({
-    manifest,
-    signatureBundleRoot: args["signature-root"] ?? path.dirname(args.manifest),
-    certificateIdentity: args["certificate-identity"],
-    certificateOidcIssuer: OIDC_ISSUER,
-    expectedCommit: document.sourceCommit,
-  });
+  const signatureRoot = args["signature-root"] ?? path.dirname(args.manifest);
+  const actualSignatures = readdirSync(signatureRoot).filter((name) => /^cosign-[a-z0-9-]+\.bundle\.json$/u.test(name)).sort();
+  const expectedSignatures = manifest.images.map((record) => `cosign-${record.id}.bundle.json`).sort();
+  assert(JSON.stringify(actualSignatures) === JSON.stringify(expectedSignatures), "owner image signature bundle inventory is incomplete or contains untracked bundles");
+  for (const record of manifest.images) {
+    verifyOwnerImageAttestations({ record, evidenceRoot: path.dirname(args.manifest), signatureRoot, repository: document.repository, workflowRun: document.workflowRun });
+  }
   if (args["env-file"]) {
     verifyProductionImageManifest({ manifest, expectedCommit: document.sourceCommit, deploymentEnvironment: readDeploymentEnv(readFileSync(args["env-file"], "utf8")) });
   }

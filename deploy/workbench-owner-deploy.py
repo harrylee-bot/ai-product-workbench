@@ -19,6 +19,7 @@ IDENTITY = "https://github.com/harrylee-bot/ai-product-workbench/.github/workflo
 QUEUE = ("workbench-api", "workbench-worker", "workbench-file-worker", "workbench-import-worker", "workbench-export-worker")
 APPLICATION = (*QUEUE, "workbench-web", "knowledge")
 GATEWAYS = ("preview-gateway", "gateway")
+NGINX_TMPFS = ("/var/cache/nginx", "/var/run", "/tmp")
 LIMITS = {
     "migrate": (1024, 1, 128),
     "workbench-api": (1024, 1, 256),
@@ -66,6 +67,25 @@ def write_compose(path, config):
     write_private(path, config)
 
 
+def gateway_tmpfs(entries):
+    """Keep mount sizes/options while granting the signed Nginx image its writable directories."""
+    if not isinstance(entries, list) or any(not isinstance(entry, str) for entry in entries):
+        fail("Resolved gateway tmpfs must be a list of mount specifications")
+    result, seen = [], set()
+    for entry in entries:
+        destination, _, options = entry.partition(":")
+        if destination in NGINX_TMPFS:
+            if destination in seen:
+                fail(f"Duplicate gateway tmpfs mount {destination}")
+            seen.add(destination)
+            retained = [option for option in options.split(",") if option and not option.startswith(("uid=", "gid=", "mode="))]
+            result.append(destination + ":" + ",".join([*retained, "uid=101", "gid=101", "mode=1770"]))
+        else:
+            result.append(entry)
+    result.extend(destination + ":uid=101,gid=101,mode=1770" for destination in NGINX_TMPFS if destination not in seen)
+    return result
+
+
 def prepare_config(original, images, runtime=False):
     """Only rewrite managed images/limits; preserve shared topology and data mounts."""
     config = copy.deepcopy(original)
@@ -84,9 +104,19 @@ def prepare_config(original, images, runtime=False):
         services[name]["image"] = image["imageRef"]
     managed = [image["composeService"] for image in selected]
     if not runtime:
+        quartz = [image for image in selected if image["id"] == "quartz"]
+        if len(quartz) != 1:
+            fail("Gateways require exactly one verified Quartz image")
         for name in GATEWAYS:
             if name not in services:
                 fail(f"Resolved Compose is missing {name}")
+            # The signed Quartz runtime is Nginx plus static content. Each
+            # gateway mounts its own complete nginx.conf, without static roots
+            # or the Quartz conf.d include. Reuse its scanned digest, not an old
+            # unverified infrastructure image. Both gateways listen on 8080.
+            services[name]["image"] = quartz[0]["imageRef"]
+            services[name]["user"] = "101:101"
+            services[name]["tmpfs"] = gateway_tmpfs(services[name].get("tmpfs", []))
         managed.extend(GATEWAYS)
     for name in managed:
         service = services[name]
@@ -103,6 +133,20 @@ def prepare_config(original, images, runtime=False):
         if "deploy" in service:
             limits = service["deploy"].setdefault("resources", {}).setdefault("limits", {})
             limits.update({"memory": service["mem_limit"], "cpus": str(cpu), "pids": pids})
+    return config
+
+
+def gateway_preflight_config(candidate):
+    """Check real mounted configs and permissions even when upstream services are absent."""
+    config = copy.deepcopy(candidate)
+    upstreams = sorted(config["services"])
+    config["name"] += "-nginx-check"
+    config["services"] = {name: config["services"][name] for name in GATEWAYS}
+    for service in config["services"].values():
+        service["extra_hosts"] = [f"{name}=127.0.0.1" for name in upstreams]
+        service["network_mode"] = "none"
+        for field in ("networks", "ports", "depends_on", "container_name"):
+            service.pop(field, None)
     return config
 
 
@@ -265,7 +309,8 @@ class Deployment:
         plan = {"version": "1.0.0", "sourceCommit": self.args.commit, "mode": "execute" if self.args.execute else "plan",
                 "applicationProject": app["name"], "runtimeProject": runtime["name"],
                 "images": [{"id": image["id"], "imageRef": image["imageRef"]} for image in release["images"]],
-                "sequence": ["pull all images", "verify local labels", "verified database backup", "stop queue participants", "migrate", "preview", "deerflow", "api and workers and web and knowledge", "gateways", "health"],
+                "gatewayImages": {name: app["services"][name]["image"] for name in GATEWAYS},
+                "sequence": ["pull all images", "verify local labels", "check gateway configuration and permissions", "verified database backup", "stop queue participants", "migrate", "preview", "deerflow", "api and workers and web and knowledge", "gateways", "health"],
                 "runningApplicationServices": sorted(previous_app), "runningRuntimeServices": sorted(previous_runtime)}
         print(json.dumps(plan, ensure_ascii=False, indent=2), flush=True)
         if not self.args.execute:
@@ -291,6 +336,12 @@ class Deployment:
             self.run(["docker", "pull", image["imageRef"]], f"Pull {image['id']}", timeout=1200)
         self.verify(inspect_local=True)
         self.check_resources(after_pull=True)
+        gateway_check = gateway_preflight_config(app)
+        gateway_check_file = self.backup / "gateway-check.json"
+        write_compose(gateway_check_file, gateway_check)
+        for name in GATEWAYS:
+            self.run(self.compose(gateway_check_file, gateway_check["name"], "run", "--rm", "--no-deps",
+                                  "--entrypoint", "nginx", name, "-t"), f"Check {name} configuration and permissions", timeout=120)
         self.database_backup(previous_app["postgres"]["containerId"])
         try:
             self.mutated = True

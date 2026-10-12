@@ -26,7 +26,7 @@ const source = {
   repository,
   sourceCommit: commit,
   sourceTree: "b".repeat(40),
-  sourceFiles: Object.fromEntries(["package.json", "package-lock.json", "scripts/owner-release.mjs", "scripts/production-image-inventory.mjs", "deploy/workbench-owner-deploy.py"].map((name) => [name, "d".repeat(64)])),
+  sourceFiles: Object.fromEntries(["package.json", "package-lock.json", "scripts/owner-release.mjs", "scripts/owner-image-attestations.mjs", "scripts/production-image-inventory.mjs", "deploy/workbench-owner-deploy.py"].map((name) => [name, "d".repeat(64)])),
   workflow: OWNER_WORKFLOW,
   ref: "refs/heads/main",
   authorization: { kind: "project-owner-workflow-dispatch", actor: "project-owner", accepted: true },
@@ -166,6 +166,10 @@ test("workflow keeps publication manual, builds outside production, and only sig
     (value) => { value.jobs.images.strategy.matrix.include.pop(); },
     (value) => { value.jobs.images.steps.find((step) => step.id === "build").with.provenance = false; },
     (value) => { value.jobs.images.steps.find((step) => step.uses?.startsWith("aquasecurity/trivy-action@")).with["exit-code"] = "0"; },
+    (value) => { value.jobs.images.steps.find((step) => step.uses?.startsWith("aquasecurity/trivy-action@")).with["ignore-unfixed"] = true; },
+    (value) => { value.jobs.images.steps.find((step) => step.name === "Sign SLSA provenance and SPDX image attestations").run = "echo unsigned"; },
+    (value) => { value.jobs.images.steps = value.jobs.images.steps.filter((step) => !step.run?.includes("owner-image-attestations.mjs verify")); },
+    (value) => { value.jobs.release.steps.find((step) => step.name === "Assemble exact candidate release package").run = "echo missing proofs"; },
   ]) {
     const invalid = structuredClone(workflow);
     mutate(invalid);

@@ -80,7 +80,7 @@ describe("Workbench isolated Preview", () => {
     expect(frame.getAttribute("sandbox")).toBe(workbenchPreviewSandbox);
     expect(frame.getAttribute("sandbox")).not.toContain("allow-same-origin");
     expect(frame.getAttribute("sandbox")).not.toContain("allow-top-navigation");
-    expect(frame.getAttribute("credentialless")).toBe("");
+    expect(frame.hasAttribute("credentialless")).toBe(true);
     expect(frame.getAttribute("referrerpolicy")).toBe("no-referrer");
     expect(onCapabilityChange).toHaveBeenLastCalledWith(null);
 

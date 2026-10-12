@@ -9,6 +9,9 @@ import { isWorkbenchPublicRegistrationEnabled } from "@/lib/auth/workbench-regis
 
 import { RegisterPage } from "./register-page";
 
+// Registration availability is resolved for each request after connection().
+export const instant = false;
+
 export default async function Page({
   searchParams,
 }: {

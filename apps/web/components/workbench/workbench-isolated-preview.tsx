@@ -37,7 +37,9 @@ export const workbenchPreviewHandshakeTimeoutMs = 2_000;
 export const workbenchPreviewRenewalLeadMs = 30_000;
 const maximumBrowserTimerDelayMs = 2_147_000_000;
 const workbenchPreviewCredentiallessProps = {
-  credentialless: "",
+  // The attribute name is a valid HTML boolean value. A truthy string works
+  // with React 19.0's custom attribute and Next's newer boolean property.
+  credentialless: "credentialless",
 } as IframeHTMLAttributes<HTMLIFrameElement> & { credentialless: string };
 
 type PreviewState =

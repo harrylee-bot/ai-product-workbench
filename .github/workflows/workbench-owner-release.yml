@@ -38,10 +38,12 @@ jobs:
           cache: npm
       - name: Install verifier dependencies
         run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Install browser for delivery verifier regressions
+        run: npx playwright install --with-deps chromium
       - name: Validate owner release contract
         run: |
           node scripts/owner-release.mjs contract
-          node --test scripts/owner-release.test.mjs
+          node --test scripts/owner-release.test.mjs scripts/owner-image-attestations.test.mjs scripts/runtime-node-toolchain.test.mjs scripts/workbench-delivery-http-smoke.test.mjs
           python3 scripts/workbench-owner-deploy.test.py
           npm run deployment:images:check
       - name: Bind owner authorization to exact source
@@ -132,12 +134,24 @@ jobs:
       contents: read
       packages: write
       id-token: write
-      attestations: write
     strategy:
       fail-fast: false
       max-parallel: 4
       matrix:
         include:
+          - name: deerflow
+            dockerfile: integrations/deerflow/Dockerfile
+            target: runtime
+            build_args: |
+              DEERFLOW_BASE_IMAGE=${{ vars.WORKBENCH_DEERFLOW_BASE_IMAGE_REF }}
+              DEERFLOW_NODE_IMAGE=${{ vars.WORKBENCH_DEERFLOW_NODE_IMAGE_REF }}
+              DEERFLOW_SOURCE_COMMIT=${{ vars.WORKBENCH_DEERFLOW_COMMIT }}
+              WORKBENCH_SOURCE_COMMIT=${{ github.sha }}
+          - name: export-worker
+            dockerfile: apps/workbench-export-worker/Dockerfile
+            target: runner
+            build_args: |
+              NODE_IMAGE=${{ vars.WORKBENCH_NODE_IMAGE }}
           - name: web
             dockerfile: apps/web/Dockerfile
             target: runner
@@ -174,11 +188,6 @@ jobs:
             target: runner
             build_args: |
               NODE_IMAGE=${{ vars.WORKBENCH_NODE_IMAGE }}
-          - name: export-worker
-            dockerfile: apps/workbench-export-worker/Dockerfile
-            target: runner
-            build_args: |
-              NODE_IMAGE=${{ vars.WORKBENCH_NODE_IMAGE }}
           - name: preview
             dockerfile: apps/workbench-preview/Dockerfile
             target: runner
@@ -192,14 +201,6 @@ jobs:
               KNOWLEDGE_WEB_URL=${{ vars.WORKBENCH_WEB_ORIGIN }}
               NODE_IMAGE=${{ vars.WORKBENCH_NODE_IMAGE }}
               NGINX_IMAGE=${{ vars.WORKBENCH_NGINX_IMAGE }}
-          - name: deerflow
-            dockerfile: integrations/deerflow/Dockerfile
-            target: runtime
-            build_args: |
-              DEERFLOW_BASE_IMAGE=${{ vars.WORKBENCH_DEERFLOW_BASE_IMAGE_REF }}
-              DEERFLOW_NODE_IMAGE=${{ vars.WORKBENCH_DEERFLOW_NODE_IMAGE_REF }}
-              DEERFLOW_SOURCE_COMMIT=${{ vars.WORKBENCH_DEERFLOW_COMMIT }}
-              WORKBENCH_SOURCE_COMMIT=${{ github.sha }}
     steps:
       - name: Checkout
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
@@ -312,39 +313,25 @@ jobs:
           severity: CRITICAL,HIGH
           exit-code: "1"
 
-      - name: Publish signed build provenance attestation
-        id: provenance
-        uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2
-        with:
-          subject-name: ghcr.io/${{ github.repository_owner }}/workbench-${{ matrix.name }}
-          subject-digest: ${{ steps.build.outputs.digest }}
-          push-to-registry: true
-
-      - name: Capture signed build provenance bundle
-        env:
-          PROVENANCE_BUNDLE: ${{ steps.provenance.outputs.bundle-path }}
-        run: |
-          test -s "$PROVENANCE_BUNDLE"
-          cp "$PROVENANCE_BUNDLE" "output/provenance-${{ matrix.name }}.bundle.json"
-
-      - name: Publish signed SBOM attestation
-        id: sbom_attestation
-        uses: actions/attest-sbom@bd218ad0dbcb3e146bd073d1d9c6d78e08aa8a0b # v2
-        with:
-          subject-name: ghcr.io/${{ github.repository_owner }}/workbench-${{ matrix.name }}
-          subject-digest: ${{ steps.build.outputs.digest }}
-          sbom-path: output/sbom-${{ matrix.name }}.spdx.json
-          push-to-registry: true
-
-      - name: Capture signed SBOM attestation bundle
-        env:
-          SBOM_ATTESTATION_BUNDLE: ${{ steps.sbom_attestation.outputs.bundle-path }}
-        run: |
-          test -s "$SBOM_ATTESTATION_BUNDLE"
-          cp "$SBOM_ATTESTATION_BUNDLE" "output/sbom-attestation-${{ matrix.name }}.bundle.json"
-
       - name: Install Cosign
-        uses: sigstore/cosign-installer@dc72c7d5c4d10cd6bcb8cf6e3fd625a9e5e537da # v3.7.0
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+        with:
+          cosign-release: v3.1.3
+
+      - name: Sign SLSA provenance and SPDX image attestations
+        env:
+          IMAGE_REF: ${{ steps.image.outputs.ref }}
+        run: |
+          set -euo pipefail
+          node scripts/owner-image-attestations.mjs predicate \
+            --configuration "${{ steps.build-configuration.outputs.path }}" \
+            --output "output/provenance-${{ matrix.name }}.predicate.json"
+          cosign attest --yes --type slsaprovenance1 \
+            --predicate "output/provenance-${{ matrix.name }}.predicate.json" \
+            --bundle "output/provenance-${{ matrix.name }}.bundle.json" "$IMAGE_REF"
+          cosign attest --yes --type spdxjson \
+            --predicate "output/sbom-${{ matrix.name }}.spdx.json" \
+            --bundle "output/sbom-attestation-${{ matrix.name }}.bundle.json" "$IMAGE_REF"
 
       - name: Sign and verify immutable image
         env:
@@ -355,8 +342,7 @@ jobs:
           cosign verify \
             --certificate-identity "$CERTIFICATE_IDENTITY" \
             --certificate-oidc-issuer https://token.actions.githubusercontent.com \
-            --output-file "output/cosign-${{ matrix.name }}.verify.json" \
-            "$IMAGE_REF"
+            "$IMAGE_REF" > "output/cosign-${{ matrix.name }}.verify.json"
 
       - name: Write immutable image evidence record
         env:
@@ -376,6 +362,12 @@ jobs:
             --verification-path "output/cosign-${{ matrix.name }}.verify.json" \
             --vulnerability-path "output/trivy-${{ matrix.name }}.json" \
             > "output/image-record-${{ matrix.name }}.json"
+
+      - name: Verify exact image attestation signatures and payload bindings
+        run: |
+          node scripts/owner-image-attestations.mjs verify \
+            --record "output/image-record-${{ matrix.name }}.json" \
+            --evidence-root output
 
       - name: Upload image evidence
         if: always()
@@ -431,6 +423,9 @@ jobs:
             --records output/image-evidence \
             --output output/release
           cp output/image-evidence/cosign-*.bundle.json output/release/
+          cp output/image-evidence/provenance-*.bundle.json output/release/
+          cp output/image-evidence/sbom-attestation-*.bundle.json output/release/
+          cp output/image-evidence/sbom-*.spdx.json output/release/
       - name: Login to GitHub Container Registry
         uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
         with:
@@ -438,7 +433,9 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: Install Cosign
-        uses: sigstore/cosign-installer@dc72c7d5c4d10cd6bcb8cf6e3fd625a9e5e537da # v3.7.0
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+        with:
+          cosign-release: v3.1.3
       - name: Sign and verify complete release
         env:
           CERTIFICATE_IDENTITY: https://github.com/${{ github.repository }}/.github/workflows/workbench-owner-release.yml@refs/heads/main

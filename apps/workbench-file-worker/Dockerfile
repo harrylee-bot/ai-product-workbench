@@ -74,6 +74,8 @@ COPY --from=build --chown=node:node /app/packages/workbench-telemetry/dist packa
 
 RUN node --input-type=module -e "await import('./apps/workbench-file-worker/dist/mime.js')"
 
+COPY deploy/remove-node-package-managers.mjs /usr/local/lib/remove-node-package-managers.mjs
+RUN node /usr/local/lib/remove-node-package-managers.mjs
 USER node
 HEALTHCHECK --interval=20s --timeout=5s --start-period=20s --retries=4 \
   CMD ["node", "apps/workbench-file-worker/dist/healthcheck.js"]

@@ -70,6 +70,8 @@ RUN install -d -o node -g node -m 0700 /var/lib/workbench-preview
 RUN node --input-type=module -e \
   "await import('./apps/workbench-preview/dist/csp.js'); await import('./apps/workbench-preview/dist/preview-bridge.js')"
 
+COPY deploy/remove-node-package-managers.mjs /usr/local/lib/remove-node-package-managers.mjs
+RUN node /usr/local/lib/remove-node-package-managers.mjs
 USER node
 HEALTHCHECK --interval=20s --timeout=5s --start-period=15s --retries=4 \
   CMD ["node", "-e", "fetch('http://127.0.0.1:4300/healthz').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]

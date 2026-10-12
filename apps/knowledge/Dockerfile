@@ -64,6 +64,10 @@ RUN chmod +x /usr/local/bin/knowledge-build-immutable \
 
 FROM ${NGINX_IMAGE} AS immutable-runner
 
+# Alpine 3.24's Nginx image predates the CVE-2026-103111 fix. Pin the
+# reviewed patched package; the final image must still pass the release scan.
+RUN apk add --no-cache --upgrade pcre2=10.49-r0
+
 COPY apps/knowledge/nginx.conf /etc/nginx/conf.d/default.conf
 COPY --from=immutable-builder /tmp/quartz-public /usr/share/nginx/html
 

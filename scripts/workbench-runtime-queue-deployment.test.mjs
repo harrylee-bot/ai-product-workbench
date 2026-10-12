@@ -36,7 +36,8 @@ test("the migrator reconciles Runtime queues before services start", async () =>
 
   assert.match(dockerfile, /COPY scripts\/reconcile-workbench-runtime-queues\.mjs/u);
   assert.ok(
-    migrate.indexOf("migrate:deploy") < migrate.indexOf("reconcile-workbench-runtime-queues.mjs"),
+    migrate.indexOf("prisma/build/index.js migrate deploy") >= 0
+      && migrate.indexOf("prisma/build/index.js migrate deploy") < migrate.indexOf("reconcile-workbench-runtime-queues.mjs"),
     "Prisma migrations must complete before queue reconciliation",
   );
   assert.match(

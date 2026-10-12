@@ -71,6 +71,8 @@ RUN node --check apps/workbench-import-worker/dist/main.js \
   && node --check apps/workbench-import-worker/dist/healthcheck.js \
   && node --input-type=module -e "await import('./packages/workbench-content-security/dist/index.js')"
 
+COPY deploy/remove-node-package-managers.mjs /usr/local/lib/remove-node-package-managers.mjs
+RUN node /usr/local/lib/remove-node-package-managers.mjs
 USER node
 HEALTHCHECK --interval=20s --timeout=5s --start-period=20s --retries=4 \
   CMD ["node", "apps/workbench-import-worker/dist/healthcheck.js"]

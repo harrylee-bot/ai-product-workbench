@@ -4,7 +4,11 @@ ARG DEERFLOW_BASE_IMAGE
 ARG DEERFLOW_NODE_IMAGE
 FROM ${DEERFLOW_NODE_IMAGE} AS validator-runtime
 
-FROM ${DEERFLOW_BASE_IMAGE} AS runtime
+# The recovered image is a checksum-verified source input only. Its Debian
+# filesystem, virtualenv and developer CLIs must never enter the final image.
+FROM ${DEERFLOW_BASE_IMAGE} AS recovered-source
+
+FROM cgr.dev/chainguard/wolfi-base@sha256:1c451d46a0d5c4e9f2b38e0e8d3e299564a1aa95c21973efcc1980a9d1d2e73e AS runtime
 
 ARG DEERFLOW_BASE_IMAGE
 ARG DEERFLOW_NODE_IMAGE
@@ -15,10 +19,44 @@ ARG WORKBENCH_DEERFLOW_TOOL_SCOPE_PATCH_SHA256=fee79cfd2c2f1088d8adc70d42946fa32
 LABEL org.opencontainers.image.title="产品工作台 DeerFlow Runtime" \
       org.opencontainers.image.revision="${WORKBENCH_SOURCE_COMMIT}" \
       io.workbench.deerflow.base-image="${DEERFLOW_BASE_IMAGE}" \
+      io.workbench.deerflow.runtime-base-image="cgr.dev/chainguard/wolfi-base@sha256:1c451d46a0d5c4e9f2b38e0e8d3e299564a1aa95c21973efcc1980a9d1d2e73e" \
       io.workbench.deerflow.validator-node-image="${DEERFLOW_NODE_IMAGE}" \
       io.workbench.deerflow.source-commit="${DEERFLOW_SOURCE_COMMIT}" \
       io.workbench.deerflow.tool-scope-patch-sha256="${WORKBENCH_DEERFLOW_TOOL_SCOPE_PATCH_SHA256}" \
       io.workbench.deerflow.contract-version="1"
+
+USER root
+RUN apk upgrade --no-cache \
+    && apk add --no-cache python-3.12=3.12.15-r3 uv=0.13.0-r0 libstdc++=16.2.0-r1 \
+    && mkdir -p /usr/local/bin \
+    && ln -sf /usr/bin/python3.12 /usr/local/bin/python \
+    && ln -sf /usr/bin/python3.12 /usr/local/bin/python3
+
+ENV LANG=C.UTF-8 \
+    LC_ALL=C.UTF-8 \
+    PYTHONIOENCODING=utf-8 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    UV_PYTHON_DOWNLOADS=never \
+    UV_CACHE_DIR=/tmp/uv-cache
+WORKDIR /app
+
+COPY integrations/deerflow/base-recovery/ /opt/workbench/deerflow/base-recovery/
+COPY integrations/deerflow/runtime-security/dependencies.json \
+     integrations/deerflow/runtime-security/source-snapshot.json \
+     integrations/deerflow/runtime-security/prepare_source.py \
+     integrations/deerflow/runtime-security/test_runtime.py \
+     integrations/deerflow/runtime-security/uv.lock \
+     /opt/workbench/deerflow/runtime-security/
+COPY integrations/deerflow/source-patches/7a6c4a994a86583d2a3c056ee9d0f157d4f030c2/ /opt/workbench/deerflow/source-patch/
+RUN --mount=from=recovered-source,source=/,target=/source-ro \
+    python3 /opt/workbench/deerflow/runtime-security/prepare_source.py \
+      --source-root /source-ro --destination /app/backend \
+      --recovery-root /opt/workbench/deerflow/base-recovery \
+      --candidate-patch-root /opt/workbench/deerflow/source-patch \
+    && cd /app/backend \
+    && uv sync --locked --no-dev --python /usr/bin/python3.12 \
+    && uv pip check --python /app/backend/.venv/bin/python \
+    && rm -rf /tmp/uv-cache
 
 # The candidate-owned extension is embedded in the derived image. Production
 # never installs tools or public skills from a mutable host checkout.
@@ -29,11 +67,6 @@ COPY integrations/deerflow/skills/requirement-doc-template/ /app/skills/public/r
 COPY integrations/deerflow/runtime-tools/deerflow_workbench_tools/ /app/backend/deerflow_workbench_tools/
 COPY integrations/deerflow/runtime-tools/config.fragment.yaml /opt/workbench/deerflow/config.fragment.yaml
 COPY deploy/deerflow-extensions.production.json /app/backend/extensions_config.workbench.json
-COPY integrations/deerflow/source-patches/7a6c4a994a86583d2a3c056ee9d0f157d4f030c2/ /opt/workbench/deerflow/source-patch/
-
-# The hardened upstream image runs as the non-root runtime identity. Apply the
-# immutable source patch as root, then restore that identity in the final image.
-USER root
 
 # The base image must contain the exact audited upstream sources. Apply the
 # deterministic patch, run its contracts against the image's real
@@ -58,4 +91,10 @@ RUN test "${DEERFLOW_SOURCE_COMMIT}" = "7a6c4a994a86583d2a3c056ee9d0f157d4f030c2
       --source-commit "${DEERFLOW_SOURCE_COMMIT}" \
       --check
 
+EXPOSE 8001
+CMD ["sh", "-c", "cd /app/backend && PYTHONPATH=. exec uv run --no-sync uvicorn app.gateway.app:app --host 0.0.0.0 --port 8001"]
 USER 65532:65532
+RUN --network=none cd /app/backend \
+    && PYTHONPATH=/app/backend/packages/harness:/app/backend \
+      uv run --no-sync python /opt/workbench/deerflow/runtime-security/test_runtime.py \
+    && rm -rf /tmp/uv-cache

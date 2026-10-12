@@ -33,6 +33,7 @@ from PIL import Image, ImageDraw, ImageFont
 FONT_CANDIDATES = [
     ("/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc", "Noto Sans CJK SC"),
     ("/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc", "Noto Sans CJK SC"),
+    ("/usr/share/fonts/noto/NotoSansCJK-Regular.ttc", "Noto Sans CJK SC"),
     ("/System/Library/Fonts/Supplemental/Songti.ttc", "Songti SC"),
     ("/System/Library/Fonts/STHeiti Light.ttc", "Heiti SC"),
 ]

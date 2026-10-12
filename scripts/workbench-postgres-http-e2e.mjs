@@ -35,7 +35,7 @@ import {
 import { executeCanvasToolRequest } from "./workbench-postgres-http-e2e-canvas-client.mjs";
 import { startControlledKnowledgeFixture } from "./workbench-postgres-http-e2e-knowledge.mjs";
 import { spawnProcessTree, stopProcessTree } from "./workbench-e2e-process.mjs";
-import { warmWorkbenchProtectedRoutes } from "./e2e/workbench-web-startup.mjs";
+import { managedWorkbenchWebDistDir, warmWorkbenchProtectedRoutes } from "./e2e/workbench-web-startup.mjs";
 
 const { Client } = pg;
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -45,6 +45,7 @@ const databaseName = decodeURIComponent(new URL(databaseUrl).pathname.slice(1));
 assertSchemaResetConfirmation(databaseName);
 const commandTimeoutMs = positiveInteger("WORKBENCH_E2E_COMMAND_TIMEOUT_MS", 180_000);
 const scenarioTimeoutMs = positiveInteger("WORKBENCH_E2E_SCENARIO_TIMEOUT_MS", 60_000);
+const controlledRuntimeResponses = new WeakMap();
 const fakeRuntimeToken = `workbench-e2e-${randomUUID()}`;
 const fakeStorageBucket = "workbench-e2e-sources";
 const fakeStorageAccessKeyId = "workbench-e2e-access-key";
@@ -3550,6 +3551,21 @@ async function handleFakeDeerFlow(
     return;
   }
 
+  const threadStateMatch = /^\/threads\/([^/]+)\/state$/.exec(url.pathname);
+  if (request.method === "GET" && threadStateMatch) {
+    const externalThreadId = decodeURIComponent(threadStateMatch[1]);
+    const run = [...state.runtimeRuns.values()].reverse()
+      .find((candidate) => candidate.thread_id === externalThreadId);
+    if (!run?.checkpoint) {
+      response.writeHead(404, { "content-type": "application/json" }).end(JSON.stringify({ error: "not found" }));
+      return;
+    }
+    state.requests.push({ method: request.method, path: url.pathname, kind: "thread-state" });
+    response.writeHead(200, { "content-type": "application/json" });
+    response.end(JSON.stringify(run.checkpoint));
+    return;
+  }
+
   const runListMatch = /^\/threads\/([^/]+)\/runs$/.exec(url.pathname);
   if (request.method === "GET" && runListMatch) {
     const externalThreadId = decodeURIComponent(runListMatch[1]);
@@ -3584,7 +3600,7 @@ async function handleFakeDeerFlow(
     if (run.kind === "browser-failure-accepted") {
       state.browserFailureRejoinAttempts += 1;
       state.requests.push({ method: request.method, path: url.pathname, kind: "browser-failure-rejoin" });
-      response.writeHead(404, { "content-type": "application/json" });
+      response.writeHead(503, { "content-type": "application/json" });
       response.end(JSON.stringify({ code: "CONTROLLED_BROWSER_STREAM_UNAVAILABLE" }));
       return;
     }
@@ -3593,6 +3609,11 @@ async function handleFakeDeerFlow(
     const run = state.runtimeRuns.get(decodeURIComponent(runGetMatch[2]));
     if (!run || run.thread_id !== decodeURIComponent(runGetMatch[1])) {
       response.writeHead(404, { "content-type": "application/json" }).end(JSON.stringify({ error: "not found" }));
+      return;
+    }
+    if (run.kind === "browser-failure-accepted" && state.browserFailureRejoinAttempts > 0) {
+      response.writeHead(503, { "content-type": "application/json" });
+      response.end(JSON.stringify({ code: "CONTROLLED_BROWSER_STATUS_UNAVAILABLE" }));
       return;
     }
     response.writeHead(200, { "content-type": "application/json" });
@@ -3637,7 +3658,9 @@ async function handleFakeDeerFlow(
           assistant_id: body.assistant_id,
           created_at: new Date().toISOString(),
           updated_at: new Date().toISOString(),
-          status: "error",
+          // Exercise recoverable transport failure. A terminal provider error
+          // is intentionally non-retryable in the production runtime.
+          status: "running",
           metadata: body.metadata ?? {},
           multitask_strategy: body.multitask_strategy ?? null,
           kind: "browser-failure-accepted",
@@ -3698,6 +3721,7 @@ async function handleFakeDeerFlow(
       closeStream: null,
     };
     state.runtimeRuns.set(externalRunId, run);
+    controlledRuntimeResponses.set(response, run);
     state.runRequests.push({ kind, body });
     state.requests.push({ method: request.method, path: url.pathname, kind, externalRunId });
     await controlledKnowledge.retrieve(body);
@@ -3908,12 +3932,12 @@ async function writeSuccessfulRuntimeStream(
       }, String(index + 3));
       await delay(controlledProviderDelayMs);
     }
-    if (draftGate) await draftGate.wait();
+    if (draftGate) await draftGate.wait(response);
     sendSse(response, "values", {
       node: "generate_prd",
       values: { messages: draftSnapshot },
     }, String(stageSnapshots.length + 3));
-    if (finalizationGate) await finalizationGate.wait();
+    if (finalizationGate) await finalizationGate.wait(response);
     else await delay(controlledProviderDelayMs);
     sendSse(response, "values", {
       node: "finalize",
@@ -4157,7 +4181,7 @@ async function writePrototypeCreateRuntimeStream(response, requestBody, draft, m
     }, String(index + 2));
   }
   await delay(controlledProviderDelayMs);
-  if (finalizationGate) await finalizationGate.wait();
+  if (finalizationGate) await finalizationGate.wait(response);
   sendSse(response, "values", {
     node: "finalize",
     values: { messages },
@@ -4771,6 +4795,12 @@ async function holdCancellationStream(request, response, state, run) {
 }
 
 function sendSse(response, event, value, id) {
+  const run = controlledRuntimeResponses.get(response);
+  if (run && event === "values") {
+    // The real adapter may read the authoritative checkpoint when its status
+    // probe observes completion before it finishes consuming the final frame.
+    run.checkpoint = structuredClone(value);
+  }
   if (!response.destroyed && !response.writableEnded) {
     response.write(`${id ? `id: ${id}\n` : ""}event: ${event}\ndata: ${JSON.stringify(value)}\n\n`);
   }
@@ -4850,6 +4880,7 @@ async function runRealStackBrowserScenario({
     return { filePath, original };
   }));
   const temporaryWebTsconfigPath = path.join(root, "apps", "web", ".tsconfig.real-stack.json");
+  const temporaryWebDistDir = managedWorkbenchWebDistDir(process.pid, webPort);
   let browser;
   let context;
   let web;
@@ -4870,6 +4901,7 @@ async function runRealStackBrowserScenario({
     WORKBENCH_PUBLIC_REGISTRATION_ENABLED: "true",
     WORKBENCH_API_INTERNAL_URL: oidcApiBaseUrl,
     WORKBENCH_PREVIEW_ORIGIN: previewOrigin,
+    WORKBENCH_NEXT_DIST_DIR: temporaryWebDistDir,
     WORKBENCH_NEXT_TSCONFIG_PATH: path.basename(temporaryWebTsconfigPath),
   });
   await waitForHttp(`${webOrigin}/login`, web, scenarioTimeoutMs);
@@ -5651,6 +5683,7 @@ async function runRealStackBrowserScenario({
     await context?.close();
     await browser?.close();
     if (web) await stopService(web);
+    await rm(path.join(root, "apps", "web", temporaryWebDistDir), { recursive: true, force: true });
     await rm(temporaryWebTsconfigPath, { force: true });
     await writeFile(nextEnvPath, originalNextEnv);
     for (const { filePath, original } of nextAgentFiles) {
@@ -5702,7 +5735,23 @@ function controlledGate() {
     releasePromise = resolve;
   });
   return {
-    wait: () => promise,
+    async wait(response) {
+      // Visual capture deliberately pauses the provider. Keep its transport
+      // alive without adding business events or disabling the SDK watchdog.
+      const heartbeat = setInterval(() => {
+        if (!response.destroyed && !response.writableEnded) {
+          response.write(": controlled-visual-capture\n\n");
+        }
+      }, 1_000);
+      const stopHeartbeat = () => clearInterval(heartbeat);
+      response.once("close", stopHeartbeat);
+      try {
+        await promise;
+      } finally {
+        stopHeartbeat();
+        response.off("close", stopHeartbeat);
+      }
+    },
     release: () => {
       if (released) return;
       released = true;

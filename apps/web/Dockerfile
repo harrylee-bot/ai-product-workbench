@@ -79,7 +79,10 @@ COPY --from=build /app/apps/web/public apps/web/public
 COPY --from=build /app/packages/workbench-contracts/dist packages/workbench-contracts/dist
 COPY --from=build /app/packages/workbench-telemetry/dist packages/workbench-telemetry/dist
 RUN cd apps/web && node -e "require.resolve('next/dist/bin/next'); if (require('next/package.json').version !== require('./package.json').dependencies.next) process.exit(1)"
+COPY deploy/run-workspace-cli.mjs /app/deploy/run-workspace-cli.mjs
+COPY deploy/remove-node-package-managers.mjs /usr/local/lib/remove-node-package-managers.mjs
+RUN node /usr/local/lib/remove-node-package-managers.mjs
 WORKDIR /app/apps/web
 USER node
 EXPOSE 3000
-CMD ["npx", "next", "start", "--hostname", "0.0.0.0", "--port", "3000"]
+CMD ["node", "/app/deploy/run-workspace-cli.mjs", "/app/apps/web", "next/dist/bin/next", "start", "--hostname", "0.0.0.0", "--port", "3000"]

@@ -60,7 +60,7 @@
     "g5:postgres-recovery": "node scripts/workbench-postgres-recovery-drill.mjs",
     "g5:postgres-recovery:test": "node --test scripts/workbench-postgres-recovery-drill.test.mjs scripts/workbench-postgres-recovery-drill.postgres.test.mjs",
     "production:acceptance:test": "node --test scripts/production-acceptance/production-acceptance.test.mjs",
-    "core:contract:test": "node --test scripts/release-candidate-manifest.test.mjs scripts/evidence-ledger.test.mjs scripts/verify-workbench-reproducibility.test.mjs scripts/g0-scope-approval.test.mjs scripts/workbench-hard-cut-manifest.test.mjs scripts/workbench-web-typegen.test.mjs scripts/knowledge-vault-audit.test.mjs scripts/workbench-postgres-http-e2e-diagnostics.test.mjs scripts/e2e/workbench-route-frame-contract.test.mjs scripts/production-acceptance/production-acceptance.test.mjs",
+    "core:contract:test": "node --test scripts/workbench-prisma-dependency.test.mjs scripts/release-candidate-manifest.test.mjs scripts/evidence-ledger.test.mjs scripts/verify-workbench-reproducibility.test.mjs scripts/g0-scope-approval.test.mjs scripts/workbench-hard-cut-manifest.test.mjs scripts/workbench-web-typegen.test.mjs scripts/knowledge-vault-audit.test.mjs scripts/workbench-postgres-http-e2e-diagnostics.test.mjs scripts/e2e/workbench-route-frame-contract.test.mjs scripts/production-acceptance/production-acceptance.test.mjs",
     "runtime:contract:baseline:test": "node --test scripts/runtime-execution-timeline.test.mjs scripts/workbench-launch-config.test.mjs scripts/assert-runtime-provider-state-test-database.test.mjs scripts/workbench-runtime-observability.test.mjs scripts/workbench-capacity.test.mjs",
     "runtime:provider-state:backfill": "tsx scripts/backfill-workbench-runtime-provider-state.mts",
     "runtime:provider-state:backfill:test": "node --import tsx --test scripts/backfill-workbench-runtime-provider-state.test.mts",
@@ -109,6 +109,9 @@
     "deerflow:tools:test": "PYTHONPATH=integrations/deerflow/runtime-tools /usr/bin/python3 -S -m unittest integrations/deerflow/runtime-tools/test_artifact_draft_tool.py integrations/deerflow/runtime-tools/test_generation_stage_tool.py integrations/deerflow/runtime-tools/test_prototype_patch_tool.py integrations/deerflow/runtime-tools/test_knowledge_client.py integrations/deerflow/runtime-tools/test_prd_reference_tool.py integrations/deerflow/runtime-tools/test_runtime_result_tool.py integrations/deerflow/runtime-tools/test_runtime_result_validator.py integrations/deerflow/runtime-tools/test_canvas_client.py integrations/deerflow/runtime-tools/test_canvas_tool.py integrations/deerflow/runtime-tools/test_runtime_tool_architecture.py integrations/deerflow/source-patches/7a6c4a994a86583d2a3c056ee9d0f157d4f030c2/test_workbench_tool_scope_middleware.py"
   },
   "overrides": {
+    "@prisma/config": {
+      "deepmerge-ts": "8.0.0"
+    },
     "brace-expansion": "5.0.12",
     "esbuild": "0.28.1",
     "fast-uri": "3.1.8",

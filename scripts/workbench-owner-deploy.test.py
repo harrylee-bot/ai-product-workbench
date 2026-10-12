@@ -106,6 +106,60 @@ class OwnerDeployTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "explicit healthcheck"):
             DEPLOY.prepare_config(original, IMAGES)
 
+    def test_gateways_reuse_the_verified_quartz_image_with_writable_nonroot_tmpfs(self):
+        original = fixture()
+        original["services"]["gateway"].update({
+            "user": "0:0", "entrypoint": ["nginx", "-g", "daemon off;"], "command": [],
+            "ports": [{"target": 8080, "published": "4180", "host_ip": "127.0.0.1"}],
+            "tmpfs": ["/var/cache/nginx:size=32m,uid=0,gid=0,mode=0755", "/var/run", "/tmp", "/extra:size=4m"],
+        })
+        original["services"]["preview-gateway"]["tmpfs"] = ["/tmp:uid=101,gid=101,mode=1770"]
+        snapshot = copy.deepcopy(original)
+        prepared = DEPLOY.prepare_config(original, IMAGES)
+        quartz = next(image["imageRef"] for image in IMAGES if image["id"] == "quartz")
+        self.assertEqual(original, snapshot)
+        for name in DEPLOY.GATEWAYS:
+            service = prepared["services"][name]
+            self.assertEqual(service["image"], quartz)
+            self.assertEqual(service["user"], "101:101")
+            mounts = dict(entry.partition(":")[::2] for entry in service["tmpfs"])
+            for destination in DEPLOY.NGINX_TMPFS:
+                options = mounts[destination].split(",")
+                self.assertTrue({"uid=101", "gid=101", "mode=1770"}.issubset(options))
+                self.assertEqual(len([option for option in options if option.startswith("uid=")]), 1)
+            for field in ("command", "entrypoint", "ports", "volumes", "networks"):
+                self.assertEqual(service.get(field), original["services"][name].get(field))
+        self.assertIn("/var/cache/nginx:size=32m,uid=101,gid=101,mode=1770", prepared["services"]["gateway"]["tmpfs"])
+        self.assertIn("/extra:size=4m", prepared["services"]["gateway"]["tmpfs"])
+        for images in ([image for image in IMAGES if image["id"] != "quartz"],
+                       [*IMAGES, next(image for image in IMAGES if image["id"] == "quartz")]):
+            with self.assertRaisesRegex(RuntimeError, "exactly one verified Quartz"):
+                DEPLOY.prepare_config(original, images)
+
+    def test_gateway_checks_resolve_missing_upstreams_without_network_or_candidate_dns_overrides(self):
+        candidate = DEPLOY.prepare_config(fixture(), IMAGES)
+        candidate["services"]["gateway"].update({"depends_on": {"workbench-web": {}}, "ports": ["127.0.0.1:4180:8080"]})
+        snapshot = copy.deepcopy(candidate)
+        checked = DEPLOY.gateway_preflight_config(candidate)
+        self.assertEqual(candidate, snapshot)
+        self.assertEqual(set(checked["services"]), set(DEPLOY.GATEWAYS))
+        self.assertNotEqual(checked["name"], candidate["name"])
+        for name, service in checked["services"].items():
+            self.assertEqual(service["network_mode"], "none")
+            self.assertEqual(set(service["extra_hosts"]), {f"{upstream}=127.0.0.1" for upstream in candidate["services"]})
+            for field in ("ports", "networks", "depends_on"):
+                self.assertNotIn(field, service)
+            for field in ("image", "user", "tmpfs", "volumes"):
+                self.assertEqual(service[field], candidate["services"][name][field])
+            self.assertNotIn("extra_hosts", candidate["services"][name])
+            self.assertNotIn("network_mode", candidate["services"][name])
+        if HAS_COMPOSE:
+            with tempfile.TemporaryDirectory() as directory:
+                filename = Path(directory) / "gateway-check.json"
+                DEPLOY.write_compose(filename, checked)
+                result = subprocess.run(["docker", "compose", "--env-file", "/dev/null", "--file", str(filename), "config", "--quiet"], capture_output=True)
+                self.assertEqual(result.returncode, 0, "Isolated gateway preflight must be valid Compose")
+
     def test_dollar_escaping_preserves_structure_and_literal_values(self):
         value = {"environment": {"PASSWORD": "secret$x:${x}:$$"}, "command": ["sh", "-c", "echo $USER"], "cpus": 1}
         self.assertEqual(DEPLOY.escape_compose_values(value), {"environment": {"PASSWORD": "secret$$x:$${x}:$$$$"}, "command": ["sh", "-c", "echo $$USER"], "cpus": 1})
@@ -163,7 +217,7 @@ class OwnerDeployTests(unittest.TestCase):
                         deployment.check_resources(after_pull=after_pull)
 
     def test_signature_and_backup_failure_never_stop_live_services(self):
-        for failure in ["signature", "backup"]:
+        for failure in ["signature", "backup", "Check preview-gateway configuration and permissions", "Check gateway configuration and permissions"]:
             with self.subTest(failure=failure), tempfile.TemporaryDirectory() as directory:
                 deployment = FakeDeployment(self.args(Path(directory), True), failure)
                 with self.assertRaises(RuntimeError):
@@ -180,7 +234,10 @@ class OwnerDeployTests(unittest.TestCase):
             pulls = [index for index, (_, command) in enumerate(deployment.calls) if command[:2] == ["docker", "pull"]]
             self.assertEqual(len(pulls), 10)
             self.assertLess(max(pulls), names.index("verify-local"))
-            self.assertLess(names.index("verify-local"), names.index("backup"))
+            for name in DEPLOY.GATEWAYS:
+                check = names.index(f"Check {name} configuration and permissions")
+                self.assertLess(names.index("verify-local"), check)
+                self.assertLess(check, names.index("backup"))
             self.assertLess(names.index("backup"), stop)
             self.assertLess(names.index("Start workbench-preview"), names.index("Start deerflow"))
             for _, command in deployment.calls:
@@ -193,6 +250,12 @@ class OwnerDeployTests(unittest.TestCase):
                     self.assertNotIn(command[-1], ["postgres", "object-storage"])
             self.assertEqual(deployment.backup.stat().st_mode & 0o777, 0o700)
             self.assertTrue(all(file.stat().st_mode & 0o777 == 0o600 for file in deployment.backup.iterdir()))
+            candidate = json.loads((deployment.backup / "candidate-app.json").read_text())
+            checked = json.loads((deployment.backup / "gateway-check.json").read_text())
+            for name in DEPLOY.GATEWAYS:
+                self.assertEqual(candidate["services"][name]["image"], candidate["services"]["knowledge"]["image"])
+                self.assertNotIn("extra_hosts", candidate["services"][name])
+                self.assertEqual(checked["services"][name]["network_mode"], "none")
 
     def test_failed_migration_restores_original_image_ids_and_stops_new_services_without_database_restore(self):
         with tempfile.TemporaryDirectory() as directory:

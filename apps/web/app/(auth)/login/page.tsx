@@ -5,6 +5,9 @@ import { isWorkbenchPublicRegistrationEnabled } from "@/lib/auth/workbench-regis
 
 import { LoginPage } from "./login-page";
 
+// Authentication options are resolved for each request after connection().
+export const instant = false;
+
 export default async function Page() {
   await connection();
   return (

@@ -77,6 +77,8 @@ COPY --from=build --chown=node:node /app/packages/workbench-db/generated package
 COPY --from=build --chown=node:node /app/packages/workbench-knowledge/dist packages/workbench-knowledge/dist
 COPY --from=build --chown=node:node /app/packages/workbench-telemetry/dist packages/workbench-telemetry/dist
 
+COPY deploy/remove-node-package-managers.mjs /usr/local/lib/remove-node-package-managers.mjs
+RUN node /usr/local/lib/remove-node-package-managers.mjs
 USER node
 HEALTHCHECK --interval=20s --timeout=5s --start-period=20s --retries=4 \
   CMD ["node", "apps/workbench-worker/dist/healthcheck.js"]

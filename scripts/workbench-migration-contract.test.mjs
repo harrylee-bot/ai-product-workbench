@@ -537,7 +537,7 @@ test("database extensions are provisioned outside least-privilege application mi
   }
   assert(
     migratorEntrypoint.indexOf("assert-workbench-postgres-extensions.mjs --check")
-      < migratorEntrypoint.indexOf("migrate:deploy"),
+      < migratorEntrypoint.indexOf("prisma/build/index.js migrate deploy"),
     "the migrator must fail closed on missing or unsupported extensions before Prisma runs",
   );
 });

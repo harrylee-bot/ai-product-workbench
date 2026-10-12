@@ -19,7 +19,7 @@ if [ -n "${WORKBENCH_POSTGRES_ADMIN_URL:-}" ] \
 fi
 
 node scripts/assert-workbench-postgres-extensions.mjs --check
-npm --workspace @workbench/workbench-db run migrate:deploy
+node deploy/run-workspace-cli.mjs packages/workbench-db prisma/build/index.js migrate deploy --schema prisma/schema.prisma
 if [ -n "${WORKBENCH_POSTGRES_ADMIN_URL:-}" ] \
   && [ -n "${WORKBENCH_POSTGRES_MIGRATOR_USER:-}" ] \
   && [ -n "${WORKBENCH_POSTGRES_MIGRATOR_PASSWORD:-}" ] \

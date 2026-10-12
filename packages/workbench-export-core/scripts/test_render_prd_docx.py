@@ -5,10 +5,16 @@ from unittest.mock import patch
 from docx import Document
 from docx.oxml.ns import qn
 
-from render_prd_docx import Renderer, append_bookmark, export_link_target, paragraph_format
+from render_prd_docx import Renderer, append_bookmark, choose_font, export_link_target, paragraph_format
 
 
 class RendererRegressionTests(unittest.TestCase):
+    def test_alpine_installed_cjk_font_is_available_to_document_rendering(self):
+        alpine_font = "/usr/share/fonts/noto/NotoSansCJK-Regular.ttc"
+        with patch.dict(os.environ, {"WORKBENCH_EXPORT_CJK_FONT_PATH": ""}), \
+                patch("render_prd_docx.Path.is_file", lambda path: str(path) == alpine_font):
+            self.assertEqual(choose_font(), (alpine_font, "Noto Sans CJK SC"))
+
     def test_bookmark_follows_paragraph_properties(self):
         document = Document()
         paragraph = document.add_paragraph("Heading", style="Heading 1")
