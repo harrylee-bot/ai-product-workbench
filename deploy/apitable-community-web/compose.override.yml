@@ -1,4 +1,4 @@
 services:
   web-server:
-    image: workbench/apitable-web:v1.13.0-beta.1-ce-collaboration.14
+    image: workbench/apitable-web:v1.13.0-beta.1-ce-collaboration.17
     pull_policy: never

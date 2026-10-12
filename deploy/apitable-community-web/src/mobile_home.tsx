@@ -35,23 +35,31 @@ import styles from './style.module.less';
 export const MobileHome: React.FC<React.PropsWithChildren<unknown>> = () => {
   const inviteLinkInfo = useAppSelector((state: IReduxState) => state.invite.inviteLinkInfo);
   const inviteEmailInfo = useAppSelector((state: IReduxState) => state.invite.inviteEmailInfo);
-  const [action, setAction] = useState<ActionType>(ActionType.SignUp);
-  const [email, setEmail] = useState<string>('');
   const router = useRouter();
+  const [action, setAction] = useState<ActionType>(() =>
+    router.pathname === '/login' && !router.query.inviteLinkToken && !router.query.inviteMailToken && !inviteLinkInfo && !inviteEmailInfo
+      ? ActionType.SignIn
+      : ActionType.SignUp,
+  );
+  const [email, setEmail] = useState<string>('');
   const theme = useTheme().palette.type;
 
   const switchActionType = (actionType: ActionType) => {
     setAction(actionType);
   };
-  const loginAction = localStorage.getItem('loginAction');
   useMount(() => {
     if (router.asPath.includes('sumo')) {
       setAction(ActionType.BindAppSumo);
       return;
     }
-    if (loginAction === ActionType.SignIn) {
-      setAction(ActionType.SignIn);
-      localStorage.removeItem('loginAction');
+    try {
+      const loginAction = localStorage.getItem('loginAction');
+      if (loginAction === ActionType.SignIn) {
+        setAction(ActionType.SignIn);
+        localStorage.removeItem('loginAction');
+      }
+    } catch {
+      // The login route still works when browser storage is unavailable.
     }
   });
 

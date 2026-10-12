@@ -22,7 +22,7 @@ RUN pnpm install
 
 FROM apitable/nodepy:16.15.0-alpine AS builder
 
-ARG SEMVER_FULL="v1.13.0-beta.1-ce-collaboration.14"
+ARG SEMVER_FULL="v1.13.0-beta.1-ce-collaboration.17"
 ARG NEXT_ASSET_PREFIX=""
 ARG NEXT_PUBLIC_ASSET_PREFIX=""
 ENV SEMVER_FULL=${SEMVER_FULL}
@@ -59,6 +59,12 @@ COPY self-hosted-community-web/public/file/docx-preview.js \
   ./packages/datasheet/public/file/docx-preview.js
 COPY self-hosted-community-web/src/address_list.tsx \
   ./packages/datasheet/src/pc/components/address_list/address_list.tsx
+COPY self-hosted-community-web/src/member_info.tsx \
+  ./packages/datasheet/src/pc/components/address_list/member_info/member_info.tsx
+COPY self-hosted-community-web/src/member_password_reset.tsx \
+  ./packages/datasheet/src/pc/components/address_list/member_info/member_password_reset.tsx
+COPY self-hosted-community-web/src/form_container.tsx \
+  ./packages/datasheet/src/pc/components/form_container/form_container.tsx
 COPY self-hosted-community-web/src/logo.tsx \
   ./packages/datasheet/src/pc/components/common/logo/logo.tsx
 COPY self-hosted-community-web/src/logo.style.module.less \
@@ -101,7 +107,7 @@ RUN node self-hosted-community-web/scripts/scrub-runtime-branding.mjs
 FROM apitable/nodepy:16.15.0-alpine AS runner
 
 LABEL org.opencontainers.image.title="APITable Community Edition web server"
-LABEL org.opencontainers.image.version="v1.13.0-beta.1-ce-collaboration.14"
+LABEL org.opencontainers.image.version="v1.13.0-beta.1-ce-collaboration.17"
 LABEL org.opencontainers.image.licenses="AGPL-3.0-or-later"
 LABEL org.opencontainers.image.source="https://github.com/apitable/apitable/tree/v1.13.0-beta.1"
 

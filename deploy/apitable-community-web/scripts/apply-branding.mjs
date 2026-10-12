@@ -93,6 +93,32 @@ replaceSourceText(path.resolve('packages/datasheet/src/pc/components/home/pc_hom
     'import { getLanguage, IReduxState, Strings, t } from \'@apitable/core\';',
   ],
   [
+    "  const [action, setAction] = useState<ActionType>(ActionType.SignUp);\n  const [email, setEmail] = useState<string>('');\n  const router = useRouter();",
+    `  const router = useRouter();
+  const [action, setAction] = useState<ActionType>(() =>
+    router.pathname === '/login' && !router.query.inviteLinkToken && !router.query.inviteMailToken && !inviteLinkInfo && !inviteEmailInfo
+      ? ActionType.SignIn
+      : ActionType.SignUp,
+  );
+  const [email, setEmail] = useState<string>('');`,
+  ],
+  ["  const loginAction = localStorage.getItem('loginAction');\n", ''],
+  [
+    `    if (loginAction === ActionType.SignIn) {
+      setAction(ActionType.SignIn);
+      localStorage.removeItem('loginAction');
+    }`,
+    `    try {
+      const loginAction = localStorage.getItem('loginAction');
+      if (loginAction === ActionType.SignIn) {
+        setAction(ActionType.SignIn);
+        localStorage.removeItem('loginAction');
+      }
+    } catch {
+      // The login route still works when browser storage is unavailable.
+    }`,
+  ],
+  [
     '  const getTitle = (action: ActionType) => {\n    switch (action) {',
     "  const getTitle = (action: ActionType) => {\n    const isEnglish = getLanguage() === 'en-US';\n    switch (action) {",
   ],
