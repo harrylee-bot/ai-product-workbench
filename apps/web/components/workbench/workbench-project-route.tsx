@@ -441,11 +441,11 @@ export function getPrdNodeViewport(
   const rightInset = containerWidth >= 768 && containerWidth < 1024 ? 80 : 40;
   const availableWidth = Math.max(1, containerWidth - targetLeft - rightInset);
   const targetTop = containerWidth < 768 ? 186 : documentViewport.y;
-  // Mobile keeps a horizontal 54px tool rail 190px above the bottom. Leave
+  // Mobile keeps a horizontal 54px tool rail 222px above the bottom. Leave
   // 16px between the fitted document and that rail; desktop documents keep
   // their readable width and can extend vertically for panning/scrolling.
   const mobileContentBottom = containerWidth < 768
-    ? containerHeight - 190 - 54 - 16
+    ? containerHeight - 222 - 54 - 16
     : Number.POSITIVE_INFINITY;
   const heightFitZoom = Math.max(1, Math.min(mobileContentBottom, contentBottom) - targetTop) / nodeHeight;
   const preferredZoom = documentViewport.zoom * (prdCanvasWidth / nodeWidth);

@@ -311,7 +311,7 @@ describe("Mini Workbench Run preview", () => {
       expect(projectedRight).toBeLessThanOrEqual(containerWidth - rightInset);
       if (containerWidth < 768) {
         const projectedBottom = projectedTop + prd.workbench.size!.height * viewport.zoom;
-        expect(projectedBottom).toBeLessThanOrEqual(containerHeight - 190 - 54 - 16);
+        expect(projectedBottom).toBeLessThanOrEqual(containerHeight - 222 - 54 - 16);
       }
     },
   );
@@ -332,7 +332,7 @@ describe("Mini Workbench Run preview", () => {
     expect(top).toBeCloseTo(186, 5);
     expect(left).toBeCloseTo(24, 5);
     expect(left + 500 * viewport.zoom).toBeLessThanOrEqual(containerWidth - 40);
-    expect(top + 707 * viewport.zoom).toBeCloseTo(containerHeight - 260, 5);
+    expect(top + 707 * viewport.zoom).toBeCloseTo(containerHeight - 292, 5);
   });
 
   it.each([

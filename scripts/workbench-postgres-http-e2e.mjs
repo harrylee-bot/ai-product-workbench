@@ -5935,6 +5935,7 @@ async function captureActiveGenerationVisualEvidence({ evidence, kind, outputDir
       const viewportLayout = await waitForStableViewportLayout(page, viewport, {
         selectors: visualLayoutSelectors, timeoutMs: scenarioTimeoutMs,
       });
+      const mobileToolInteraction = await verifyMobileToolRailInteraction(page, viewport);
       const motion = await motionElement.evaluate(async (element) => {
         const sample = () => {
           const style = getComputedStyle(element);
@@ -6015,6 +6016,7 @@ async function captureActiveGenerationVisualEvidence({ evidence, kind, outputDir
       evidence.push({
         viewport: `${viewport.width}x${viewport.height}`,
         viewportLayout,
+        mobileToolInteraction,
         reducedMotion,
         colorScheme: "dark",
         runState,
@@ -6071,6 +6073,9 @@ function assertActiveGenerationVisualEvidence(evidence, kind) {
   for (const item of evidence) {
     const [width, height] = item.viewport.split("x").map(Number);
     assert.deepEqual(item.viewportLayout, { width, height, stableFrames: 3 }, "visual evidence used an unsettled viewport");
+    if (width < 768) {
+      assert.deepEqual(item.mobileToolInteraction, { pan: true, select: true, position: "lower-center" });
+    }
     assert.equal(item.layout.composer.visible, true, `Project Composer was not visible at ${kind} ${item.viewport}`);
     assert.equal(item.layout.agentCard.visible, width >= 768, `Agent card breakpoint was incorrect at ${kind} ${item.viewport}`);
     assert.equal(item.layout.taskStack.visible, width >= 1280, `task stack breakpoint was incorrect at ${kind} ${item.viewport}`);
@@ -6111,6 +6116,7 @@ function assertActiveGenerationVisualEvidence(evidence, kind) {
       ["utilityPill", "composer"],
       ["suggestions", "composer"],
       ["utilityPill", "suggestions"],
+      ["rightToolRail", "suggestions"],
       ["pendingArtifact", "agentCard"],
       ["pendingArtifact", "taskStack"],
       ["pendingArtifact", "mobileRunStatus"],
@@ -6132,6 +6138,21 @@ function cssValueListMatches(value, expected) {
   return values.length > 0 && values.every((item) => item === expected);
 }
 
+async function verifyMobileToolRailInteraction(page, viewport) {
+  if (viewport.width >= 768) return null;
+  const rail = page.locator("[data-right-tool-rail]");
+  // The former overlap covered each tool's lower edge while its center still
+  // worked. Use real, unforced clicks in that covered area, then restore Select.
+  for (const label of ["Pan", "Select"]) {
+    const button = rail.getByRole("button", { name: label, exact: true });
+    const bounds = await button.boundingBox();
+    assert.ok(bounds, `mobile ${label} button was not visible`);
+    await button.click({ position: { x: bounds.width / 2, y: bounds.height - 4 } });
+    assert.equal(await button.getAttribute("aria-pressed"), "true", `mobile ${label} lower edge could not be clicked`);
+  }
+  return { pan: true, select: true, position: "lower-center" };
+}
+
 async function capturePendingDocumentVisualEvidence({ outputDir, page, pendingDocument }) {
   const evidence = [];
   for (const reducedMotion of [false, true]) {
@@ -6142,6 +6163,7 @@ async function capturePendingDocumentVisualEvidence({ outputDir, page, pendingDo
       const viewportLayout = await waitForStableViewportLayout(page, viewport, {
         selectors: visualLayoutSelectors, timeoutMs: scenarioTimeoutMs,
       });
+      const mobileToolInteraction = await verifyMobileToolRailInteraction(page, viewport);
       const observation = await pendingDocument.evaluate(async (element) => {
         const metric = (selector) => {
           const candidate = document.querySelector(selector);
@@ -6184,6 +6206,7 @@ async function capturePendingDocumentVisualEvidence({ outputDir, page, pendingDo
           },
           spinnerFrames: [firstSpinnerFrame, spinnerSample()],
           rect: { left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom },
+          suggestions: metric("[data-project-suggestions]"),
           occluders: {
             composer: metric("[data-project-composer]"),
             mobileRunStatus: metric("[data-mobile-run-status]"),
@@ -6201,6 +6224,7 @@ async function capturePendingDocumentVisualEvidence({ outputDir, page, pendingDo
         ...observation,
         viewport: `${viewport.width}x${viewport.height}`,
         viewportLayout,
+        mobileToolInteraction,
         reducedMotion,
         screenshot: path.relative(root, screenshotPath),
         sha256: sha256(bytes),
@@ -6214,6 +6238,14 @@ function assertPendingDocumentVisualEvidence(evidence) {
   assert.equal(evidence.length, generationVisualViewports.length * 2, "pending PRD visual matrix was incomplete");
   for (const item of evidence) {
     const [width, height] = item.viewport.split("x").map(Number);
+    assert.deepEqual(item.viewportLayout, { width, height, stableFrames: 3 }, "pending PRD used an unsettled viewport");
+    if (width < 768) {
+      assert.deepEqual(item.mobileToolInteraction, { pan: true, select: true, position: "lower-center" });
+    }
+    assert.ok(
+      !rectanglesOverlap(item.occluders.rightToolRail, item.suggestions),
+      `rightToolRail overlapped suggestions while refining PRD at ${item.viewport}`,
+    );
     assert.equal(item.ariaLive, "polite", `pending PRD document did not expose a polite live region at ${item.viewport}`);
     assert.equal(item.transientArtifactCount, 0, `early PRD placeholder remained over the real draft at ${item.viewport}`);
     assert.equal(item.hasSkeleton, true, `pending PRD document omitted its skeleton at ${item.viewport}`);

@@ -1159,7 +1159,7 @@ textarea:focus-visible {
 
   .workbench-transient-artifact-surface--prototype {
     width: auto;
-    height: min(372px, calc(100vh - 440px));
+    height: min(340px, calc(100vh - 472px));
   }
 }
 
