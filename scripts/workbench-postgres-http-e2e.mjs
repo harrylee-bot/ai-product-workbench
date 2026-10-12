@@ -5092,6 +5092,10 @@ async function runRealStackBrowserScenario({
     });
     await page.locator('textarea[aria-label="提示词"]').waitFor({ state: "visible", timeout: scenarioTimeoutMs });
 
+    // This scenario validates PRD generation followed by the explicit
+    // PRD-to-prototype action. The product default generates both artifacts.
+    await page.getByRole("button", { name: "选择生成类型" }).click();
+    await page.getByRole("menuitemradio", { name: /生成文档/u }).click();
     await page.locator('textarea[aria-label="提示词"]').fill("Generate a product requirements document for the synthetic browser test");
     await page.getByRole("button", { name: "提交提示" }).click();
     await page.waitForURL(/\/projects\//u, { timeout: scenarioTimeoutMs });
@@ -5167,6 +5171,7 @@ async function runRealStackBrowserScenario({
       });
       evidenceManifest.pendingDocumentEvidence = pendingDocumentEvidence;
       assertPendingDocumentVisualEvidence(pendingDocumentEvidence);
+      console.log("[e2e] browser PRD early and refining visual matrices passed");
     } finally {
       fakeRuntime.releaseBrowserPrdFinalization();
       await cdpSession.send("Network.emulateNetworkConditions", {
@@ -5202,6 +5207,10 @@ async function runRealStackBrowserScenario({
     });
     const projectId = new URL(projectUrl).pathname.split("/").at(-1);
 
+    // Completed documents can be taller than the canvas viewport. Use the
+    // product's Select All shortcut instead of an offscreen node midpoint.
+    await page.keyboard.press("ControlOrMeta+A");
+    await page.locator(".react-flow__node-documentCanvas.selected").waitFor({ state: "attached", timeout: scenarioTimeoutMs });
     await page.getByRole("button", { name: "导出", exact: true }).click();
     const exportPanel = page.locator("[data-workbench-export-panel]");
     await exportPanel.waitFor({ state: "visible", timeout: scenarioTimeoutMs });
@@ -5260,56 +5269,9 @@ async function runRealStackBrowserScenario({
     assert.ok(fakeRuntime.state.exportReads.some((read) => read.role === "export"), "Export Worker did not read the canonical object with its dedicated identity");
     await page.getByRole("button", { name: "Close", exact: true }).click();
     await exportPanel.waitFor({ state: "detached", timeout: scenarioTimeoutMs });
+    console.log("[e2e] browser export build and external delivery confirmation passed");
 
     assert.ok(projectId, "real-stack browser project URL has no project id");
-    const mixedPersistenceBefore = await browserProjectPersistenceCounts(projectId);
-    const mixedProviderRequestsBefore = fakeRuntime.state.runRequests.length;
-    const mixedSubmissionPostsBefore = bffRequests.filter((request) => (
-      request.method === "POST" && /\/threads\/:id\/submission-intents$/u.test(request.pathClass)
-    )).length;
-    const mixedComposer = page.locator('input[placeholder="您想更改或创建什么内容?"]');
-    await mixedComposer.waitFor({ state: "visible", timeout: scenarioTimeoutMs });
-    const mixedArtifactPrompt = "生成需求文档。然后生成原型";
-    await mixedComposer.fill(mixedArtifactPrompt);
-    await page.getByRole("button", { name: "提交项目请求" }).click();
-    await page.locator('[data-panel-motion="agent-card"]').getByText("提交失败", { exact: true })
-      .waitFor({ state: "visible", timeout: scenarioTimeoutMs });
-    const mixedErrorMessage = "一次运行只能生成需求文档或原型。请先完成需求文档，再发起原型生成。";
-    const mixedErrorToast = page.locator('[data-sonner-toast][data-type="error"]')
-      .filter({ hasText: mixedErrorMessage });
-    await mixedErrorToast.waitFor({ state: "visible", timeout: scenarioTimeoutMs });
-    const mixedErrorToastText = (await mixedErrorToast.textContent())?.replace(/\s+/gu, " ").trim() ?? "";
-    assert.ok(mixedErrorToastText.includes(mixedErrorMessage), "mixed Composer rejection omitted its localized product message");
-    assert.doesNotMatch(
-      mixedErrorToastText,
-      /requestedArtifactKinds|two sequential Runs|\[\s*\{/u,
-      "mixed Composer rejection exposed its schema validation payload",
-    );
-    const mixedPersistenceAfter = await browserProjectPersistenceCounts(projectId);
-    const mixedSubmissionPostsAfter = bffRequests.filter((request) => (
-      request.method === "POST" && /\/threads\/:id\/submission-intents$/u.test(request.pathClass)
-    )).length;
-    const mixedProviderRequestsAdded = fakeRuntime.state.runRequests.length - mixedProviderRequestsBefore;
-    const mixedSubmissionPostsAdded = mixedSubmissionPostsAfter - mixedSubmissionPostsBefore;
-    assert.deepEqual(
-      mixedPersistenceAfter,
-      mixedPersistenceBefore,
-      "mixed Composer request created persistent side effects",
-    );
-    assert.equal(
-      mixedProviderRequestsAdded,
-      0,
-      "mixed Composer request reached the controlled provider",
-    );
-    assert.equal(
-      mixedSubmissionPostsAdded,
-      0,
-      "mixed Composer request crossed the client contract boundary",
-    );
-    assert.equal(await mixedComposer.inputValue(), mixedArtifactPrompt, "rejected mixed prompt was cleared from the Composer");
-    assert.equal(await page.locator('[data-phase="generating"]').count(), 0, "mixed Composer request left an active Run UI");
-    await mixedComposer.fill("");
-
     await page.getByRole("button", { name: /基于此 PRD 生成 UI/u }).waitFor({ state: "visible", timeout: scenarioTimeoutMs });
     await page.evaluate(() => {
       const observations = [];
@@ -5322,7 +5284,6 @@ async function runRealStackBrowserScenario({
       globalThis.__workbenchPrototypeMotionObserver = observer;
     });
     await page.getByRole("button", { name: /基于此 PRD 生成 UI/u }).click();
-    await mixedErrorToast.waitFor({ state: "detached", timeout: scenarioTimeoutMs });
     await page.locator('[data-canvas-generation-motion="prototype"]').waitFor({ state: "visible", timeout: scenarioTimeoutMs });
     const prototypeObservations = await page.evaluate(() => {
       globalThis.__workbenchPrototypeMotionObserver?.disconnect();
@@ -5343,6 +5304,7 @@ async function runRealStackBrowserScenario({
     await page.locator('[data-phase="complete"]').first().waitFor({ state: "visible", timeout: scenarioTimeoutMs });
     const artifactPersistence = await assertBrowserArtifactPersistence(projectId);
     evidenceManifest.artifactPersistence = artifactPersistence;
+    console.log("[e2e] browser PRD and prototype artifacts persisted");
     await runScriptedHardNavigation({
       action: () => page.goto(projectUrl, { waitUntil: "networkidle" }),
       kind: "goto",
@@ -5382,6 +5344,7 @@ async function runRealStackBrowserScenario({
       await page.getByRole("button", { name: "预览项目" }).click();
       const productPreview = page.locator("[data-project-preview]");
       await productPreview.waitFor({ state: "visible", timeout: scenarioTimeoutMs });
+      await productPreview.getByRole("button", { name: "Home", exact: true }).click();
       const productPreviewFrame = productPreview.locator("iframe[data-preview-capability]");
       await productPreviewFrame.waitFor({ state: "visible", timeout: scenarioTimeoutMs });
       await productPreview.locator('[data-isolated-preview] [role="status"]')
@@ -5436,6 +5399,7 @@ async function runRealStackBrowserScenario({
         responses: previewResponses,
       };
       evidenceManifest.previewEvidence = previewEvidence;
+      console.log("[e2e] browser isolated interactive preview passed");
       await page.getByRole("button", { name: "退出预览" }).click();
       await productPreview.waitFor({ state: "detached", timeout: scenarioTimeoutMs });
     } catch (error) {
@@ -5452,6 +5416,8 @@ async function runRealStackBrowserScenario({
 
     const composer = page.locator('input[placeholder="您想更改或创建什么内容?"]');
     await composer.waitFor({ state: "visible", timeout: scenarioTimeoutMs });
+    await page.locator("[data-project-composer]").getByRole("button", { name: "选择生成类型" }).click();
+    await page.getByRole("menuitemradio", { name: /生成文档/u }).click();
     await composer.fill("E2E_BROWSER_FAILURE: Generate a product requirements document for controlled recovery");
     await page.getByRole("button", { name: "提交项目请求" }).click();
     await page.locator('[data-phase="generating"]').first().waitFor({ state: "visible", timeout: recoveryScenarioTimeoutMs });
@@ -5611,7 +5577,6 @@ async function runRealStackBrowserScenario({
       bffOidcApi: true,
       workerArtifactPersistence: true,
       prdPendingPanelAndMotion: true,
-      mixedRequestRejected: true,
       prototypeAfterPrdMotion: true,
       reconnectReload: true,
       previewIndependentOriginAndSandbox: true,
@@ -5638,16 +5603,6 @@ async function runRealStackBrowserScenario({
       visualEvidence,
       pendingDocumentEvidence,
       artifactPersistence,
-      mixedZeroSideEffects: {
-        persistenceCountsUnchanged: true,
-        providerRequestsAdded: mixedProviderRequestsAdded,
-        submissionPostsAdded: mixedSubmissionPostsAdded,
-      },
-      mixedErrorPresentation: {
-        localized: true,
-        schemaPayloadHidden: true,
-        dismissedBeforeNextRun: true,
-      },
       externalDeliveryConfirmation: {
         attemptBeforeConfirmation: deliveryBeforeConfirmation.attempt,
         queueJobsBeforeConfirmation: deliveryBeforeConfirmation.queueJobs,

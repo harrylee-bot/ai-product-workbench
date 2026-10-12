@@ -11,6 +11,7 @@ import shutil
 import subprocess
 from types import SimpleNamespace
 import unittest
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parent.parent
 SPEC = importlib.util.spec_from_file_location("owner_deploy", ROOT / "deploy/workbench-owner-deploy.py")
@@ -146,6 +147,20 @@ class OwnerDeployTests(unittest.TestCase):
             self.assertIn(("verify", []), deployment.calls)
             self.assertFalse((root / "backups").exists())
             self.assertEqual([call for call in deployment.calls if call[1]], [])
+
+    def test_image_filesystem_capacity_is_checked_separately_from_backup_capacity(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            docker_root = root / "docker-images"
+            docker_root.mkdir()
+            deployment = DEPLOY.Deployment(self.args(root))
+            def space(path):
+                return SimpleNamespace(free=(5 if Path(path) == docker_root else 50) * 1024**3)
+            with patch.object(deployment, "run", return_value=str(docker_root).encode()), \
+                    patch.object(DEPLOY.shutil, "disk_usage", side_effect=space):
+                for after_pull in (False, True):
+                    with self.subTest(after_pull=after_pull), self.assertRaisesRegex(RuntimeError, "Docker image storage"):
+                        deployment.check_resources(after_pull=after_pull)
 
     def test_signature_and_backup_failure_never_stop_live_services(self):
         for failure in ["signature", "backup"]:

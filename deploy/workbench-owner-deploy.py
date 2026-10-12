@@ -172,10 +172,14 @@ class Deployment:
         target = self.args.backup_root
         while not target.exists():
             target = target.parent
-        free = shutil.disk_usage(target).free
+        docker_root = Path(self.run(["docker", "info", "--format", "{{.DockerRootDir}}"],
+                                    "Locate Docker image storage").decode().strip())
+        if not docker_root.is_absolute() or not docker_root.is_dir():
+            fail("Docker image storage must be an existing local absolute directory")
         required_gib = self.args.min_remaining_gib if after_pull else self.args.min_free_gib
-        if free < required_gib * 1024**3:
-            fail("Insufficient free disk space for pulling images and retaining database backup")
+        for label, directory in (("database backup", target), ("Docker image storage", docker_root)):
+            if shutil.disk_usage(directory).free < required_gib * 1024**3:
+                fail(f"Insufficient free disk space for {label}")
         if Path("/proc/meminfo").exists():
             entries = dict(re.findall(r"^(\w+):\s+(\d+) kB", Path("/proc/meminfo").read_text(), re.M))
             if int(entries.get("MemAvailable", "0")) < self.args.min_available_mib * 1024:

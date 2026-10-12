@@ -40,7 +40,7 @@ docker compose --env-file deploy/workbench.env \
 
 代码只维护 `main`。普通推送运行 CI；生产发布由项目所有者在 `main` 手动运行「产品工作台 1.0.0 项目所有者发布」（`workbench-owner-release.yml`），填写当前完整提交 SHA，并明确勾选 `approve`。该工作流在 GitHub Actions 构建全部 10 个镜像；只有同一提交的 CI、真实栈浏览器测试、部署合同及镜像漏洞检查全部通过后，才生成签名发布包。版本固定为 `1.0.0`，镜像使用不可变 digest，并保留构建来源、SBOM 与 Cosign 签名。
 
-生产服务器只使用这个发布包中的外部构建镜像。部署端的 Cosign 身份固定为 `https://github.com/harrylee-bot/ai-product-workbench/.github/workflows/workbench-owner-release.yml@refs/heads/main`。`deploy/workbench-owner-deploy.py --help` 列出部署参数；默认只核验并输出计划，增加 `--execute` 才执行切换。执行时先核验签名、提交、镜像及构建配置，拉取全部镜像并检查资源，再备份私有配置与数据库、校验备份，然后迁移和逐服务启动；整个过程禁止服务器构建。
+生产服务器只使用这个发布包中的外部构建镜像。部署端的 Cosign 身份固定为本仓库 `main` 上的 [项目所有者发布工作流](.github/workflows/workbench-owner-release.yml)，精确身份由部署脚本约束。`deploy/workbench-owner-deploy.py --help` 列出部署参数；默认只核验并输出计划，增加 `--execute` 才执行切换。执行时先核验签名、提交、镜像及构建配置，拉取全部镜像并检查资源，再备份私有配置与数据库、校验备份，然后迁移和逐服务启动；整个过程禁止服务器构建。
 
 切换失败时恢复原先运行的应用镜像，保留仅管理员可读的恢复材料；数据库迁移不会自动反向执行，数据库恢复按备份和实际故障单独处理。服务健康检查通过后，还须在线验证真实知识检索、文档生成与下载、原型分享和撤销。生产凭据、发布包和备份存放在仓库外的受控目录，不写入项目文件或公开日志。
 
