@@ -138,6 +138,7 @@ try {
   await run("node", ["scripts/e2e/workbench-run-preview-smoke.mjs"]);
   await run("node", ["scripts/e2e/workbench-approval-preferences-smoke.mjs"]);
   await run("node", ["scripts/e2e/workbench-board-tools-smoke.mjs"]);
+  await run("node", ["--test", "scripts/e2e/workbench-navigation-readiness.test.mjs"]);
   for (const browserName of ["chromium", "firefox", "webkit"]) {
     await run(
       "node",

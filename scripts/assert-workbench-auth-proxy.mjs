@@ -34,6 +34,15 @@ for (const name of [
 
 const nginx = read("deploy/workbench-nginx.conf");
 const previewNginx = read("deploy/workbench-preview-nginx.conf");
+const knowledgeRoute = nginx.split("location = /api/v1/runtime/knowledge/retrieve {")[1]
+  ?.split("    # Canvas capability calls")[0];
+assert(
+  knowledgeRoute?.includes("proxy_pass_request_headers off;")
+    && knowledgeRoute.includes("proxy_set_header Idempotency-Key $http_idempotency_key;")
+    && knowledgeRoute.includes("proxy_set_header Authorization $http_authorization;")
+    && knowledgeRoute.includes('proxy_set_header Cookie "";'),
+  "the Knowledge capability route must forward its invocation key and grant while stripping cookies",
+);
 for (const [source, label] of [
   [nginx, "primary nginx"],
   [previewNginx, "Preview nginx"],

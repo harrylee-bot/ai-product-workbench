@@ -10,6 +10,7 @@ import {
   assertRouteTransitionFrames,
   routePresent,
 } from "./workbench-route-frame-contract.mjs";
+import { waitForInitialHomeVisualReady } from "./workbench-navigation-readiness.mjs";
 
 const origin = normalizedOrigin(
   process.env.WORKBENCH_E2E_WEB_ORIGIN ?? "http://localhost:3000",
@@ -291,6 +292,7 @@ try {
     );
   }, homeHref);
 
+  const initialHomeVisualReady = await waitForInitialHomeVisualReady(page, { expectedHref: homeHref });
   await startRouteFrameCapture(page, "home-to-project");
   await page.getByText(project.title, { exact: true }).click();
   await page.waitForFunction(() => (
@@ -527,6 +529,7 @@ try {
   console.log(JSON.stringify({
     ok: true,
     browser: browserName,
+    initialHomeVisualReady,
     rejectedBoardSaveCount: failedBoardSaves.length,
     successfulBoardSaveCount: successfulBoardSaves.length,
     finalBoardRevision: board.revision,

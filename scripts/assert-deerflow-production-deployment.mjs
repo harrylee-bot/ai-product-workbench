@@ -222,7 +222,7 @@ const gatewayContextPatch = patchManifest.gatewaySources[0];
 assert(
   gatewayContextPatch.path === "app/gateway/services.py"
     && gatewayContextPatch.upstreamSha256 === "4d445c3ed264b346f419204f88073868db7030b2ae307eb6c496ef6f5755eb34"
-    && gatewayContextPatch.patchedSha256 === "46c8c98fbdf94876603012d922c91ee7a2ece03c07a6ccf30d63a43086e1fdcb",
+    && gatewayContextPatch.patchedSha256 === "f44b8577193d4e51bd2c9670a3eaf78fe83fce4c6d01ef99dc1e90e2cf940999",
   "DeerFlow Gateway context patch must bind the audited upstream and patched hashes",
 );
 assert(
@@ -248,9 +248,12 @@ assert(
   gatewayContextPatchText.includes('sanitized.pop(\\"recursion_limit\\", None)')
     && gatewayContextPatchText.includes("_DEFAULT_LEAD_GRAPH_RECURSION_LIMIT = 100")
     && gatewayContextPatchText.includes("_WORKBENCH_PRD_LEAD_GRAPH_RECURSION_LIMIT = 200")
+    && gatewayContextPatchText.includes("_WORKBENCH_LINKED_LEAD_GRAPH_RECURSION_LIMIT = 400")
     && gatewayContextPatchText.includes("_apply_workbench_lead_recursion_limit")
-    && gatewayContextPatchText.includes('requestedArtifactKinds\\") == [\\"prd\\"]'),
-  "DeerFlow Gateway patch must grant the bounded 200-step budget only to trusted PRD-only Runs",
+    && gatewayContextPatchText.includes("trusted_internal_caller is True")
+    && gatewayContextPatchText.includes('set(requested_kinds) == {\\"prd\\", \\"prototype\\"}')
+    && gatewayContextPatchText.includes('requested_kinds == [\\"prd\\"]'),
+  "DeerFlow Gateway patch must keep bounded trusted budgets of 400 for linked delivery, 200 for PRD-only, and 100 otherwise",
 );
 assert(
   patchManifest.agent?.insertion?.includes("WorkbenchToolScopeMiddleware(")
@@ -447,6 +450,12 @@ const patchRequestContextTestSource = readText(`${patchRoot}/test_workbench_requ
 assert(
   sha256(patchRequestContextTestSource) === patchManifest.requestContextTest?.sha256,
   "DeerFlow request-context contract test does not match its manifest",
+);
+assert(
+  patchRequestContextTestSource.includes("test_trusted_linked_scope_receives_a_bounded_budget_in_either_order")
+    && patchRequestContextTestSource.includes("test_joint_budget_requires_a_literal_trusted_internal_identity")
+    && patchRequestContextTestSource.includes("test_non_prd_malformed_untrusted_and_forged_fields_keep_default_budget"),
+  "DeerFlow request-context tests must cover trusted linked budgets and reject forged or malformed scope",
 );
 assertDeepEqual(
   readdirSync(new URL(`${patchRoot}/`, root)).sort(),

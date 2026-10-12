@@ -35,7 +35,7 @@
     {
       "path": "app/gateway/services.py",
       "upstreamSha256": "4d445c3ed264b346f419204f88073868db7030b2ae307eb6c496ef6f5755eb34",
-      "patchedSha256": "46c8c98fbdf94876603012d922c91ee7a2ece03c07a6ccf30d63a43086e1fdcb",
+      "patchedSha256": "f44b8577193d4e51bd2c9670a3eaf78fe83fce4c6d01ef99dc1e90e2cf940999",
       "replacements": [
         {
           "anchor": "def merge_run_context_overrides(config: dict[str, Any], context: Mapping[str, Any] | None) -> None:\n",
@@ -50,7 +50,7 @@
         {
           "anchor": "def merge_run_context_overrides(config: dict[str, Any], context: Mapping[str, Any] | None) -> None:\n",
           "position": "before",
-          "insertion": "_DEFAULT_LEAD_GRAPH_RECURSION_LIMIT = 100\n_WORKBENCH_PRD_LEAD_GRAPH_RECURSION_LIMIT = 200\n\n\ndef _apply_workbench_lead_recursion_limit(\n    config: dict[str, Any],\n    *,\n    trusted_internal_caller: bool,\n) -> None:\n    normalized_scope = None\n    runtime_context = config.get(\"context\")\n    if trusted_internal_caller is True and isinstance(runtime_context, Mapping):\n        normalized_scope = _normalize_workbench_scope(runtime_context.get(\"workbench\"))\n    config[\"recursion_limit\"] = (\n        _WORKBENCH_PRD_LEAD_GRAPH_RECURSION_LIMIT\n        if normalized_scope is not None\n        and normalized_scope.get(\"requestedArtifactKinds\") == [\"prd\"]\n        else _DEFAULT_LEAD_GRAPH_RECURSION_LIMIT\n    )\n\n\n"
+          "insertion": "_DEFAULT_LEAD_GRAPH_RECURSION_LIMIT = 100\n_WORKBENCH_PRD_LEAD_GRAPH_RECURSION_LIMIT = 200\n_WORKBENCH_LINKED_LEAD_GRAPH_RECURSION_LIMIT = 400\n\n\ndef _apply_workbench_lead_recursion_limit(\n    config: dict[str, Any],\n    *,\n    trusted_internal_caller: bool,\n) -> None:\n    normalized_scope = None\n    runtime_context = config.get(\"context\")\n    if trusted_internal_caller is True and isinstance(runtime_context, Mapping):\n        normalized_scope = _normalize_workbench_scope(runtime_context.get(\"workbench\"))\n    requested_kinds = (\n        normalized_scope.get(\"requestedArtifactKinds\")\n        if normalized_scope is not None\n        else None\n    )\n    # Each tool round traverses multiple middleware nodes. Linked delivery must\n    # complete both staged artifacts while keeping the graph budget bounded.\n    if requested_kinds is not None and set(requested_kinds) == {\"prd\", \"prototype\"}:\n        config[\"recursion_limit\"] = _WORKBENCH_LINKED_LEAD_GRAPH_RECURSION_LIMIT\n    elif requested_kinds == [\"prd\"]:\n        config[\"recursion_limit\"] = _WORKBENCH_PRD_LEAD_GRAPH_RECURSION_LIMIT\n    else:\n        config[\"recursion_limit\"] = _DEFAULT_LEAD_GRAPH_RECURSION_LIMIT\n\n\n"
         },
         {
           "anchor": "def merge_run_context_overrides(config: dict[str, Any], context: Mapping[str, Any] | None) -> None:\n",
@@ -97,6 +97,6 @@
     "sha256": "d800675a3c65ef94eeb8328bd2a1f75b63cebed730f2d5614e109ffda1ffb0c2"
   },
   "requestContextTest": {
-    "sha256": "a4cb17db889064abe9a6360e24aca1e861cfd9c99ee5b35298e0dd84beae2fe1"
+    "sha256": "c546a3440ea71d32723da6180d86e5eb9a266186062b3cb3103c1a8aabfe5550"
   }
 }

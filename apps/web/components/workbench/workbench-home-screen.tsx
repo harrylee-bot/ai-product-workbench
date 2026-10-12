@@ -84,6 +84,7 @@ import {
   type WorkbenchDesignStyleSelection,
 } from "./workbench-design-system-controls";
 import { WorkbenchImportSourcesDialog } from "./workbench-import-sources-dialog";
+import { useWorkbenchRouteEnterAnimation } from "./workbench-route-motion";
 import {
   keepWorkbenchRouteMotionOnMainThread,
   panelTransition,
@@ -181,6 +182,7 @@ export function HomeScreen({
   setProjectSearch: (query: string) => void;
   setPrompt: (prompt: string) => void;
 }) {
+  const routeAnimation = useWorkbenchRouteEnterAnimation("home");
   const stageRef = useRef<HTMLElement | null>(null);
   const [inspirationRotationRequest, setInspirationRotationRequest] = useState(0);
   const [importSourcesOpen, setImportSourcesOpen] = useState(false);
@@ -228,7 +230,7 @@ export function HomeScreen({
 
   return (
     <motion.section
-      animate={{ opacity: 1, y: 0 }}
+      animate={routeAnimation}
       className="absolute inset-0 bg-[var(--workbench-bg)] text-[#e5e2e3]"
       exit={{ opacity: 0, y: -6 }}
       initial={{ opacity: 0, y: 6 }}

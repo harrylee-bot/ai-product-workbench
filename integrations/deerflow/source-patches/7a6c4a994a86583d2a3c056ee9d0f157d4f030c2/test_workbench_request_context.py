@@ -5,6 +5,7 @@ import unittest
 
 from app.gateway.services import (
     _DEFAULT_LEAD_GRAPH_RECURSION_LIMIT,
+    _WORKBENCH_LINKED_LEAD_GRAPH_RECURSION_LIMIT,
     _WORKBENCH_PRD_LEAD_GRAPH_RECURSION_LIMIT,
     _apply_workbench_lead_recursion_limit,
     _is_trusted_internal_caller,
@@ -154,6 +155,30 @@ class WorkbenchRequestContextTests(unittest.TestCase):
             _WORKBENCH_PRD_LEAD_GRAPH_RECURSION_LIMIT,
         )
 
+    def test_trusted_linked_scope_receives_a_bounded_budget_in_either_order(self) -> None:
+        self.assertEqual(_WORKBENCH_LINKED_LEAD_GRAPH_RECURSION_LIMIT, 400)
+        for kinds in (["prd", "prototype"], ["prototype", "prd"]):
+            with self.subTest(kinds=kinds):
+                config = build_run_config(
+                    "thread-1",
+                    {"recursion_limit": 999},
+                    None,
+                )
+                merge_run_context_overrides(
+                    config,
+                    {
+                        "recursion_limit": 999,
+                        "workbench": {
+                            "runId": "run-1",
+                            "runtimeAttemptId": "attempt-1",
+                            "requestedArtifactKinds": kinds,
+                        },
+                    },
+                    allow_workbench_context=True,
+                )
+                _apply_workbench_lead_recursion_limit(config, trusted_internal_caller=True)
+                self.assertEqual(config["recursion_limit"], 400)
+
     def test_non_prd_malformed_untrusted_and_forged_fields_keep_default_budget(self) -> None:
         exact_prd_scope = {
             "runId": "run-1",
@@ -162,21 +187,25 @@ class WorkbenchRequestContextTests(unittest.TestCase):
         }
         cases = (
             ("prototype", True, {**exact_prd_scope, "requestedArtifactKinds": ["prototype"]}),
-            ("mixed", True, {**exact_prd_scope, "requestedArtifactKinds": ["prd", "prototype"]}),
+            ("other-mixed", True, {**exact_prd_scope, "requestedArtifactKinds": ["prd", "document"]}),
+            ("linked-plus-extra", True, {**exact_prd_scope, "requestedArtifactKinds": ["prd", "prototype", "document"]}),
+            ("linked-duplicate", True, {**exact_prd_scope, "requestedArtifactKinds": ["prd", "prototype", "prd"]}),
+            ("unknown", True, {**exact_prd_scope, "requestedArtifactKinds": ["prd", "unknown"]}),
             ("malformed", True, {**exact_prd_scope, "requestedArtifactKinds": ["prd", "prd"]}),
             ("missing", True, {"runId": "run-1", "runtimeAttemptId": "attempt-1"}),
             ("untrusted", False, exact_prd_scope),
+            ("untrusted-linked", False, {**exact_prd_scope, "requestedArtifactKinds": ["prd", "prototype"]}),
         )
         for label, trusted_internal_caller, scope in cases:
             with self.subTest(label=label):
                 config = build_run_config(
                     "thread-1",
                     {
-                        "recursion_limit": 200,
-                        "configurable": {"requestedArtifactKinds": ["prd"]},
+                        "recursion_limit": 999,
+                        "configurable": {"requestedArtifactKinds": ["prd", "prototype"]},
                         "context": {
                             "workbench": exact_prd_scope,
-                            "recursion_limit": 200,
+                            "recursion_limit": 999,
                         },
                     },
                     None,
@@ -184,7 +213,7 @@ class WorkbenchRequestContextTests(unittest.TestCase):
                 merge_run_context_overrides(
                     config,
                     {
-                        "recursion_limit": 200,
+                        "recursion_limit": 999,
                         "workbench": scope,
                     },
                     allow_workbench_context=trusted_internal_caller,
@@ -198,6 +227,22 @@ class WorkbenchRequestContextTests(unittest.TestCase):
                     config["recursion_limit"],
                     _DEFAULT_LEAD_GRAPH_RECURSION_LIMIT,
                 )
+
+    def test_joint_budget_requires_a_literal_trusted_internal_identity(self) -> None:
+        for trusted in (False, None, "true", 1):
+            with self.subTest(trusted=trusted):
+                config = {
+                    "recursion_limit": 999,
+                    "context": {
+                        "workbench": {
+                            "runId": "run-1",
+                            "runtimeAttemptId": "attempt-1",
+                            "requestedArtifactKinds": ["prd", "prototype"],
+                        },
+                    },
+                }
+                _apply_workbench_lead_recursion_limit(config, trusted_internal_caller=trusted)
+                self.assertEqual(config["recursion_limit"], 100)
 
     def test_malformed_scope_does_not_create_a_runtime_secret_channel(self) -> None:
         config = build_run_config("thread-1", None, None)

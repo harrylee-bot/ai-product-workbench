@@ -90,6 +90,7 @@ import {
   ProjectTranscriptPanel,
 } from "./workbench-project-run-panels";
 import { RenameProjectDialog } from "./workbench-rename-dialog";
+import { useWorkbenchRouteEnterAnimation } from "./workbench-route-motion";
 import {
   keepWorkbenchRouteMotionOnMainThread,
   viewTransition,
@@ -274,6 +275,7 @@ export function ProjectScreenView({
 }: {
   controller: ProjectScreenViewContract;
 }) {
+  const routeAnimation = useWorkbenchRouteEnterAnimation("project");
   const activeMotionKind = getProjectStageMotionKind({
     generationStage: runPanels.generationStage,
     isOverview: root.isGeneratedOverview,
@@ -290,7 +292,7 @@ export function ProjectScreenView({
 
   return (
     <motion.section
-      animate={{ opacity: 1 }}
+      animate={routeAnimation}
       className={root.projectStageClass}
       data-generation-stage={runPanels.generationStage ?? undefined}
       data-project-phase={root.phase}
