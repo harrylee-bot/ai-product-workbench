@@ -97,6 +97,7 @@ def workbench_artifact_draft_publish(
         response["repairInstruction"] = _artifact_draft_repair_instruction(
             draft, validation["issues"],
         )
+        response["repairHints"] = _artifact_draft_repair_hints(draft, validation["issues"])
     return json.dumps(response, ensure_ascii=False, separators=(",", ":")), artifact
 
 
@@ -144,6 +145,176 @@ def _artifact_draft_repair_instruction(candidate: Any, issues: list[Any]) -> str
             "checked state and existing binding ids; do not choose a new default."
         )
     return instruction
+
+
+def _artifact_draft_repair_hints(candidate: Any, issues: list[Any]) -> list[dict[str, Any]]:
+    """Bounded transport guidance only; never normalize or invent business content."""
+    if (
+        not isinstance(candidate, dict)
+        or candidate.get("kind") != "prd"
+        or candidate.get("schemaVersion") != 2
+    ):
+        return []
+    hints: list[dict[str, Any]] = []
+    used_bytes = 2  # The surrounding JSON array brackets.
+
+    def append(hint: dict[str, Any]) -> None:
+        nonlocal used_bytes
+        encoded = json.dumps(hint, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+        addition = len(encoded) + (1 if hints else 0)
+        if len(hints) < 20 and used_bytes + addition <= 12_000 and hint not in hints:
+            hints.append(hint)
+            used_bytes += addition
+
+    inline_shape = '[{type:"text",text:string,marks:[]}]'
+    paragraph_shape = '{id:string,type:"paragraph",content:' + inline_shape + '}'
+    list_shape = (
+        '{id:string,type:"bulletList",items:[{id:string,content:' + inline_shape + '}]}'
+    )
+    section_shapes = {
+        ("content", "sections"): (
+            '{introduction:{title,background,scope,usageScenarios},'
+            'businessRequirements:{title,summary,pageLinks,coreRules,flowAndPages,'
+            'acceptanceCriteria,additionalSections},degradation:{title,applicable,content},'
+            'safetyBaseline:{title,intro,rows}}'
+        ),
+        ("content", "sections", "businessRequirements"): (
+            '{title:string,summary:Inline[],pageLinks:{title,blocks},coreRules:{title,blocks},'
+            'flowAndPages:{title,blocks,diagrams},acceptanceCriteria:{title,blocks},'
+            'additionalSections:[{title,blocks}]}'
+        ),
+        ("content", "sections", "degradation"): '{title:string,applicable:boolean,content:Inline[]}',
+        ("content", "sections", "safetyBaseline"): '{title:string,intro:string,rows:SafetyRow[21]}',
+        ("content", "sections", "businessRequirements", "acceptanceCriteria"): '{title:string,blocks:Block[]}',
+        ("content", "sections", "businessRequirements", "additionalSections"): '[{title:string,blocks:Block[]}]',
+    }
+    for name in _misplaced_prd_sections(candidate, issues):
+        append({
+            "path": ["content", "sections", name],
+            "moveFrom": ["content", "sections", "introduction", name],
+            "instruction": "Move the complete existing object to this sibling path; preserve its contents and remove only the misplaced copy.",
+        })
+    relocation_paths = [
+        (["sections"], ["content", "sections"], dict),
+        (["content", "degradation"], ["content", "sections", "degradation"], dict),
+        (["content", "safetyBaseline"], ["content", "sections", "safetyBaseline"], dict),
+        (["content", "sections", "acceptanceCriteria"], ["content", "sections", "businessRequirements", "acceptanceCriteria"], dict),
+        (["content", "sections", "additionalSections"], ["content", "sections", "businessRequirements", "additionalSections"], list),
+    ]
+    for source, target, expected_type in relocation_paths:
+        parent = _candidate_value(candidate, target[:-1])
+        if (
+            isinstance(parent, dict) and target[-1] not in parent
+            and isinstance(_candidate_value(candidate, source), expected_type)
+            and any(isinstance(i, dict) and i.get("code") == "unrecognized_keys" and i.get("path") == source[:-1] for i in issues)
+            # additionalSections has a contract default, so only its rejected
+            # source is required as evidence; it must still remain absent here.
+            and (target[-1] == "additionalSections" or any(isinstance(i, dict) and i.get("code") == "invalid_type" and i.get("path") == target for i in issues))
+        ):
+            append({"path": target, "moveFrom": source, "instruction": "Move the complete existing value to its exact owning path and remove only the misplaced copy. Preserve all nested content; do not rewrite it."})
+    for issue in issues[:100]:
+        if not isinstance(issue, dict) or not isinstance(issue.get("path"), list):
+            continue
+        path = issue["path"]
+        if len(path) > 24 or any(
+            isinstance(part, bool) or not isinstance(part, (str, int))
+            or (isinstance(part, str) and len(part) > 96)
+            for part in path
+        ):
+            continue
+        code = issue.get("code")
+        if (
+            isinstance(issue.get("expectedValue"), str)
+            and len(issue["expectedValue"]) <= 2_000
+            and (
+                code == "invalid_literal" and path == ["content", "sections", "safetyBaseline", "intro"]
+                or code == "custom" and len(path) == 4 and path[:3] == ["content", "tableOfContents", "entries"]
+                and isinstance(path[3], int) and not isinstance(path[3], bool)
+            )
+        ):
+            append({
+                "path": path,
+                "expectedValue": issue["expectedValue"],
+                "instruction": "Copy this exact contract-owned string, including punctuation and newlines. It is fixed template text, not a business assertion.",
+            })
+        if code == "invalid_type" and tuple(path) in section_shapes:
+            append({
+                "path": path,
+                "structure": section_shapes[tuple(path)],
+                "instruction": "This is type notation, not replacement content. Preserve existing sections and relocate misplaced complete objects to these exact paths; do not recreate their business text.",
+            })
+        if (
+            len(path) >= 2 and path[-2] == "blocks" and isinstance(path[-1], int)
+            and code in ("invalid_type", "invalid_union", "invalid_union_discriminator")
+        ):
+            misplaced_field_paths = {
+                "introduction": ["content", "sections", "introduction"],
+                "background": ["content", "sections", "introduction", "background"],
+                "scope": ["content", "sections", "introduction", "scope"],
+                "usageScenarios": ["content", "sections", "introduction", "usageScenarios"],
+                "businessRequirements": ["content", "sections", "businessRequirements"],
+                "degradation": ["content", "sections", "degradation"],
+                "safetyBaseline": ["content", "sections", "safetyBaseline"],
+                "pageLinks": ["content", "sections", "businessRequirements", "pageLinks"],
+                "coreRules": ["content", "sections", "businessRequirements", "coreRules"],
+                "flowAndPages": ["content", "sections", "businessRequirements", "flowAndPages"],
+                "acceptanceCriteria": ["content", "sections", "businessRequirements", "acceptanceCriteria"],
+            }
+            value = _candidate_value(candidate, path)
+            owning_path = misplaced_field_paths.get(value) if isinstance(value, str) else None
+            if owning_path is not None:
+                exists = isinstance(_candidate_value(candidate, owning_path), dict)
+                append({
+                    "path": path,
+                    "owningPath": owning_path,
+                    "instruction": (
+                        "This string is a schema field name, not business text, a block object, or a valid reference. "
+                        + ("The owning field already contains an object: remove only this invalid duplicate string from blocks and preserve that object."
+                           if exists else "Restore the required object at owningPath using existing authored content, then remove this invalid field-name string from blocks.")
+                        + " Never wrap a schema field name in a text paragraph or list item. Keep all genuine business blocks unchanged."
+                    ),
+                })
+                continue
+            scope = path[:4] == ["content", "sections", "introduction", "scope"]
+            append({
+                "path": path,
+                "structure": list_shape if scope else paragraph_shape,
+                "instruction": (
+                    "Every blocks entry is a typed object, never a string or Markdown. "
+                    "This is type notation: preserve existing business text and stable IDs; allocate unique IDs only for new objects. Schema field names and IDs are not business text and must not become prose. "
+                    + ("Scope needs an explicit bulletList or orderedList; every list item is an object with id and an inline content array."
+                       if scope else "Use the block type that preserves the existing meaning; a paragraph contains an inline content array.")
+                ),
+            })
+        if code == "custom" and path == ["content", "sections", "introduction", "scope", "blocks"] and issue.get("message") == "document scope must contain an explicit list":
+            append({
+                "path": path,
+                "structure": list_shape,
+                "instruction": "Represent existing scope items as a typed bulletList or orderedList. Preserve their meaning; do not append a plain string or a Markdown list to blocks.",
+            })
+        if code == "invalid_type" and path and path[-1] == "marks":
+            parent = _candidate_value(candidate, path[:-1])
+            if isinstance(parent, dict) and parent.get("type") == "text":
+                append({
+                    "path": path,
+                    "structure": 'marks: Array<"strong"|"emphasis"|"code"|"strikethrough">',
+                    "instruction": "Every text inline requires marks. Use [] for unformatted text, otherwise preserve its intended format with unique allowed marks. Preserve the sibling text exactly.",
+                })
+        if code == "invalid_type" and issue.get("expectedType") in ("object", "array", "string", "number", "boolean", "null"):
+            append({"path": path, "expectedType": issue["expectedType"], "instruction": "Repair this field's JSON type while preserving its existing meaning and every unrelated field."})
+    return hints
+
+
+def _candidate_value(candidate: Any, path: list[Any]) -> Any:
+    value = candidate
+    for part in path:
+        if isinstance(value, dict) and isinstance(part, str):
+            value = value.get(part)
+        elif isinstance(value, list) and isinstance(part, int) and not isinstance(part, bool) and 0 <= part < len(value):
+            value = value[part]
+        else:
+            return None
+    return value
 
 
 def _misplaced_prd_sections(candidate: Any, issues: list[Any]) -> list[str]:

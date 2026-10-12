@@ -40,9 +40,11 @@ const prdDefinitions = Object.fromEntries(
     .sort()
     .map((name) => [name, rewriteRefs(schemas[name])]),
 );
-const prdGenerated = `${JSON.stringify({
+const prdGenerated = `${serializePrdSchema({
   $schema: "https://json-schema.org/draft/2020-12/schema",
   title: "产品工作台 PRD Runtime Result",
+  description: "Read x-workbench-authoring-guide: business-neutral transport fragments only; validation constraints are unchanged.",
+  "x-workbench-authoring-guide": prdAuthoringGuide(schemas),
   type: "object",
   properties: {
     protocol: {
@@ -63,7 +65,7 @@ const prdGenerated = `${JSON.stringify({
   required: ["protocol", "message", "artifacts"],
   additionalProperties: false,
   $defs: prdDefinitions,
-}, null, 2)}\n`;
+})}\n`;
 
 const outputs = [
   { path: outputPath, content: generated, label: "Runtime result schema" },
@@ -127,4 +129,71 @@ function rewriteRefs(value) {
       ? [key, child.replace(/^#\/components\/schemas\//, "#/$defs/")]
       : [key, rewriteRefs(child)]
   )));
+}
+
+function prdAuthoringGuide(allSchemas) {
+  const literal = (schemaName, property) => {
+    const values = allSchemas[schemaName]?.properties?.[property]?.enum;
+    if (!Array.isArray(values) || values.length !== 1) {
+      throw new Error(`Expected one fixed OpenAPI literal: ${schemaName}.${property}`);
+    }
+    return values[0];
+  };
+  const text = (value) => ({ type: literal("PrdTextInline", "type"), text: value, marks: [] });
+  const paragraph = {
+    id: "replace-paragraph-id",
+    type: literal("PrdParagraphBlock", "type"),
+    content: [text("REPLACE_WITH_TEXT")],
+  };
+  const bulletList = {
+    id: "replace-list-id",
+    type: literal("PrdBulletListBlock", "type"),
+    items: [
+      { id: "replace-item-a", content: [text("REPLACE_WITH_SCOPE_A")] },
+      { id: "replace-item-b", content: [text("REPLACE_WITH_SCOPE_B")] },
+    ],
+  };
+  const table = {
+    id: "replace-table-id",
+    type: literal("PrdTableBlock", "type"),
+    columns: [
+      { id: "replace-column-a", label: "REPLACE_WITH_LABEL_A" },
+      { id: "replace-column-b", label: "REPLACE_WITH_LABEL_B" },
+    ],
+    rows: [{
+      id: "replace-row-id",
+      cells: [
+        { columnId: "replace-column-a", content: [text("REPLACE_WITH_CELL_A")] },
+        { columnId: "replace-column-b", content: [text("REPLACE_WITH_CELL_B")] },
+      ],
+    }],
+  };
+  const document = allSchemas.PrdDocumentV2;
+  const sectionSchemas = document.properties.sections.properties;
+  const introEnum = sectionSchemas.safetyBaseline.properties.intro.enum;
+  if (!Array.isArray(introEnum) || introEnum.length !== 1) throw new Error("Expected one fixed safety intro literal");
+  return {
+    purpose: "STRUCTURE ONLY, not a complete publishable draft. Replace replace-* IDs and REPLACE_WITH_* text from authorized facts; omit this guide. No business facts, citations, channels, degradation or safety decisions are supplied.",
+    constructionRules: [
+      "blocks contains complete objects, never strings, IDs, schema names, $ref or JSON-encoded objects. Put text in typed inline objects with marks: [].",
+      "Scope needs a bulletList/orderedList. Each items entry is {id,content}, without type. Never append item IDs or section names as sibling blocks.",
+      "Tables require one typed cell per column per row. IDs are globally unique; columnId references a declared column.",
+      "sectionFields lists required fields for four sibling objects under content.sections; none belongs inside introduction. Keep every section during repairs.",
+      "Copy fixed schema literals verbatim, including all intro characters. JSON \\n decodes to a real newline; never double-escape. TOC punctuation follows the canonical structure reference.",
+      "Fragments are incomplete. Replace all markers, retain all required fields, and pass semantic checks. Repair only reported paths and resubmit the complete draft.",
+    ],
+    requiredDocumentFields: document.required,
+    sectionFields: Object.fromEntries(Object.entries(sectionSchemas).map(([name, schema]) => [name, schema.required])),
+    fixedLiterals: { "content.sections.safetyBaseline.intro": introEnum[0] },
+    typedBlockFragments: { paragraph, bulletList, table },
+  };
+}
+
+function serializePrdSchema(schema) {
+  // Keep the authoring annotation compact within the fixed reference-read budget.
+  return `{
+${Object.entries(schema).map(([key, value]) => (
+    `  ${JSON.stringify(key)}: ${JSON.stringify(value, null, key === "x-workbench-authoring-guide" ? 0 : 2).replace(/\n/gu, "\n  ")}`
+  )).join(",\n")}
+}`;
 }

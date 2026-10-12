@@ -89,6 +89,58 @@ class RuntimeResultValidatorTests(unittest.TestCase):
         self.assertTrue(result["ok"])
         self.assertEqual(result["issues"], [])
 
+    def test_prd_expected_metadata_is_contract_owned_and_does_not_echo_candidate_values(self) -> None:
+        draft = json.loads(PRD_EXAMPLE_PATH.read_text(encoding="utf-8"))["artifacts"][0]
+        sections = draft["content"]["sections"]
+        expected_intro = sections["safetyBaseline"]["intro"]
+        sections["safetyBaseline"]["intro"] = "PRIVATE_WRONG_INTRO"
+        sections["introduction"]["scope"]["blocks"][0] = "PRIVATE_WRONG_BLOCK"
+        del sections["degradation"]["content"][0]["marks"]
+        before = copy.deepcopy(draft)
+
+        result = validate_runtime_artifact_draft(draft)
+
+        self.assertFalse(result["ok"])
+        self.assertEqual(draft, before)
+        intro = next(issue for issue in result["issues"] if issue["path"][-1] == "intro")
+        self.assertEqual(intro["expectedValue"], expected_intro)
+        self.assertIn("截图违依据", intro["expectedValue"])
+        block = next(issue for issue in result["issues"] if issue["path"][-2:] == ["blocks", 0])
+        self.assertEqual(block["expectedType"], "object")
+        marks = next(issue for issue in result["issues"] if issue["path"][-1] == "marks")
+        self.assertEqual(marks["expectedType"], "array")
+        self.assertNotIn("PRIVATE_", json.dumps(result["issues"]))
+        self.assertTrue(all(set(issue) <= {"code", "path", "message", "expectedType", "expectedValue"} for issue in result["issues"]))
+
+    def test_toc_expected_values_skip_authored_headings_and_account_for_their_offset(self) -> None:
+        draft = json.loads(PRD_EXAMPLE_PATH.read_text(encoding="utf-8"))["artifacts"][0]
+        content = draft["content"]
+        content["sections"]["businessRequirements"]["additionalSections"] = [{
+            "title": "2.5 PRIVATE_AUTHORED_HEADING",
+            "blocks": [{"id": "extra_section_text", "type": "paragraph", "content": [
+                {"type": "text", "text": "沿用正文已经说明的业务范围。", "marks": []},
+            ]}],
+        }]
+        content["tableOfContents"]["entries"][9:9] = ["2.5 WRONG"]
+        content["tableOfContents"]["entries"][-2:] = ["3 无点", "4 无点"]
+
+        result = validate_runtime_artifact_draft(draft)
+
+        self.assertFalse(result["ok"])
+        toc = {issue["path"][-1]: issue for issue in result["issues"] if issue["path"][:3] == ["content", "tableOfContents", "entries"]}
+        self.assertNotIn("expectedValue", toc[9])
+        self.assertEqual(toc[10]["expectedValue"], "3. 业务降级方案（必填）")
+        self.assertEqual(toc[11]["expectedValue"], "4. 需求安全基线要求（必填）")
+        self.assertTrue(all("PRIVATE_" not in str(issue.get("expectedValue", "")) for issue in result["issues"]))
+
+    def test_expected_value_metadata_is_not_added_for_prototype_or_unknown_literal_paths(self) -> None:
+        candidate = copy.deepcopy(self.example)
+        candidate["protocol"] = "WRONG_PROTOCOL"
+        candidate["artifacts"][0]["content"]["protocol"] = "WRONG_CONTENT_PROTOCOL"
+        result = validate_runtime_result(candidate)
+        self.assertFalse(result["ok"])
+        self.assertTrue(all("expectedValue" not in issue for issue in result["issues"]))
+
     def test_rejects_vague_acceptance_text_before_publishing_a_prd(self) -> None:
         candidate = json.loads(PRD_EXAMPLE_PATH.read_text(encoding="utf-8"))
         section = candidate["artifacts"][0]["content"]["sections"]["businessRequirements"]["acceptanceCriteria"]

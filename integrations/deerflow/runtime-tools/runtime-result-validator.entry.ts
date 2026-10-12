@@ -7,6 +7,10 @@ import {
 import {
   runtimeResultSchema,
 } from "../../../packages/workbench-contracts/src/runtime.js";
+import {
+  prdSafetyBaselineIntro,
+  prdTableOfContentsEntries,
+} from "../../../packages/workbench-contracts/src/prd.js";
 
 const MAX_INPUT_BYTES = 2_000_000;
 const MAX_ISSUES = 100;
@@ -15,6 +19,8 @@ type ValidationIssue = {
   code: string;
   path: Array<string | number>;
   message: string;
+  expectedType?: string;
+  expectedValue?: string;
 };
 
 async function main() {
@@ -75,13 +81,13 @@ async function main() {
     ok: false,
     candidateChecksum,
     artifactChecksums,
-    issues: actionableIssues(parsed.error.issues),
+    issues: actionableIssues(parsed.error.issues, candidate),
   });
 }
 
-function actionableIssues(rawIssues: readonly unknown[]): ValidationIssue[] {
+function actionableIssues(rawIssues: readonly unknown[], candidate: unknown): ValidationIssue[] {
   const unique = new Map<string, ValidationIssue>();
-  for (const issue of rawIssues.flatMap(actionableIssue)) {
+  for (const issue of rawIssues.flatMap((issue) => actionableIssue(issue, candidate))) {
     const key = JSON.stringify([issue.code, issue.path, issue.message]);
     if (!unique.has(key)) unique.set(key, issue);
     if (unique.size >= MAX_ISSUES) break;
@@ -89,16 +95,16 @@ function actionableIssues(rawIssues: readonly unknown[]): ValidationIssue[] {
   return [...unique.values()];
 }
 
-function actionableIssue(rawIssue: unknown): ValidationIssue[] {
+function actionableIssue(rawIssue: unknown, candidate: unknown): ValidationIssue[] {
   if (!isRecord(rawIssue)) return [];
-  const fallback = validationIssue(rawIssue);
+  const fallback = validationIssue(rawIssue, candidate);
   if (rawIssue.code !== "invalid_union" || !Array.isArray(rawIssue.unionErrors)) {
     return fallback ? [fallback] : [];
   }
 
   const alternative = uniquelyDiscriminatedAlternative(rawIssue);
   return alternative
-    ? actionableIssues(alternative)
+    ? actionableIssues(alternative, candidate)
     : (fallback ? [fallback] : []);
 }
 
@@ -133,7 +139,7 @@ function directDiscriminantMismatchCount(
   }).length;
 }
 
-function validationIssue(rawIssue: Record<string, unknown>): ValidationIssue | null {
+function validationIssue(rawIssue: Record<string, unknown>, candidate: unknown): ValidationIssue | null {
   if (
     typeof rawIssue.code !== "string"
     || typeof rawIssue.message !== "string"
@@ -142,11 +148,43 @@ function validationIssue(rawIssue: Record<string, unknown>): ValidationIssue | n
   ) {
     return null;
   }
-  return {
+  const issue: ValidationIssue = {
     code: rawIssue.code,
     path: rawIssue.path as Array<string | number>,
     message: rawIssue.message,
   };
+  // Only contract-owned guidance is exposed. In particular, do not copy Zod's
+  // received value, arbitrary metadata, or candidate-authored text into hints.
+  if (rawIssue.code === "invalid_type" && ["object", "array", "string", "number", "boolean", "null"].includes(String(rawIssue.expected))) {
+    issue.expectedType = String(rawIssue.expected);
+  }
+  const fixedValue = prdFixedValue(issue, candidate);
+  if (fixedValue !== undefined) issue.expectedValue = fixedValue;
+  return issue;
+}
+
+function prdFixedValue(issue: ValidationIssue, candidate: unknown): string | undefined {
+  const [root, index, ...path] = issue.path;
+  if (root !== "artifacts" || typeof index !== "number" || !Number.isInteger(index)) return undefined;
+  const draft = candidateArtifacts(candidate)[index];
+  if (!isRecord(draft) || draft.kind !== "prd" || draft.schemaVersion !== 2 || !isRecord(draft.content)) return undefined;
+  if (issue.code === "invalid_literal" && JSON.stringify(path) === '["content","sections","safetyBaseline","intro"]') {
+    return prdSafetyBaselineIntro;
+  }
+  if (issue.code !== "custom" || path.length !== 4 || path[0] !== "content"
+    || path[1] !== "tableOfContents" || path[2] !== "entries" || !Number.isInteger(path[3])) return undefined;
+  const entryIndex = path[3] as number;
+  const sections = draft.content.sections;
+  const business = isRecord(sections) ? sections.businessRequirements : undefined;
+  const additional = isRecord(business) ? business.additionalSections : undefined;
+  if (additional !== undefined && !Array.isArray(additional)) return undefined;
+  const additionalCount = Array.isArray(additional) ? additional.length : 0;
+  // Additional headings are authored content, never fixed replacement values.
+  const fixedPrefixLength = prdTableOfContentsEntries.length - 2;
+  const canonicalIndex = entryIndex < fixedPrefixLength ? entryIndex : entryIndex - additionalCount;
+  if (entryIndex >= fixedPrefixLength && entryIndex < fixedPrefixLength + additionalCount) return undefined;
+  if (canonicalIndex < 0 || canonicalIndex >= prdTableOfContentsEntries.length) return undefined;
+  return prdTableOfContentsEntries[canonicalIndex];
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

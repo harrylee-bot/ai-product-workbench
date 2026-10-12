@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 import { runtimeResultSchema } from "../src/runtime.js";
-import { prdSafetyBaselineItems } from "../src/prd.js";
+import { prdBlockSchema, prdDocumentV2Schema, prdSafetyBaselineIntro, prdSafetyBaselineItems } from "../src/prd.js";
 
 const prototypeExamplePath = fileURLToPath(new URL(
   "../../../integrations/deerflow/skills/workbench/references/prototype-runtime-result.example.json",
@@ -37,6 +37,10 @@ const prdTransportSchemaPath = fileURLToPath(new URL(
   import.meta.url,
 ));
 const prdTransportSchemaSource = readFileSync(prdTransportSchemaPath, "utf8");
+const transportSchemaSource = readFileSync(fileURLToPath(new URL(
+  "../../../integrations/deerflow/skills/workbench/references/runtime-result.schema.json",
+  import.meta.url,
+)), "utf8");
 
 describe("DeerFlow PRD Runtime Result reference", () => {
   it("stays compact and valid against the production Runtime result schema", () => {
@@ -128,6 +132,79 @@ describe("DeerFlow PRD Runtime Result reference", () => {
     expect(workbenchSkillSource).toContain("requirement/criterion references bidirectional");
     expect(prdTransportSchemaSource).toContain('"PrdDiagramEdge"');
     expect(workbenchSkillSource).toContain("A revision returns the complete next PRD/Prototype document");
+  });
+
+  it("adds authoring annotations without changing any shared transport constraint", () => {
+    const schema = JSON.parse(prdTransportSchemaSource);
+    const runtimeSchema = JSON.parse(transportSchemaSource);
+    expect(schema.description).toContain("business-neutral transport fragments only");
+    expect(Object.keys(schema).filter((key) => !["description", "x-workbench-authoring-guide"].includes(key))).toEqual([
+      "$schema", "title", "type", "properties", "required", "additionalProperties", "$defs",
+    ]);
+    expect(schema.required).toEqual(["protocol", "message", "artifacts"]);
+    expect(schema.additionalProperties).toBe(false);
+    expect(schema.properties).toEqual({
+      protocol: { type: "string", enum: ["workbench.runtime.result.v1"] },
+      message: { type: "string", maxLength: 100_000 },
+      artifacts: { type: "array", items: { $ref: "#/$defs/RuntimeArtifactDraftPrdV2" }, minItems: 1, maxItems: 1 },
+    });
+    for (const [name, definition] of Object.entries(schema.$defs)) {
+      expect(definition, name).toEqual(runtimeSchema.$defs[name]);
+    }
+  });
+
+  it("provides valid inline typed fragments without supplying publishable business content", () => {
+    const schema = JSON.parse(prdTransportSchemaSource);
+    const guide = schema["x-workbench-authoring-guide"];
+    expect(guide.purpose).toContain("not a complete publishable draft");
+    expect(guide.typedBlockFragments).toHaveProperty("paragraph");
+    expect(guide.typedBlockFragments).toHaveProperty("bulletList");
+    expect(guide.typedBlockFragments).toHaveProperty("table");
+    for (const fragment of Object.values(guide.typedBlockFragments)) {
+      expect(prdBlockSchema.safeParse(fragment).success).toBe(true);
+      expect(runtimeResultSchema.safeParse(fragment).success).toBe(false);
+    }
+    const list = guide.typedBlockFragments.bulletList;
+    expect(list.items).toHaveLength(2);
+    expect(list.items.every((item: { type?: unknown; content: Array<{ marks: unknown }> }) => (
+      item.type === undefined && item.content.every((inline) => Array.isArray(inline.marks))
+    ))).toBe(true);
+    const table = guide.typedBlockFragments.table;
+    for (const row of table.rows) {
+      expect(row.cells.map((cell: { columnId: string }) => cell.columnId)).toEqual(
+        table.columns.map((column: { id: string }) => column.id),
+      );
+    }
+    expect(JSON.stringify(guide.typedBlockFragments)).not.toMatch(/"(?:citations|applicability|applicable|enabled)":/u);
+    expect(Object.keys(guide.sectionFields)).toEqual(["introduction", "businessRequirements", "degradation", "safetyBaseline"]);
+    expect(guide.sectionFields.introduction).toEqual(["title", "background", "scope", "usageScenarios"]);
+    expect(guide.fixedLiterals["content.sections.safetyBaseline.intro"]).toBe(prdSafetyBaselineIntro);
+    expect(guide.fixedLiterals["content.sections.safetyBaseline.intro"].split("\n")).toHaveLength(5);
+    expect(guide.fixedLiterals["content.sections.safetyBaseline.intro"]).not.toContain("\\n");
+    expect(Buffer.byteLength(prdTransportSchemaSource, "utf8")).toBeLessThan(50_000);
+  });
+
+  it("continues rejecting misplaced section-name strings and incomplete inline text", () => {
+    const example = JSON.parse(prdExampleSource);
+    const scope = example.artifacts[0].content.sections.introduction.scope;
+    scope.blocks.push("usageScenarios");
+    let result = runtimeResultSchema.safeParse(example);
+    expect(result.success).toBe(false);
+    if (result.success) throw new Error("Misplaced section name was accepted");
+    const documentResult = prdDocumentV2Schema.safeParse(example.artifacts[0].content);
+    if (documentResult.success) throw new Error("Misplaced section name was accepted by document schema");
+    expect(documentResult.error.issues).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        path: ["sections", "introduction", "scope", "blocks", scope.blocks.length - 1],
+      }),
+    ]));
+    scope.blocks.pop();
+    const invalidParagraph = {
+      id: "invalid-paragraph", type: "paragraph", content: [{ type: "text", text: "完整正文必须携带显式格式字段。" }],
+    };
+    expect(prdBlockSchema.safeParse(invalidParagraph).success).toBe(false);
+    result = runtimeResultSchema.safeParse(example);
+    expect(result.success).toBe(true);
   });
 });
 

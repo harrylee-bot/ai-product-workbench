@@ -19,7 +19,7 @@ export const PRD_RUNTIME_REFERENCE_FILES = [
   },
   {
     relativePath: "workbench/references/prd-runtime-result.schema.json",
-    sha256: "09a620e90af5cf28e307922e080782e91b232d4b213e470dbd3e43d690361ba3",
+    sha256: "52c29a5477e5a854bedf807ba947dca21b6f62d1a841c0f5aea3e1b55dddcd65",
   },
 ] as const;
 
