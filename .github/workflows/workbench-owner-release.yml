@@ -1,0 +1,463 @@
+name: 产品工作台 1.0.0 项目所有者发布
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_commit:
+        description: "完整 main 提交 SHA；构建与技术验收必须对应同一提交"
+        required: true
+        type: string
+      approve:
+        description: "项目所有者授权生成 1.0.0 生产发布包，保留全部技术检查"
+        required: true
+        default: false
+        type: boolean
+
+concurrency:
+  group: workbench-owner-release
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  source:
+    name: Verify owner authorization and exact source
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && inputs.approve == true
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      source_commit: ${{ steps.source.outputs.source_commit }}
+    steps:
+      - name: Checkout exact candidate
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - name: Use Node.js 22
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install verifier dependencies
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Validate owner release contract
+        run: |
+          node scripts/owner-release.mjs contract
+          node --test scripts/owner-release.test.mjs
+          python3 scripts/workbench-owner-deploy.test.py
+          npm run deployment:images:check
+      - name: Bind owner authorization to exact source
+        id: source
+        env:
+          OWNER_RELEASE_COMMIT: ${{ inputs.source_commit }}
+          OWNER_RELEASE_APPROVED: ${{ inputs.approve }}
+        run: |
+          node scripts/owner-release.mjs source --output output/owner-source.json
+          echo "source_commit=$GITHUB_SHA" >> "$GITHUB_OUTPUT"
+      - name: Require immutable build and infrastructure inputs
+        env:
+          WORKBENCH_NODE_IMAGE: ${{ vars.WORKBENCH_NODE_IMAGE }}
+          WORKBENCH_DEERFLOW_NODE_IMAGE_REF: ${{ vars.WORKBENCH_DEERFLOW_NODE_IMAGE_REF }}
+          WORKBENCH_DEERFLOW_BASE_IMAGE_REF: ${{ vars.WORKBENCH_DEERFLOW_BASE_IMAGE_REF }}
+          WORKBENCH_NGINX_IMAGE: ${{ vars.WORKBENCH_NGINX_IMAGE }}
+          WORKBENCH_POSTGRES_IMAGE: ${{ vars.WORKBENCH_POSTGRES_IMAGE }}
+          WORKBENCH_CI_POSTGRES_IMAGE: ${{ vars.WORKBENCH_CI_POSTGRES_IMAGE }}
+          WORKBENCH_DOCLING_IMAGE: ${{ vars.WORKBENCH_DOCLING_IMAGE }}
+          WORKBENCH_CLAMAV_IMAGE: ${{ vars.WORKBENCH_CLAMAV_IMAGE }}
+          WORKBENCH_MINIO_IMAGE: ${{ vars.WORKBENCH_MINIO_IMAGE }}
+          WORKBENCH_MINIO_MC_IMAGE: ${{ vars.WORKBENCH_MINIO_MC_IMAGE }}
+          WORKBENCH_DEX_IMAGE: ${{ vars.WORKBENCH_DEX_IMAGE }}
+        run: |
+          node --input-type=module <<'NODE'
+          const names = [
+            'WORKBENCH_NODE_IMAGE', 'WORKBENCH_DEERFLOW_NODE_IMAGE_REF',
+            'WORKBENCH_DEERFLOW_BASE_IMAGE_REF', 'WORKBENCH_NGINX_IMAGE',
+            'WORKBENCH_POSTGRES_IMAGE', 'WORKBENCH_CI_POSTGRES_IMAGE',
+            'WORKBENCH_DOCLING_IMAGE', 'WORKBENCH_CLAMAV_IMAGE',
+            'WORKBENCH_MINIO_IMAGE', 'WORKBENCH_MINIO_MC_IMAGE', 'WORKBENCH_DEX_IMAGE',
+          ];
+          for (const name of names) {
+            if (!/^[^\s]+@sha256:[a-f0-9]{64}$/.test(process.env[name] ?? '')) {
+              throw new Error(`${name} must contain an immutable image digest`);
+            }
+          }
+          NODE
+      - name: Upload exact-attempt source binding
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: owner-source-${{ github.run_attempt }}
+          path: output/owner-source.json
+          if-no-files-found: error
+
+  ci:
+    name: Require complete CI for this candidate
+    needs: [source]
+    runs-on: ubuntu-latest
+    timeout-minutes: 100
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - name: Checkout exact candidate
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          ref: ${{ needs.source.outputs.source_commit }}
+      - name: Use Node.js 22
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install verifier dependencies
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Wait for exact candidate technical checks
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          node scripts/owner-release.mjs wait-ci \
+            --repository "$GITHUB_REPOSITORY" \
+            --commit "$GITHUB_SHA" \
+            --output output/owner-ci.json
+      - name: Upload exact-attempt CI evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: owner-ci-${{ github.run_attempt }}
+          path: output/owner-ci.json
+          if-no-files-found: error
+
+  images:
+    name: Production image / ${{ matrix.name }}
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && inputs.approve == true
+    needs: [source]
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix:
+        include:
+          - name: web
+            dockerfile: apps/web/Dockerfile
+            target: runner
+            build_args: |
+              WORKBENCH_PREVIEW_ORIGIN=${{ vars.WORKBENCH_PREVIEW_ORIGIN }}
+              WORKBENCH_S3_BROWSER_UPLOAD_BUCKET_URL=${{ vars.WORKBENCH_S3_BROWSER_UPLOAD_BUCKET_URL }}
+              NEXT_PUBLIC_KNOWLEDGE_APP_URL=${{ format('https://{0}', vars.WORKBENCH_KNOWLEDGE_BASE_URL) }}
+              NEXT_PUBLIC_WORKBENCH_FEEDBACK_URL=${{ vars.NEXT_PUBLIC_WORKBENCH_FEEDBACK_URL }}
+              NEXT_PUBLIC_WORKBENCH_FORUM_URL=${{ vars.NEXT_PUBLIC_WORKBENCH_FORUM_URL }}
+              NEXT_PUBLIC_WORKBENCH_PRIVACY_URL=${{ vars.NEXT_PUBLIC_WORKBENCH_PRIVACY_URL }}
+              NODE_IMAGE=${{ vars.WORKBENCH_NODE_IMAGE }}
+          - name: api
+            dockerfile: apps/workbench-api/Dockerfile
+            target: runner
+            build_args: |
+              NODE_IMAGE=${{ vars.WORKBENCH_NODE_IMAGE }}
+          - name: api-migrator
+            dockerfile: apps/workbench-api/Dockerfile
+            target: migrator
+            build_args: |
+              NODE_IMAGE=${{ vars.WORKBENCH_NODE_IMAGE }}
+          - name: runtime-worker
+            dockerfile: apps/workbench-worker/Dockerfile
+            target: runner
+            build_args: |
+              NODE_IMAGE=${{ vars.WORKBENCH_NODE_IMAGE }}
+          - name: file-worker
+            dockerfile: apps/workbench-file-worker/Dockerfile
+            target: runner
+            build_args: |
+              NODE_IMAGE=${{ vars.WORKBENCH_NODE_IMAGE }}
+          - name: import-worker
+            dockerfile: apps/workbench-import-worker/Dockerfile
+            target: runner
+            build_args: |
+              NODE_IMAGE=${{ vars.WORKBENCH_NODE_IMAGE }}
+          - name: export-worker
+            dockerfile: apps/workbench-export-worker/Dockerfile
+            target: runner
+            build_args: |
+              NODE_IMAGE=${{ vars.WORKBENCH_NODE_IMAGE }}
+          - name: preview
+            dockerfile: apps/workbench-preview/Dockerfile
+            target: runner
+            build_args: |
+              NODE_IMAGE=${{ vars.WORKBENCH_NODE_IMAGE }}
+          - name: quartz
+            dockerfile: apps/knowledge/Dockerfile
+            target: immutable-runner
+            build_args: |
+              QUARTZ_BASE_URL=${{ vars.WORKBENCH_KNOWLEDGE_BASE_URL }}
+              KNOWLEDGE_WEB_URL=${{ vars.WORKBENCH_WEB_ORIGIN }}
+              NODE_IMAGE=${{ vars.WORKBENCH_NODE_IMAGE }}
+              NGINX_IMAGE=${{ vars.WORKBENCH_NGINX_IMAGE }}
+          - name: deerflow
+            dockerfile: integrations/deerflow/Dockerfile
+            target: runtime
+            build_args: |
+              DEERFLOW_BASE_IMAGE=${{ vars.WORKBENCH_DEERFLOW_BASE_IMAGE_REF }}
+              DEERFLOW_NODE_IMAGE=${{ vars.WORKBENCH_DEERFLOW_NODE_IMAGE_REF }}
+              DEERFLOW_SOURCE_COMMIT=${{ vars.WORKBENCH_DEERFLOW_COMMIT }}
+              WORKBENCH_SOURCE_COMMIT=${{ github.sha }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          ref: ${{ needs.source.outputs.source_commit }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+
+      - name: Require approved production build inputs
+        env:
+          WORKBENCH_WEB_ORIGIN: ${{ vars.WORKBENCH_WEB_ORIGIN }}
+          WORKBENCH_PREVIEW_ORIGIN: ${{ vars.WORKBENCH_PREVIEW_ORIGIN }}
+          WORKBENCH_S3_BROWSER_UPLOAD_BUCKET_URL: ${{ vars.WORKBENCH_S3_BROWSER_UPLOAD_BUCKET_URL }}
+          WORKBENCH_KNOWLEDGE_BASE_URL: ${{ vars.WORKBENCH_KNOWLEDGE_BASE_URL }}
+          WORKBENCH_PUBLIC_REGISTRATION_ENABLED: ${{ vars.WORKBENCH_PUBLIC_REGISTRATION_ENABLED }}
+          NEXT_PUBLIC_WORKBENCH_FEEDBACK_URL: ${{ vars.NEXT_PUBLIC_WORKBENCH_FEEDBACK_URL }}
+          NEXT_PUBLIC_WORKBENCH_FORUM_URL: ${{ vars.NEXT_PUBLIC_WORKBENCH_FORUM_URL }}
+          NEXT_PUBLIC_WORKBENCH_PRIVACY_URL: ${{ vars.NEXT_PUBLIC_WORKBENCH_PRIVACY_URL }}
+        run: |
+          case "$WORKBENCH_WEB_ORIGIN" in https://*) ;; *) exit 1 ;; esac
+          case "$WORKBENCH_PREVIEW_ORIGIN" in https://*) ;; *) exit 1 ;; esac
+          case "$WORKBENCH_S3_BROWSER_UPLOAD_BUCKET_URL" in https://*) ;; *) exit 1 ;; esac
+          test "$WORKBENCH_WEB_ORIGIN" != "$WORKBENCH_PREVIEW_ORIGIN"
+          test -n "$WORKBENCH_KNOWLEDGE_BASE_URL"
+          case "$WORKBENCH_KNOWLEDGE_BASE_URL" in http://*|https://*|/*|*' '*) exit 1 ;; esac
+          case "$WORKBENCH_PUBLIC_REGISTRATION_ENABLED" in true|false) ;; *) exit 1 ;; esac
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Require fixed DeerFlow source and base image pins
+        if: matrix.name == 'deerflow'
+        env:
+          DEERFLOW_BASE_IMAGE: ${{ vars.WORKBENCH_DEERFLOW_BASE_IMAGE_REF }}
+          DEERFLOW_NODE_IMAGE: ${{ vars.WORKBENCH_DEERFLOW_NODE_IMAGE_REF }}
+          DEERFLOW_SOURCE_COMMIT: ${{ vars.WORKBENCH_DEERFLOW_COMMIT }}
+        run: |
+          test -n "$DEERFLOW_BASE_IMAGE"
+          printf '%s' "$DEERFLOW_BASE_IMAGE" | grep -Eq '@sha256:[a-f0-9]{64}$'
+          test -n "$DEERFLOW_NODE_IMAGE"
+          printf '%s' "$DEERFLOW_NODE_IMAGE" | grep -Eq '@sha256:[a-f0-9]{64}$'
+          printf '%s' "$DEERFLOW_SOURCE_COMMIT" | grep -Eq '^[a-f0-9]{40}$'
+
+      - name: Prepare image evidence directory
+        run: mkdir -p output
+
+      - name: Freeze public image build configuration
+        id: build-configuration
+        env:
+          WORKBENCH_IMAGE_BUILD_ARGS: ${{ matrix.build_args }}
+        run: |
+          path="output/build-configuration-${{ matrix.name }}.json"
+          node scripts/write-production-build-configuration.mjs \
+            --id "${{ matrix.name }}" \
+            --source-commit "$GITHUB_SHA" \
+            --dockerfile "${{ matrix.dockerfile }}" \
+            --target "${{ matrix.target }}" \
+            --build-args-env WORKBENCH_IMAGE_BUILD_ARGS \
+            > "$path"
+          sha256="$(node -e 'const fs=require("node:fs");const value=JSON.parse(fs.readFileSync(process.argv[1],"utf8"));process.stdout.write(value.payloadSha256)' "$path")"
+          echo "path=$path" >> "$GITHUB_OUTPUT"
+          echo "sha256=$sha256" >> "$GITHUB_OUTPUT"
+
+      - name: Build ${{ matrix.name }} production image
+        id: build
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: .
+          file: ${{ matrix.dockerfile }}
+          target: ${{ matrix.target }}
+          build-args: ${{ matrix.build_args }}
+          labels: |
+            org.opencontainers.image.revision=${{ github.sha }}
+            io.workbench.build-configuration-sha256=${{ steps.build-configuration.outputs.sha256 }}
+          tags: ghcr.io/${{ github.repository_owner }}/workbench-${{ matrix.name }}:${{ github.sha }}
+          push: true
+          load: false
+          provenance: mode=max
+          sbom: true
+          cache-from: type=gha,scope=workbench-${{ matrix.name }}
+          cache-to: type=gha,mode=max,scope=workbench-${{ matrix.name }},ignore-error=true
+
+      - name: Resolve image reference
+        id: image
+        run: |
+          ref="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/workbench-${{ matrix.name }}:${GITHUB_SHA}"
+          digest="${{ steps.build.outputs.digest }}"
+          printf '%s' "$digest" | grep -Eq '^sha256:[a-f0-9]{64}$'
+          ref="$ref@$digest"
+          echo "ref=$ref" >> "$GITHUB_OUTPUT"
+
+      - name: Generate SPDX SBOM
+        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0
+        with:
+          image: ${{ steps.image.outputs.ref }}
+          artifact-name: sbom-${{ matrix.name }}.spdx.json
+          output-file: output/sbom-${{ matrix.name }}.spdx.json
+
+      - name: Scan image for release-blocking vulnerabilities
+        uses: aquasecurity/trivy-action@6c175e9c4083a92bbca2f9724c8a5e33bc2d97a5 # v0.30.0
+        with:
+          image-ref: ${{ steps.image.outputs.ref }}
+          format: json
+          output: output/trivy-${{ matrix.name }}.json
+          severity: CRITICAL,HIGH
+          exit-code: "1"
+
+      - name: Publish signed build provenance attestation
+        id: provenance
+        uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2
+        with:
+          subject-name: ghcr.io/${{ github.repository_owner }}/workbench-${{ matrix.name }}
+          subject-digest: ${{ steps.build.outputs.digest }}
+          push-to-registry: true
+
+      - name: Capture signed build provenance bundle
+        env:
+          PROVENANCE_BUNDLE: ${{ steps.provenance.outputs.bundle-path }}
+        run: |
+          test -s "$PROVENANCE_BUNDLE"
+          cp "$PROVENANCE_BUNDLE" "output/provenance-${{ matrix.name }}.bundle.json"
+
+      - name: Publish signed SBOM attestation
+        id: sbom_attestation
+        uses: actions/attest-sbom@bd218ad0dbcb3e146bd073d1d9c6d78e08aa8a0b # v2
+        with:
+          subject-name: ghcr.io/${{ github.repository_owner }}/workbench-${{ matrix.name }}
+          subject-digest: ${{ steps.build.outputs.digest }}
+          sbom-path: output/sbom-${{ matrix.name }}.spdx.json
+          push-to-registry: true
+
+      - name: Capture signed SBOM attestation bundle
+        env:
+          SBOM_ATTESTATION_BUNDLE: ${{ steps.sbom_attestation.outputs.bundle-path }}
+        run: |
+          test -s "$SBOM_ATTESTATION_BUNDLE"
+          cp "$SBOM_ATTESTATION_BUNDLE" "output/sbom-attestation-${{ matrix.name }}.bundle.json"
+
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@dc72c7d5c4d10cd6bcb8cf6e3fd625a9e5e537da # v3.7.0
+
+      - name: Sign and verify immutable image
+        env:
+          IMAGE_REF: ${{ steps.image.outputs.ref }}
+          CERTIFICATE_IDENTITY: https://github.com/${{ github.repository }}/.github/workflows/workbench-owner-release.yml@refs/heads/main
+        run: |
+          cosign sign --yes --bundle "output/cosign-${{ matrix.name }}.bundle.json" "$IMAGE_REF"
+          cosign verify \
+            --certificate-identity "$CERTIFICATE_IDENTITY" \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+            --output-file "output/cosign-${{ matrix.name }}.verify.json" \
+            "$IMAGE_REF"
+
+      - name: Write immutable image evidence record
+        env:
+          IMAGE_REF: ${{ steps.image.outputs.ref }}
+          IMAGE_DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          node scripts/write-production-image-record.mjs \
+            --id "${{ matrix.name }}" \
+            --image-ref "$IMAGE_REF" \
+            --digest "$IMAGE_DIGEST" \
+            --source-commit "$GITHUB_SHA" \
+            --build-configuration-path "${{ steps.build-configuration.outputs.path }}" \
+            --sbom-path "output/sbom-${{ matrix.name }}.spdx.json" \
+            --sbom-attestation-path "output/sbom-attestation-${{ matrix.name }}.bundle.json" \
+            --provenance-path "output/provenance-${{ matrix.name }}.bundle.json" \
+            --signature-path "output/cosign-${{ matrix.name }}.bundle.json" \
+            --verification-path "output/cosign-${{ matrix.name }}.verify.json" \
+            --vulnerability-path "output/trivy-${{ matrix.name }}.json" \
+            > "output/image-record-${{ matrix.name }}.json"
+
+      - name: Upload image evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: owner-image-evidence-${{ github.run_attempt }}-${{ matrix.name }}
+          path: output/
+          if-no-files-found: error
+
+  release:
+    name: Sign deployable release after all technical checks
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && inputs.approve == true
+    needs: [source, ci, images]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      packages: read
+      id-token: write
+    steps:
+      - name: Checkout exact candidate
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          ref: ${{ needs.source.outputs.source_commit }}
+      - name: Use Node.js 22
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install verifier dependencies
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Download source binding
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: owner-source-${{ github.run_attempt }}
+          path: output/binding
+      - name: Download passed CI evidence
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: owner-ci-${{ github.run_attempt }}
+          path: output/binding
+      - name: Download complete image evidence
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: owner-image-evidence-${{ github.run_attempt }}-*
+          path: output/image-evidence
+          merge-multiple: true
+      - name: Assemble exact candidate release package
+        run: |
+          node scripts/owner-release.mjs assemble \
+            --source output/binding/owner-source.json \
+            --ci output/binding/owner-ci.json \
+            --records output/image-evidence \
+            --output output/release
+          cp output/image-evidence/cosign-*.bundle.json output/release/
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@dc72c7d5c4d10cd6bcb8cf6e3fd625a9e5e537da # v3.7.0
+      - name: Sign and verify complete release
+        env:
+          CERTIFICATE_IDENTITY: https://github.com/${{ github.repository }}/.github/workflows/workbench-owner-release.yml@refs/heads/main
+        run: |
+          set -euo pipefail
+          cosign sign-blob --yes --bundle output/release/production-image-manifest.bundle.json output/release/production-image-manifest.json
+          cosign sign-blob --yes --bundle output/release/owner-release.bundle.json output/release/owner-release.json
+          node scripts/owner-release.mjs verify \
+            --manifest output/release/owner-release.json \
+            --bundle output/release/owner-release.bundle.json \
+            --image-manifest output/release/production-image-manifest.json \
+            --image-bundle output/release/production-image-manifest.bundle.json \
+            --certificate-identity "$CERTIFICATE_IDENTITY" \
+            --expected-commit "$GITHUB_SHA" \
+            > output/release/verified-images.json
+      - name: Upload deployable 1.0.0 release package
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: owner-release-1.0.0-${{ github.sha }}-${{ github.run_attempt }}
+          path: output/release/
+          if-no-files-found: error
+          retention-days: 90

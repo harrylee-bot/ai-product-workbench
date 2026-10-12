@@ -17,6 +17,7 @@ import {
   boardNodesForPhase,
   createPrdVersionEditRequest,
   getPersistedPrdViewport,
+  getPrdNodeViewport,
   mergeCanvasNodeSelection,
   observePersistedPrdNodes,
   projectReadyPrototypePreviewArtifacts,
@@ -287,6 +288,7 @@ describe("Mini Workbench Run preview", () => {
     expect(projectedTop).toBeCloseTo(92, 5);
     expect(projectedRight).toBeLessThanOrEqual(1400);
     expect(viewport.zoom).toBeCloseTo((563 / 1154) * 0.88, 5);
+    expect(projectedTop + prd.workbench.size!.height * viewport.zoom).toBeGreaterThan(900);
   });
 
   it.each([
@@ -307,8 +309,43 @@ describe("Mini Workbench Run preview", () => {
       expect(projectedLeft).toBeCloseTo(expectedLeft, 5);
       expect(projectedTop).toBeCloseTo(expectedTop, 5);
       expect(projectedRight).toBeLessThanOrEqual(containerWidth - rightInset);
+      if (containerWidth < 768) {
+        const projectedBottom = projectedTop + prd.workbench.size!.height * viewport.zoom;
+        expect(projectedBottom).toBeLessThanOrEqual(containerHeight - 190 - 54 - 16);
+      }
     },
   );
+
+  it.each([
+    { containerHeight: 812, containerWidth: 375 },
+    { containerHeight: 720, containerWidth: 320 },
+  ])("fits the A4 draft above the mobile tools at $containerWidth x $containerHeight", ({ containerHeight, containerWidth }) => {
+    const persisted = persistedPrdNode({ id: "a4-draft", position: { x: 600, y: 400 } });
+    const draft = {
+      ...persisted,
+      workbench: { ...persisted.workbench, size: { width: 500, height: 707 } },
+    } satisfies BoardFlowNode;
+    const viewport = getPersistedPrdViewport(draft, containerWidth, containerHeight);
+    const top = viewport.y + draft.position.y * viewport.zoom;
+    const left = viewport.x + draft.position.x * viewport.zoom;
+
+    expect(top).toBeCloseTo(186, 5);
+    expect(left).toBeCloseTo(24, 5);
+    expect(left + 500 * viewport.zoom).toBeLessThanOrEqual(containerWidth - 40);
+    expect(top + 707 * viewport.zoom).toBeCloseTo(containerHeight - 260, 5);
+  });
+
+  it.each([
+    { containerWidth: 1440, containerHeight: 900, composerTop: 788 },
+    { containerWidth: 1501, containerHeight: 855, composerTop: 743 },
+  ])("keeps a loading document above the Composer at $containerWidth x $containerHeight", ({ containerWidth, containerHeight, composerTop }) => {
+    const position = { x: 600, y: 400 };
+    const viewport = getPrdNodeViewport(position, 500, 707, containerWidth, containerHeight, composerTop - 16);
+    const top = viewport.y + position.y * viewport.zoom;
+
+    expect(top).toBeCloseTo(92, 5);
+    expect(top + 707 * viewport.zoom).toBeCloseTo(composerTop - 16, 5);
+  });
 
   it("renders a persisted 500px PRD at the source-measured 563px width at 93%", () => {
     const persisted = persistedPrdNode({

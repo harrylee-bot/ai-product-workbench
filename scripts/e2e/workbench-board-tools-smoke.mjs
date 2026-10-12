@@ -225,6 +225,7 @@ const workspaceMembers = [
 const browser = await chromium.launch({ headless: true });
 await mkdir("output/audit/1.0.0/browser-remediation", { recursive: true });
 const context = await browser.newContext({ viewport: { width: 1501, height: 855 } });
+context.setDefaultTimeout(30_000);
 await context.addCookies([{
   name: "workbench.session_token",
   value: "board-tools-session",
@@ -705,7 +706,7 @@ const zoomMenu = page.locator(".workbench-zoom-menu");
 if ((await zoomTrigger.textContent())?.trim() !== "63%") {
   await zoomTrigger.click();
   await zoomMenu.waitFor();
-  await zoomMenu.getByRole("menuitem", { name: "63%", exact: true }).click({ force: true });
+  await zoomMenu.getByRole("menuitem", { name: "63%", exact: true }).click();
   await zoomMenu.waitFor({ state: "detached" });
   await waitForAsyncValue(
     () => zoomTrigger.textContent().then((value) => value?.trim() === "63%"),
@@ -728,7 +729,9 @@ assert(
 
 await zoomTrigger.click();
 await zoomMenu.waitFor();
-await zoomMenu.getByRole("menuitem", { name: "93%", exact: true }).click({ force: true });
+// The menu animates into place. Keep Playwright's visibility, stability and hit
+// target checks so this exercises an actual user click after the menu settles.
+await zoomMenu.getByRole("menuitem", { name: "93%", exact: true }).click();
 await zoomMenu.waitFor({ state: "detached" });
 await waitForAsyncValue(
   () => zoomTrigger.textContent().then((value) => value?.trim() === "93%"),
@@ -767,7 +770,7 @@ assert(
 
 await zoomTrigger.click();
 await zoomMenu.waitFor();
-await zoomMenu.getByRole("menuitem", { name: "63%", exact: true }).click({ force: true });
+await zoomMenu.getByRole("menuitem", { name: "63%", exact: true }).click();
 await zoomMenu.waitFor({ state: "detached" });
 await waitForAsyncValue(
   () => zoomTrigger.textContent().then((value) => value?.trim() === "63%"),

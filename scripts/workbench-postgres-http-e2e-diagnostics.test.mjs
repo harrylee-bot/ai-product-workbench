@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
+import { once } from "node:events";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
+import { spawnProcessTree, stopProcessTree } from "./workbench-e2e-process.mjs";
 
 import {
   diagnosticErrorClass,
@@ -9,6 +11,41 @@ import {
 } from "./workbench-postgres-http-e2e-diagnostics.mjs";
 
 const checksum = "a".repeat(64);
+
+for (const parentExitsFirst of [false, true]) {
+  test(`cleanup kills a SIGTERM-resistant grandchild when its parent ${parentExitsFirst ? "already exited" : "exits during shutdown"}`, {
+    skip: process.platform === "win32",
+    timeout: 5_000,
+  }, async (t) => {
+    const grandchildSource = `
+      const http = require("node:http");
+      process.on("SIGTERM", () => {});
+      const server = http.createServer((_, response) => response.end("ready"));
+      server.listen(0, "127.0.0.1", () => console.log(server.address().port));
+    `;
+    const parentSource = `
+      require("node:child_process").spawn(process.execPath, ["-e", ${JSON.stringify(grandchildSource)}], { stdio: "inherit" });
+      ${parentExitsFirst ? "process.exit(0);" : 'process.on("SIGTERM", () => process.exit(0));'}
+    `;
+    const child = spawnProcessTree(process.execPath, ["-e", parentSource], { stdio: ["ignore", "pipe", "pipe"] });
+    t.after(() => stopProcessTree(child, { graceMs: 100 }));
+    const [ready] = await once(child.stdout, "data");
+    const origin = `http://127.0.0.1:${Number(ready.toString().trim())}`;
+    assert.equal(await (await fetch(origin)).text(), "ready");
+    if (parentExitsFirst && child.exitCode === null) await once(child, "exit");
+    await stopProcessTree(child, { graceMs: 100 });
+    await assert.rejects(fetch(origin, { signal: AbortSignal.timeout(1_000) }));
+    // The browser scenario and outer finally both stop Web. Repeated cleanup
+    // must use the same completed lifecycle, never signal a recycled PID.
+    await stopProcessTree(child, { graceMs: 100 });
+  });
+}
+
+test("cleanup handles a service that could not spawn", { timeout: 5_000 }, async () => {
+  const child = spawnProcessTree("workbench-intentionally-missing-e2e-command", [], { stdio: "ignore" });
+  await once(child, "error");
+  await stopProcessTree(child);
+});
 
 test("fake runtime diagnostics retain stable evidence without raw identities or payload context", () => {
   const secret = "customer-secret-identity-81726354";
@@ -290,7 +327,7 @@ test("the real-stack harness prepares every shared package before application bu
   assert.ok(apiBuild > prepare, "shared package preparation must finish before API and Worker builds");
   assert.doesNotMatch(source, /runCommand\("contracts:build"/u);
   assert.doesNotMatch(source, /runCommand\("canvas-tools:build"/u);
-  assert.match(source, /waitForHttp\(`\$\{webOrigin\}\/`, web, Math\.max\(scenarioTimeoutMs, 120_000\)\)/u);
+  assert.match(source, /warmWorkbenchProtectedRoutes\(webOrigin, web\.exited\)/u);
 });
 
 test("the real-stack visual lane proves early pending surfaces and responsive control separation", async () => {

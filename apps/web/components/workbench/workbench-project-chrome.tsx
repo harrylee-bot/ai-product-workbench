@@ -60,7 +60,7 @@ const PRD_GENERATION_STAGES: readonly RunGenerationStage[] = [
 
 type ActiveProjectStageMotionKind = Exclude<WorkbenchRunMotionKind, "neutral">;
 
-function getProjectStageMotionKind({
+export function getProjectStageMotionKind({
   generationStage,
   isOverview,
   motionKind,
@@ -166,14 +166,12 @@ export function ProjectStageMotionFX({
           />
         )}
       </AnimatePresence>
-      <AnimatePresence>
-        {showPendingArtifact && generationMotionKind !== null && (
+      {showPendingArtifact && generationMotionKind !== null && (
           <motion.div
             animate={{ opacity: 1, scale: 1, y: 0 }}
             className="workbench-transient-artifact-slot absolute"
             data-generation-stage={generationStage ?? undefined}
             data-workbench-transient-artifact={generationMotionKind}
-            exit={{ opacity: 0, scale: 0.985, y: 5 }}
             initial={{ opacity: 0, scale: 0.985, y: 5 }}
             transition={{ duration: 0.28, ease: workbenchEase }}
           >
@@ -190,8 +188,7 @@ export function ProjectStageMotionFX({
               />
             </div>
           </motion.div>
-        )}
-      </AnimatePresence>
+      )}
       <AnimatePresence>
         {isOverview && (
           <motion.div

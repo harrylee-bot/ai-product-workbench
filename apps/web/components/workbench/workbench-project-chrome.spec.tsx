@@ -240,6 +240,20 @@ describe("workbench project chrome", () => {
     },
   );
 
+  it("removes the temporary skeleton immediately when a real draft takes its place", () => {
+    const props = {
+      generationStage: "drafting-prd" as const,
+      isOverview: false,
+      motionKind: "prd" as const,
+      phase: "generating" as const,
+    };
+    const { container, rerender } = render(<ProjectStageMotionFX {...props} showPendingArtifact />);
+    expect(container.querySelector("[data-workbench-transient-artifact]")).not.toBeNull();
+
+    rerender(<ProjectStageMotionFX {...props} phase="refining" showPendingArtifact={false} />);
+    expect(container.querySelector("[data-workbench-transient-artifact]")).toBeNull();
+  });
+
   it("does not mount Prototype motion over the generated overview field", () => {
     const { container } = render(
       <ProjectStageMotionFX

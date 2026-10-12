@@ -420,16 +420,19 @@ export function getPersistedPrdViewport(
   return getPrdNodeViewport(
     node.position,
     node.workbench.size?.width ?? node.width ?? prdCanvasWidth,
+    node.workbench.size?.height ?? node.height ?? prdCanvasHeight,
     containerWidth,
     containerHeight,
   );
 }
 
-function getPrdNodeViewport(
+export function getPrdNodeViewport(
   position: { x: number; y: number },
   nodeWidth: number,
+  nodeHeight: number,
   containerWidth: number,
   containerHeight: number,
+  contentBottom = Number.POSITIVE_INFINITY,
 ): Viewport {
   const documentViewport = getDocumentViewport(containerWidth, containerHeight);
   const targetLeft = containerWidth < 768
@@ -437,17 +440,32 @@ function getPrdNodeViewport(
     : Math.max(320, documentViewport.x);
   const rightInset = containerWidth >= 768 && containerWidth < 1024 ? 80 : 40;
   const availableWidth = Math.max(1, containerWidth - targetLeft - rightInset);
+  const targetTop = containerWidth < 768 ? 186 : documentViewport.y;
+  // Mobile keeps a horizontal 54px tool rail 190px above the bottom. Leave
+  // 16px between the fitted document and that rail; desktop documents keep
+  // their readable width and can extend vertically for panning/scrolling.
+  const mobileContentBottom = containerWidth < 768
+    ? containerHeight - 190 - 54 - 16
+    : Number.POSITIVE_INFINITY;
+  const heightFitZoom = Math.max(1, Math.min(mobileContentBottom, contentBottom) - targetTop) / nodeHeight;
   const preferredZoom = documentViewport.zoom * (prdCanvasWidth / nodeWidth);
   const zoom = Math.max(
     0.04,
-    Math.min(preferredZoom, availableWidth / nodeWidth),
+    Math.min(preferredZoom, availableWidth / nodeWidth, heightFitZoom),
   );
 
   return {
     x: targetLeft - position.x * zoom,
-    y: (containerWidth < 768 ? 186 : documentViewport.y) - position.y * zoom,
+    y: targetTop - position.y * zoom,
     zoom,
   };
+}
+
+function activePrdContentBottom(stage: HTMLElement): number {
+  const composer = stage.querySelector<HTMLElement>("[data-project-composer]");
+  // offsetHeight excludes the Composer entrance animation and includes any
+  // wrapped context chips. Its bottom inset is 16px; leave another 16px gap.
+  return stage.clientHeight - (composer?.offsetHeight ?? 96) - 32;
 }
 
 function isPersistedPrdNode(node: BoardFlowNode): boolean {
@@ -2407,6 +2425,12 @@ function ProjectScreen({
   }, [artifactIntent.closeVersionHistory, projectId, setProjectMembersOpen]);
 
   useEffect(() => {
+    // Reset menus when the screen context changes. Board synchronization also
+    // runs while a user opens a menu, so it must not dismiss that interaction.
+    closeTransientPanels();
+  }, [closeTransientPanels, loadStatus, phase, projectId, projectMode, runStatus]);
+
+  useEffect(() => {
     const didProjectModeChange = lastProjectModeRef.current !== projectMode;
     if (didProjectModeChange) manualZoomRef.current = false;
     lastProjectModeRef.current = projectMode;
@@ -2455,16 +2479,11 @@ function ProjectScreen({
         writeSelectedNodeUrl(selectedIds);
       }
     }
-    setProjectMenuOpen(false);
-    closeModelMenu();
-    setZoomMenuOpen(false);
-    setSelectedActionOpen(false);
     if (!manualZoomRef.current) {
       setZoomLabel(projectMode === "board" || (projectMode === "generated" && phase === "complete") ? "63%" : "93%");
     }
     scheduleReadyToast(projectMode === "generated" && phase === "complete");
   }, [
-    closeModelMenu,
     draftArtifacts,
     loadStatus,
     persistedBoardNodes,
@@ -2478,11 +2497,8 @@ function ProjectScreen({
     manualZoomRef,
     pendingNodeSelectionRef,
     setNodes,
-    setProjectMenuOpen,
-    setSelectedActionOpen,
     setNodeSelection,
     setZoomLabel,
-    setZoomMenuOpen,
     writeSelectedNodeUrl,
   ]);
 
@@ -2541,8 +2557,10 @@ function ProjectScreen({
           ? getPrdNodeViewport(
               activePrdNode.position,
               activePrdSize?.width || prdCanvasWidth,
+              activePrdSize?.height || prdCanvasHeight,
               rect.width,
               rect.height,
+              activePrdContentBottom(stage),
             )
           : persistedBoardNodes.length > 0 && persistedBoardViewport
             ? persistedBoardViewport
@@ -2573,6 +2591,8 @@ function ProjectScreen({
     syncViewport();
     const resizeObserver = new ResizeObserver(syncViewport);
     resizeObserver.observe(stage);
+    const composer = stage.querySelector<HTMLElement>("[data-project-composer]");
+    if (composer) resizeObserver.observe(composer);
 
     return () => {
       window.cancelAnimationFrame(frame);
@@ -2661,15 +2681,18 @@ function ProjectScreen({
 
     const frame = window.requestAnimationFrame(() => {
       if (!projectSession.isCurrent()) return;
-      const stage = stageRef.current?.getBoundingClientRect();
-      if (!stage || stage.width <= 0 || stage.height <= 0) return;
+      const stageElement = stageRef.current;
+      const stage = stageElement?.getBoundingClientRect();
+      if (!stageElement || !stage || stage.width <= 0 || stage.height <= 0) return;
 
       const size = workbenchNodeCanvasSize(target);
       const nextViewport = getPrdNodeViewport(
         target.position,
         size.width || prdCanvasWidth,
+        size.height || prdCanvasHeight,
         stage.width,
         stage.height,
+        activePrdContentBottom(stageElement),
       );
       activePrdViewportRunRef.current = runId;
       userAdjustedPrdViewportRunRef.current = null;

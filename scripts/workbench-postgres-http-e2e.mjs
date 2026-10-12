@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import assert from "node:assert/strict";
-import { execFileSync, spawn } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { copyFile, mkdir, readFile, rm, writeFile } from "node:fs/promises";
@@ -34,6 +34,8 @@ import {
 } from "./workbench-postgres-http-e2e-diagnostics.mjs";
 import { executeCanvasToolRequest } from "./workbench-postgres-http-e2e-canvas-client.mjs";
 import { startControlledKnowledgeFixture } from "./workbench-postgres-http-e2e-knowledge.mjs";
+import { spawnProcessTree, stopProcessTree } from "./workbench-e2e-process.mjs";
+import { warmWorkbenchProtectedRoutes } from "./e2e/workbench-web-startup.mjs";
 
 const { Client } = pg;
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -3260,7 +3262,9 @@ function eventIdentity(event) {
 
 async function startFakeDeerFlow(expectedToken) {
   const storageObjects = new Map();
+  const browserPrdDraftGate = controlledGate();
   const browserPrdFinalizationGate = controlledGate();
+  const browserPrototypeFinalizationGate = controlledGate();
   const state = {
     threadCreates: 0,
     successRuns: 0,
@@ -3301,7 +3305,9 @@ async function startFakeDeerFlow(expectedToken) {
       expectedToken,
       state,
       storageObjects,
+      browserPrdDraftGate,
       browserPrdFinalizationGate,
+      browserPrototypeFinalizationGate,
     ).catch((error) => {
       state.requests.push({ errorClass: diagnosticErrorClass(error) });
       if (!response.headersSent) {
@@ -3329,11 +3335,19 @@ async function startFakeDeerFlow(expectedToken) {
       assert.ok(!storageObjects.has(storageKey), `duplicate fake S3 object key: ${storageKey}`);
       storageObjects.set(storageKey, { bytes: Buffer.from(bytes), mediaType });
     },
+    releaseBrowserPrdDraft() {
+      browserPrdDraftGate.release();
+    },
     releaseBrowserPrdFinalization() {
       browserPrdFinalizationGate.release();
     },
+    releaseBrowserPrototypeFinalization() {
+      browserPrototypeFinalizationGate.release();
+    },
     async close() {
+      browserPrdDraftGate.release();
       browserPrdFinalizationGate.release();
+      browserPrototypeFinalizationGate.release();
       for (const socket of sockets) socket.destroy();
       server.closeAllConnections?.();
       await new Promise((resolve) => server.close(resolve));
@@ -3347,7 +3361,9 @@ async function handleFakeDeerFlow(
   expectedToken,
   state,
   storageObjects,
+  browserPrdDraftGate,
   browserPrdFinalizationGate,
+  browserPrototypeFinalizationGate,
 ) {
   const url = new URL(request.url ?? "/", "http://127.0.0.1");
   const storagePrefix = `/${fakeStorageBucket}/`;
@@ -3734,11 +3750,14 @@ async function handleFakeDeerFlow(
         operation: { kind: "create" },
         content: interactiveBrowserPrototypeDocument(),
         citations: knowledgeCitationsFor(body),
-      }, "Controlled browser prototype ready");
+      }, "Controlled browser prototype ready", {
+        finalizationGate: runRealStackBrowser ? browserPrototypeFinalizationGate : null,
+      });
       run.status = "success";
     } else {
       state.successRuns += 1;
       await writeSuccessfulRuntimeStream(response, body, {
+        draftGate: browserVisualPrd ? browserPrdDraftGate : null,
         finalizationGate: browserVisualPrd ? browserPrdFinalizationGate : null,
         streamStages: browserVisualPrd,
       });
@@ -3808,7 +3827,7 @@ async function writeApprovalRuntimeStream(response) {
 async function writeSuccessfulRuntimeStream(
   response,
   requestBody,
-  { finalizationGate = null, streamStages = false } = {},
+  { draftGate = null, finalizationGate = null, streamStages = false } = {},
 ) {
   const scope = runtimeScopeFromRequest(requestBody);
   const citations = knowledgeCitationsFor(requestBody);
@@ -3889,6 +3908,7 @@ async function writeSuccessfulRuntimeStream(
       }, String(index + 3));
       await delay(controlledProviderDelayMs);
     }
+    if (draftGate) await draftGate.wait();
     sendSse(response, "values", {
       node: "generate_prd",
       values: { messages: draftSnapshot },
@@ -4088,7 +4108,7 @@ async function writeGeneratePrototypeRuntimeStream(response, requestBody) {
   );
 }
 
-async function writePrototypeCreateRuntimeStream(response, requestBody, draft, message) {
+async function writePrototypeCreateRuntimeStream(response, requestBody, draft, message, { finalizationGate = null } = {}) {
   const scope = runtimeScopeFromRequest(requestBody);
   const messages = [{ type: "human", content: "Workbench Prototype generation request" }];
   const stageMessages = [];
@@ -4137,6 +4157,7 @@ async function writePrototypeCreateRuntimeStream(response, requestBody, draft, m
     }, String(index + 2));
   }
   await delay(controlledProviderDelayMs);
+  if (finalizationGate) await finalizationGate.wait();
   sendSse(response, "values", {
     node: "finalize",
     values: { messages },
@@ -4784,10 +4805,7 @@ async function runRealStackBrowserScenario({
   const evidenceStartedAt = new Date().toISOString();
   const evidenceRunDirectory = evidenceStartedAt.replaceAll(":", "-");
   const outputDir = path.join(
-    root,
-    "output",
-    "playwright",
-    "real-stack",
+    process.env.WORKBENCH_E2E_OUTPUT_DIR ?? path.join(root, "output", "playwright", "real-stack"),
     candidateSourceCommit,
     evidenceRunDirectory,
   );
@@ -4823,6 +4841,14 @@ async function runRealStackBrowserScenario({
   const oidcApiBaseUrl = `http://127.0.0.1:${oidcApiPort}/api/v1`;
   const nextEnvPath = path.join(root, "apps", "web", "next-env.d.ts");
   const originalNextEnv = await readFile(nextEnvPath);
+  const nextAgentFiles = await Promise.all(["AGENTS.md", "CLAUDE.md"].map(async (name) => {
+    const filePath = path.join(root, "apps", "web", name);
+    const original = await readFile(filePath, "utf8").catch((error) => {
+      if (error.code === "ENOENT") return null;
+      throw error;
+    });
+    return { filePath, original };
+  }));
   const temporaryWebTsconfigPath = path.join(root, "apps", "web", ".tsconfig.real-stack.json");
   let browser;
   let context;
@@ -4872,11 +4898,10 @@ async function runRealStackBrowserScenario({
     DEERFLOW_INTERNAL_AUTH_TOKEN: fakeRuntimeToken,
   });
   await waitForHttp(`${oidcApiBaseUrl}/system/ready`, oidcApi, scenarioTimeoutMs);
-  // Next's first compilation of the authenticated Workbench shell can exceed
-  // the ordinary browser assertion budget on a cold Turbopack cache. Warm the
-  // root route before the registration flow so the form-submit navigation is
-  // measuring auth and routing behavior instead of initial compilation.
-  await waitForHttp(`${webOrigin}/`, web, Math.max(scenarioTimeoutMs, 120_000));
+  // Anonymous requests redirect to /login before Next compiles protected
+  // routes. The warmup cookie only allows shell compilation; the browser below
+  // still creates a real account and session against PostgreSQL.
+  await warmWorkbenchProtectedRoutes(webOrigin, web.exited);
 
   browser = await chromium.launch({ headless: true });
   evidenceManifest.browser = `chromium ${browser.version()}`;
@@ -5117,6 +5142,7 @@ async function runRealStackBrowserScenario({
       page,
     });
     assertActiveGenerationVisualEvidence(visualEvidence, "prd");
+    fakeRuntime.releaseBrowserPrdDraft();
 
     await page.setViewportSize({ width: 1440, height: 900 });
     await page.emulateMedia({ reducedMotion: "no-preference" });
@@ -5312,6 +5338,7 @@ async function runRealStackBrowserScenario({
     });
     evidenceManifest.prototypeVisualEvidence = prototypeVisualEvidence;
     assertActiveGenerationVisualEvidence(prototypeVisualEvidence, "prototype");
+    fakeRuntime.releaseBrowserPrototypeFinalization();
 
     await page.locator('[data-phase="complete"]').first().waitFor({ state: "visible", timeout: scenarioTimeoutMs });
     const artifactPersistence = await assertBrowserArtifactPersistence(projectId);
@@ -5663,12 +5690,30 @@ async function runRealStackBrowserScenario({
     // A failed visual assertion can happen before the browser-specific
     // finalization block below. Release the gate first so any open provider
     // SSE response can finish before closing the browser context.
+    fakeRuntime?.releaseBrowserPrdDraft();
     fakeRuntime?.releaseBrowserPrdFinalization();
+    fakeRuntime?.releaseBrowserPrototypeFinalization();
     await context?.close();
     await browser?.close();
     if (web) await stopService(web);
     await rm(temporaryWebTsconfigPath, { force: true });
     await writeFile(nextEnvPath, originalNextEnv);
+    for (const { filePath, original } of nextAgentFiles) {
+      const current = await readFile(filePath, "utf8").catch((error) => {
+        if (error.code === "ENOENT") return null;
+        throw error;
+      });
+      if (current === null || current === original) continue;
+      const withoutGeneratedRules = current.replace(/<!-- BEGIN:nextjs-agent-rules -->[\s\S]*?<!-- END:nextjs-agent-rules -->/gu, "").trim();
+      // Restore only recognizable Next-generated edits. Keep any unrelated
+      // concurrent content so the source-drift check can report it honestly.
+      if (withoutGeneratedRules === (original ?? "").trim()) {
+        if (original === null) await rm(filePath);
+        else await writeFile(filePath, original);
+      } else if (original === null && path.basename(filePath) === "CLAUDE.md" && current.trim() === "@AGENTS.md") {
+        await rm(filePath);
+      }
+    }
     const finishedSourceSnapshot = resolveCandidateSourceSnapshot();
     const sourceDrift = finishedSourceSnapshot.digest !== candidateSourceSnapshot.digest;
     Object.assign(evidenceManifest.candidate, {
@@ -5713,7 +5758,7 @@ function controlledGate() {
 
 function spawnService(name, command, args, environment) {
   const log = new LogBuffer(name);
-  const child = spawn(command, args, {
+  const child = spawnProcessTree(command, args, {
     cwd: root,
     env: environment,
     stdio: ["ignore", "pipe", "pipe"],
@@ -5773,7 +5818,7 @@ function assertServiceRunning(service) {
 }
 
 async function runCommand(name, command, args, extraEnvironment = {}) {
-  const child = spawn(command, args, {
+  const child = spawnProcessTree(command, args, {
     cwd: root,
     env: { ...process.env, NO_COLOR: "1", FORCE_COLOR: "0", ...extraEnvironment },
     stdio: ["ignore", "pipe", "pipe"],
@@ -5793,13 +5838,15 @@ async function runCommand(name, command, args, extraEnvironment = {}) {
   let timedOut = false;
   const timeout = setTimeout(() => {
     timedOut = true;
-    child.kill("SIGTERM");
-    setTimeout(() => child.kill("SIGKILL"), 2_000).unref();
+    void stopProcessTree(child, { graceMs: 2_000 });
   }, commandTimeoutMs);
   const result = await new Promise((resolve, reject) => {
     child.once("error", reject);
     child.once("exit", (code, signal) => resolve({ code, signal }));
-  }).finally(() => clearTimeout(timeout));
+  }).finally(async () => {
+    clearTimeout(timeout);
+    await stopProcessTree(child, { graceMs: 2_000 });
+  });
   if (timedOut || result.code !== 0) {
     throw new Error(`${name} failed (${timedOut ? "timeout" : `exit ${result.code}, signal ${result.signal}`})\n${output}`);
   }
@@ -5944,6 +5991,7 @@ async function captureActiveGenerationVisualEvidence({ evidence, kind, outputDir
         phase: element.getAttribute("data-phase"),
         stage: element.getAttribute("data-generation-stage"),
         status: "active",
+        projectMode: document.querySelector("[data-workbench-project]")?.getAttribute("data-project-mode") ?? null,
         motionKind: document.querySelector("[data-canvas-generation-motion]")
           ?.getAttribute("data-canvas-generation-motion") ?? null,
       }));
@@ -6015,7 +6063,12 @@ function assertActiveGenerationVisualEvidence(evidence, kind) {
     assert.equal(item.layout.mobileRunStatus.visible, width < 768, `mobile Run status breakpoint was incorrect at ${kind} ${item.viewport}`);
     assert.equal(item.layout.pendingArtifact.visible, true, `early ${kind} pending surface was not visible at ${item.viewport}`);
     assert.equal(item.layout.rightToolRail.visible, true, `right tool rail was not visible at ${kind} ${item.viewport}`);
-    assert.equal(item.layout.suggestions.visible, true, `suggestions were not visible at ${kind} ${item.viewport}`);
+    assert.ok(["document", "board", "generated"].includes(item.runState.projectMode), "unknown project mode in visual evidence");
+    assert.equal(
+      item.layout.suggestions.visible,
+      item.runState.projectMode !== "generated",
+      `suggestions did not match ${item.runState.projectMode} mode at ${kind} ${item.viewport}`,
+    );
     assert.equal(item.layout.utilityPill.visible, true, `Utility Pill was not visible at ${kind} ${item.viewport}`);
     assert.equal(item.layout.selectedAction.visible, false, `selected action remained visible during ${kind} Run at ${item.viewport}`);
     assert.deepEqual(
@@ -6100,6 +6153,8 @@ async function capturePendingDocumentVisualEvidence({ outputDir, page, pendingDo
         const rect = element.getBoundingClientRect();
         return {
           ariaLive: element.getAttribute("aria-live"),
+          transientArtifactCount: document.querySelectorAll('[data-workbench-transient-artifact="prd"]').length,
+          documentNodeCount: document.querySelectorAll('.react-flow__node-documentCanvas').length,
           colorScheme: "dark",
           hasSkeleton: element.querySelector("[data-workbench-artifact-skeleton]") !== null,
           hasSpinner: spinner !== null,
@@ -6143,6 +6198,7 @@ function assertPendingDocumentVisualEvidence(evidence) {
   for (const item of evidence) {
     const [width, height] = item.viewport.split("x").map(Number);
     assert.equal(item.ariaLive, "polite", `pending PRD document did not expose a polite live region at ${item.viewport}`);
+    assert.equal(item.transientArtifactCount, 0, `early PRD placeholder remained over the real draft at ${item.viewport}`);
     assert.equal(item.hasSkeleton, true, `pending PRD document omitted its skeleton at ${item.viewport}`);
     assert.equal(item.hasSpinner, true, `pending PRD document omitted its progress indicator at ${item.viewport}`);
     assert.equal(item.labelKind, "refining", `runtime PRD draft did not expose refining context at ${item.viewport}`);
@@ -6665,17 +6721,7 @@ async function cleanup() {
 }
 
 async function stopService(service) {
-  if (service.spawnError || !service.child.pid) return;
-  if (service.child.exitCode !== null || service.child.signalCode !== null) return;
-  service.child.kill("SIGTERM");
-  const result = await Promise.race([
-    service.exited,
-    delay(10_000).then(() => null),
-  ]);
-  if (result === null && service.child.exitCode === null) {
-    service.child.kill("SIGKILL");
-    await Promise.race([service.exited, delay(2_000)]);
-  }
+  await stopProcessTree(service.child);
 }
 
 function dumpLogs() {
