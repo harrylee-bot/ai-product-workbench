@@ -89,7 +89,8 @@ RUN test "${DEERFLOW_SOURCE_COMMIT}" = "7a6c4a994a86583d2a3c056ee9d0f157d4f030c2
       --root /app/backend/packages/harness \
       --gateway-root /app/backend \
       --source-commit "${DEERFLOW_SOURCE_COMMIT}" \
-      --check
+      --check \
+    && rm -rf /tmp/uv-cache
 
 EXPOSE 8001
 CMD ["sh", "-c", "cd /app/backend && PYTHONPATH=. exec uv run --no-sync uvicorn app.gateway.app:app --host 0.0.0.0 --port 8001"]

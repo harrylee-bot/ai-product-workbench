@@ -210,6 +210,7 @@ jobs:
           ref: ${{ needs.source.outputs.source_commit }}
 
       - name: Set up Docker Buildx
+        id: buildx
         uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
 
       - name: Require approved production build inputs
@@ -299,15 +300,27 @@ jobs:
           ref="$ref@$digest"
           echo "ref=$ref" >> "$GITHUB_OUTPUT"
 
+      - name: Release temporary builder cache before image inspection
+        env:
+          BUILDER_NAME: ${{ steps.buildx.outputs.name }}
+        run: |
+          test "$RUNNER_ENVIRONMENT" = github-hosted
+          test -n "$BUILDER_NAME"
+          df -h / /tmp
+          docker buildx prune --builder "$BUILDER_NAME" --all --force
+          df -h / /tmp
+
       - name: Generate SPDX SBOM
         uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0
         with:
-          image: ${{ steps.image.outputs.ref }}
+          image: registry:${{ steps.image.outputs.ref }}
           artifact-name: sbom-${{ matrix.name }}.spdx.json
           output-file: output/sbom-${{ matrix.name }}.spdx.json
 
       - name: Scan image for release-blocking vulnerabilities
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        env:
+          TRIVY_IMAGE_SRC: remote
         with:
           image-ref: ${{ steps.image.outputs.ref }}
           format: json
