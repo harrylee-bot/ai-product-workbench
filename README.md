@@ -38,7 +38,9 @@ docker compose --env-file deploy/workbench.env \
 
 空数据库须先完成下面的首次知识初始化。Web 可在 API 启动后提供登录，API 的业务就绪检查仍要求有效知识发布和真实检索服务。主页面与预览使用独立访问来源。数据库迁移、事件与产物合同位于 `packages/workbench-db/`、`packages/workbench-contracts/`；机器验收合同位于 `schemas/`。
 
-代码只维护 `main`。普通推送运行 CI；生产发布由项目所有者在 `main` 手动运行「产品工作台 1.0.0 项目所有者发布」（`workbench-owner-release.yml`），填写当前完整提交 SHA，并明确勾选 `approve`。该工作流在 GitHub Actions 构建全部 10 个镜像；只有同一提交的 CI、真实栈浏览器测试、部署合同及镜像漏洞检查全部通过后，才生成签名发布包。版本固定为 `1.0.0`，镜像使用不可变 digest，并保留构建来源、SBOM 与 Cosign 签名。
+代码只维护 `main`。普通推送由 GitHub Actions 调度到专用本机 Linux ARM64 运行器 `workbench-local-build-1-0-0`；发布前应确保该运行器在线。构建环境为独立 Colima 虚拟机，生产主机不得注册此构建标签。镜像逐个构建，每个 BuildKit 限制 2 CPU、4 GiB 内存且内部并行度为 1，显式生成 `linux/amd64` 镜像并实际运行兼容性检查。运行器自托管计算不占 GitHub 托管分钟；工作流不写云端缓存，临时证据保留 1 天、最终签名发布包保留 7 天，仍遵守 GitHub 的存储额度。
+
+同一完整提交的推送 CI 成功后，项目所有者在 `main` 手动运行「产品工作台 1.0.0 项目所有者发布」（`workbench-owner-release.yml`），填写提交 SHA 并勾选 `approve`。该工作流构建全部 10 个镜像；真实栈浏览器测试、部署合同、镜像漏洞检查和签名均通过后生成发布包。版本固定为 `1.0.0`，镜像使用不可变 digest，保留构建来源、SBOM 与 Cosign 签名。网站部署后独立运行，本机关闭不影响线上服务。
 
 生产服务器只使用这个发布包中的外部构建镜像。部署端的 Cosign 身份固定为本仓库 `main` 上的 [项目所有者发布工作流](.github/workflows/workbench-owner-release.yml)，精确身份由部署脚本约束。`deploy/workbench-owner-deploy.py --help` 列出部署参数；默认只核验并输出计划，增加 `--execute` 才执行切换。执行时先核验签名、提交、镜像及构建配置，拉取全部镜像并检查资源，再备份私有配置与数据库、校验备份，然后迁移和逐服务启动；整个过程禁止服务器构建。
 

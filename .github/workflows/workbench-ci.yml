@@ -280,9 +280,7 @@ jobs:
           [[ "$TEST_POSTGRES_PORT" =~ ^[0-9]+$ ]]
           printf '%s\n' \
             "WORKBENCH_DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:$TEST_POSTGRES_PORT/workbench_test?schema=workbench" \
-            "WORKBENCH_TEST_DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:$TEST_POSTGRES_PORT/workbench_test?schema=workbench" \
-            "WORKBENCH_POSTGRES_ADMIN_URL=postgresql://postgres:postgres@127.0.0.1:$TEST_POSTGRES_PORT/workbench_test" \
-            "WORKBENCH_RUNTIME_ATTEMPT_TEST_DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:$TEST_POSTGRES_PORT/workbench_test?schema=runtime_provider_state_test" >> "$GITHUB_ENV"
+            "WORKBENCH_TEST_DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:$TEST_POSTGRES_PORT/workbench_test?schema=workbench" >> "$GITHUB_ENV"
 
       - name: Use Node.js 22
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
@@ -328,6 +326,8 @@ jobs:
         run: npm run workbench:prepare
 
       - name: Provision database extensions as CI infrastructure admin
+        env:
+          WORKBENCH_POSTGRES_ADMIN_URL: postgresql://postgres:postgres@127.0.0.1:${{ job.services.postgres.ports[5432] }}/workbench_test
         run: npm run db:extensions:provision
 
       - name: Apply clean migrations and verify PostgreSQL constraints
@@ -365,6 +365,8 @@ jobs:
         run: npm test
 
       - name: Run Runtime provider-state PostgreSQL integration
+        env:
+          WORKBENCH_RUNTIME_ATTEMPT_TEST_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:${{ job.services.postgres.ports[5432] }}/workbench_test?schema=runtime_provider_state_test
         run: |
           WORKBENCH_DATABASE_URL="$WORKBENCH_RUNTIME_ATTEMPT_TEST_DATABASE_URL" \
             npm --workspace @workbench/workbench-db run migrate:deploy
@@ -456,8 +458,7 @@ jobs:
           printf '%s\n' \
             "WORKBENCH_DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:$TEST_POSTGRES_PORT/workbench_real_stack_test?schema=workbench" \
             "WORKBENCH_TEST_DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:$TEST_POSTGRES_PORT/workbench_real_stack_test?schema=workbench" \
-            "WORKBENCH_POSTGRES_ADMIN_URL=postgresql://postgres:postgres@127.0.0.1:$TEST_POSTGRES_PORT/workbench_real_stack_test" \
-            "WORKBENCH_RUNTIME_ATTEMPT_TEST_DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:$TEST_POSTGRES_PORT/workbench_real_stack_test?schema=runtime_provider_state_test" >> "$GITHUB_ENV"
+            "WORKBENCH_POSTGRES_ADMIN_URL=postgresql://postgres:postgres@127.0.0.1:$TEST_POSTGRES_PORT/workbench_real_stack_test" >> "$GITHUB_ENV"
 
       - name: Use Node.js 22
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4

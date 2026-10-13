@@ -5,6 +5,35 @@ import YAML from "yaml";
 
 const root = new URL("../", import.meta.url);
 
+test("Runtime provider-state PostgreSQL tests activate only after their dedicated migration", async () => {
+  const workflow = YAML.parse(await readFile(new URL(".github/workflows/workbench-ci.yml", root), "utf8"));
+  const key = "WORKBENCH_RUNTIME_ATTEMPT_TEST_DATABASE_URL";
+  const quality = workflow.jobs.quality;
+  const integration = quality.steps.find((step) => step.name === "Run Runtime provider-state PostgreSQL integration");
+  assert.equal(workflow.env?.[key], undefined);
+  assert.equal(quality.env?.[key], undefined);
+  assert.equal(integration?.env?.[key],
+    "postgresql://postgres:postgres@127.0.0.1:${{ job.services.postgres.ports[5432] }}/workbench_test?schema=runtime_provider_state_test");
+  assert(quality.steps.indexOf(integration) > quality.steps.findIndex((step) => step.run === "npm test"));
+  assert.match(integration.run,
+    /WORKBENCH_DATABASE_URL="\$WORKBENCH_RUNTIME_ATTEMPT_TEST_DATABASE_URL"[\s\S]+migrate:deploy[\s\S]+workbench-worker run test:postgres/u);
+  for (const step of quality.steps.filter((step) => step !== integration)) {
+    assert(!JSON.stringify(step).includes(key), "the Runtime integration switch must not leak through GITHUB_ENV into ordinary tests");
+  }
+  assert(!JSON.stringify(workflow.jobs["real-stack-browser"]).includes(key), "the browser job must not enable unrelated Runtime integration tests");
+  const adminKey = "WORKBENCH_POSTGRES_ADMIN_URL";
+  const provision = quality.steps.find((step) => step.name === "Provision database extensions as CI infrastructure admin");
+  assert.equal(workflow.env?.[adminKey], undefined);
+  assert.equal(quality.env?.[adminKey], undefined);
+  assert.equal(provision?.env?.[adminKey],
+    "postgresql://postgres:postgres@127.0.0.1:${{ job.services.postgres.ports[5432] }}/workbench_test");
+  for (const step of quality.steps.filter((step) => step !== provision)) {
+    assert(!JSON.stringify(step).includes(adminKey), "quality admin credentials must not activate database-role integration tests during npm test");
+  }
+  assert(workflow.jobs["real-stack-browser"].steps.some((step) => step.run?.includes(adminKey)),
+    "the browser job must keep its existing database administration scope");
+});
+
 test("the migrator reconciles Runtime queues before services start", async () => {
   const [
     dockerfile,
