@@ -105,11 +105,11 @@ test("require-complete rejects queued or missing push CI without occupying the r
   const filename = path.join(directory, "fixture.json");
   const output = path.join(directory, "evidence.json");
   const commit = "a".repeat(40);
-  const run = { id: 10, run_attempt: 1, head_sha: commit, head_branch: "main", head_repository: { full_name: "harrylee-bot/ai-product-workbench" },
+  const run = { id: 10, run_attempt: 1, head_sha: commit, head_branch: "main", head_repository: { full_name: "example-owner/workbench" },
     event: "push", path: ".github/workflows/workbench-ci.yml", status: "completed", conclusion: "success" };
   const jobs = REQUIRED_CI_JOBS.map((name, i) => ({ name, id: i + 1, status: "completed", conclusion: "success" }));
   const invoke = () => execFileSync(process.execPath, [new URL("./owner-release.mjs", import.meta.url).pathname, "wait-ci",
-    "--repository", "harrylee-bot/ai-product-workbench", "--commit", commit, "--output", output, "--require-complete", "true"],
+    "--repository", "example-owner/workbench", "--commit", commit, "--output", output, "--require-complete", "true"],
   { env: { ...process.env, PATH: directory + path.delimiter + process.env.PATH, CI_FIXTURE: filename },
     timeout: 5000, stdio: ["ignore", "pipe", "pipe"], encoding: "utf8" });
   for (const runs of [[], [{ ...run, status: "queued", conclusion: null }]]) {
