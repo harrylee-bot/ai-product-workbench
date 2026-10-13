@@ -376,3 +376,57 @@ def latest_accepted_artifact_draft(
     except (ValueError, TypeError, KeyError, RuntimeError):
         return None
     return None
+
+
+def resolve_runtime_result_draft_references(
+    state: Any, candidate: Any, *, run_id: str, runtime_attempt_id: str,
+    requested_artifact_kinds: Any,
+) -> tuple[Any, list[dict[str, Any]]]:
+    """Expand explicit checksum-bound references, never replace submitted content.
+
+    References are tool input only. The returned envelope still requires the
+    ordinary complete Result validation and linked workflow checks.
+    """
+    if not isinstance(candidate, dict) or not isinstance(candidate.get("artifacts"), list):
+        return candidate, []
+    artifacts = candidate["artifacts"]
+    if not any(isinstance(item, dict) and "draftReference" in item for item in artifacts):
+        return candidate, []
+    try:
+        if (not 1 <= len(artifacts) <= 20
+                or not isinstance(requested_artifact_kinds, list)
+                or not requested_artifact_kinds
+                or any(not isinstance(kind, str) for kind in requested_artifact_kinds)):
+            raise ValueError
+        resolved = _copy_candidate(candidate)
+        normalizations: list[dict[str, Any]] = []
+        for index, item in enumerate(artifacts):
+            if not isinstance(item, dict) or "draftReference" not in item:
+                continue
+            reference = item["draftReference"]
+            if (set(item) != {"draftReference"} or not isinstance(reference, dict)
+                    or set(reference) != {"artifactIndex", "draftChecksum"}
+                    or type(reference["artifactIndex"]) is not int
+                    or reference["artifactIndex"] != index
+                    or not _checksum(reference["draftChecksum"])):
+                raise ValueError
+            draft = latest_accepted_artifact_draft(
+                state, run_id=run_id, runtime_attempt_id=runtime_attempt_id, artifact_index=index,
+            )
+            if (not isinstance(draft, dict) or draft.get("kind") not in {"prd", "prototype"}
+                    or draft["kind"] not in requested_artifact_kinds):
+                raise ValueError
+            validation = validate_runtime_artifact_draft(draft)
+            if (validation.get("ok") is not True
+                    or validation.get("candidateChecksum") != reference["draftChecksum"]):
+                raise ValueError
+            resolved["artifacts"][index] = copy.deepcopy(draft)
+            normalizations.append({
+                "path": ["artifacts", index], "artifactIndex": index,
+                "action": "resolved-accepted-draft-reference",
+            })
+        # Enforce the envelope size after expansion, before any model content can
+        # cross the normal validator's process boundary.
+        return _copy_candidate(resolved), normalizations
+    except (ValueError, TypeError, KeyError, RuntimeError, ImportError, RecursionError):
+        raise ValueError("WORKBENCH_RUNTIME_DRAFT_REFERENCE_INVALID") from None

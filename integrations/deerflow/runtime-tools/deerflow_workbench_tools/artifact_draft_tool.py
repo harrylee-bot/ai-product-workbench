@@ -107,6 +107,19 @@ def workbench_artifact_draft_publish(
         "candidateChecksum": validation["candidateChecksum"],
         "issues": validation["issues"],
     }
+    if validation["ok"] is True and draft_kind in {"prd", "prototype"}:
+        response["finalSubmissionArtifact"] = {
+            "draftReference": {
+                "artifactIndex": artifact_index,
+                "draftChecksum": validation["candidateChecksum"],
+            },
+        }
+        response["submissionInstruction"] = (
+            "Keep this accepted draft unchanged. For final workbench_runtime_result_submit, "
+            "copy finalSubmissionArtifact as the entire artifacts array entry at this index; "
+            "do not retype its content. For joint generation submit the accepted PRD "
+            "reference at index 0 and Prototype reference at index 1 together."
+        )
     if validation["ok"] is False:
         response["repairInstruction"] = (
             "Prefer the repair argument instead of retyping the full draft. "

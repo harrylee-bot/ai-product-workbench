@@ -23,9 +23,10 @@ from deerflow_workbench_tools.runtime_result_tool import workbench_runtime_resul
 root = Path(__ROOT__)
 draft = json.loads((root/'integrations/deerflow/test-fixtures/prd-runtime-result.example.json').read_text())['artifacts'][0]
 assert set(workbench_artifact_draft_publish.tool_call_schema.model_json_schema()['properties']) == {'artifact_index','draft','repair'}
+assert set(workbench_runtime_result_submit.tool_call_schema.model_json_schema()['properties']) == {'candidate'}
 context = {'workbench':{'runId':'run_1','runtimeAttemptId':'attempt_1','requestedArtifactKinds':['prd']}}
 node = ToolNode([workbench_artifact_draft_publish,workbench_runtime_result_submit], handle_tool_errors=False)
-async def check(asynchronous):
+async def check(asynchronous, reference):
     broken = copy.deepcopy(draft)
     broken['degradation'] = broken['content']['sections'].pop('degradation')
     state = {'messages':[HumanMessage('Generate the artifacts.')]}
@@ -41,11 +42,17 @@ async def check(asynchronous):
     assert json.loads(repaired.content)['ok'] is True and repaired.artifact['draft'] == draft
     placeholder = copy.deepcopy(draft)
     placeholder.update(title=[None], content=[None], operation=[None])
-    final = await call('workbench_runtime_result_submit','final',{'candidate':{'protocol':'workbench.runtime.result.v1','message':'Done','artifacts':[placeholder]}})
+    entry = json.loads(repaired.content)['finalSubmissionArtifact'] if reference else placeholder
+    final_candidate = {'protocol':'workbench.runtime.result.v1','message':'Done','artifacts':[entry]}
+    original = copy.deepcopy(final_candidate)
+    final = await call('workbench_runtime_result_submit','final',{'candidate':final_candidate})
     assert json.loads(final.content)['ok'] is True
     assert final.artifact['result']['artifacts'][0] == draft
-asyncio.run(check(False))
-asyncio.run(check(True))
+    assert final_candidate == original
+    assert state['messages'][-2].tool_calls[0]['args']['candidate'] == original
+for asynchronous in (False, True):
+    for reference in (False, True):
+        asyncio.run(check(asynchronous, reference))
 print('REAL_TOOLNODE_SYNC_ASYNC_REPAIR_AND_FINALIZATION_PASS')
 '''.replace("__ROOT__", repr(str(Path(__file__).resolve().parents[3])))
         result = subprocess.run([sys.executable, "-c", source], capture_output=True, text=True, timeout=45, env={**os.environ, "PYTHONDONTWRITEBYTECODE":"1"})

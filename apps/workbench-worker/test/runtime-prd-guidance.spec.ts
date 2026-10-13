@@ -18,6 +18,14 @@ const requirementSkillSource = readFileSync(fileURLToPath(new URL(
   "../../../integrations/deerflow/skills/requirement-doc-template/SKILL.md",
   import.meta.url,
 )), "utf8");
+const runtimeResultContractSource = readFileSync(fileURLToPath(new URL(
+  "../../../integrations/deerflow/skills/workbench/references/runtime-result-contract.md",
+  import.meta.url,
+)), "utf8");
+const leadSource = readFileSync(fileURLToPath(new URL(
+  "../../../integrations/deerflow/agents/workbench-lead/SOUL.md",
+  import.meta.url,
+)), "utf8");
 
 describe("runtimePrdResultGuidance", () => {
   it("routes new PRDs to the installed v2 reference without injecting sample business content", () => {
@@ -97,13 +105,39 @@ describe("runtimePrdResultGuidance", () => {
     expect(prdStructureSource).toContain("every Runtime `targetSurface` value, including `app` and `web`, is not source evidence");
   });
 
-  it("generates linked PRD then Prototype in one Run without premature auto-submission", () => {
-    const guidance = runtimePrdResultGuidance(["prd", "prototype"], "generate") ?? "";
+  it.each([["prd", "prototype"], ["prototype", "prd"]])("uses accepted references for linked artifacts requested as %s then %s", (first, second) => {
+    const guidance = runtimePrdResultGuidance([first, second], "generate") ?? "";
 
     expect(guidance).toContain("artifact_index 0");
     expect(guidance).toContain("artifact_index 1");
     expect(guidance).toContain("one complete Result");
+    expect(guidance).toContain("explicitly call workbench_runtime_result_submit");
+    expect(guidance).toContain("latest accepted ACK's finalSubmissionArtifact unchanged");
+    expect(guidance).toContain("PRD at index 0 and Prototype at index 1");
+    expect(guidance).toContain("{draftReference:{artifactIndex,draftChecksum}}");
+    expect(guidance).toContain("artifactIndex equal to its array position");
+    expect(guidance).toContain("Do not rewrite accepted bodies");
+    expect(guidance).toContain("never invent a checksum, use a rejected ACK");
+    expect(guidance).toContain("or combine the reference with content, kind, or other artifact fields");
+    expect(guidance).toContain("Complete artifact entries remain supported when no accepted Draft exists");
+    expect(guidance).toContain("fully validates");
+    expect(guidance).toContain("external Runtime v1 result still contains complete artifacts");
     expect(guidance).not.toContain("trusted Runtime submits the exact normalized Draft once");
+  });
+
+  it("keeps installed final-submission guidance aligned with accepted references and the complete result contract", () => {
+    for (const source of [workbenchSkillSource, runtimeResultContractSource, leadSource]) {
+      expect(source).toContain("finalSubmissionArtifact");
+      expect(source).toContain('"draftReference":{"artifactIndex":0,"draftChecksum":');
+      expect(source).toContain("Complete artifact entries remain supported");
+      expect(source).toContain("no accepted Draft exists");
+      expect(source).toContain("PRD-only Run");
+      expect(source).toContain("must not repeat that");
+      expect(source).toContain("workbench.runtime.result.v1");
+    }
+    expect(runtimeResultContractSource).toContain("external Runtime v1 contract is unchanged");
+    expect(runtimePrdResultGuidance(["prd"], "generate")).not.toContain("finalSubmissionArtifact");
+    expect(runtimePrdResultGuidance(["prd"], "edit")).not.toContain("finalSubmissionArtifact");
   });
 
   it("preserves the targeted protocol for edits without injecting a create starter", () => {
@@ -116,6 +150,16 @@ describe("runtimePrdResultGuidance", () => {
     expect(guidance).not.toContain("all 21 safety-row meanings");
     expect(guidance).not.toContain("fixed cover, version history");
     expect(guidance).not.toContain("IDs globally unique across the document and every nested IR entity");
+  });
+
+  it("keeps linked edits progressing through both drafts without PRD-only stop instructions", () => {
+    const linked = runtimePrdResultGuidance(["prd", "prototype"], "edit") ?? "";
+    expect(linked).toContain("Legacy workbench.prd.v1 targets remain v1");
+    expect(linked).toContain("complete the linked Prototype at artifact_index 1");
+    expect(linked).toContain("submit both accepted ACKs' finalSubmissionArtifact references together");
+    expect(linked).not.toContain("do not call a Draft or Result tool");
+    expect(linked).not.toContain("automatic Result validation fails");
+    expect(runtimePrdResultGuidance(["prd"], "edit")).toContain("trusted Runtime submits the exact normalized Draft once");
   });
 
   it("does not inject PRD instructions into non-PRD runs", () => {

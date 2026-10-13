@@ -1,6 +1,14 @@
 # Runtime Result Contract
 
-The DeerFlow lead agent must submit the complete `workbench.runtime.result.v1` object through the trusted `workbench_runtime_result_submit` tool. 产品工作台 accepts only the current turn's successful ToolMessage artifact and validates it again before persistence. Never emit a `workbench_runtime_result` Markdown fence or raw result JSON in assistant prose.
+The DeerFlow lead agent submits a `candidate` envelope with exactly `protocol: "workbench.runtime.result.v1"`, `message`, and `artifacts` through the trusted `workbench_runtime_result_submit` tool. For accepted PRD or Prototype Drafts, use the explicit accepted references below. The tool resolves those references to complete artifacts and performs full final validation. The external Runtime v1 contract is unchanged: 产品工作台 accepts only the current turn's successful ToolMessage artifact containing the complete result and validates it again before persistence. Never emit a `workbench_runtime_result` Markdown fence or raw result JSON in assistant prose.
+
+## Submit Accepted Drafts
+
+After a PRD or Prototype Draft receives `ok:true`, copy the latest successful ACK's `finalSubmissionArtifact` unchanged into the matching `candidate.artifacts` array position. It has the shape `{"draftReference":{"artifactIndex":0,"draftChecksum":"<exact checksum from the accepted ACK>"}}`; use the actual ACK value, never the placeholder. The index must equal its position in the final array. Keep `protocol` and a concise user-facing `message` in the envelope, and make the explicit `workbench_runtime_result_submit` call.
+
+The reference must be the entire array entry. Do not combine it with `content`, `kind`, or other artifact fields, invent a checksum, reference a rejected Draft, or reuse an ACK from another Run or Attempt. Do not rewrite an accepted artifact's body. References resolve only to the exact latest accepted Drafts from this Run and Attempt, with all normal final validation still enforced.
+
+Complete artifact entries remain supported. When no accepted Draft exists, submit the complete required artifact through the existing full-candidate path; do not invent a reference. Any stage or Draft-publication requirements still apply. For an exact PRD-only Run, the trusted Runtime automatically submits the accepted Draft once; the lead must not repeat that final call.
 
 ## Message Only
 
@@ -51,7 +59,7 @@ Citation values in examples are illustrative only. Retrieve knowledge successful
 
 PRD and Prototype content must satisfy the complete schemas in `runtime-result.schema.json`; do not substitute free-form Markdown or an abbreviated object. Prototype `variables` and state `values` are explicit runtime data sources: every variable/state binding must resolve to one of them, and binding node/value types must match the schema. Forms, submit/reset button types, submit ownership, and select options are explicit IR fields; do not rely on renderer inference.
 
-When both PRD and Prototype are requested, finish the PRD stages and publish its complete Draft at index 0 first. Then complete the Prototype stages and publish its Draft at index 1, using that same PRD as its source. Submit one final result containing both unchanged Drafts in that order. A successful PRD Draft alone does not complete a linked Run.
+When both PRD and Prototype are requested, finish the PRD stages and publish its complete Draft at index 0 first. Then complete the Prototype stages and publish its Draft at index 1, using that same PRD as its source. Submit one final candidate whose `artifacts` contains the PRD ACK's `finalSubmissionArtifact` at index 0 and the Prototype ACK's `finalSubmissionArtifact` at index 1. The resolved result contains both unchanged Drafts in that order. A successful PRD Draft alone does not complete a linked Run.
 
 ### PRD authoring fast path
 
@@ -65,7 +73,7 @@ A Prototype `date` input uses a string variable whose value is either empty or a
 
 Read and copy `prototype-runtime-result.example.json` as one complete create-result template before authoring a Prototype. It includes a valid screen/root tree, an explicit form, a variable-backed input, a form-owned submit action, states, and a motion while remaining small enough for one model read. Replace the sample values and expand the arrays; do not delete required fields or break the node/action/binding/motion back-references.
 
-Submit the complete candidate with `workbench_runtime_result_submit`. If it reports errors, correct all paths and resubmit the whole candidate. Stop after the first `ok:true` response and return only a concise user-facing message. A sub-agent result is draft material, not the final transport artifact.
+Submit the candidate envelope with `workbench_runtime_result_submit`, copying accepted ACKs' `finalSubmissionArtifact` references instead of rewriting their bodies. If it reports errors, correct all reported paths and resubmit the envelope while preserving valid accepted references. For a rejected reference, copy the correct latest accepted ACK value; never guess a hash or rewrite accepted content. Without an accepted Draft, use the complete artifact path. Stop after the first `ok:true` response and return only a concise user-facing message. A sub-agent result is draft material, not the final transport artifact.
 
 For a single-screen request, return one screen unless the user explicitly requires more. Prefer at most 48 nodes, 12 actions, 12 bindings, 4 states, and 8 motions, keep the complete response below 16,000 output tokens, and reuse shared tokens, assets, and state instead of duplicating equivalent variants or prose.
 

@@ -1661,6 +1661,67 @@ describe("DeerFlow runtime adapter", () => {
       .toThrow("RUNTIME_RESULT_SUBMISSION_MISSING");
   });
 
+  it("extracts complete validated results from draft-reference declarations without trusting unresolved references", () => {
+    const result = {
+      ...runtimeResultSchema.parse(prdRuntimeResultExample),
+      message: "Both accepted drafts are complete.",
+      artifacts: [
+        ...runtimeResultSchema.parse(prdRuntimeResultExample).artifacts,
+        minimalPrototypeArtifact(),
+      ],
+    };
+    const candidate = {
+      protocol: result.protocol,
+      message: result.message,
+      artifacts: result.artifacts.map((draft, artifactIndex) => ({
+        draftReference: { artifactIndex, draftChecksum: sha256(canonicalJson(draft)) },
+      })),
+    };
+    const original = structuredClone(candidate);
+    const toolCallId = "accepted-draft-reference-result";
+    const state = (artifact: unknown) => ({ values: { messages: [
+      { type: "human", content: "Generate the linked PRD and Prototype." },
+      ...result.artifacts.flatMap((draft, index) => {
+        const draftCallId = `reference-source-draft-${index}`;
+        const [, response] = artifactDraftToolMessages(draft, index, draftCallId);
+        return [
+          {
+            type: "ai", content: "",
+            tool_calls: [{ id: draftCallId, name: "workbench_artifact_draft_publish", args: { artifact_index: index, draft } }],
+          },
+          {
+            ...response, status: "success", content: JSON.stringify({
+              protocol: "workbench.runtime.artifact-draft-ack.v1", ok: true,
+              artifactIndex: index, candidateChecksum: sha256(canonicalJson(draft)), issues: [],
+            }),
+          },
+        ];
+      }),
+      {
+        type: "ai", content: "",
+        tool_calls: [{ id: toolCallId, name: "workbench_runtime_result_submit", args: { candidate } }],
+      },
+      { type: "tool", name: "workbench_runtime_result_submit", tool_call_id: toolCallId, status: "success", artifact },
+    ] } });
+    const artifact = validatedResultArtifact(result, { toolCallId });
+
+    expect(resolveRuntimeResult(state(artifact), ["prd", "prototype"], execution()))
+      .toEqual(runtimeResultSchema.parse(result));
+    expect(candidate).toEqual(original);
+
+    expect(() => resolveRuntimeResult(state({
+      ...artifact, result: { ...result, message: "Tampered after validation." },
+    }), ["prd", "prototype"], execution())).toThrow("RUNTIME_RESULT_SUBMISSION_SCOPE_INVALID");
+    expect(() => resolveRuntimeResult(state(validatedResultArtifact(result, {
+      toolCallId, runId: "another-run",
+    })), ["prd", "prototype"], execution())).toThrow("RUNTIME_RESULT_SUBMISSION_SCOPE_INVALID");
+    expect(() => resolveRuntimeResult(state(validatedResultArtifact(result, {
+      toolCallId, runtimeAttemptId: "previous-attempt",
+    })), ["prd", "prototype"], execution())).toThrow("RUNTIME_RESULT_SUBMISSION_MISSING");
+    expect(() => resolveRuntimeResult(state(validatedResultArtifact(candidate, { toolCallId })),
+      ["prd", "prototype"], execution())).toThrow("RUNTIME_RESULT_SUBMISSION_INVALID");
+  });
+
   it("reports a trusted unresolved draft rejection without exposing its issue text", () => {
     const state = { messages: [
       { type: "human", content: "current turn" },

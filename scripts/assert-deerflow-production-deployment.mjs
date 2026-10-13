@@ -497,6 +497,15 @@ assert(
       "test_linked_run_keeps_prd_draft_then_publishes_prototype_before_combined_result",
     )
     && patchContractTestSource.includes(
+      "test_linked_reference_preflight_preserves_args_and_rejects_invalid_reference",
+    )
+    && patchContractTestSource.includes(
+      "test_linked_full_body_drift_still_fails_without_replacing_content",
+    )
+    && patchContractTestSource.includes(
+      "test_final_reference_guidance_requires_complete_trusted_verified_history",
+    )
+    && patchContractTestSource.includes(
       "test_prd_clarification_is_hidden_and_blocked_without_calling_the_handler",
     )
     && patchContractTestSource.includes(

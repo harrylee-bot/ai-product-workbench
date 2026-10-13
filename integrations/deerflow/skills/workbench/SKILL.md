@@ -186,7 +186,8 @@ PRD through draft publication and Runtime result submission.
 A request for both PRD and Prototype is one linked Run. Complete PRD stages
 and reference reads, publish the validated PRD at artifact_index 0, then build
 its Prototype and publish it at artifact_index 1. Submit both artifacts once
-in the final Result. Do not stop after the PRD Draft in a linked Run.
+by copying their accepted ACKs' `finalSubmissionArtifact` references into the
+final candidate in that same order. Do not stop after the PRD Draft in a linked Run.
 Every artifact requires nonempty citations copied exactly from successful
 Knowledge retrieval in the current attempt. Missing knowledge is a blocker,
 not permission to generate from memory or fabricate sources.
@@ -236,7 +237,7 @@ Writing requirements:
 - Preserve the exact PRD v2 transport paths: `content.sections.introduction`, `content.sections.businessRequirements.acceptanceCriteria`, `content.sections.businessRequirements.additionalSections`, `content.sections.degradation`, and `content.sections.safetyBaseline`. `content.sections.businessRequirements` also owns `pageLinks`, `coreRules`, and `flowAndPages`. Never put `acceptanceCriteria` or `additionalSections` directly under `content.sections`, and never put `degradation` or `safetyBaseline` directly under `content`.
 - Keep IDs globally unique across the document and every nested IR entity. Resolve every table, diagram, citation, assumption, goal, requirement, criterion, and flow reference, and keep requirement/criterion references bidirectional.
 - Never use a filled PRD example as an authoring source. A business example can silently inject unrelated pages, roles, permissions, states, retry behavior, or acceptance rules into a short request.
-- When a complete schema-valid PRD candidate exists, call `workbench_artifact_draft_publish` at `artifact_index: 0`. For an exact PRD-only Run, the trusted Runtime submits the normalized Draft once. For a linked PRD and Prototype Run, continue with the Prototype and submit both together. If validation fails, repair only the reported paths. A placeholder, prose outline, partial section, or progress estimate is not a publishable draft.
+- When a complete schema-valid PRD candidate exists, call `workbench_artifact_draft_publish` at `artifact_index: 0`. For an exact PRD-only Run, the trusted Runtime submits the normalized Draft once. For a linked PRD and Prototype Run, continue with the Prototype and submit both accepted ACKs' `finalSubmissionArtifact` references together. If validation fails, repair only the reported paths. A placeholder, prose outline, partial section, or progress estimate is not a publishable draft.
 
 ### Repair a rejected artifact draft
 
@@ -244,7 +245,7 @@ After `workbench_artifact_draft_publish` returns `ok:false`, use the same tool w
 
 Use JSON Pointer operations `add`, `replace`, `remove`, or `move` to repair only reported paths. Copy each supplied replacement from the authored business content or an exact fixed contract value. Use `move` for misplaced complete sections or blocks so their contents and IDs stay intact. A table row owns `cells`; a `requirement` or `goal` is a block and belongs in its section's `blocks` array. Move misplaced blocks out of `rows`, preserving their contents; do not turn them into empty rows.
 
-Repair can address `title`, `content`, and `citations`; it cannot change artifact kind, schema version, or operation/target. A move cannot overwrite an existing object field. If the tool reports a stale or invalid repair base, do not guess a checksum or reuse an accepted draft. Read the latest ACK in this run and correct the repair call. Each patch runs complete validation; keep repairing the latest rejected candidate until accepted. Never restart completed stages or reference reads. After acceptance, continue the linked prototype and final submission with the complete accepted artifacts.
+Repair can address `title`, `content`, and `citations`; it cannot change artifact kind, schema version, or operation/target. A move cannot overwrite an existing object field. If the tool reports a stale or invalid repair base, do not guess a checksum or reuse an accepted draft. Read the latest ACK in this run and correct the repair call. Each patch runs complete validation; keep repairing the latest rejected candidate until accepted. Never restart completed stages or reference reads. After acceptance, keep the ACK's `finalSubmissionArtifact` for final submission and continue the linked prototype. Do not rewrite an accepted artifact's body.
 
 ## Runtime Inputs
 
@@ -304,7 +305,8 @@ Call it again only after that Artifact's renderable content materially changes. 
 checkpoint must be a complete valid Runtime Artifact draft, not a DOM fragment, prose,
 placeholder, skeleton, or progress estimate. Keep `artifact_index` and the Artifact's
 operation/title stable, and make the final `workbench_runtime_result_submit` Artifact at
-that index exactly match the latest checkpoint. Do not publish a checkpoint on a timer.
+that index exactly match the latest checkpoint by copying its accepted ACK's
+`finalSubmissionArtifact` into that array position. Do not publish a checkpoint on a timer.
 
 After the first complete Prototype checkpoint, use `workbench_prototype_patch_publish`
 to expose material changes inside one Screen without waiting for another full checkpoint.
@@ -325,9 +327,11 @@ one complete current checkpoint before the next patch, then use the supplied
 `baseRevision`. A checkpoint is the only recovery boundary after a degraded projection;
 do not guess missing operations or reuse an older revision.
 
-Every turn must finish with a successful `workbench_runtime_result_submit` carrying the complete unfenced `workbench.runtime.result.v1` object in its `candidate` argument. For an exact PRD-only Run, the trusted Runtime submits the normalized successful Draft automatically once; the lead must not repeat that submission. Other Runs use the explicit Result path. The Worker accepts only the current turn's validated ToolMessage artifact; it does not parse Markdown fences, raw JSON, assistant state fields, or sub-agent text.
+Every turn must finish with a successful `workbench_runtime_result_submit` carrying an unfenced `candidate` envelope with exactly `protocol: "workbench.runtime.result.v1"`, `message`, and `artifacts`. For an exact PRD-only Run, the trusted Runtime submits the normalized successful Draft automatically once; the lead must not repeat that submission. Other Runs use the explicit Result path. The Worker accepts only the current turn's validated ToolMessage artifact; it does not parse Markdown fences, raw JSON, assistant state fields, or sub-agent text.
 
-If the tool returns `ok:false`, fix every reported path and submit the complete candidate again. Continue until it returns `ok:true`. After the first successful submission, do not mutate or resubmit the candidate; return only a concise user-facing completion message. Sub-agents may research or draft content, but the lead agent alone owns the final submit call.
+For an accepted PRD or Prototype Draft, copy the latest successful ACK's `finalSubmissionArtifact` unchanged into the matching `candidate.artifacts` array position. Its entire shape is `{"draftReference":{"artifactIndex":0,"draftChecksum":"<exact checksum from the accepted ACK>"}}`; copy the actual ACK value, never this placeholder. The index must equal its array position. In a linked Run use the PRD reference at index 0 and the Prototype reference at index 1. Never invent a checksum, use a rejected or earlier Run/Attempt's ACK, or combine `draftReference` with `content`, `kind`, or other artifact fields. Do not rewrite accepted bodies. The trusted tool resolves the exact accepted contents and applies complete final validation; the external Runtime v1 result still contains complete artifacts. Complete artifact entries remain supported; when no accepted Draft exists, submit the full required artifact rather than a reference.
+
+If the tool returns `ok:false`, fix every reported path and resubmit the candidate envelope, preserving all valid accepted references. For a rejected reference, copy the correct latest accepted ACK's `finalSubmissionArtifact`; never repair it by guessing a hash or rewriting accepted content. Continue until the tool returns `ok:true`. After the first successful submission, do not mutate or resubmit the candidate; return only a concise user-facing completion message. Sub-agents may research or draft content, but the lead agent alone owns the final submit call.
 
 For a PRD result, the earlier PRD section requires the canonical requirement skill and the business-neutral `references/prd-runtime-result.schema.json`; do not consult the legacy PRD business example. For an exact Prototype-only Run, the trusted Runtime supplies the pinned Prototype transport example and contract directly in model context. For an exact linked PRD and Prototype Run, it supplies them only after the PRD Draft is accepted. Use these references for structure, never as business facts or citation evidence; replace example values with the current request, retrieved Knowledge, and the accepted PRD. The configured PRD-only `read_file` capability cannot open Prototype references. Populate the applicable transport with request-specific IDs and content while keeping every required field and every bidirectional reference. Both paths are validated by the production `runtimeResultSchema`.
 
@@ -350,7 +354,7 @@ Do not load the entire generated `references/runtime-result.schema.json` into mo
 - A `date` input binds either an empty string or a real calendar date in canonical `YYYY-MM-DD` form. Do not return locale dates, timestamps, timezone suffixes, or impossible dates.
 - Never return a create operation for an edit Run or a revise operation for any non-edit workflow, including a generate Run that has source targets.
 
-The trusted Prototype transport context comes from `references/prototype-runtime-result.example.json` and `references/runtime-result-contract.md`, verified against fixed SHA-256 digests. It grants no additional filesystem capability and does not count as a tool read. In a linked Run, keep the accepted PRD unchanged and submit both validated Drafts, even though the transport example contains only one Prototype. After a rejected Draft, use the latest checksum-bound repair to preserve valid fields and correct only reported paths; do not repeat completed stages or reference reads.
+The trusted Prototype transport context comes from `references/prototype-runtime-result.example.json` and `references/runtime-result-contract.md`, verified against fixed SHA-256 digests. It grants no additional filesystem capability and does not count as a tool read. In a linked Run, keep the accepted PRD unchanged and submit both accepted ACKs' `finalSubmissionArtifact` references in PRD/Prototype order, even though the transport example contains only one Prototype. After a rejected Draft, use the latest checksum-bound repair to preserve valid fields and correct only reported paths; do not repeat completed stages or reference reads.
 
 ## Prototype Execution
 

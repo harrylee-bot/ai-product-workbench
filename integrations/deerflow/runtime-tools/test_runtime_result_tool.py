@@ -465,5 +465,84 @@ class RuntimeResultToolTests(unittest.TestCase):
         validate.assert_not_called()
 
 
+class AcceptedDraftReferenceTests(unittest.TestCase):
+    def setUp(self):
+        root = Path(__file__).resolve().parents[3]
+        self.drafts = [
+            json.loads((root / "integrations/deerflow/test-fixtures/prd-runtime-result.example.json").read_text())["artifacts"][0],
+            json.loads((root / "integrations/deerflow/skills/workbench/references/prototype-runtime-result.example.json").read_text())["artifacts"][0],
+        ]
+        self.messages = [_draft_message(draft, artifact_index=index, tool_call_id=f"draft_{index}")
+                         for index, draft in enumerate(self.drafts)]
+        self.runtime = _runtime_with_messages(self.messages)
+        self.runtime.context["workbench"]["requestedArtifactKinds"] = ["prd", "prototype"]
+        self.candidate = {
+            "protocol": "workbench.runtime.result.v1", "message": "Done",
+            "artifacts": [{"draftReference": {"artifactIndex": index,
+                           "draftChecksum": message.artifact["draftChecksum"]}}
+                          for index, message in enumerate(self.messages)],
+        }
+
+    def test_joint_references_submit_exact_accepted_bodies_without_mutating_history(self):
+        original = copy.deepcopy(self.candidate)
+        history = copy.deepcopy(self.runtime.state)
+        content, artifact = workbench_runtime_result_submit.func(self.runtime, self.candidate)
+        self.assertTrue(json.loads(content)["ok"])
+        self.assertEqual(artifact["result"]["artifacts"], self.drafts)
+        self.assertEqual(artifact["resultChecksum"], validate_runtime_result(artifact["result"])["candidateChecksum"])
+        self.assertEqual(len(json.loads(content)["normalizations"]), 2)
+        self.assertEqual(self.candidate, original)
+        self.assertEqual(self.runtime.state, history)
+
+    def test_reference_cannot_mix_content_or_override_identity_and_checksum(self):
+        variants = [
+            {"draftReference": None},
+            {**self.candidate["artifacts"][0], "content": {"secret": "must-not-echo"}},
+            {"draftReference": {"artifactIndex": True, "draftChecksum": self.messages[0].artifact["draftChecksum"]}},
+            {"draftReference": {"artifactIndex": 1, "draftChecksum": self.messages[0].artifact["draftChecksum"]}},
+            {"draftReference": {"artifactIndex": 0, "draftChecksum": "0" * 64}},
+            {"draftReference": {"artifactIndex": 0, "draftChecksum": "not-a-checksum"}},
+            {"draftReference": {"artifactIndex": 0, "draftChecksum": self.messages[0].artifact["draftChecksum"], "kind": "prd"}},
+        ]
+        for entry in variants:
+            with self.subTest(entry_keys=list(entry)):
+                candidate = copy.deepcopy(self.candidate)
+                candidate["artifacts"][0] = entry
+                with self.assertRaisesRegex(ValueError, "^WORKBENCH_RUNTIME_DRAFT_REFERENCE_INVALID$"):
+                    workbench_runtime_result_submit.func(self.runtime, candidate)
+
+    def test_reference_requires_requested_kind_and_current_turn_and_scope(self):
+        for mutation in (
+            lambda runtime: runtime.context["workbench"].update(runId="another-run"),
+            lambda runtime: runtime.context["workbench"].update(runtimeAttemptId="another-attempt"),
+            lambda runtime: runtime.context["workbench"].update(requestedArtifactKinds=["prototype"]),
+            lambda runtime: runtime.context["workbench"].pop("requestedArtifactKinds"),
+            lambda runtime: runtime.state["messages"].append({"type": "human", "content": "New request"}),
+            lambda runtime: runtime.state["messages"].pop(1),
+            lambda runtime: runtime.state["messages"].append(copy.deepcopy(runtime.state["messages"][-1])),
+            lambda runtime: runtime.state["messages"][2].artifact.update(checksum="0" * 64),
+        ):
+            runtime = copy.deepcopy(self.runtime)
+            mutation(runtime)
+            with self.assertRaisesRegex(ValueError, "^WORKBENCH_RUNTIME_DRAFT_REFERENCE_INVALID$"):
+                workbench_runtime_result_submit.func(runtime, self.candidate)
+
+    def test_expanded_result_still_requires_full_envelope_validation(self):
+        candidate = copy.deepcopy(self.candidate)
+        candidate["unexpected"] = "field"
+        content, artifact = workbench_runtime_result_submit.func(self.runtime, candidate)
+        self.assertFalse(json.loads(content)["ok"])
+        self.assertFalse(artifact["ok"])
+        self.assertNotIn("result", artifact)
+
+    def test_full_content_is_never_replaced_by_a_reference_to_another_entry(self):
+        candidate = copy.deepcopy(self.candidate)
+        candidate["artifacts"][0] = copy.deepcopy(self.drafts[0])
+        candidate["artifacts"][0]["content"]["unexpected"] = "field"
+        content, artifact = workbench_runtime_result_submit.func(self.runtime, candidate)
+        self.assertFalse(json.loads(content)["ok"])
+        self.assertFalse(artifact["ok"])
+
+
 if __name__ == "__main__":
     unittest.main()

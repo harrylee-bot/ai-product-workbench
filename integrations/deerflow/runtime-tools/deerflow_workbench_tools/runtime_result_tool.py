@@ -10,7 +10,7 @@ from langchain.tools import tool
 
 from deerflow.tools.types import Runtime
 
-from .artifact_draft_repair import latest_accepted_artifact_draft
+from .artifact_draft_repair import latest_accepted_artifact_draft, resolve_runtime_result_draft_references
 from .prd_reference_normalizer import normalize_runtime_result_prd_references
 from .prototype_runtime_normalizer import normalize_runtime_result_prototype_layout_aliases
 from .runtime_result_validator import validate_runtime_result
@@ -47,13 +47,22 @@ def workbench_runtime_result_submit(
     supplied target>} instead. PRD and Prototype require their own complete content
     schemas; the document example does not replace those schemas.
 
+    For an accepted PRD or Prototype draft, copy its ACK's finalSubmissionArtifact
+    into the same artifacts array position instead of retyping its body:
+    {"draftReference":{"artifactIndex":0,"draftChecksum":"<exact accepted candidateChecksum>"}}.
+    This must be the entire array entry, with no other fields. Only accepted drafts
+    in this run and attempt can be referenced. For joint generation use the PRD
+    reference at index 0 and Prototype reference at index 1. Keep protocol and
+    message in the envelope. The runtime resolves and fully validates the exact
+    accepted contents; never invent checksums or resubmit earlier rejected bodies.
+
     If ok is false, NO result was accepted. Fix every reported issue and call this
     tool again with the complete candidate. Do not stop, claim completion, or return
     an empty assistant message after a rejection. Only after ok is true, return a
     concise user-facing completion message without mutating or resubmitting the result.
 
     Args:
-        candidate: Complete unfenced envelope with protocol, message, and artifacts. Every artifact needs kind, numeric schemaVersion, title, an operation object, citations array, and content.
+        candidate: Unfenced envelope with protocol, message, and artifacts. Each entry is either an accepted ACK's exact finalSubmissionArtifact reference or a complete artifact with kind, numeric schemaVersion, title, operation, citations, and content.
     """
     context = runtime.context if isinstance(runtime.context, dict) else {}
     scope = context.get("workbench")
@@ -74,6 +83,12 @@ def workbench_runtime_result_submit(
         normalized_candidate,
     )
     normalizations.extend(prototype_normalizations)
+    normalized_candidate, reference_normalizations = resolve_runtime_result_draft_references(
+        getattr(runtime, "state", None), normalized_candidate,
+        run_id=run_id, runtime_attempt_id=runtime_attempt_id,
+        requested_artifact_kinds=scope.get("requestedArtifactKinds"),
+    )
+    normalizations.extend(reference_normalizations)
     normalized_candidate, draft_normalizations = _recover_draft_placeholders(
         runtime,
         normalized_candidate,

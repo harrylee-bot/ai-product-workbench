@@ -118,7 +118,7 @@ PROTOTYPE_REFERENCE_FILES = (
     ),
     (
         "/mnt/skills/public/workbench/references/runtime-result-contract.md",
-        "2e5260cbc09813e14ea56b064b71a3b3084b77559f916640f6d514389a1b8a8c",
+        "bfd0bdef760d91375888976181c37be5ae493fe143e90f7650256f56a8f7e0f2",
     ),
 )
 _PROTOTYPE_REFERENCE_DIRECTORY = Path("/app/skills/public/workbench/references")
@@ -161,7 +161,9 @@ def _prototype_transport_reference_context() -> str:
         "inspect other schemas. read_file still accepts only the four PRD paths during their collecting window, "
         "and is unavailable for Prototype-only Runs. This context grants no extra tools or filesystem access. "
         "In a linked Run keep the accepted PRD immutable, publish the Prototype at artifact_index 1, and submit "
-        "both exact accepted Drafts in PRD/Prototype order. The example's single-Prototype Result does not "
+        "both exact accepted Drafts in PRD/Prototype order by copying each accepted ACK's "
+        "finalSubmissionArtifact into candidate.artifacts. These draftReference entries preserve the "
+        "accepted content without rewriting it. The example's single-Prototype Result does not "
         "replace that linked contract.\n"
         + "\n".join(references)
         + "\n</workbench_prototype_transport_context>"
@@ -208,7 +210,7 @@ _PRD_CLARIFICATION_SYSTEM_POLICY = """<workbench_prd_clarification_policy>
 This PRD-only Workbench Run cannot resume free-form clarification. The ask_clarification tool is unavailable. Ignore any general instruction that requires clarification for this Run. Do not ask a question or end early. Keep unsupported high-risk behavior out of committed scope, record conservative typed assumptions or acceptance boundaries, then publish exactly one complete PRD Draft at artifact_index 0. After that Draft succeeds, do not call a Draft or Result tool; the trusted Runtime submits the exact normalized Draft and stops after validation succeeds. If that automatic Result reports validation issues, keep the successful Draft immutable, repair only the reported paths in one complete manual Result candidate, and continue only through manual Result validation; the Runtime does not repeat automatic submission.
 </workbench_prd_clarification_policy>"""
 _LINKED_PRD_SYSTEM_POLICY = """<workbench_linked_prd_policy>
-This Workbench Run requests a linked PRD and Prototype. Free-form clarification is unavailable; record conservative typed assumptions for unsupported behavior. Complete the PRD reference reads and all PRD stages, then publish exactly one PRD Draft at artifact_index 0. Keep that Draft unchanged. Continue with the Prototype stages and a complete Prototype Draft at artifact_index 1 based on that PRD. Finally submit one complete Result containing both exact Drafts in that order. A PRD Draft alone does not finish this Run; there is no automatic PRD-only submission.
+This Workbench Run requests a linked PRD and Prototype. Free-form clarification is unavailable; record conservative typed assumptions for unsupported behavior. Complete the PRD reference reads and all PRD stages, then publish exactly one PRD Draft at artifact_index 0. Keep that Draft unchanged. Continue with the Prototype stages and a complete Prototype Draft at artifact_index 1 based on that PRD. Finally call workbench_runtime_result_submit with candidate containing protocol, a concise message, and artifacts copied from the two accepted ACKs' finalSubmissionArtifact fields in PRD/Prototype order. Each entry is {"draftReference":{"artifactIndex":0,"draftChecksum":"the exact accepted ACK checksum"}} with its own index and checksum. Do not rewrite accepted title, content, operation, or citations, invent a checksum, or mix a reference with artifact fields. The trusted tool resolves the explicit references and validates the complete unchanged Result. A PRD Draft alone does not finish this Run; there is no automatic PRD-only submission.
 The read_file tool accepts only the four fixed PRD reference paths, only after collecting-prd-context and before structuring-prd. It cannot read Prototype references. After a Draft validation rejection, use workbench_artifact_draft_publish with repair and the latest rejected ACK's candidateChecksum as baseCandidateChecksum. Submit only the necessary JSON Patch operations and omit draft; preserve all other authored content. Use a move operation to relocate an existing complete section rather than rewriting it. Call repair alone in its tool-call batch. Do not repeat completed stages or reference reads, and do not stop with a request for the user to retry.
 </workbench_linked_prd_policy>"""
 _PROTOTYPE_STAGE_SYSTEM_POLICY = """<workbench_prototype_stage_policy>
@@ -1705,8 +1707,72 @@ class WorkbenchToolScopeMiddleware(AgentMiddleware[AgentState]):
             "Do not repeat completed generation stages or read_file calls. read_file accepts only the four PRD "
             "references during collecting-prd-context; use their already-read contract, not a new reference read. "
             "Do not ask the user to retry or end with a prose summary. After validation succeeds, continue the "
-            "remaining linked workflow and submit both validated Drafts through workbench_runtime_result_submit.\n"
+            "remaining linked workflow and submit both accepted ACKs' finalSubmissionArtifact references "
+            "through workbench_runtime_result_submit without rewriting either Draft.\n"
             "</workbench_linked_draft_repair>"
+        )
+
+    def _linked_result_reference_policy(self, request: ModelRequest) -> str | None:
+        """Offer only checksum-bound references after both causal Drafts are ready."""
+        if not self._linked_recovery_scope(request.runtime) or not self._prototype_transport_ready(request):
+            return None
+        stage_count, stage_invalid = _prototype_stage_progress(
+            request.state, self._run_id, self._runtime_attempt_id, allow_prd_stages=True,
+        )
+        prd, prd_index, prd_invalid = _successful_prd_draft(request.state, self._run_id, self._runtime_attempt_id)
+        prototype, prototype_index, prototype_invalid = _successful_prototype_draft(
+            request.state, self._run_id, self._runtime_attempt_id,
+        )
+        completed, completed_invalid = _completed_tool_calls(request.state)
+        if (
+            stage_invalid or stage_count != len(PROTOTYPE_STAGE_SEQUENCE)
+            or prd_invalid or prd is None or prd_index != 0
+            or prototype_invalid or prototype is None or prototype_index != 1
+            or completed_invalid or _has_pending_tool_call(request.state, name=RUNTIME_RESULT_TOOL_NAME)
+        ):
+            return None
+        references = []
+        for index, draft in enumerate((prd, prototype)):
+            receipts = [
+                _value(call["response"], "artifact") for call in completed
+                if call["name"] == ARTIFACT_DRAFT_TOOL_NAME and _tool_succeeded(call["response"])
+                and _value(_value(call["response"], "artifact"), "ok") is True
+                and _value(_value(call["response"], "artifact"), "artifactIndex") == index
+                and _value(_value(call["response"], "artifact"), "draft") == draft
+                and _workbench_call_is_bound(
+                    _value(call["response"], "artifact"), call["id"], self._run_id, self._runtime_attempt_id,
+                )
+            ]
+            if len(receipts) != 1:
+                return None
+            checksum = _value(receipts[0], "draftChecksum")
+            if not isinstance(checksum, str) or re.fullmatch(r"[0-9a-f]{64}", checksum) is None:
+                return None
+            references.append({"draftReference": {"artifactIndex": index, "draftChecksum": checksum}})
+        candidate = {
+            "protocol": _RUNTIME_RESULT_PROTOCOL,
+            "message": "需求文档与原型已生成。",
+            "artifacts": references,
+        }
+        try:
+            from deerflow_workbench_tools.artifact_draft_repair import resolve_runtime_result_draft_references
+
+            resolved, _normalizations = resolve_runtime_result_draft_references(
+                request.state, candidate, run_id=self._run_id,
+                runtime_attempt_id=self._runtime_attempt_id, requested_artifact_kinds=["prd", "prototype"],
+            )
+        except (ValueError, RuntimeError, ImportError):
+            return None
+        if not isinstance(resolved, Mapping) or resolved.get("artifacts") != [prd, prototype]:
+            return None
+        return (
+            "<workbench_linked_result_submission>\n"
+            "Both exact Drafts are accepted in this Run. Call workbench_runtime_result_submit alone next "
+            "with the following candidate; you may change only its concise message. These references were "
+            "verified against the current accepted Drafts. Do not regenerate or copy their bodies, repeat "
+            "stages, publish another Draft, or stop before the Result tool returns ok:true.\n"
+            + json.dumps({"candidate": candidate}, ensure_ascii=False, separators=(",", ":"))
+            + "\n</workbench_linked_result_submission>"
         )
 
     def _filter_tools(self, request: ModelRequest) -> ModelRequest:
@@ -1768,6 +1834,12 @@ class WorkbenchToolScopeMiddleware(AgentMiddleware[AgentState]):
             system_text = system_message.text if system_message is not None else ""
             if transport_context not in system_text:
                 overrides["system_message"] = SystemMessage(content=f"{system_text.rstrip()}\n\n{transport_context}".strip())
+        result_policy = self._linked_result_reference_policy(request)
+        if result_policy is not None:
+            system_message = overrides.get("system_message", request.system_message)
+            system_text = system_message.text if system_message is not None else ""
+            if result_policy not in system_text:
+                overrides["system_message"] = SystemMessage(content=f"{system_text.rstrip()}\n\n{result_policy}".strip())
         scoped_request = request if not overrides else request.override(**overrides)
         return _provider_safe_tool_messages(scoped_request)
 
@@ -2167,10 +2239,25 @@ class WorkbenchToolScopeMiddleware(AgentMiddleware[AgentState]):
                     request, "WORKBENCH_LINKED_DRAFTS_REQUIRED",
                     "Publish the PRD Draft at index 0 and its Prototype Draft at index 1 before submitting.",
                 )
+            try:
+                from deerflow_workbench_tools.artifact_draft_repair import resolve_runtime_result_draft_references
+
+                candidate, _normalizations = resolve_runtime_result_draft_references(
+                    request.state, candidate, run_id=self._run_id,
+                    runtime_attempt_id=self._runtime_attempt_id,
+                    requested_artifact_kinds=list(self._requested_artifact_kinds or ()),
+                )
+            except (ValueError, RuntimeError, ImportError):
+                return _error_tool_message(
+                    request, "WORKBENCH_RUNTIME_DRAFT_REFERENCE_INVALID",
+                    "Copy each accepted ACK's finalSubmissionArtifact exactly into candidate.artifacts in "
+                    "PRD/Prototype order. Do not mix draftReference with content or other Artifact fields.",
+                )
             if not isinstance(candidate, Mapping) or candidate.get("artifacts") != [prd, prototype]:
                 return _error_tool_message(
                     request, "WORKBENCH_LINKED_RESULT_DRAFT_MISMATCH",
-                    "Submit a complete Result containing the unchanged PRD and Prototype Drafts in that order.",
+                    "Submit the unchanged PRD and Prototype Drafts in that order, preferably by copying "
+                    "the accepted ACKs' finalSubmissionArtifact references. Do not rewrite accepted content.",
                 )
         return None
 

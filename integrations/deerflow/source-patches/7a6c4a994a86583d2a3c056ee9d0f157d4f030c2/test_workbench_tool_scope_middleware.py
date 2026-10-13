@@ -1950,6 +1950,137 @@ class WorkbenchToolScopeMiddlewareTests(unittest.TestCase):
         self.assertIn("WORKBENCH_PRD_DRAFT_REQUIRED", result.content)
 
 
+class LinkedFinalReferenceTests(unittest.IsolatedAsyncioTestCase):
+    marker = "<workbench_linked_result_submission>"
+
+    def setUp(self):
+        reference_patch = patch.object(
+            middleware_module, "_PROTOTYPE_REFERENCE_DIRECTORY", SKILL_ROOT / "workbench" / "references",
+        )
+        reference_patch.start()
+        self.addCleanup(reference_patch.stop)
+
+    def ready(self):
+        request = PrototypeTransportContextTests().request(["prd", "prototype"], accepted=True)
+        messages = request.state["messages"]
+        prd = copy.deepcopy(messages[-1]["artifact"]["draft"])
+        prd_checksum = messages[-1]["artifact"]["draftChecksum"]
+        for index, stage in enumerate(middleware_module.PROTOTYPE_STAGE_SEQUENCE):
+            call_id = f"final-prototype-stage-{index}"
+            append_stage(messages, stage, call_id)
+            messages[-1]["artifact"].update({
+                "runId": "run-auto", "runtimeAttemptId": "attempt-auto", "toolCallId": call_id,
+            })
+        prototype = {"kind": "prototype", "title": "Accepted prototype"}
+        prototype_checksum = hashlib.sha256(json.dumps(
+            prototype, sort_keys=True, separators=(",", ":"),
+        ).encode("utf-8")).hexdigest()
+        artifact = {
+            "protocol": "workbench.runtime.artifact-draft.v1", "ok": True,
+            "runId": "run-auto", "runtimeAttemptId": "attempt-auto", "toolCallId": "final-prototype-draft",
+            "artifactIndex": 1, "draft": prototype, "draftChecksum": prototype_checksum,
+        }
+        PrototypeTransportContextTests.sign_envelope(artifact)
+        append_tool_batch(messages, [call("workbench_artifact_draft_publish", "final-prototype-draft", {
+            "artifact_index": 1, "draft": copy.deepcopy(prototype),
+        })], [tool_message("workbench_artifact_draft_publish", "final-prototype-draft", artifact=artifact)])
+        references = [{"draftReference": {"artifactIndex": index, "draftChecksum": checksum}}
+                      for index, checksum in enumerate((prd_checksum, prototype_checksum))]
+        return request, [prd, prototype], {
+            "protocol": "workbench.runtime.result.v1", "message": "Complete", "artifacts": references,
+        }
+
+    @staticmethod
+    def middleware():
+        return WorkbenchToolScopeMiddleware(None, ["prd", "prototype"], run_scope=("run-auto", "attempt-auto"))
+
+    async def test_linked_reference_preflight_preserves_args_and_rejects_invalid_reference(self):
+        from deerflow_workbench_tools import artifact_draft_repair
+
+        for asynchronous in (False, True):
+            for invalid in (False, True):
+                with self.subTest(asynchronous=asynchronous, invalid=invalid):
+                    model_request, drafts, candidate = self.ready()
+                    request = request_in_state(model_request.state["messages"], RUNTIME_RESULT_TOOL_NAME,
+                                               "final-reference", {"candidate": candidate})
+                    before = copy.deepcopy((request.state, request.tool_call))
+                    handled = []
+                    sentinel = object()
+
+                    def handler(actual):
+                        handled.append(actual)
+                        self.assertIs(actual, request)
+                        self.assertEqual(actual.tool_call["args"]["candidate"], candidate)
+                        return sentinel
+
+                    async def async_handler(actual):
+                        return handler(actual)
+
+                    with patch.object(artifact_draft_repair, "resolve_runtime_result_draft_references",
+                                      return_value=({**candidate, "artifacts": drafts}, []),
+                                      side_effect=ValueError("WORKBENCH_RUNTIME_DRAFT_REFERENCE_INVALID") if invalid else None) as resolve:
+                        middleware = self.middleware()
+                        result = (await middleware.awrap_tool_call(request, async_handler) if asynchronous
+                                  else middleware.wrap_tool_call(request, handler))
+                    self.assertEqual((request.state, request.tool_call), before)
+                    self.assertEqual(resolve.call_args.kwargs["run_id"], "run-auto")
+                    self.assertEqual(resolve.call_args.kwargs["runtime_attempt_id"], "attempt-auto")
+                    if invalid:
+                        self.assertFalse(handled)
+                        self.assertTrue(result.content.startswith("Error: WORKBENCH_RUNTIME_DRAFT_REFERENCE_INVALID"))
+                        self.assertEqual(result.status, "error")
+                        self.assertIsNone(getattr(result, "artifact", None))
+                    else:
+                        self.assertIs(result, sentinel)
+                        self.assertEqual(len(handled), 1)
+
+    def test_linked_full_body_drift_still_fails_without_replacing_content(self):
+        model_request, drafts, candidate = self.ready()
+        candidate["artifacts"] = copy.deepcopy(drafts)
+        candidate["artifacts"][1]["title"] = "Rewritten content"
+        request = request_in_state(model_request.state["messages"], RUNTIME_RESULT_TOOL_NAME,
+                                   "final-drift", {"candidate": candidate})
+        before = copy.deepcopy((request.state, request.tool_call))
+        result = self.middleware().wrap_tool_call(request, lambda _request: self.fail("handler called"))
+        self.assertIn("WORKBENCH_LINKED_RESULT_DRAFT_MISMATCH", result.content)
+        self.assertEqual((request.state, request.tool_call), before)
+
+    def test_final_reference_guidance_requires_complete_trusted_verified_history(self):
+        from deerflow_workbench_tools import artifact_draft_repair
+
+        for case in ("ready", "untrusted", "missing-stage", "missing-draft", "bad-checksum", "pending", "resolver-rejected"):
+            with self.subTest(case=case):
+                request, drafts, candidate = self.ready()
+                messages = request.state["messages"]
+                if case == "untrusted":
+                    request.runtime.context["workbench"]["runtimeAttemptId"] = "different-attempt"
+                elif case == "missing-stage":
+                    messages[:] = [message for message in messages
+                                   if message.get("tool_call_id") != "final-prototype-stage-3"
+                                   and not any(item["id"] == "final-prototype-stage-3" for item in message.get("tool_calls", []))]
+                elif case == "missing-draft":
+                    del messages[-2:]
+                elif case == "bad-checksum":
+                    messages[-1]["artifact"]["draftChecksum"] = "invalid"
+                elif case == "pending":
+                    messages.append({"type": "ai", "content": "", "tool_calls": [call(RUNTIME_RESULT_TOOL_NAME, "pending-result")]})
+                before = copy.deepcopy(request.state)
+                with patch.object(artifact_draft_repair, "resolve_runtime_result_draft_references",
+                                  return_value=({**candidate, "artifacts": drafts}, []),
+                                  side_effect=ValueError("WORKBENCH_RUNTIME_DRAFT_REFERENCE_INVALID") if case == "resolver-rejected" else None):
+                    scoped = self.middleware().wrap_model_call(request, lambda actual: actual)
+                self.assertEqual(request.state, before)
+                self.assertNotIn(self.marker, request.system_message.text)
+                if case == "ready":
+                    segment = scoped.system_message.text.split(self.marker, 1)[1].split("</workbench_linked_result_submission>", 1)[0]
+                    self.assertEqual(segment.count('"draftReference"'), 2)
+                    self.assertNotIn('"content":', segment)
+                    for reference in candidate["artifacts"]:
+                        self.assertIn(reference["draftReference"]["draftChecksum"], segment)
+                else:
+                    self.assertNotIn(self.marker, scoped.system_message.text)
+
+
 class LinkedDraftRecoveryTests(unittest.IsolatedAsyncioTestCase):
     scope = {"runId": "run-auto", "runtimeAttemptId": "attempt-auto", "requestedArtifactKinds": ["prd", "prototype"]}
 
