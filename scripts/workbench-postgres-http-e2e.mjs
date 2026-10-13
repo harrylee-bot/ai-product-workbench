@@ -37,6 +37,7 @@ import { startControlledKnowledgeFixture } from "./workbench-postgres-http-e2e-k
 import { spawnProcessTree, stopProcessTree } from "./workbench-e2e-process.mjs";
 import { managedWorkbenchWebDistDir, warmWorkbenchProtectedRoutes } from "./e2e/workbench-web-startup.mjs";
 import { waitForStableViewportLayout } from "./e2e/workbench-browser-viewport.mjs";
+import { captureGenerationMotion } from "./e2e/workbench-browser-motion.mjs";
 
 const { Client } = pg;
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -5936,27 +5937,7 @@ async function captureActiveGenerationVisualEvidence({ evidence, kind, outputDir
         selectors: visualLayoutSelectors, timeoutMs: scenarioTimeoutMs,
       });
       const mobileToolInteraction = await verifyMobileToolRailInteraction(page, viewport);
-      const motion = await motionElement.evaluate(async (element) => {
-        const sample = () => {
-          const style = getComputedStyle(element);
-          const before = getComputedStyle(element, "::before");
-          return {
-            animationName: style.animationName,
-            animationDuration: style.animationDuration,
-            opacity: style.opacity,
-            transform: style.transform,
-            beforeAnimationName: before.animationName,
-            beforeAnimationDuration: before.animationDuration,
-            beforeAnimationIterationCount: before.animationIterationCount,
-            beforeBackgroundPosition: before.backgroundPosition,
-            beforeOpacity: before.opacity,
-            beforeTransform: before.transform,
-          };
-        };
-        const first = sample();
-        await new Promise((resolve) => setTimeout(resolve, 180));
-        return { ...sample(), frames: [first, sample()] };
-      });
+      const motion = await captureGenerationMotion(motionElement, { kind, reducedMotion });
       const layout = await page.evaluate((expectedKind) => {
         const metric = (selector) => {
           const element = document.querySelector(selector);

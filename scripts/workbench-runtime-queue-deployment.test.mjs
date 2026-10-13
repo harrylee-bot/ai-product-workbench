@@ -112,7 +112,7 @@ test("the migrator reconciles Runtime queues before services start", async () =>
   );
   assert.equal(
     realStackBrowser.steps?.[viewportTestIndex]?.run,
-    "node --test scripts/e2e/workbench-browser-viewport.test.mjs",
+    "node --test scripts/e2e/workbench-browser-viewport.test.mjs scripts/e2e/workbench-browser-motion.test.mjs",
   );
   assert.equal(realStackBrowser.steps?.[realStackPrepareIndex]?.run, "npm run workbench:prepare");
   assert.equal(realStackRun?.run, "npm run e2e:web:real-stack:browser-only");
