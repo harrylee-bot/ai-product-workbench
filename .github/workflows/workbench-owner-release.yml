@@ -24,24 +24,36 @@ jobs:
   source:
     name: Verify owner authorization and exact source
     if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && inputs.approve == true
-    runs-on: ubuntu-latest
+    runs-on:
+      - self-hosted
+      - Linux
+      - ARM64
+      - workbench-local-build
     timeout-minutes: 10
     outputs:
       source_commit: ${{ steps.source.outputs.source_commit }}
     steps:
       - name: Checkout exact candidate
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          clean: true
+          persist-credentials: false
+      - name: Verify dedicated local runner and prepare job isolation
+        run: python3 scripts/workbench-local-runner.py prepare
       - name: Use Node.js 22
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 22
-          cache: npm
       - name: Install verifier dependencies
         run: npm ci --ignore-scripts --no-audit --no-fund
       - name: Build contracts used by delivery verifier
         run: npm run build --workspace @workbench/workbench-contracts
       - name: Install browser for delivery verifier regressions
         run: npx playwright install --with-deps chromium
+      - name: Test local runner safety contracts
+        run: |-
+          python3 scripts/workbench-local-runner.test.py
+          node --test scripts/workbench-local-runner-workflow.test.mjs
       - name: Validate owner release contract
         run: |
           node scripts/owner-release.mjs contract
@@ -90,12 +102,20 @@ jobs:
           name: owner-source-${{ github.run_attempt }}
           path: output/owner-source.json
           if-no-files-found: error
+          retention-days: 1
+      - name: Clean only verified current job resources
+        if: always()
+        run: python3 scripts/workbench-local-runner.py cleanup
 
   ci:
     name: Require complete CI for this candidate
-    needs: [source]
-    runs-on: ubuntu-latest
-    timeout-minutes: 100
+    needs: [ source ]
+    runs-on:
+      - self-hosted
+      - Linux
+      - ARM64
+      - workbench-local-build
+    timeout-minutes: 15
     permissions:
       contents: read
       actions: read
@@ -104,33 +124,47 @@ jobs:
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           ref: ${{ needs.source.outputs.source_commit }}
+          clean: true
+          persist-credentials: false
+      - name: Verify dedicated local runner and prepare job isolation
+        run: python3 scripts/workbench-local-runner.py prepare
       - name: Use Node.js 22
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 22
-          cache: npm
       - name: Install verifier dependencies
         run: npm ci --ignore-scripts --no-audit --no-fund
-      - name: Wait for exact candidate technical checks
+      - name: Require already successful exact candidate technical checks
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           node scripts/owner-release.mjs wait-ci \
             --repository "$GITHUB_REPOSITORY" \
             --commit "$GITHUB_SHA" \
-            --output output/owner-ci.json
+            --output output/owner-ci.json \
+            --require-complete true
       - name: Upload exact-attempt CI evidence
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: owner-ci-${{ github.run_attempt }}
           path: output/owner-ci.json
           if-no-files-found: error
+          retention-days: 1
+      - name: Clean only verified current job resources
+        if: always()
+        run: python3 scripts/workbench-local-runner.py cleanup
 
   images:
     name: Production image / ${{ matrix.name }}
     if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && inputs.approve == true
-    needs: [source]
-    runs-on: ubuntu-latest
+    needs:
+      - source
+      - ci
+    runs-on:
+      - self-hosted
+      - Linux
+      - ARM64
+      - workbench-local-build
     timeout-minutes: 60
     permissions:
       contents: read
@@ -138,7 +172,7 @@ jobs:
       id-token: write
     strategy:
       fail-fast: false
-      max-parallel: 4
+      max-parallel: 1
       matrix:
         include:
           - name: deerflow
@@ -208,10 +242,36 @@ jobs:
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           ref: ${{ needs.source.outputs.source_commit }}
+          clean: true
+          persist-credentials: false
+      - name: Verify dedicated local runner and prepare job isolation
+        run: python3 scripts/workbench-local-runner.py prepare
+      - name: Use Node.js 22
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 22
 
       - name: Set up Docker Buildx
         id: buildx
         uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+        with:
+          name: ${{ env.WORKBENCH_JOB_BUILDER }}
+          driver: docker-container
+          endpoint: unix:///var/run/docker.sock
+          driver-opts: |-
+            memory=4294967296
+            memory-swap=4294967296
+            cpu-period=100000
+            cpu-quota=200000
+            network=bridge
+            env.http_proxy=${{ env.WORKBENCH_BUILD_PROXY }}
+            env.https_proxy=${{ env.WORKBENCH_BUILD_PROXY }}
+            env.no_proxy=${{ env.WORKBENCH_BUILD_NO_PROXY }}
+          buildkitd-config: deploy/workbench-buildkitd.toml
+          buildkitd-flags: --oci-worker-net=bridge
+          cleanup: false
+      - name: Verify active builder isolation and resource limits
+        run: python3 scripts/workbench-local-runner.py verify-builder
 
       - name: Require approved production build inputs
         env:
@@ -288,8 +348,8 @@ jobs:
           load: false
           provenance: mode=max
           sbom: true
-          cache-from: type=gha,scope=workbench-${{ matrix.name }}
-          cache-to: type=gha,mode=max,scope=workbench-${{ matrix.name }},ignore-error=true
+          platforms: linux/amd64
+          builder: ${{ env.WORKBENCH_JOB_BUILDER }}
 
       - name: Resolve image reference
         id: image
@@ -301,14 +361,12 @@ jobs:
           echo "ref=$ref" >> "$GITHUB_OUTPUT"
 
       - name: Release temporary builder cache before image inspection
+        run: |-
+          python3 scripts/workbench-local-runner.py release-builder
+      - name: Run isolated AMD64 image compatibility check
         env:
-          BUILDER_NAME: ${{ steps.buildx.outputs.name }}
-        run: |
-          test "$RUNNER_ENVIRONMENT" = github-hosted
-          test -n "$BUILDER_NAME"
-          df -h / /tmp
-          docker buildx prune --builder "$BUILDER_NAME" --all --force
-          df -h / /tmp
+          IMAGE_REF: ${{ steps.image.outputs.ref }}
+        run: python3 scripts/workbench-local-runner.py image-smoke --image "$IMAGE_REF" --name "${{ matrix.name }}" --commit "$GITHUB_SHA"
 
       - name: Generate SPDX SBOM
         uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0
@@ -316,17 +374,22 @@ jobs:
           image: registry:${{ steps.image.outputs.ref }}
           artifact-name: sbom-${{ matrix.name }}.spdx.json
           output-file: output/sbom-${{ matrix.name }}.spdx.json
+          upload-artifact: false
+        env:
+          SYFT_PLATFORM: linux/amd64
 
       - name: Scan image for release-blocking vulnerabilities
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         env:
           TRIVY_IMAGE_SRC: remote
+          TRIVY_PLATFORM: linux/amd64
         with:
           image-ref: ${{ steps.image.outputs.ref }}
           format: json
           output: output/trivy-${{ matrix.name }}.json
           severity: CRITICAL,HIGH
           exit-code: "1"
+          cache: false
 
       - name: Install Cosign
         uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
@@ -391,12 +454,22 @@ jobs:
           name: owner-image-evidence-${{ github.run_attempt }}-${{ matrix.name }}
           path: output/
           if-no-files-found: error
+          retention-days: 1
+      - name: Clean only verified current job resources
+        if: always()
+        run: python3 scripts/workbench-local-runner.py cleanup
+    env:
+      WORKBENCH_IMAGE_ID: ${{ matrix.name }}
 
   release:
     name: Sign deployable release after all technical checks
     if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && inputs.approve == true
-    needs: [source, ci, images]
-    runs-on: ubuntu-latest
+    needs: [ source, ci, images ]
+    runs-on:
+      - self-hosted
+      - Linux
+      - ARM64
+      - workbench-local-build
     timeout-minutes: 20
     permissions:
       contents: read
@@ -407,11 +480,14 @@ jobs:
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           ref: ${{ needs.source.outputs.source_commit }}
+          clean: true
+          persist-credentials: false
+      - name: Verify dedicated local runner and prepare job isolation
+        run: python3 scripts/workbench-local-runner.py prepare
       - name: Use Node.js 22
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 22
-          cache: npm
       - name: Install verifier dependencies
         run: npm ci --ignore-scripts --no-audit --no-fund
       - name: Download source binding
@@ -472,4 +548,10 @@ jobs:
           name: owner-release-1.0.0-${{ github.sha }}-${{ github.run_attempt }}
           path: output/release/
           if-no-files-found: error
-          retention-days: 90
+          retention-days: 7
+      - name: Clean only verified current job resources
+        if: always()
+        run: python3 scripts/workbench-local-runner.py cleanup
+env:
+  DOCKER_BUILD_RECORD_UPLOAD: "false"
+  DOCKER_BUILD_SUMMARY: "false"

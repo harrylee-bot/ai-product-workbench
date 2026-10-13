@@ -10,6 +10,7 @@ import YAML from "yaml";
 
 import { readDeploymentEnv } from "./workbench-origin-manifest.mjs";
 import { verifyProductionBuildConfiguration } from "./write-production-build-configuration.mjs";
+import { assertLocalRunnerWorkflow } from "./workbench-local-runner-workflow.mjs";
 
 const root = new URL("../", import.meta.url);
 const DIGEST_PATTERN = /^sha256:[a-f0-9]{64}$/u;
@@ -236,6 +237,7 @@ export function assertProductionImageContract({ inventory = loadProductionImageI
   const ci = readYaml(".github/workflows/workbench-ci.yml");
   const workflowSource = readText(".github/workflows/workbench-ci.yml");
   assertPinnedWorkflowActions(ci);
+  assertLocalRunnerWorkflow(ci);
   const releaseChainJob = ci.jobs?.["release-chain"];
   assert(releaseChainJob, "release-chain job is required before G3/G4 jobs");
   assertProductionWorkflowPermissions(ci);

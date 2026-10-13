@@ -19,6 +19,7 @@ import {
 } from "./production-image-inventory.mjs";
 import { readDeploymentEnv } from "./workbench-origin-manifest.mjs";
 import { verifyOwnerImageAttestations } from "./owner-image-attestations.mjs";
+import { assertLocalRunnerWorkflow } from "./workbench-local-runner-workflow.mjs";
 
 export const OWNER_RELEASE_SCHEMA = "workbench.owner-release.v1";
 export const OWNER_WORKFLOW = ".github/workflows/workbench-owner-release.yml";
@@ -120,6 +121,7 @@ export function verifySourceFiles(source, sourceRoot) {
 
 export function assertOwnerReleaseWorkflow(workflow) {
   assertPinnedWorkflowActions(workflow);
+  assertLocalRunnerWorkflow(workflow, { owner: true });
   assert(Object.keys(workflow.on).join() === "workflow_dispatch", "owner release must only allow explicit dispatch");
   assert(workflow.on.workflow_dispatch.inputs?.approve?.type === "boolean"
     && workflow.on.workflow_dispatch.inputs.approve.default === false, "owner approval must default to false");
@@ -186,7 +188,7 @@ function githubJson(endpoint) {
   return JSON.parse(execFileSync("gh", ["api", endpoint], { encoding: "utf8", timeout: 30_000, maxBuffer: 16 * 1024 * 1024 }));
 }
 
-async function waitForCi({ repository, commit, output, timeoutMs = 90 * 60_000 }) {
+async function waitForCi({ repository, commit, output, timeoutMs = 90 * 60_000, "require-complete": requireComplete }) {
   assert(REPOSITORY.test(repository ?? "") && COMMIT.test(commit ?? ""), "CI repository and commit are required");
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
@@ -203,6 +205,9 @@ async function waitForCi({ repository, commit, output, timeoutMs = 90 * 60_000 }
     }
     if (relevant.length > 0 && relevant.every((entry) => entry.status === "completed")) {
       throw new Error(`Exact candidate CI failed: ${relevant.map((entry) => `${entry.id}:${entry.conclusion}`).join(", ")}`);
+    }
+    if (requireComplete === "true") {
+      throw new Error("Exact candidate push CI must already be successful before the single local runner starts a release");
     }
     console.log(`Waiting for CI of ${commit}; candidate images are built separately.`);
     await new Promise((resolve) => setTimeout(resolve, 30_000));

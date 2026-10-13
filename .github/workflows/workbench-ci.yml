@@ -23,7 +23,11 @@ permissions:
 jobs:
   release-chain:
     name: Verify G0-G2 release chain
-    runs-on: ubuntu-latest
+    runs-on:
+      - self-hosted
+      - Linux
+      - ARM64
+      - workbench-local-build
     timeout-minutes: 20
     permissions:
       contents: read
@@ -35,15 +39,23 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          clean: true
+          persist-credentials: false
+      - name: Verify dedicated local runner and prepare job isolation
+        run: python3 scripts/workbench-local-runner.py prepare
 
       - name: Use Node.js 22
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 22
-          cache: npm
 
       - name: Install verifier dependencies
         run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Test local runner safety contracts
+        run: |-
+          python3 scripts/workbench-local-runner.test.py
+          node --test scripts/workbench-local-runner-workflow.test.mjs
 
       - name: Validate release-chain workflow contract
         run: npm run deployment:images:check
@@ -162,17 +174,33 @@ jobs:
           name: release-chain-to-sign-${{ github.run_attempt }}
           path: output/release-chain-to-sign/
           if-no-files-found: error
+          retention-days: 1
+      - name: Clean only verified current job resources
+        if: always()
+        run: python3 scripts/workbench-local-runner.py cleanup
+    if: (github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') || (github.event_name == 'pull_request' && github.event.pull_request.base.ref == 'main' && github.event.pull_request.base.repo.full_name == github.repository && github.event.pull_request.head.repo.full_name == github.repository)
 
   release-chain-signing:
     name: Sign verified G0-G2 release chain
     if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && inputs.release == true
-    needs: [release-chain]
-    runs-on: ubuntu-latest
+    needs: [ release-chain ]
+    runs-on:
+      - self-hosted
+      - Linux
+      - ARM64
+      - workbench-local-build
     timeout-minutes: 10
     permissions:
       contents: read
       id-token: write
     steps:
+      - name: Checkout candidate guard
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          clean: true
+          persist-credentials: false
+      - name: Verify dedicated local runner and prepare job isolation
+        run: python3 scripts/workbench-local-runner.py prepare
       - name: Download exact-attempt release chain
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
@@ -203,11 +231,19 @@ jobs:
           name: verified-release-chain-${{ github.run_attempt }}
           path: output/verified-release-chain/
           if-no-files-found: error
+          retention-days: 1
+      - name: Clean only verified current job resources
+        if: always()
+        run: python3 scripts/workbench-local-runner.py cleanup
 
   quality:
     name: Contracts, architecture, tests, and build
-    needs: [release-chain]
-    runs-on: ubuntu-latest
+    needs: [ release-chain ]
+    runs-on:
+      - self-hosted
+      - Linux
+      - ARM64
+      - workbench-local-build
     timeout-minutes: 45
     outputs:
       pr_production_image_count: ${{ steps.affected_production_images.outputs.count }}
@@ -220,35 +256,38 @@ jobs:
           POSTGRES_PASSWORD: postgres
           POSTGRES_USER: postgres
         ports:
-          - 5432:5432
+          - 127.0.0.1::5432
         options: >-
-          --health-cmd "pg_isready -U postgres -d workbench_test"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 20
+          --health-cmd "pg_isready -U postgres -d workbench_test" --health-interval 5s --health-timeout 5s --health-retries 20 --memory=1g --memory-swap=1g --cpus=1 --pids-limit=128
 
     env:
       CI: true
-      WORKBENCH_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/workbench_test?schema=workbench
-      WORKBENCH_TEST_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/workbench_test?schema=workbench
 
     steps:
       - name: Checkout
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           fetch-depth: 0
+          clean: true
+          persist-credentials: false
+      - name: Verify dedicated local runner and prepare job isolation
+        run: python3 scripts/workbench-local-runner.py prepare
+      - name: Bind isolated test PostgreSQL port
+        env:
+          TEST_POSTGRES_PORT: ${{ job.services.postgres.ports[5432] }}
+        run: |
+          set -euo pipefail
+          [[ "$TEST_POSTGRES_PORT" =~ ^[0-9]+$ ]]
+          printf '%s\n' \
+            "WORKBENCH_DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:$TEST_POSTGRES_PORT/workbench_test?schema=workbench" \
+            "WORKBENCH_TEST_DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:$TEST_POSTGRES_PORT/workbench_test?schema=workbench" \
+            "WORKBENCH_POSTGRES_ADMIN_URL=postgresql://postgres:postgres@127.0.0.1:$TEST_POSTGRES_PORT/workbench_test" \
+            "WORKBENCH_RUNTIME_ATTEMPT_TEST_DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:$TEST_POSTGRES_PORT/workbench_test?schema=runtime_provider_state_test" >> "$GITHUB_ENV"
 
       - name: Use Node.js 22
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 22
-          cache: npm
-
-      - name: Cache pinned oasdiff release
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
-        with:
-          path: ~/.cache/workbench/tools/oasdiff
-          key: oasdiff-${{ runner.os }}-${{ runner.arch }}-v1.23.0-resolver-v1
 
       - name: Install and verify pinned oasdiff
         run: npm run openapi:tool:prepare
@@ -289,8 +328,6 @@ jobs:
         run: npm run workbench:prepare
 
       - name: Provision database extensions as CI infrastructure admin
-        env:
-          WORKBENCH_POSTGRES_ADMIN_URL: postgresql://postgres:postgres@127.0.0.1:5432/workbench_test
         run: npm run db:extensions:provision
 
       - name: Apply clean migrations and verify PostgreSQL constraints
@@ -328,8 +365,6 @@ jobs:
         run: npm test
 
       - name: Run Runtime provider-state PostgreSQL integration
-        env:
-          WORKBENCH_RUNTIME_ATTEMPT_TEST_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/workbench_test?schema=runtime_provider_state_test
         run: |
           WORKBENCH_DATABASE_URL="$WORKBENCH_RUNTIME_ATTEMPT_TEST_DATABASE_URL" \
             npm --workspace @workbench/workbench-db run migrate:deploy
@@ -370,11 +405,19 @@ jobs:
 
       - name: Validate Workbench route bundles
         run: npm run bundle:workbench:check
+      - name: Clean only verified current job resources
+        if: always()
+        run: python3 scripts/workbench-local-runner.py cleanup
+    if: (github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') || (github.event_name == 'pull_request' && github.event.pull_request.base.ref == 'main' && github.event.pull_request.base.repo.full_name == github.repository && github.event.pull_request.head.repo.full_name == github.repository)
 
   real-stack-browser:
     name: Real-stack browser / controlled-local-deerflow
-    needs: [quality]
-    runs-on: ubuntu-latest
+    needs: [ quality ]
+    runs-on:
+      - self-hosted
+      - Linux
+      - ARM64
+      - workbench-local-build
     timeout-minutes: 20
     permissions:
       contents: read
@@ -386,17 +429,11 @@ jobs:
           POSTGRES_PASSWORD: postgres
           POSTGRES_USER: postgres
         ports:
-          - 5432:5432
+          - 127.0.0.1::5432
         options: >-
-          --health-cmd "pg_isready -U postgres -d workbench_real_stack_test"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 20
+          --health-cmd "pg_isready -U postgres -d workbench_real_stack_test" --health-interval 5s --health-timeout 5s --health-retries 20 --memory=1g --memory-swap=1g --cpus=1 --pids-limit=128
     env:
       CI: true
-      WORKBENCH_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/workbench_real_stack_test?schema=workbench
-      WORKBENCH_TEST_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/workbench_real_stack_test?schema=workbench
-      WORKBENCH_POSTGRES_ADMIN_URL: postgresql://postgres:postgres@127.0.0.1:5432/workbench_real_stack_test
       WORKBENCH_SCHEMA_RESET_CONFIRM: workbench_real_stack_test
       WORKBENCH_E2E_REAL_STACK_BROWSER: "1"
       WORKBENCH_E2E_REAL_STACK_BROWSER_ONLY: "1"
@@ -405,12 +442,27 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          clean: true
+          persist-credentials: false
+      - name: Verify dedicated local runner and prepare job isolation
+        run: python3 scripts/workbench-local-runner.py prepare
+      - name: Bind isolated test PostgreSQL port
+        env:
+          TEST_POSTGRES_PORT: ${{ job.services.postgres.ports[5432] }}
+        run: |
+          set -euo pipefail
+          [[ "$TEST_POSTGRES_PORT" =~ ^[0-9]+$ ]]
+          printf '%s\n' \
+            "WORKBENCH_DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:$TEST_POSTGRES_PORT/workbench_real_stack_test?schema=workbench" \
+            "WORKBENCH_TEST_DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:$TEST_POSTGRES_PORT/workbench_real_stack_test?schema=workbench" \
+            "WORKBENCH_POSTGRES_ADMIN_URL=postgresql://postgres:postgres@127.0.0.1:$TEST_POSTGRES_PORT/workbench_real_stack_test" \
+            "WORKBENCH_RUNTIME_ATTEMPT_TEST_DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:$TEST_POSTGRES_PORT/workbench_real_stack_test?schema=runtime_provider_state_test" >> "$GITHUB_ENV"
 
       - name: Use Node.js 22
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 22
-          cache: npm
 
       - name: Install dependencies
         run: npm ci
@@ -439,16 +491,29 @@ jobs:
           name: real-stack-browser-${{ github.sha }}-${{ github.run_attempt }}
           path: output/playwright/real-stack/**
           if-no-files-found: warn
-          retention-days: 14
+          retention-days: 1
+      - name: Clean only verified current job resources
+        if: always()
+        run: python3 scripts/workbench-local-runner.py cleanup
+    if: (github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') || (github.event_name == 'pull_request' && github.event.pull_request.base.ref == 'main' && github.event.pull_request.base.repo.full_name == github.repository && github.event.pull_request.head.repo.full_name == github.repository)
 
   deployment-config:
     name: Compose, gateways, and Quartz behavior
-    needs: [release-chain]
-    runs-on: ubuntu-latest
+    needs: [ release-chain ]
+    runs-on:
+      - self-hosted
+      - Linux
+      - ARM64
+      - workbench-local-build
     timeout-minutes: 15
     steps:
       - name: Checkout
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          clean: true
+          persist-credentials: false
+      - name: Verify dedicated local runner and prepare job isolation
+        run: python3 scripts/workbench-local-runner.py prepare
 
       - name: Use Node.js 22
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
@@ -460,11 +525,7 @@ jobs:
 
       - name: Validate greenfield Compose model
         run: >-
-          docker compose
-          --env-file deploy/workbench.env.example
-          --file deploy/workbench-compose.yml
-          --profile "*"
-          config --quiet
+          docker compose --env-file deploy/workbench.env.example --file deploy/workbench-compose.yml --profile "*" config --quiet
 
       - name: Validate browser upload deployment contract
         run: npm run deployment:upload:check
@@ -488,45 +549,74 @@ jobs:
         env:
           NGINX_IMAGE: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && inputs.release == true && vars.WORKBENCH_NGINX_IMAGE || 'nginx:stable-alpine' }}
         run: >-
-          docker run --rm
-          --add-host workbench-web:127.0.0.1
-          --add-host workbench-api:127.0.0.1
-          --add-host knowledge:127.0.0.1
-          --volume "$PWD/deploy/workbench-nginx.conf:/etc/nginx/nginx.conf:ro"
-          "$NGINX_IMAGE" nginx -t
+          docker run --rm --add-host workbench-web:127.0.0.1 --add-host workbench-api:127.0.0.1 --add-host knowledge:127.0.0.1 --volume "$PWD/deploy/workbench-nginx.conf:/etc/nginx/nginx.conf:ro" "$NGINX_IMAGE" nginx -t
 
       - name: Validate isolated Preview gateway configuration
         env:
           NGINX_IMAGE: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && inputs.release == true && vars.WORKBENCH_NGINX_IMAGE || 'nginx:stable-alpine' }}
         run: >-
-          docker run --rm
-          --add-host workbench-preview:127.0.0.1
-          --volume "$PWD/deploy/workbench-preview-nginx.conf:/etc/nginx/nginx.conf:ro"
-          "$NGINX_IMAGE" nginx -t
+          docker run --rm --add-host workbench-preview:127.0.0.1 --volume "$PWD/deploy/workbench-preview-nginx.conf:/etc/nginx/nginx.conf:ro" "$NGINX_IMAGE" nginx -t
 
       - name: Validate immutable Quartz source and plugin pins
         run: npm run knowledge:assert-pinned
 
       - name: Test Quartz watcher atomic publication and shutdown
         run: bash apps/knowledge/test-quartz-watcher.sh
+      - name: Clean only verified current job resources
+        if: always()
+        run: python3 scripts/workbench-local-runner.py cleanup
+    if: (github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') || (github.event_name == 'pull_request' && github.event.pull_request.base.ref == 'main' && github.event.pull_request.base.repo.full_name == github.repository && github.event.pull_request.head.repo.full_name == github.repository)
 
   pr-production-images:
     name: PR production image / ${{ matrix.name }}
-    if: github.event_name == 'pull_request' && needs.quality.outputs.pr_production_image_count != '0'
-    needs: [quality]
-    runs-on: ubuntu-latest
+    if: (github.event_name == 'pull_request' && needs.quality.outputs.pr_production_image_count != '0') && ((github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') || (github.event_name == 'pull_request' && github.event.pull_request.base.ref == 'main' && github.event.pull_request.base.repo.full_name == github.repository && github.event.pull_request.head.repo.full_name == github.repository))
+    needs: [ quality ]
+    runs-on:
+      - self-hosted
+      - Linux
+      - ARM64
+      - workbench-local-build
     timeout-minutes: 45
     permissions:
       contents: read
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.quality.outputs.pr_production_image_matrix) }}
+      max-parallel: 1
     steps:
       - name: Checkout
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          clean: true
+          persist-credentials: false
+      - name: Verify dedicated local runner and prepare job isolation
+        run: python3 scripts/workbench-local-runner.py prepare
+      - name: Use Node.js 22
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 22
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+        id: buildx
+        with:
+          name: ${{ env.WORKBENCH_JOB_BUILDER }}
+          driver: docker-container
+          endpoint: unix:///var/run/docker.sock
+          driver-opts: |-
+            memory=4294967296
+            memory-swap=4294967296
+            cpu-period=100000
+            cpu-quota=200000
+            network=bridge
+            env.http_proxy=${{ env.WORKBENCH_BUILD_PROXY }}
+            env.https_proxy=${{ env.WORKBENCH_BUILD_PROXY }}
+            env.no_proxy=${{ env.WORKBENCH_BUILD_NO_PROXY }}
+          buildkitd-config: deploy/workbench-buildkitd.toml
+          buildkitd-flags: --oci-worker-net=bridge
+          cleanup: false
+      - name: Verify active builder isolation and resource limits
+        run: python3 scripts/workbench-local-runner.py verify-builder
 
       - name: Build and probe production target without publishing
         env:
@@ -537,7 +627,7 @@ jobs:
           NGINX_IMAGE: ${{ vars.WORKBENCH_NGINX_IMAGE }}
         run: |
           set -euo pipefail
-          tag="workbench-pr-${{ matrix.name }}:${GITHUB_SHA}"
+          tag="$WORKBENCH_JOB_IMAGE"
           args=()
           require_digest() {
             name="$1"
@@ -582,15 +672,18 @@ jobs:
               ;;
           esac
           docker buildx build \
+            --builder "$WORKBENCH_JOB_BUILDER" --platform linux/amd64 \
             --load \
             --file "${{ matrix.dockerfile }}" \
             --target "${{ matrix.target }}" \
             --label "org.opencontainers.image.revision=${GITHUB_SHA}" \
+            --label "io.workbench.job=$WORKBENCH_JOB_BUILDER" \
             --tag "$tag" \
             "${args[@]}" \
             "${{ matrix.context }}"
           docker image inspect "$tag" --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}' | grep -Fx "$GITHUB_SHA"
 
+          python3 scripts/workbench-local-runner.py release-builder
           probe_log="$(mktemp)"
           probe_container=""
           cleanup_probe() {
@@ -604,14 +697,14 @@ jobs:
             expected="$1"
             shift
             : > "$probe_log"
-            if docker run --rm --network none "$@" "$tag" >"$probe_log" 2>&1; then
+            if docker run --rm --network none --name "$WORKBENCH_JOB_BUILDER-probe" --label "io.workbench.job=$WORKBENCH_JOB_BUILDER" --platform linux/amd64 --memory 512m --memory-swap 512m --cpus 1 --pids-limit 128 "$@" "$tag" >"$probe_log" 2>&1; then
               echo "production command unexpectedly started without required configuration" >&2
               return 1
             fi
             grep -Fq "$expected" "$probe_log"
           }
           start_probe_container() {
-            probe_container="$(docker run --rm --network none --detach "$@" "$tag")"
+            probe_container="$(docker run --rm --network none --name "$WORKBENCH_JOB_BUILDER-probe" --label "io.workbench.job=$WORKBENCH_JOB_BUILDER" --platform linux/amd64 --memory 512m --memory-swap 512m --cpus 1 --pids-limit 128 --detach "$@" "$tag")"
           }
           stop_probe_container() {
             docker stop --timeout 5 "$probe_container" >/dev/null
@@ -623,7 +716,7 @@ jobs:
               test -n "${{ matrix.command_path }}"
               docker image inspect "$tag" --format '{{json .Config.Cmd}}' \
                 | grep -Fx "[\"node\",\"${{ matrix.command_path }}\"]"
-              docker run --rm --network none --entrypoint node "$tag" \
+              docker run --rm --network none --name "$WORKBENCH_JOB_BUILDER-probe" --label "io.workbench.job=$WORKBENCH_JOB_BUILDER" --platform linux/amd64 --memory 512m --memory-swap 512m --cpus 1 --pids-limit 128 --entrypoint node "$tag" \
                 --check "${{ matrix.command_path }}"
               expect_config_failure "Missing WORKBENCH_DATABASE_URL" \
                 --read-only --cap-drop ALL --security-opt no-new-privileges:true --tmpfs /tmp
@@ -631,7 +724,7 @@ jobs:
             migrator-config-fail-fast)
               docker image inspect "$tag" --format '{{json .Config.Entrypoint}}' \
                 | grep -Fx '["/app/deploy/workbench-migrate.sh"]'
-              docker run --rm --network none --entrypoint /bin/sh "$tag" \
+              docker run --rm --network none --name "$WORKBENCH_JOB_BUILDER-probe" --label "io.workbench.job=$WORKBENCH_JOB_BUILDER" --platform linux/amd64 --memory 512m --memory-swap 512m --cpus 1 --pids-limit 128 --entrypoint /bin/sh "$tag" \
                 -n /app/deploy/workbench-migrate.sh
               expect_config_failure "WORKBENCH_DATABASE_URL (migrator URL) is required" \
                 --read-only --cap-drop ALL --security-opt no-new-privileges:true --tmpfs /tmp
@@ -664,7 +757,7 @@ jobs:
                 --tmpfs /var/run:uid=101,gid=101,mode=1770
                 --tmpfs /tmp:uid=101,gid=101,mode=1770
               )
-              docker run --rm --network none "${quartz_runtime_args[@]}" \
+              docker run --rm --network none --name "$WORKBENCH_JOB_BUILDER-probe" --label "io.workbench.job=$WORKBENCH_JOB_BUILDER" --platform linux/amd64 --memory 512m --memory-swap 512m --cpus 1 --pids-limit 128 "${quartz_runtime_args[@]}" \
                 --entrypoint nginx "$tag" -t
               start_probe_container "${quartz_runtime_args[@]}"
               ready=0
@@ -680,7 +773,7 @@ jobs:
               ;;
             deerflow-runtime-syntax)
               docker image inspect "$tag" --format '{{.Config.User}}' | grep -Fx '65532:65532'
-              docker run --rm --network none \
+              docker run --rm --network none --name "$WORKBENCH_JOB_BUILDER-probe" --label "io.workbench.job=$WORKBENCH_JOB_BUILDER" --platform linux/amd64 --memory 512m --memory-swap 512m --cpus 1 --pids-limit 128 \
                 --read-only \
                 --cap-drop ALL \
                 --security-opt no-new-privileges:true \
@@ -696,12 +789,21 @@ jobs:
               exit 1
               ;;
           esac
+      - name: Clean only verified current job resources
+        if: always()
+        run: python3 scripts/workbench-local-runner.py cleanup
+    env:
+      WORKBENCH_IMAGE_ID: ${{ matrix.name }}
 
   production-images:
     name: Production image / ${{ matrix.name }}
     if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && inputs.release == true
-    needs: [release-chain, release-chain-signing, quality, deployment-config]
-    runs-on: ubuntu-latest
+    needs: [ release-chain, release-chain-signing, quality, deployment-config ]
+    runs-on:
+      - self-hosted
+      - Linux
+      - ARM64
+      - workbench-local-build
     timeout-minutes: 45
     permissions:
       contents: read
@@ -774,12 +876,41 @@ jobs:
               DEERFLOW_NODE_IMAGE=${{ vars.WORKBENCH_DEERFLOW_NODE_IMAGE_REF }}
               DEERFLOW_SOURCE_COMMIT=${{ vars.WORKBENCH_DEERFLOW_COMMIT }}
               WORKBENCH_SOURCE_COMMIT=${{ github.sha }}
+      max-parallel: 1
     steps:
       - name: Checkout
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          clean: true
+          persist-credentials: false
+      - name: Verify dedicated local runner and prepare job isolation
+        run: python3 scripts/workbench-local-runner.py prepare
+      - name: Use Node.js 22
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 22
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+        id: buildx
+        with:
+          name: ${{ env.WORKBENCH_JOB_BUILDER }}
+          driver: docker-container
+          endpoint: unix:///var/run/docker.sock
+          driver-opts: |-
+            memory=4294967296
+            memory-swap=4294967296
+            cpu-period=100000
+            cpu-quota=200000
+            network=bridge
+            env.http_proxy=${{ env.WORKBENCH_BUILD_PROXY }}
+            env.https_proxy=${{ env.WORKBENCH_BUILD_PROXY }}
+            env.no_proxy=${{ env.WORKBENCH_BUILD_NO_PROXY }}
+          buildkitd-config: deploy/workbench-buildkitd.toml
+          buildkitd-flags: --oci-worker-net=bridge
+          cleanup: false
+      - name: Verify active builder isolation and resource limits
+        run: python3 scripts/workbench-local-runner.py verify-builder
 
       - name: Require approved production build inputs
         env:
@@ -857,8 +988,8 @@ jobs:
           provenance: mode=max
           sbom: true
           metadata-file: output/build-metadata.json
-          cache-from: type=gha,scope=workbench-${{ matrix.name }}
-          cache-to: type=gha,mode=max,scope=workbench-${{ matrix.name }},ignore-error=true
+          platforms: linux/amd64
+          builder: ${{ env.WORKBENCH_JOB_BUILDER }}
 
       - name: Resolve image reference
         id: image
@@ -868,6 +999,12 @@ jobs:
           printf '%s' "$digest" | grep -Eq '^sha256:[a-f0-9]{64}$'
           ref="$ref@$digest"
           echo "ref=$ref" >> "$GITHUB_OUTPUT"
+      - name: Release temporary builder cache before image inspection
+        run: python3 scripts/workbench-local-runner.py release-builder
+      - name: Run isolated AMD64 image compatibility check
+        env:
+          IMAGE_REF: ${{ steps.image.outputs.ref }}
+        run: python3 scripts/workbench-local-runner.py image-smoke --image "$IMAGE_REF" --name "${{ matrix.name }}" --commit "$GITHUB_SHA"
 
       - name: Generate SPDX SBOM
         uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0
@@ -875,6 +1012,9 @@ jobs:
           image: ${{ steps.image.outputs.ref }}
           artifact-name: sbom-${{ matrix.name }}.spdx.json
           output-file: output/sbom-${{ matrix.name }}.spdx.json
+          upload-artifact: false
+        env:
+          SYFT_PLATFORM: linux/amd64
 
       - name: Scan image for release-blocking vulnerabilities
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
@@ -884,6 +1024,10 @@ jobs:
           output: output/trivy-${{ matrix.name }}.json
           severity: CRITICAL,HIGH
           exit-code: "1"
+          cache: false
+        env:
+          TRIVY_PLATFORM: linux/amd64
+          TRIVY_IMAGE_SRC: remote
 
       - name: Publish signed build provenance attestation
         id: provenance
@@ -957,12 +1101,22 @@ jobs:
           name: production-image-evidence-${{ github.run_attempt }}-${{ matrix.name }}
           path: output/
           if-no-files-found: error
+          retention-days: 1
+      - name: Clean only verified current job resources
+        if: always()
+        run: python3 scripts/workbench-local-runner.py cleanup
+    env:
+      WORKBENCH_IMAGE_ID: ${{ matrix.name }}
 
   image-evidence:
     name: Assemble signed production image inventory
     if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && inputs.release == true
-    needs: [production-images, release-chain, release-chain-signing]
-    runs-on: ubuntu-latest
+    needs: [ production-images, release-chain, release-chain-signing ]
+    runs-on:
+      - self-hosted
+      - Linux
+      - ARM64
+      - workbench-local-build
     timeout-minutes: 10
     permissions:
       contents: read
@@ -970,6 +1124,11 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          clean: true
+          persist-credentials: false
+      - name: Verify dedicated local runner and prepare job isolation
+        run: python3 scripts/workbench-local-runner.py prepare
 
       - name: Use Node.js 22
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
@@ -1026,12 +1185,20 @@ jobs:
             output/production-image-manifest.bundle.json
             output/cosign-*.bundle.json
           if-no-files-found: error
+          retention-days: 1
+      - name: Clean only verified current job resources
+        if: always()
+        run: python3 scripts/workbench-local-runner.py cleanup
 
   deployment-config-evidence:
     name: Sign candidate-bound production deployment configuration
     if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && inputs.release == true
-    needs: [release-chain, release-chain-signing, image-evidence]
-    runs-on: ubuntu-latest
+    needs: [ release-chain, release-chain-signing, image-evidence ]
+    runs-on:
+      - self-hosted
+      - Linux
+      - ARM64
+      - workbench-local-build
     timeout-minutes: 10
     permissions:
       contents: read
@@ -1039,6 +1206,11 @@ jobs:
     steps:
       - name: Checkout candidate source
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          clean: true
+          persist-credentials: false
+      - name: Verify dedicated local runner and prepare job isolation
+        run: python3 scripts/workbench-local-runner.py prepare
 
       - name: Use Node.js 22
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
@@ -1121,3 +1293,10 @@ jobs:
           name: production-deployment-config-${{ github.run_attempt }}
           path: output/deployment-config/
           if-no-files-found: error
+          retention-days: 1
+      - name: Clean only verified current job resources
+        if: always()
+        run: python3 scripts/workbench-local-runner.py cleanup
+env:
+  DOCKER_BUILD_RECORD_UPLOAD: "false"
+  DOCKER_BUILD_SUMMARY: "false"
