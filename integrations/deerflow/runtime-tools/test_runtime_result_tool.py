@@ -36,7 +36,7 @@ sys.modules.update({
 from deerflow_workbench_tools.runtime_result_tool import (
     workbench_runtime_result_submit,
 )
-from deerflow_workbench_tools.runtime_result_validator import validate_runtime_result
+from deerflow_workbench_tools.runtime_result_validator import validate_runtime_result, validate_runtime_artifact_draft
 
 
 def _runtime() -> SimpleNamespace:
@@ -53,7 +53,16 @@ def _runtime() -> SimpleNamespace:
 
 def _runtime_with_messages(messages: list[object]) -> SimpleNamespace:
     runtime = _runtime()
-    runtime.state = {"messages": messages}
+    paired = [{"type": "human", "content": "Generate requested artifacts."}]
+    for message in messages:
+        artifact = getattr(message, "artifact", None)
+        if isinstance(artifact, dict) and isinstance(artifact.get("draft"), dict):
+            paired.append({"type": "ai", "tool_calls": [{
+                "id": artifact["toolCallId"], "name": "workbench_artifact_draft_publish",
+                "args": {"artifact_index": artifact["artifactIndex"], "draft": copy.deepcopy(artifact["draft"])},
+            }]})
+        paired.append(message)
+    runtime.state = {"messages": paired}
     return runtime
 
 
@@ -82,13 +91,15 @@ def _draft_message(
         "toolCallId": tool_call_id,
         "artifactIndex": artifact_index,
         "ok": True,
-        "draftChecksum": _checksum(draft),
+        "draftChecksum": validate_runtime_artifact_draft(draft)["candidateChecksum"],
     }
     return SimpleNamespace(
         type="tool",
         name="workbench_artifact_draft_publish",
         tool_call_id=tool_call_id,
         status="success",
+        content=json.dumps({"protocol": "workbench.runtime.artifact-draft-ack.v1", "ok": True, "artifactIndex": artifact_index,
+                            "candidateChecksum": validate_runtime_artifact_draft(draft)["candidateChecksum"], "issues": []}),
         artifact={
             **envelope,
             "checksum": _checksum(envelope),

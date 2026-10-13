@@ -10,17 +10,13 @@ from langchain.tools import tool
 
 from deerflow.tools.types import Runtime
 
+from .artifact_draft_repair import latest_accepted_artifact_draft
 from .prd_reference_normalizer import normalize_runtime_result_prd_references
 from .prototype_runtime_normalizer import normalize_runtime_result_prototype_layout_aliases
-from .runtime_result_validator import (
-    validate_runtime_artifact_draft,
-    validate_runtime_result,
-)
+from .runtime_result_validator import validate_runtime_result
 
 
 VALIDATED_RESULT_PROTOCOL = "workbench.runtime.validated-result.v1"
-ARTIFACT_DRAFT_TOOL_NAME = "workbench_artifact_draft_publish"
-ARTIFACT_DRAFT_PROTOCOL = "workbench.runtime.artifact-draft.v1"
 _DRAFT_RECOVERY_KINDS = frozenset({"prd", "prototype"})
 _DRAFT_RECOVERY_FIELDS = ("title", "content", "operation")
 
@@ -180,98 +176,14 @@ def _latest_successful_draft(
     run_id: str,
     runtime_attempt_id: str,
 ) -> Mapping[str, Any] | None:
-    state = getattr(runtime, "state", None)
-    messages = state.get("messages") if isinstance(state, Mapping) else getattr(
-        state,
-        "messages",
-        None,
+    return latest_accepted_artifact_draft(
+        getattr(runtime, "state", None), run_id=run_id,
+        runtime_attempt_id=runtime_attempt_id, artifact_index=artifact_index,
     )
-    if not isinstance(messages, list):
-        return None
-    for message in reversed(messages):
-        message_type = _message_value(message, "type")
-        if isinstance(message_type, str):
-            message_type = message_type.lower()
-        if message_type not in {"tool", "toolmessage"}:
-            continue
-        if _message_value(message, "name") != ARTIFACT_DRAFT_TOOL_NAME:
-            continue
-        message_tool_call_id = _message_value(message, "tool_call_id")
-        if not isinstance(message_tool_call_id, str):
-            continue
-        status = _message_value(message, "status")
-        if status is not None and (
-            not isinstance(status, str) or status.lower() != "success"
-        ):
-            continue
-        content = _message_value(message, "content")
-        if isinstance(content, str) and content.lstrip().startswith("Error:"):
-            continue
-        artifact = _message_value(message, "artifact")
-        if not isinstance(artifact, Mapping):
-            continue
-        if (
-            artifact.get("protocol") != ARTIFACT_DRAFT_PROTOCOL
-            or artifact.get("ok") is not True
-            or artifact.get("runId") != run_id
-            or artifact.get("runtimeAttemptId") != runtime_attempt_id
-            or artifact.get("toolCallId") != message_tool_call_id
-            or (
-                isinstance(artifact.get("artifactIndex"), bool)
-                or not isinstance(artifact.get("artifactIndex"), int)
-            )
-            or artifact.get("artifactIndex") != artifact_index
-        ):
-            continue
-        draft = artifact.get("draft")
-        draft_checksum = artifact.get("draftChecksum")
-        if not isinstance(draft, Mapping) or not _is_sha256(draft_checksum):
-            continue
-        envelope = {
-            "protocol": artifact["protocol"],
-            "runId": artifact["runId"],
-            "runtimeAttemptId": artifact["runtimeAttemptId"],
-            "toolCallId": artifact["toolCallId"],
-            "artifactIndex": artifact["artifactIndex"],
-            "ok": artifact["ok"],
-            "draftChecksum": draft_checksum,
-        }
-        if artifact.get("checksum") != _sha256_json(envelope):
-            continue
-        if _sha256_json(dict(draft)) != draft_checksum:
-            continue
-        try:
-            validation = validate_runtime_artifact_draft(dict(draft))
-        except Exception:
-            continue
-        if (
-            validation.get("ok") is True
-            and validation.get("candidateChecksum") == draft_checksum
-        ):
-            return draft
-    return None
-
-
-def _message_value(message: Any, key: str) -> Any:
-    if isinstance(message, Mapping):
-        return message.get(key)
-    return getattr(message, key, None)
 
 
 def _is_null_array(value: Any) -> bool:
     return isinstance(value, list) and len(value) == 1 and value[0] is None
-
-
-def _sha256_json(value: Mapping[str, Any]) -> str:
-    return hashlib.sha256(_canonical_json(dict(value)).encode("utf-8")).hexdigest()
-
-
-def _is_sha256(value: Any) -> bool:
-    return (
-        isinstance(value, str)
-        and len(value) == 64
-        and all(character in "0123456789abcdef" for character in value)
-    )
 
 
 def _validation_feedback(

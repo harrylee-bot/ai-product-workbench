@@ -177,10 +177,10 @@ function prdAuthoringGuide(allSchemas) {
     constructionRules: [
       "blocks contains complete objects, never strings, IDs, schema names, $ref or JSON-encoded objects. Put text in typed inline objects with marks: [].",
       "Scope needs a bulletList/orderedList. Each items entry is {id,content}, without type. Never append item IDs or section names as sibling blocks.",
-      "Tables require one typed cell per column per row. IDs are globally unique; columnId references a declared column.",
+      "Table rows require typed cells; requirement/goal objects belong in sibling blocks. IDs are unique; columnId references a declared column.",
       "sectionFields lists required fields for four sibling objects under content.sections; none belongs inside introduction. Keep every section during repairs.",
       "Copy fixed schema literals verbatim, including all intro characters. JSON \\n decodes to a real newline; never double-escape. TOC punctuation follows the canonical structure reference.",
-      "Fragments are incomplete. Replace all markers, retain all required fields, and pass semantic checks. Repair only reported paths and resubmit the complete draft.",
+      "Replace markers and pass all checks. After rejection, use repair:{baseCandidateChecksum,operations:[{op,path,value?,from?}]} with the latest ACK checksum; add/replace/remove/move only erroneous fields, never artifact identity.",
     ],
     requiredDocumentFields: document.required,
     sectionFields: Object.fromEntries(Object.entries(sectionSchemas).map(([name, schema]) => [name, schema.required])),

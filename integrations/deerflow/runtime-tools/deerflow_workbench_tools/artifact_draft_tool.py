@@ -8,6 +8,7 @@ from langchain.tools import tool
 
 from deerflow.tools.types import Runtime
 
+from .artifact_draft_repair import resolve_artifact_draft_candidate
 from .runtime_result_validator import validate_runtime_artifact_draft
 
 
@@ -22,18 +23,26 @@ ARTIFACT_DRAFT_PROTOCOL = "workbench.runtime.artifact-draft.v1"
 def workbench_artifact_draft_publish(
     runtime: Runtime,
     artifact_index: int,
-    draft: dict[str, Any],
+    draft: dict[str, Any] | None = None,
+    repair: dict[str, Any] | None = None,
 ) -> tuple[str, dict[str, Any]]:
     """Validate and publish one real 产品工作台 Artifact checkpoint.
 
     Call this after an Artifact becomes complete enough to render. Publish another
     checkpoint only after its renderable content materially changes.
-    A rejected draft is not accepted: correct the returned issues and publish the
-    complete repaired draft in this run. Do not stop and ask the user to retry.
+    For the initial call, pass draft. After a rejection, prefer repair to edit only
+    invalid paths in the latest rejected candidate while preserving all other data.
+    Pass exactly one of draft or repair. A repair is {baseCandidateChecksum,
+    operations:[{op:"replace",path:"/content/...",value:...}]}; use the checksum
+    from the latest rejection. Supported operations are add, replace, remove, move
+    (move uses from instead of value). Paths use JSON Pointer syntax. Move keeps
+    the complete existing object; never overwrite an existing destination object.
+    Every repaired candidate is validated in full before it can be accepted.
 
     Args:
         artifact_index: Stable zero-based index used by the final Runtime result.
-        draft: One complete Runtime Artifact draft object.
+        draft: One complete Runtime Artifact draft object, omitted when using repair.
+        repair: Local edits to the latest rejected candidate: baseCandidateChecksum and operations (at most 24, at most 64 KiB). Omit draft. Never edit kind, schemaVersion, or operation.
     """
     if isinstance(artifact_index, bool) or not isinstance(artifact_index, int):
         raise ValueError("WORKBENCH_ARTIFACT_DRAFT_INDEX_INVALID")
@@ -60,6 +69,11 @@ def workbench_artifact_draft_publish(
         or any(not isinstance(kind, str) for kind in requested_artifact_kinds)
     ):
         raise ValueError("WORKBENCH_REQUESTED_ARTIFACT_KINDS_INVALID")
+    draft = resolve_artifact_draft_candidate(
+        getattr(runtime, "state", None), run_id=run_id,
+        runtime_attempt_id=runtime_attempt_id, tool_call_id=tool_call_id,
+        artifact_index=artifact_index, draft=draft, repair=repair,
+    )
     draft_kind = draft.get("kind") if isinstance(draft, dict) else None
     if not isinstance(draft_kind, str) or draft_kind not in requested_artifact_kinds:
         raise ValueError("WORKBENCH_ARTIFACT_DRAFT_KIND_NOT_REQUESTED")
@@ -94,9 +108,22 @@ def workbench_artifact_draft_publish(
         "issues": validation["issues"],
     }
     if validation["ok"] is False:
-        response["repairInstruction"] = _artifact_draft_repair_instruction(
-            draft, validation["issues"],
+        response["repairInstruction"] = (
+            "Prefer the repair argument instead of retyping the full draft. "
+            "Omit draft and pass repair={baseCandidateChecksum: this response's "
+            "candidateChecksum, operations:[...]}; use JSON Pointer paths and "
+            "add/replace/remove/move. This edits the latest rejected candidate "
+            "without changing unrelated data. "
+            + _artifact_draft_repair_instruction(draft, validation["issues"])
         )
+        response["repairMode"] = {
+            "baseCandidateChecksum": validation["candidateChecksum"],
+            "supportedOperations": ["add", "replace", "remove", "move"],
+            "maximumOperations": 24,
+            "maximumBytes": 65_536,
+            "editablePaths": ["/title", "/content/...", "/citations/..."],
+            "immutableFields": ["kind", "schemaVersion", "operation"],
+        }
         response["repairHints"] = _artifact_draft_repair_hints(draft, validation["issues"])
     return json.dumps(response, ensure_ascii=False, separators=(",", ":")), artifact
 
@@ -113,8 +140,8 @@ def _artifact_draft_repair_instruction(candidate: Any, issues: list[Any]) -> str
             "These sections must be siblings of introduction, not children. "
             "Preserve their entire contents and every other valid field; remove "
             "only the misplaced copies from introduction. No draft was accepted. "
-            "Correct any remaining returned issues and publish the complete repaired "
-            "draft directly in this run. Do not repeat generation stages, call "
+            "Correct remaining issue paths using checksum-bound repair operations "
+            "directly in this run. Do not repeat generation stages, call "
             "read_file again, resubmit an unchanged candidate, or ask the user to retry."
         )
     if _has_prd_shape_failure(candidate, issues):
@@ -123,18 +150,19 @@ def _artifact_draft_repair_instruction(candidate: Any, issues: list[Any]) -> str
             "contract: revision, cover, tableOfContents, and sections are objects; "
             "versionHistory and assumptions are arrays of complete objects; "
             "tableOfContents.entries is the directory entries array. "
-            "Preserve all valid requested content and publish the complete repaired "
-            "draft again. Do not resubmit the unchanged candidate or use placeholders."
+            "Preserve all valid requested content and submit local repair operations "
+            "against the returned candidateChecksum. Do not resubmit the unchanged "
+            "candidate or use placeholders."
         )
     instruction = (
-        "Edit only the returned issue paths in the immediately preceding complete "
-        "draft argument, preserve every other field, and publish that complete draft "
-        "again. Do not discard valid sections for a local content or reference error. "
+        "Edit only the returned issue paths using repair operations against the "
+        "latest candidateChecksum; preserve every other field in the existing "
+        "candidate. Do not discard valid sections for a local content or reference error. "
         "No draft was accepted. Do not resubmit an unchanged candidate: the same "
         "candidateChecksum will produce the same validation issues. Correct an "
         "identified field before publishing again; if the same issue persists, "
         "compare the named field's value and type with the contract already provided. "
-        "Publish the repaired draft directly; do not repeat generation stages or "
+        "Submit the repair directly; do not repeat generation stages or "
         "call read_file again, and do not stop merely to ask the user to retry."
     )
     if _has_checkbox_initial_value_failure(candidate, issues):
@@ -196,8 +224,12 @@ def _artifact_draft_repair_hints(candidate: Any, issues: list[Any]) -> list[dict
         })
     relocation_paths = [
         (["sections"], ["content", "sections"], dict),
+        (["degradation"], ["content", "sections", "degradation"], dict),
+        (["safetyBaseline"], ["content", "sections", "safetyBaseline"], dict),
         (["content", "degradation"], ["content", "sections", "degradation"], dict),
         (["content", "safetyBaseline"], ["content", "sections", "safetyBaseline"], dict),
+        (["content", "sections", "flowAndPages"], ["content", "sections", "businessRequirements", "flowAndPages"], dict),
+        (["content", "sections", "businessRequirements", "diagrams"], ["content", "sections", "businessRequirements", "flowAndPages", "diagrams"], list),
         (["content", "sections", "acceptanceCriteria"], ["content", "sections", "businessRequirements", "acceptanceCriteria"], dict),
         (["content", "sections", "additionalSections"], ["content", "sections", "businessRequirements", "additionalSections"], list),
     ]
@@ -223,6 +255,18 @@ def _artifact_draft_repair_hints(candidate: Any, issues: list[Any]) -> list[dict
         ):
             continue
         code = issue.get("code")
+        if code == "invalid_type" and len(path) >= 5 and path[-1] == "cells" and path[-3] == "rows":
+            row = _candidate_value(candidate, path[:-1])
+            block_array = path[:-4]
+            if (
+                isinstance(row, dict) and row.get("type") in {"requirement", "goal"}
+                and "cells" not in row and block_array and block_array[-1] == "blocks"
+                and isinstance(_candidate_value(candidate, block_array), list)
+            ):
+                append({
+                    "path": path[:-1], "owningArrayPath": block_array,
+                    "instruction": "This is an authored requirement/goal block misplaced inside table.rows. Use a move operation to relocate the whole object into the owning section's blocks array at the intended position. Preserve its text, IDs, and references; do not turn it into an empty table row or rewrite its business content. Array indexes apply after each preceding move/removal.",
+                })
         if (
             isinstance(issue.get("expectedValue"), str)
             and len(issue["expectedValue"]) <= 2_000

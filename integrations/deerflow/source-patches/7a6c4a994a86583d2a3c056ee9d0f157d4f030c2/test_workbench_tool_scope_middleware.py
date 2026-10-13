@@ -15,6 +15,9 @@ from typing import TypedDict
 
 
 PATCH_ROOT = Path(__file__).resolve().parent
+RUNTIME_TOOLS_ROOT = PATCH_ROOT.parents[1] / "runtime-tools"
+if RUNTIME_TOOLS_ROOT.is_dir():
+    sys.path.insert(0, str(RUNTIME_TOOLS_ROOT))
 
 
 def install_import_stubs() -> bool:
@@ -381,6 +384,260 @@ class AutomaticPrdResultTest(unittest.IsolatedAsyncioTestCase):
                     ),
                     sentinel,
                 )
+
+
+class DraftRepairScopeTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        reference_patch = patch.object(
+            middleware_module, "_PROTOTYPE_REFERENCE_DIRECTORY", SKILL_ROOT / "workbench" / "references",
+        )
+        reference_patch.start()
+        self.addCleanup(reference_patch.stop)
+
+    @staticmethod
+    def middleware(kinds=None):
+        return WorkbenchToolScopeMiddleware(
+            None, kinds or ["prd", "prototype"], run_scope=("run-auto", "attempt-auto"),
+        )
+
+    def rejected_state(self):
+        from deerflow_workbench_tools.runtime_result_validator import validate_runtime_artifact_draft
+
+        state = automatic_prd_request().state
+        del state["messages"][-2:]
+        # An intentionally incomplete authored PRD remains rejected by the real
+        # validator. The middleware must preserve it while relocating its object.
+        candidate = {
+            "kind": "prd", "schemaVersion": 2, "title": "Keep authored title",
+            "operation": {"kind": "create"}, "citations": [],
+            "content": {"sections": {"introduction": {
+                "businessRequirements": {"title": "业务要求", "authored": ["保留全文", 1.0]},
+            }}},
+        }
+        validation = validate_runtime_artifact_draft(candidate)
+        self.assertFalse(validation["ok"])
+        payload = {
+            "protocol": "workbench.runtime.artifact-draft.v1", "ok": False,
+            "runId": "run-auto", "runtimeAttemptId": "attempt-auto", "toolCallId": "rejected-base",
+            "artifactIndex": 0,
+        }
+        artifact = {
+            **payload,
+            "checksum": hashlib.sha256(json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()).hexdigest(),
+            "issues": validation["issues"],
+        }
+        ack = {
+            "protocol": "workbench.runtime.artifact-draft-ack.v1", "ok": False,
+            "artifactIndex": 0, "candidateChecksum": validation["candidateChecksum"], "issues": validation["issues"],
+        }
+        append_tool_batch(state["messages"], [call(
+            "workbench_artifact_draft_publish", "rejected-base", {"artifact_index": 0, "draft": candidate},
+        )], [tool_message("workbench_artifact_draft_publish", "rejected-base", json.dumps(ack), artifact=artifact)])
+        repair = {
+            "baseCandidateChecksum": validation["candidateChecksum"],
+            "operations": [{
+                "op": "move", "from": "/content/sections/introduction/businessRequirements",
+                "path": "/content/sections/businessRequirements",
+            }],
+        }
+        return state, candidate, repair
+
+    async def test_repair_uses_exact_causal_declaration_without_mutating_model_args(self):
+        for asynchronous in (False, True):
+            with self.subTest(asynchronous=asynchronous):
+                state, candidate, repair = self.rejected_state()
+                request = request_in_state(state["messages"], "workbench_artifact_draft_publish", "local-repair", {
+                    "artifact_index": 0, "repair": repair,
+                })
+                before = copy.deepcopy(request.state)
+                observed = []
+                sentinel = object()
+
+                def handler(actual):
+                    observed.append(copy.deepcopy(actual.tool_call))
+                    return sentinel
+
+                async def async_handler(actual):
+                    return handler(actual)
+
+                middleware = self.middleware()
+                result = await middleware.awrap_tool_call(request, async_handler) if asynchronous else middleware.wrap_tool_call(request, handler)
+                self.assertIs(result, sentinel)
+                self.assertEqual(observed, [request.tool_call])
+                self.assertNotIn("draft", observed[0]["args"])
+                self.assertEqual(request.state, before)
+                reconstructed = middleware_module._artifact_draft_from_declaration(
+                    request.state, request.tool_call, "run-auto", "attempt-auto",
+                )
+                self.assertEqual(reconstructed["content"]["sections"]["businessRequirements"], candidate["content"]["sections"]["introduction"]["businessRequirements"])
+                self.assertNotIn("businessRequirements", reconstructed["content"]["sections"]["introduction"])
+                self.assertEqual(reconstructed["title"], candidate["title"])
+
+    def test_bad_repair_history_blocks_before_the_tool_handler(self):
+        for case in ("checksum", "run", "attempt", "response-name", "duplicate-response", "new-turn", "index", "old-base", "unanswered"):
+            with self.subTest(case=case):
+                state, _candidate, repair = self.rejected_state()
+                response = state["messages"][-1]
+                if case == "checksum":
+                    repair["baseCandidateChecksum"] = "0" * 64
+                elif case == "run":
+                    response["artifact"]["runId"] = "other-run"
+                elif case == "attempt":
+                    response["artifact"]["runtimeAttemptId"] = "other-attempt"
+                elif case == "response-name":
+                    response["name"] = "different-tool"
+                elif case == "duplicate-response":
+                    state["messages"].append(copy.deepcopy(response))
+                elif case == "new-turn":
+                    state["messages"].append({"type": "human", "content": "new request"})
+                elif case == "old-base":
+                    state["messages"][-2]["tool_calls"][0]["args"]["draft"]["title"] = "changed after rejection"
+                elif case == "unanswered":
+                    state["messages"].append({"type": "ai", "content": "", "tool_calls": [call("workbench_generation_stage_update", "pending", {"stage": "validating-prd"})]})
+                request = request_in_state(state["messages"], "workbench_artifact_draft_publish", "local-repair", {
+                    "artifact_index": 1 if case == "index" else 0, "repair": repair,
+                })
+                result = self.middleware().wrap_tool_call(request, lambda _r: self.fail("invalid repair reached handler"))
+                self.assertEqual(result.status, "error")
+                self.assertIn("WORKBENCH_ARTIFACT_DRAFT_REPAIR_INVALID", result.content)
+
+    def test_accepted_repair_causal_proof_is_reconstructed_at_original_declaration(self):
+        from deerflow_workbench_tools.runtime_result_validator import validate_runtime_artifact_draft
+
+        state, _candidate, repair = self.rejected_state()
+        request = request_in_state(state["messages"], "workbench_artifact_draft_publish", "local-repair", {
+            "artifact_index": 0, "repair": repair,
+        })
+        repaired = middleware_module._artifact_draft_from_declaration(request.state, request.tool_call, "run-auto", "attempt-auto")
+        artifact = {
+            "protocol": "workbench.runtime.artifact-draft.v1", "ok": True,
+            "runId": "run-auto", "runtimeAttemptId": "attempt-auto", "toolCallId": "local-repair",
+            "artifactIndex": 0, "draft": repaired,
+            "draftChecksum": validate_runtime_artifact_draft(repaired)["candidateChecksum"],
+        }
+        # This fixture tests the middleware's declaration/receipt equality only.
+        # Real acceptance of an authored candidate is tested by the Draft tool.
+        PrototypeTransportContextTests.sign_envelope(artifact)
+        request.state["messages"].append(tool_message("workbench_artifact_draft_publish", "local-repair", artifact=artifact))
+        model_request = FakeModelRequest([], state=request.state, context={"workbench": {
+            "runId": "run-auto", "runtimeAttemptId": "attempt-auto", "requestedArtifactKinds": ["prd", "prototype"],
+        }})
+        before = copy.deepcopy(request.state)
+        self.assertTrue(self.middleware()._prototype_transport_ready(model_request))
+        self.assertEqual(request.state, before)
+        request.state["messages"][-2]["tool_calls"][0]["args"]["repair"]["operations"][0]["path"] = "/content/sections/safetyBaseline"
+        self.assertFalse(self.middleware()._prototype_transport_ready(model_request))
+
+    @unittest.skipIf(USING_IMPORT_STUBS, "requires real ToolNode sync and async concurrency")
+    async def test_real_graph_rejects_every_sibling_of_a_repair_batch(self):
+        from langchain.agents import create_agent
+        from langchain_core.language_models.fake_chat_models import FakeMessagesListChatModel
+        from langchain_core.messages import AIMessage, HumanMessage
+        from langchain_core.tools import StructuredTool
+
+        class BoundModel(FakeMessagesListChatModel):
+            def bind_tools(self, tools, *, tool_choice=None, **kwargs):
+                return self
+
+        def publication(artifact_index: int, draft: dict | None = None, repair: dict | None = None):
+            self.fail("a sibling publication executed against a shared rejected base")
+
+        for asynchronous in (False, True):
+            for sibling in ("repair", "draft"):
+                with self.subTest(asynchronous=asynchronous, sibling=sibling):
+                    repair = {"baseCandidateChecksum": "0" * 64, "operations": [{"op": "replace", "path": "/title", "value": "Changed"}]}
+                    calls = [
+                        call("workbench_artifact_draft_publish", "parallel-first", {"artifact_index": 0, "repair": repair}),
+                        call("workbench_artifact_draft_publish", "parallel-second", {"artifact_index": 0, sibling: repair if sibling == "repair" else {"kind": "prototype"}}),
+                    ]
+                    model = BoundModel(responses=[AIMessage(content="", tool_calls=copy.deepcopy(calls)), AIMessage(content="Stopped")])
+                    graph = create_agent(model, tools=[StructuredTool.from_function(
+                        publication, name="workbench_artifact_draft_publish", description="Publish an authored artifact",
+                    )], middleware=[self.middleware(["prototype"])])
+                    kwargs = {"context": {"workbench": {
+                        "runId": "run-auto", "runtimeAttemptId": "attempt-auto", "requestedArtifactKinds": ["prototype"],
+                    }}}
+                    initial = {"messages": [HumanMessage(content="Generate the requested artifact")]}
+                    result = await graph.ainvoke(initial, **kwargs) if asynchronous else graph.invoke(initial, **kwargs)
+                    responses = [m for m in result["messages"] if middleware_module._is_tool_message(m)]
+                    self.assertEqual(len(responses), 2)
+                    for response in responses:
+                        self.assertEqual(response.status, "error")
+                        self.assertIn("WORKBENCH_ARTIFACT_DRAFT_REPAIR_BATCH_INVALID", response.content)
+                    original = next(m for m in result["messages"] if middleware_module._is_ai_message(m) and m.tool_calls)
+                    self.assertEqual(original.tool_calls, [{**c, "type": "tool_call"} for c in calls])
+
+    @unittest.skipIf(USING_IMPORT_STUBS, "requires real injected ToolRuntime state and concurrent ToolNode")
+    async def test_real_graph_can_repair_after_concurrent_batch_was_rejected(self):
+        from langchain.agents import create_agent
+        from langchain_core.language_models.fake_chat_models import FakeMessagesListChatModel
+        from langchain_core.messages import AIMessage, HumanMessage
+        from langchain_core.tools import StructuredTool
+        from deerflow.tools.types import Runtime
+        from deerflow_workbench_tools.artifact_draft_tool import workbench_artifact_draft_publish
+        from deerflow_workbench_tools.runtime_result_validator import validate_runtime_artifact_draft
+
+        class BoundModel(FakeMessagesListChatModel):
+            def bind_tools(self, tools, *, tool_choice=None, **kwargs):
+                return self
+
+        source = json.loads((SKILL_ROOT / "workbench" / "references" / "prototype-runtime-result.example.json").read_text())
+        original = source["artifacts"][0]
+        broken = copy.deepcopy(original)
+        del broken["title"]
+        validation = validate_runtime_artifact_draft(broken)
+        self.assertFalse(validation["ok"])
+        repair = {
+            "baseCandidateChecksum": validation["candidateChecksum"],
+            "operations": [{"op": "add", "path": "/title", "value": original["title"]}],
+        }
+        publications = []
+
+        def publication(runtime, artifact_index: int, draft: dict | None = None, repair: dict | None = None):
+            publications.append(runtime.tool_call_id)
+            return workbench_artifact_draft_publish.func(runtime, artifact_index, draft=draft, repair=repair)
+
+        # Use the actual upstream ToolRuntime annotation, which ToolNode injects
+        # while hiding the state/context from the model-facing tool schema.
+        publication.__annotations__["runtime"] = Runtime
+        publication.__annotations__["artifact_index"] = int
+        publication.__annotations__["draft"] = dict | None
+        publication.__annotations__["repair"] = dict | None
+        for asynchronous in (False, True):
+            with self.subTest(asynchronous=asynchronous):
+                publications.clear()
+                calls = [
+                    call("workbench_artifact_draft_publish", ident, {"artifact_index": 0, "repair": copy.deepcopy(repair)})
+                    for ident in ("parallel-first", "parallel-second")
+                ]
+                model = BoundModel(responses=[
+                    AIMessage(content="", tool_calls=[call("workbench_artifact_draft_publish", "base", {"artifact_index": 0, "draft": copy.deepcopy(broken)})]),
+                    AIMessage(content="", tool_calls=calls),
+                    AIMessage(content="", tool_calls=[call("workbench_artifact_draft_publish", "retry-alone", {"artifact_index": 0, "repair": copy.deepcopy(repair)})]),
+                    AIMessage(content="Done"),
+                ])
+                graph = create_agent(model, tools=[StructuredTool.from_function(
+                    publication, name="workbench_artifact_draft_publish", description="Publish an authored artifact",
+                    response_format="content_and_artifact",
+                )], middleware=[self.middleware(["prototype"])])
+                kwargs = {"context": {"workbench": {
+                    "runId": "run-auto", "runtimeAttemptId": "attempt-auto", "requestedArtifactKinds": ["prototype"],
+                }}}
+                initial = {"messages": [HumanMessage(content="Build this prototype")]}
+                result = await graph.ainvoke(initial, **kwargs) if asynchronous else graph.invoke(initial, **kwargs)
+                self.assertEqual(publications, ["base", "retry-alone"])
+                responses = {m.tool_call_id: m for m in result["messages"] if middleware_module._is_tool_message(m)}
+                self.assertFalse(responses["base"].artifact["ok"])
+                self.assertTrue(responses["retry-alone"].artifact["ok"])
+                self.assertEqual(responses["retry-alone"].artifact["draft"], original)
+                for ident in ("parallel-first", "parallel-second"):
+                    self.assertEqual(responses[ident].status, "error")
+                    self.assertIn("WORKBENCH_ARTIFACT_DRAFT_REPAIR_BATCH_INVALID", responses[ident].content)
+                accepted_declaration = next(
+                    c for m in result["messages"] if middleware_module._is_ai_message(m)
+                    for c in m.tool_calls if c["id"] == "retry-alone"
+                )
+                self.assertEqual(accepted_declaration["args"], {"artifact_index": 0, "repair": repair})
 
 
 class PrototypeTransportContextTests(unittest.IsolatedAsyncioTestCase):

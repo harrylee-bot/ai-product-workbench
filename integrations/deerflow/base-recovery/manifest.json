@@ -5,7 +5,7 @@
   "upstreamCommit": "7a6c4a994a86583d2a3c056ee9d0f157d4f030c2",
   "installedPatchManifestPath": "/opt/workbench/deerflow/source-patch/manifest.json",
   "installedPatchManifestSha256": "f2bcd543acb4db5b4e14138d3f1f9df533b2e2d62b0cf36ac1b39a009bf7e4ea",
-  "candidatePatchManifestSha256": "018984e505d0c0219bf14d28e6ba436198e67689c40b7e7bc8fbf21fbb83169c",
+  "candidatePatchManifestSha256": "7439fd82e380ff2d9ee7ed251ab44eb67f5dcbc57356103a8dc8b7daf4b46316",
   "sourceFileSha256": {
     "/opt/workbench/deerflow/source-patch/apply.py": "2d18f25f77a489f17771550a32f06efc6e8e780e09ba789f2562d94a4b6bb2fb",
     "/opt/workbench/deerflow/source-patch/manifest.json": "f2bcd543acb4db5b4e14138d3f1f9df533b2e2d62b0cf36ac1b39a009bf7e4ea",

@@ -108,7 +108,7 @@ PRD_REFERENCE_FILES = (
     ),
     (
         "/mnt/skills/public/workbench/references/prd-runtime-result.schema.json",
-        "52c29a5477e5a854bedf807ba947dca21b6f62d1a841c0f5aea3e1b55dddcd65",
+        "3ba722d8aec222c7f4ed01f1f66869adf68cdd00e7b896ed4e89e55fa2700105",
     ),
 )
 PROTOTYPE_REFERENCE_FILES = (
@@ -209,7 +209,7 @@ This PRD-only Workbench Run cannot resume free-form clarification. The ask_clari
 </workbench_prd_clarification_policy>"""
 _LINKED_PRD_SYSTEM_POLICY = """<workbench_linked_prd_policy>
 This Workbench Run requests a linked PRD and Prototype. Free-form clarification is unavailable; record conservative typed assumptions for unsupported behavior. Complete the PRD reference reads and all PRD stages, then publish exactly one PRD Draft at artifact_index 0. Keep that Draft unchanged. Continue with the Prototype stages and a complete Prototype Draft at artifact_index 1 based on that PRD. Finally submit one complete Result containing both exact Drafts in that order. A PRD Draft alone does not finish this Run; there is no automatic PRD-only submission.
-The read_file tool accepts only the four fixed PRD reference paths, only after collecting-prd-context and before structuring-prd. It cannot read Prototype references. After a Draft validation rejection, use the already-read contract, repair the reported fields while preserving all other content, and call workbench_artifact_draft_publish again with the complete repaired Draft. Do not repeat completed stages or reference reads, and do not stop with a request for the user to retry.
+The read_file tool accepts only the four fixed PRD reference paths, only after collecting-prd-context and before structuring-prd. It cannot read Prototype references. After a Draft validation rejection, use workbench_artifact_draft_publish with repair and the latest rejected ACK's candidateChecksum as baseCandidateChecksum. Submit only the necessary JSON Patch operations and omit draft; preserve all other authored content. Use a move operation to relocate an existing complete section rather than rewriting it. Call repair alone in its tool-call batch. Do not repeat completed stages or reference reads, and do not stop with a request for the user to retry.
 </workbench_linked_prd_policy>"""
 _PROTOTYPE_STAGE_SYSTEM_POLICY = """<workbench_prototype_stage_policy>
 This Prototype-only Workbench Run must keep Prototype publication tools scoped to the
@@ -301,7 +301,13 @@ def _unrepaired_linked_draft(state: Any, run_id: str, attempt_id: str) -> dict[s
         if call["name"] != ARTIFACT_DRAFT_TOOL_NAME or artifact.get("protocol") != _PRD_DRAFT_PROTOCOL:
             continue
         index = artifact.get("artifactIndex")
-        candidate = call["args"].get("draft")
+        try:
+            candidate = _artifact_draft_from_declaration(
+                {"messages": _state_messages(state)[:call["message_index"] + 1]},
+                call, run_id, attempt_id,
+            )
+        except (ValueError, RuntimeError, ImportError):
+            return None
         if (
             type(index) is not int or index not in (0, 1)
             or call["args"].get("artifact_index") != index
@@ -559,6 +565,39 @@ def _current_turn_start(messages: list[Any]) -> int:
         if _is_human_message(messages[index]):
             return index
     return -1
+
+
+def _artifact_draft_from_declaration(
+    state: Any,
+    call: Mapping[str, Any],
+    run_id: str | None,
+    runtime_attempt_id: str | None,
+) -> Mapping[str, Any] | None:
+    """Resolve original declared arguments without rewriting model messages.
+
+    Full Draft calls retain their existing causal equality. Repair calls derive
+    the candidate from strictly paired current-turn history; the same helper is
+    used by the real tool, including its Node canonical checksum verification.
+    For a completed call, callers supply the historical state through its AI
+    declaration, before its response, so later messages cannot become its base.
+    """
+    args = _tool_args(call.get("args"))
+    if args.get("repair") is None:
+        draft = args.get("draft")
+        return draft if isinstance(draft, Mapping) else None
+    if not run_id or not runtime_attempt_id:
+        raise ValueError("WORKBENCH_ARTIFACT_DRAFT_REPAIR_SCOPE_MISSING")
+    from deerflow_workbench_tools.artifact_draft_repair import resolve_artifact_draft_candidate
+
+    return resolve_artifact_draft_candidate(
+        state,
+        run_id=run_id,
+        runtime_attempt_id=runtime_attempt_id,
+        tool_call_id=call.get("id"),
+        artifact_index=args.get("artifact_index"),
+        draft=args.get("draft"),
+        repair=args.get("repair"),
+    )
 
 
 def _completed_tool_calls(state: Any) -> tuple[list[dict[str, Any]], bool]:
@@ -1538,10 +1577,17 @@ class WorkbenchToolScopeMiddleware(AgentMiddleware[AgentState]):
             if _stage_progress(before_draft, self._run_id, self._runtime_attempt_id) != (len(PRD_STAGE_SEQUENCE), False):
                 return False
             artifact = _value(call["response"], "artifact")
+            try:
+                declared_draft = _artifact_draft_from_declaration(
+                    {"messages": messages[:call["message_index"] + 1]},
+                    call, self._run_id, self._runtime_attempt_id,
+                )
+            except (ValueError, RuntimeError, ImportError):
+                return False
             if (
                 _value(call["response"], "name") != ARTIFACT_DRAFT_TOOL_NAME
                 or type(call["args"].get("artifact_index")) is not int or call["args"]["artifact_index"] != 0
-                or call["args"].get("draft") != draft
+                or declared_draft != draft
                 or not isinstance(artifact.get("draftChecksum"), str)
                 or re.fullmatch(r"[0-9a-f]{64}", artifact["draftChecksum"]) is None
             ):
@@ -1554,7 +1600,9 @@ class WorkbenchToolScopeMiddleware(AgentMiddleware[AgentState]):
                 # metadata envelope. Its draftChecksum uses Node canonicalize;
                 # recomputing that body digest with Python would reject valid
                 # floats and Unicode keys. The accepted body must instead match
-                # its causal declared args; final validation remains authoritative.
+                # its causal declared args, or the exact repair reconstructed
+                # from preceding paired declarations; final validation remains
+                # authoritative. Never replace the model's original arguments.
                 encoded = json.dumps(envelope, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False).encode("utf-8")
                 return hashlib.sha256(encoded).hexdigest() == artifact.get("checksum")
             except (TypeError, ValueError):
@@ -1650,8 +1698,10 @@ class WorkbenchToolScopeMiddleware(AgentMiddleware[AgentState]):
         return (
             "<workbench_linked_draft_repair>\n"
             f"The Draft at artifact_index {marker['artifactIndex']} was rejected, and no complete Result exists. "
-            "Continue this Run now: repair the issue paths in the last rejected complete Draft, preserve every "
-            "other field, and call workbench_artifact_draft_publish with that complete repaired Draft. "
+            "Continue this Run now: call workbench_artifact_draft_publish with repair, using the latest "
+            "rejected ACK's candidateChecksum as baseCandidateChecksum and only the necessary JSON Patch "
+            "operations. Omit draft and preserve every other field. Relocate complete existing "
+            "sections with move instead of rewriting them. Call repair alone in its tool-call batch. "
             "Do not repeat completed generation stages or read_file calls. read_file accepts only the four PRD "
             "references during collecting-prd-context; use their already-read contract, not a new reference read. "
             "Do not ask the user to retry or end with a prose summary. After validation succeeds, continue the "
@@ -1799,8 +1849,10 @@ class WorkbenchToolScopeMiddleware(AgentMiddleware[AgentState]):
                 "WORKBENCH_PRD_RESULT_ALREADY_SUBMITTED",
                 "A validated Runtime result already exists for this turn; return the concise completion message without another tool call.",
             )
-        draft_args = _tool_args(request.tool_call.get("args"))
-        is_prototype_draft = isinstance(draft_args.get("draft"), dict) and draft_args["draft"].get("kind") == "prototype"
+        declared_draft = _artifact_draft_from_declaration(
+            request.state, request.tool_call, self._run_id, self._runtime_attempt_id,
+        ) if request.tool_call.get("name") == ARTIFACT_DRAFT_TOOL_NAME else None
+        is_prototype_draft = isinstance(declared_draft, Mapping) and declared_draft.get("kind") == "prototype"
         if draft_count > 0 and request.tool_call.get("name") == ARTIFACT_DRAFT_TOOL_NAME and not (self._prototype_enabled and is_prototype_draft):
             return _error_tool_message(
                 request,
@@ -1836,6 +1888,34 @@ class WorkbenchToolScopeMiddleware(AgentMiddleware[AgentState]):
                 request,
                 "WORKBENCH_PRD_DRAFT_REQUIRED",
                 "Publish the complete validated PRD candidate with workbench_artifact_draft_publish before final submission.",
+            )
+        return None
+
+    def _draft_repair_preflight(self, request: ToolCallRequest) -> ToolMessage | None:
+        batch = _current_batch_calls(request)
+        repair_calls = [
+            call for call in batch
+            if call["name"] == ARTIFACT_DRAFT_TOOL_NAME and call["args"].get("repair") is not None
+        ]
+        # ToolNode executes every sibling from the same state snapshot, in both
+        # sync and async modes. Reject the entire batch, including a sibling full
+        # Draft, rather than letting one publication race with another.
+        if repair_calls and len(batch) != 1:
+            return _error_tool_message(
+                request, "WORKBENCH_ARTIFACT_DRAFT_REPAIR_BATCH_INVALID",
+                "Call the repair alone in a new tool-call batch so it can use the latest completed rejected candidate.",
+            )
+        args = _tool_args(request.tool_call.get("args"))
+        if request.tool_call.get("name") != ARTIFACT_DRAFT_TOOL_NAME or args.get("repair") is None:
+            return None
+        try:
+            _artifact_draft_from_declaration(
+                request.state, request.tool_call, self._run_id, self._runtime_attempt_id,
+            )
+        except (ValueError, RuntimeError, ImportError):
+            return _error_tool_message(
+                request, "WORKBENCH_ARTIFACT_DRAFT_REPAIR_INVALID",
+                "Use the latest rejected ACK's candidateChecksum for this run and artifact_index, omit draft, and repair only permitted paths. Accepted drafts are immutable.",
             )
         return None
 
@@ -2048,9 +2128,11 @@ class WorkbenchToolScopeMiddleware(AgentMiddleware[AgentState]):
 
     def _linked_publication_preflight(self, request: ToolCallRequest) -> ToolMessage | None:
         args = _tool_args(request.tool_call.get("args"))
-        draft = args.get("draft")
         is_result = request.tool_call.get("name") == RUNTIME_RESULT_TOOL_NAME
         if not is_result:
+            draft = _artifact_draft_from_declaration(
+                request.state, request.tool_call, self._run_id, self._runtime_attempt_id,
+            )
             expected_index = 0 if isinstance(draft, Mapping) and draft.get("kind") == "prd" else 1
             if args.get("artifact_index") != expected_index:
                 return _error_tool_message(
@@ -2472,6 +2554,9 @@ class WorkbenchToolScopeMiddleware(AgentMiddleware[AgentState]):
         blocked = self._blocked_tool_message(request)
         if blocked is not None:
             return blocked
+        blocked = self._draft_repair_preflight(request)
+        if blocked is not None:
+            return blocked
         blocked = self._prd_preflight(request)
         if blocked is not None:
             return blocked
@@ -2555,6 +2640,9 @@ class WorkbenchToolScopeMiddleware(AgentMiddleware[AgentState]):
         handler: Callable[[ToolCallRequest], Awaitable[ToolMessage | Command]],
     ) -> ToolMessage | Command:
         blocked = self._blocked_tool_message(request)
+        if blocked is not None:
+            return blocked
+        blocked = self._draft_repair_preflight(request)
         if blocked is not None:
             return blocked
         blocked = self._prd_preflight(request)
