@@ -175,7 +175,7 @@ test("Web production type checking excludes test-only workspaces while full type
   assert.match(nextConfig, /tsconfigPath: configuredTsconfigPath \?\? "tsconfig\.build\.json"/u);
 });
 
-test("the Web and CI builds pin their Linux x64 native dependencies", async () => {
+test("the Web and CI builds pin native dependencies for production x64 and the ARM64 runner", async () => {
   const manifest = JSON.parse(await readFile(path.join(root, "package.json"), "utf8"));
   const lockfile = JSON.parse(await readFile(path.join(root, "package-lock.json"), "utf8"));
   const nativePins = {
@@ -183,6 +183,7 @@ test("the Web and CI builds pin their Linux x64 native dependencies", async () =
     "@next/swc-linux-x64-musl": "16.3.8",
     "@rolldown/binding-linux-x64-gnu": "1.1.4",
     "@rolldown/binding-linux-x64-musl": "1.1.4",
+    "@tailwindcss/oxide-linux-arm64-gnu": "4.3.1",
     "@tailwindcss/oxide-linux-x64-gnu": "4.3.1",
     "@tailwindcss/oxide-linux-x64-musl": "4.3.1",
     "lightningcss-linux-x64-gnu": "1.32.0",
@@ -194,7 +195,7 @@ test("the Web and CI builds pin their Linux x64 native dependencies", async () =
     assert.equal(lockfile.packages?.[""]?.optionalDependencies?.[name], version, `${name} must be pinned in package-lock.json`);
     const lockedPackage = lockfile.packages?.[`node_modules/${name}`];
     assert.equal(lockedPackage?.version, version, `${name} must have a complete lockfile entry`);
-    assert.equal(lockedPackage?.optional, true, `${name} must remain optional outside Linux x64 builds`);
+    assert.equal(lockedPackage?.optional, true, `${name} must remain optional outside its target platform`);
     assert.match(lockedPackage?.integrity ?? "", /^sha512-/u, `${name} must retain registry integrity metadata`);
   }
 
