@@ -891,9 +891,9 @@ function assertBuildConfigurationMatchesDeployment(record, expectedCommit, envir
     assert(value, `${record.id} build verification requires ${name}`);
     return value;
   };
-  const withNodeImage = (buildArgs) => ({
+  const withNodeImage = (buildArgs, environmentName = "WORKBENCH_NODE_IMAGE") => ({
     ...buildArgs,
-    NODE_IMAGE: required("WORKBENCH_NODE_IMAGE"),
+    NODE_IMAGE: required(environmentName),
   });
   let expectedBuildArgs;
   switch (record.id) {
@@ -932,9 +932,11 @@ function assertBuildConfigurationMatchesDeployment(record, expectedCommit, envir
     case "runtime-worker":
     case "file-worker":
     case "import-worker":
-    case "export-worker":
     case "preview":
       expectedBuildArgs = withNodeImage({});
+      break;
+    case "export-worker":
+      expectedBuildArgs = withNodeImage({}, "WORKBENCH_DEERFLOW_NODE_IMAGE_REF");
       break;
     default:
       expectedBuildArgs = {};

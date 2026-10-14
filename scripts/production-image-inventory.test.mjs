@@ -825,8 +825,10 @@ function buildConfiguration(id) {
       ].join("\n")
       : id === "quartz"
         ? `KNOWLEDGE_WEB_URL=https://workbench.example.test\nNGINX_IMAGE=nginx:stable-alpine@sha256:${"b".repeat(64)}\nNODE_IMAGE=node:22-alpine@sha256:${"a".repeat(64)}\nQUARTZ_BASE_URL=workbench.example.test/knowledge`
-        : ["api", "api-migrator", "runtime-worker", "file-worker", "import-worker", "export-worker", "preview"].includes(id)
+        : ["api", "api-migrator", "runtime-worker", "file-worker", "import-worker", "preview"].includes(id)
           ? `NODE_IMAGE=node:22-alpine@sha256:${"a".repeat(64)}`
+          : id === "export-worker"
+            ? `NODE_IMAGE=node:22-bookworm-slim@sha256:${"9".repeat(64)}`
           : "";
   return createProductionBuildConfiguration({ id, sourceCommit: commit, dockerfile, target, buildArgsSource });
 }
