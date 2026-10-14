@@ -5937,6 +5937,17 @@ async function captureActiveGenerationVisualEvidence({ evidence, kind, outputDir
         selectors: visualLayoutSelectors, timeoutMs: scenarioTimeoutMs,
       });
       const mobileToolInteraction = await verifyMobileToolRailInteraction(page, viewport);
+      // The stage wash is mounted through Framer Motion. When the browser
+      // preference changes from normal motion to reduced motion, the element
+      // can still be completing its one-time entrance opacity transition even
+      // though it is already visible. Wait for the current animation state and
+      // two real rendering frames before sampling the reduced-motion contract;
+      // otherwise the harness reports a transient entrance frame as ongoing
+      // reduced motion.
+      await motionElement.evaluate(async (element) => {
+        await Promise.all(element.getAnimations({ subtree: true }).map((animation) => animation.ready));
+        await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+      });
       const motion = await captureGenerationMotion(motionElement, { kind, reducedMotion });
       const layout = await page.evaluate((expectedKind) => {
         const metric = (selector) => {
