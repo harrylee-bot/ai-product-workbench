@@ -1,6 +1,9 @@
 ARG NODE_IMAGE=node:22-alpine
 
-FROM ${NODE_IMAGE} AS deps
+# Build the Next bundle on the native builder architecture. The final runner
+# remains TARGETPLATFORM, and receives target-architecture production modules
+# from the separate prod-deps stage below.
+FROM --platform=$BUILDPLATFORM ${NODE_IMAGE} AS deps
 WORKDIR /app
 ENV NPM_CONFIG_UPDATE_NOTIFIER=false \
     NPM_CONFIG_AUDIT=false \
@@ -24,12 +27,14 @@ ARG NEXT_PUBLIC_WORKBENCH_FORUM_URL
 ARG NEXT_PUBLIC_WORKBENCH_PRIVACY_URL
 ARG WORKBENCH_PREVIEW_ORIGIN
 ARG WORKBENCH_S3_BROWSER_UPLOAD_BUCKET_URL
+ARG WORKBENCH_TYPES_PREVALIDATED=0
 ENV NEXT_PUBLIC_KNOWLEDGE_APP_URL=$NEXT_PUBLIC_KNOWLEDGE_APP_URL
 ENV NEXT_PUBLIC_WORKBENCH_FEEDBACK_URL=$NEXT_PUBLIC_WORKBENCH_FEEDBACK_URL
 ENV NEXT_PUBLIC_WORKBENCH_FORUM_URL=$NEXT_PUBLIC_WORKBENCH_FORUM_URL
 ENV NEXT_PUBLIC_WORKBENCH_PRIVACY_URL=$NEXT_PUBLIC_WORKBENCH_PRIVACY_URL
 ENV WORKBENCH_PREVIEW_ORIGIN=$WORKBENCH_PREVIEW_ORIGIN
 ENV WORKBENCH_S3_BROWSER_UPLOAD_BUCKET_URL=$WORKBENCH_S3_BROWSER_UPLOAD_BUCKET_URL
+ENV WORKBENCH_TYPES_PREVALIDATED=$WORKBENCH_TYPES_PREVALIDATED
 ENV NEXT_TELEMETRY_DISABLED=1 \
     NODE_OPTIONS=--max-old-space-size=2048 \
     WORKBENCH_NEXT_BUILD_CPUS=1
@@ -41,19 +46,38 @@ RUN npm --workspace @workbench/workbench-contracts run validate:openapi \
   && npm --workspace @workbench/workbench-telemetry run build \
   && npm --workspace @workbench/web run generate:workbench-api
 WORKDIR /app/apps/web
-# Type checking in a separate process avoids retaining the compiler heap while
-# Next starts its TypeScript worker on memory-constrained builders.
-RUN npx next typegen && npx tsc -p tsconfig.build.json --noEmit
+# Type checking runs in the exact-source CI job on the native ARM64 runner.
+# Production image assembly can therefore reuse that verified result. This
+# avoids starting Next's native route/type worker under an AMD64 emulator,
+# while the following production build still compiles the application bundle.
+RUN if [ "$WORKBENCH_TYPES_PREVALIDATED" = "1" ]; then \
+      test -f package.json; \
+    else \
+      npx next typegen && npx tsc -p tsconfig.build.json --noEmit; \
+    fi
 ENV WORKBENCH_TYPES_PREVALIDATED=1
 RUN npm run build
 
-FROM build AS prod-deps
+FROM --platform=$TARGETPLATFORM ${NODE_IMAGE} AS prod-deps
+WORKDIR /app
+ENV NPM_CONFIG_UPDATE_NOTIFIER=false \
+    NPM_CONFIG_AUDIT=false \
+    NPM_CONFIG_FUND=false \
+    NPM_CONFIG_REGISTRY=https://registry.npmmirror.com \
+    NPM_CONFIG_REPLACE_REGISTRY_HOST=always
+COPY --chmod=0555 deploy/prepare-node-image.sh /usr/local/bin/prepare-node-image
+RUN prepare-node-image
+COPY package.json package-lock.json tsconfig.base.json ./
+COPY apps/web/package.json apps/web/package.json
+COPY packages/workbench-contracts/package.json packages/workbench-contracts/package.json
+COPY packages/workbench-telemetry/package.json packages/workbench-telemetry/package.json
+RUN --mount=type=cache,target=/root/.npm \
+  npm ci --omit=dev --include=optional --ignore-scripts --no-audit --no-fund
 COPY deploy/collect-workspace-runtime-dependencies.mjs /usr/local/lib/collect-workspace-runtime-dependencies.mjs
-RUN npm prune --omit=dev --include=optional --no-audit --no-fund \
-  && node /usr/local/lib/collect-workspace-runtime-dependencies.mjs /app /app/.runtime-workspace-dependencies \
+RUN node /usr/local/lib/collect-workspace-runtime-dependencies.mjs /app /app/.runtime-workspace-dependencies \
   && rm -rf /root/.npm
 
-FROM ${NODE_IMAGE} AS runner
+FROM --platform=$TARGETPLATFORM ${NODE_IMAGE} AS runner
 WORKDIR /app
 ENV NODE_ENV=production
 ENV HOSTNAME=0.0.0.0

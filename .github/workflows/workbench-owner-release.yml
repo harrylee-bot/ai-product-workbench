@@ -198,6 +198,7 @@ jobs:
               NEXT_PUBLIC_WORKBENCH_FEEDBACK_URL=${{ vars.NEXT_PUBLIC_WORKBENCH_FEEDBACK_URL }}
               NEXT_PUBLIC_WORKBENCH_FORUM_URL=${{ vars.NEXT_PUBLIC_WORKBENCH_FORUM_URL }}
               NEXT_PUBLIC_WORKBENCH_PRIVACY_URL=${{ vars.NEXT_PUBLIC_WORKBENCH_PRIVACY_URL }}
+              WORKBENCH_TYPES_PREVALIDATED=1
               NODE_IMAGE=${{ vars.WORKBENCH_NODE_IMAGE }}
           - name: api
             dockerfile: apps/workbench-api/Dockerfile

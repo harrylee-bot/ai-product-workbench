@@ -274,15 +274,20 @@ test("candidate security dependency fixes remain exactly pinned", async () => {
   assert.equal(apiManifest.dependencies?.["@aws-sdk/s3-request-presigner"], "3.896.0");
 });
 
-test("every workspace runner preserves production dependency directories after pruning", async () => {
+test("every workspace runner preserves production dependency directories with target-platform modules", async () => {
   const lockfile = JSON.parse(await readFile(path.join(root, "package-lock.json"), "utf8"));
   for (const relativePath of nodeDockerfiles.filter((name) => name !== "apps/knowledge/Dockerfile")) {
     const source = await readFile(path.join(root, relativePath), "utf8");
     const stage = relativePath === "apps/web/Dockerfile" ? "prod-deps" : "production-dependencies";
-    const production = source.split(`FROM build AS ${stage}\n`)[1]?.split(/^FROM /mu)[0];
+    const marker = relativePath === "apps/web/Dockerfile"
+      ? "FROM --platform=$TARGETPLATFORM ${NODE_IMAGE} AS prod-deps\n"
+      : `FROM build AS ${stage}\n`;
+    const production = source.split(marker)[1]?.split(/^FROM /mu)[0];
     assert.ok(production, `${relativePath} must have a production dependency stage`);
     assert.match(production, /COPY deploy\/collect-workspace-runtime-dependencies\.mjs /u);
-    const prune = production.indexOf("npm prune --omit=dev");
+    const prune = production.indexOf(relativePath === "apps/web/Dockerfile"
+      ? "npm ci --omit=dev --include=optional --ignore-scripts"
+      : "npm prune --omit=dev");
     const collect = production.indexOf("node /usr/local/lib/collect-workspace-runtime-dependencies.mjs /app /app/.runtime-workspace-dependencies");
     assert.ok(prune >= 0 && collect > prune, `${relativePath} must collect only pruned production dependencies`);
     const runner = source.split(/^FROM .* AS runner\n/mu)[1];
@@ -295,6 +300,9 @@ test("every workspace runner preserves production dependency directories after p
     assert.ok(nestedProduction.length > 0, `${relativePath} fixture must exercise the current nested dependency layout`);
   }
   const web = await readFile(path.join(root, "apps/web/Dockerfile"), "utf8");
+  assert.match(web, /FROM --platform=\$BUILDPLATFORM \$\{NODE_IMAGE\} AS deps/u);
+  assert.match(web, /FROM --platform=\$TARGETPLATFORM \$\{NODE_IMAGE\} AS prod-deps/u);
+  assert.match(web, /npm ci --omit=dev --include=optional --ignore-scripts/u);
   assert.match(web, /require\.resolve\('next\/dist\/bin\/next'\)/u);
   assert.match(web, /require\('next\/package\.json'\)\.version !== require\('\.\/package\.json'\)\.dependencies\.next/u);
 });
