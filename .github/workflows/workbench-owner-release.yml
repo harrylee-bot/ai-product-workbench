@@ -187,7 +187,7 @@ jobs:
             dockerfile: apps/workbench-export-worker/Dockerfile
             target: runner
             build_args: |
-              NODE_IMAGE=${{ vars.WORKBENCH_NODE_IMAGE }}
+              NODE_IMAGE=${{ vars.WORKBENCH_DEERFLOW_NODE_IMAGE_REF }}
           - name: web
             dockerfile: apps/web/Dockerfile
             target: runner
