@@ -68,7 +68,9 @@ export async function captureGenerationMotion(locator, {
           // Check every reduced-motion sample, not just endpoints which could
           // coincide after a complete unintended animation cycle.
           if (options.reducedMotion && visualKeys.some((visualKey) => last[visualKey] !== first[visualKey])) {
-            finish("GENERATION_REDUCED_MOTION_MOVED"); return;
+            const changed = Object.fromEntries(visualKeys.filter((visualKey) => last[visualKey] !== first[visualKey])
+              .map((visualKey) => [visualKey, { first: first[visualKey], last: last[visualKey] }]));
+            finish(`GENERATION_REDUCED_MOTION_MOVED ${JSON.stringify({ kind: options.kind, stage, changed })}`); return;
           }
           const observedWindow = lastTimeline - firstTimeline >= options.observationMs;
           if (epochSamples >= 2 && observedWindow && (options.reducedMotion || last[key] !== first[key])) {

@@ -4,6 +4,7 @@ import test from "node:test";
 import { build } from "esbuild";
 import { chromium } from "playwright";
 import { captureGenerationMotion } from "./workbench-browser-motion.mjs";
+import { waitForStableViewportLayout } from "./workbench-browser-viewport.mjs";
 
 const fixture = `<!doctype html><style>
   #motion { width: 200px; height: 100px; position: relative; opacity: .64; }
@@ -68,6 +69,13 @@ test("production generation wash stays still with reduced motion during mount an
       await page.emulateMedia({ reducedMotion: "reduce" });
       const result = await captureGenerationMotion(locator, { kind, reducedMotion: true });
       assert.deepEqual(result.frames[0], result.frames[1]);
+      // Real generation continues while users cross the mobile/tablet/desktop
+      // breakpoints. Exercise those resizes after the preference switch too.
+      for (const viewport of [{ width: 375, height: 812 }, { width: 768, height: 1024 }, { width: 1440, height: 900 }]) {
+        await page.setViewportSize(viewport);
+        await waitForStableViewportLayout(page, viewport, { selectors: ["#root"] });
+        await captureGenerationMotion(locator, { kind, reducedMotion: true });
+      }
     } finally { await page.close(); }
   }
 });

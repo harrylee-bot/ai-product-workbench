@@ -2134,6 +2134,14 @@ textarea:focus-visible {
     opacity: var(--workbench-stage-opacity, 0.48) !important;
   }
 
+  /* Keep the stage wash's semantic animation metadata for diagnostics while
+     freezing its pseudo-element at the first rendered frame. A one-millisecond
+     animation can otherwise finish between two requestAnimationFrame samples,
+     exposing its stage-specific opacity fallback as motion. */
+  .workbench-stage-phase-wash::before {
+    animation-play-state: paused !important;
+  }
+
   .workbench-generated-node {
     opacity: 1;
     transform: none;
