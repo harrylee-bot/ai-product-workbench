@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import test from "node:test";
+import { build } from "esbuild";
 import { chromium } from "playwright";
 import { captureGenerationMotion } from "./workbench-browser-motion.mjs";
 
@@ -22,6 +24,53 @@ const fixture = `<!doctype html><style>
   #motion.element-transform-jitter { animation: transform-jitter .1s steps(2, end) infinite; }
   #motion.element-opacity-jitter { animation: opacity-jitter .1s steps(2, end) infinite; }
 </style><div id="motion" data-canvas-generation-motion="prd" data-generation-stage="drafting-prd"></div>`;
+
+test("production generation wash stays still with reduced motion during mount and phase changes", { timeout: 20_000 }, async (t) => {
+  const browser = await chromium.launch({ headless: true });
+  t.after(() => browser.close());
+  const compiled = await build({
+    stdin: {
+      contents: `import React from "react";
+        import { createRoot } from "react-dom/client";
+        import { flushSync } from "react-dom";
+        import { MotionPreferenceProvider } from "./apps/web/components/motion-preference-provider";
+        import { ProjectStageMotionFX } from "./apps/web/components/workbench/workbench-project-chrome";
+        const root = createRoot(document.querySelector("#root"));
+        window.renderStage = (props) => flushSync(() => root.render(
+          <MotionPreferenceProvider><ProjectStageMotionFX {...props} /></MotionPreferenceProvider>));`,
+      resolveDir: process.cwd(), loader: "tsx",
+    },
+    tsconfig: "apps/web/tsconfig.json", bundle: true, write: false,
+    platform: "browser", format: "iife", jsx: "automatic",
+    define: { "process.env": "{}", "process.env.NODE_ENV": '"production"' },
+  });
+  const css = await readFile(new URL("../../apps/web/app/globals.css", import.meta.url), "utf8");
+  for (const kind of ["prd", "prototype"]) {
+    const page = await browser.newPage({ reducedMotion: "reduce" });
+    try {
+      await page.setContent('<main id="root" class="workbench-shell"></main>');
+      await page.addStyleTag({ content: css });
+      await page.addScriptTag({ content: compiled.outputFiles[0].text });
+      const locator = page.locator(`[data-canvas-generation-motion="${kind}"]`);
+      for (const phase of ["generating", "refining", "generating"]) {
+        await page.evaluate((props) => window.renderStage(props), {
+          motionKind: kind, generationStage: kind === "prd" ? "drafting-prd" : "generating-ui",
+          phase, isOverview: false,
+        });
+        const result = await captureGenerationMotion(locator, { kind, reducedMotion: true });
+        assert.deepEqual(result.frames[0], result.frames[1]);
+        assert.equal(result.opacity, kind === "prd" ? "0.64" : phase === "refining" ? "0.62" : "0.48");
+      }
+      // Switching the operating-system preference must also take effect without
+      // remounting the component or seeking any animations in the test.
+      await page.emulateMedia({ reducedMotion: "no-preference" });
+      await captureGenerationMotion(locator, { kind, reducedMotion: false });
+      await page.emulateMedia({ reducedMotion: "reduce" });
+      const result = await captureGenerationMotion(locator, { kind, reducedMotion: true });
+      assert.deepEqual(result.frames[0], result.frames[1]);
+    } finally { await page.close(); }
+  }
+});
 
 test("generation motion evidence follows real browser frames with bounded failure", { timeout: 20_000 }, async (t) => {
   const browser = await chromium.launch({ headless: true });

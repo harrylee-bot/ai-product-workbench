@@ -17,7 +17,7 @@ import {
   Trash2Icon,
   UsersIcon,
 } from "lucide-react";
-import type { ComponentType, SVGProps } from "react";
+import type { ComponentType, CSSProperties, SVGProps } from "react";
 import { cn } from "@/lib/utils";
 import type { BoardNodeActionAvailability } from "@/lib/workbench/features/board";
 import type {
@@ -145,13 +145,14 @@ export function ProjectStageMotionFX({
     phase,
   });
   const showPrdGenerationWash = generationMotionKind === "prd";
+  const washOpacity = showPrdGenerationWash ? 0.64 : phase === "refining" ? 0.62 : 0.48;
 
   return (
     <div className="pointer-events-none absolute inset-0 z-[6] overflow-hidden">
       <AnimatePresence>
         {generationMotionKind !== null && (
           <motion.div
-            animate={{ opacity: showPrdGenerationWash ? 0.64 : phase === "refining" ? 0.62 : 0.48 }}
+            animate={{ opacity: washOpacity }}
             aria-hidden="true"
             className={cn(
               "workbench-stage-phase-wash absolute inset-0",
@@ -162,6 +163,7 @@ export function ProjectStageMotionFX({
             data-generation-stage={generationStage ?? undefined}
             exit={{ opacity: 0 }}
             initial={{ opacity: 0 }}
+            style={{ "--workbench-stage-opacity": washOpacity } as CSSProperties}
             transition={{ duration: 0.34, ease: workbenchEase }}
           />
         )}

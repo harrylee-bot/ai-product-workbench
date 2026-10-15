@@ -2128,6 +2128,12 @@ textarea:focus-visible {
     animation: workbench-artifact-spin 1ms linear 1;
   }
 
+  .workbench-stage-phase-wash {
+    /* MotionConfig retains opacity tweens. Override their inline/WAAPI values
+       as soon as the OS preference changes, including an active entrance. */
+    opacity: var(--workbench-stage-opacity, 0.48) !important;
+  }
+
   .workbench-generated-node {
     opacity: 1;
     transform: none;
