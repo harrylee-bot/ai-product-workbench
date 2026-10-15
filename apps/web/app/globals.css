@@ -2140,6 +2140,7 @@ textarea:focus-visible {
      exposing its stage-specific opacity fallback as motion. */
   .workbench-stage-phase-wash::before {
     animation-play-state: paused !important;
+    opacity: 0.70 !important;
   }
 
   .workbench-generated-node {
