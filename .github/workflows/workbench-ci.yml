@@ -487,15 +487,11 @@ jobs:
 
       - name: Upload real-stack browser evidence
         if: always()
-        # Evidence is already retained locally by the dedicated runner. A transient
-        # GitHub artifact endpoint reset must not turn a passed browser smoke into a
-        # release-blocking application failure.
-        continue-on-error: true
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: real-stack-browser-${{ github.sha }}-${{ github.run_attempt }}
           path: output/playwright/real-stack/**
-          if-no-files-found: warn
+          if-no-files-found: error
           retention-days: 1
       - name: Clean only verified current job resources
         if: always()

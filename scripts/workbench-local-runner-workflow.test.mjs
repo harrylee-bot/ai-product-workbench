@@ -73,6 +73,17 @@ test("reject fork PR and shared service port", () => {
     assert.throws(() => assertLocalRunnerWorkflow(invalid));
   }
 });
+test("browser evidence cannot silently disappear or be ignored by a passing CI job", () => {
+  for (const target of ["job", "smoke", "evidence", "missing-files"]) {
+    const invalid = structuredClone(workflows[0].workflow);
+    const job = invalid.jobs["real-stack-browser"];
+    const smoke = job.steps.find((step) => step.run === "npm run e2e:web:real-stack:browser-only");
+    const evidence = job.steps.find((step) => step.uses?.startsWith("actions/upload-artifact@"));
+    if (target === "missing-files") evidence.with["if-no-files-found"] = "warn";
+    else ({ job, smoke, evidence })[target]["continue-on-error"] = true;
+    assert.throws(() => assertLocalRunnerWorkflow(invalid), /fail closed/u);
+  }
+});
 test("release cannot build before CI or occupy sole runner waiting for CI", () => {
   const owner = workflows[1].workflow;
   for (const mutate of [

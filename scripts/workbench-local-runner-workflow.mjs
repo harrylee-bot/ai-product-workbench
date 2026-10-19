@@ -78,6 +78,16 @@ export function assertLocalRunnerWorkflow(workflow, { owner = false } = {}) {
     assert.equal(job.steps[1]?.run, GUARD + "prepare", `${id}: guard must precede dependencies and builds`);
     assert.equal(job.steps.at(-1)?.run, GUARD + "cleanup", `${id}: scoped cleanup required`);
     assert.equal(job.steps.at(-1)?.if, "always()", `${id}: failures also require cleanup`);
+    if (id === "real-stack-browser") {
+      const smoke = job.steps.find((step) => step.run === "npm run e2e:web:real-stack:browser-only");
+      const evidence = job.steps.find((step) => step.uses?.startsWith("actions/upload-artifact@"));
+      assert(smoke && evidence, "browser smoke and durable evidence are required");
+      for (const subject of [job, smoke, evidence]) {
+        assert(!subject["continue-on-error"], "browser checks and evidence must fail closed");
+      }
+      assert.equal(evidence.with?.["if-no-files-found"], "error", "missing browser evidence must fail closed");
+      assert.equal(evidence.if, "always()", "failed browser tests must also publish diagnostics");
+    }
     for (const step of job.steps) {
       assert(!step.uses?.startsWith("actions/cache"), `${id}: Actions cloud cache forbidden`);
       assert(!step.env?.DOCKER_HOST && !step.env?.DOCKER_CONTEXT, `${id}: remote Docker step override forbidden`);
