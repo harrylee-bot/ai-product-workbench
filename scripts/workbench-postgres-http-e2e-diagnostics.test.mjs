@@ -299,23 +299,19 @@ test("the real-stack harness records error classes and delegates diagnostic seri
   assert.match(source, /originClass === "web" \|\| originClass === "preview"/u);
 });
 
-test("the real-stack browser waits for full-header credential classification and fails closed", async () => {
+test("real-stack auth artwork is local and every external browser request fails closed", async () => {
   const source = await readFile(new URL("./workbench-postgres-http-e2e.mjs", import.meta.url), "utf8");
-
-  assert.doesNotMatch(source, /const headers = request\.headers\(\);/u);
-  assert.match(source, /const headers = await request\.allHeaders\(\);/u);
-  assert.match(source, /externalRequestClassifications\.push\(classification\);/u);
-  assert.match(source, /return \{ \.\.\.evidence, inspection: "failed", requestClass: null \};/u);
-  assert.match(source, /else unknownRequests\.push\(evidence\);/u);
-
-  const stopCapture = source.indexOf('page.off("request", captureBrowserRequest);');
-  const awaitClassifications = source.indexOf("await Promise.all(externalRequestClassifications)");
-  const firstNetworkAssertion = source.indexOf("assert.ok(bffRequests.some", awaitClassifications);
-  assert.ok(stopCapture >= 0, "the harness must stop accepting new classification work before asserting");
-  assert.ok(
-    stopCapture < awaitClassifications && awaitClassifications < firstNetworkAssertion,
-    "the harness must drain credential classifications before its network assertions",
-  );
+  assert.match(source, /unknownRequests\.push\(\{ originClass, method: request\.method\(\), resourceType: request\.resourceType\(\) \}\)/u);
+  assert.match(source, /unknownRequests\.length,\s+0,/u);
+  assert.doesNotMatch(source, /browserExternalRequestClass|approvedAuthSpotlight/u);
+  const shell = await readFile(new URL("../apps/web/components/auth/auth-spotlight-shell.tsx", import.meta.url), "utf8");
+  assert.doesNotMatch(shell, /https?:\/\//u);
+  for (const name of ["spotlight-primary.webp", "spotlight-reveal.webp"]) {
+    assert.ok(shell.includes(`/auth/${name}`));
+    const asset = await readFile(new URL(`../apps/web/public/auth/${name}`, import.meta.url));
+    assert.equal(asset.subarray(0, 4).toString(), "RIFF");
+    assert.equal(asset.subarray(8, 12).toString(), "WEBP");
+  }
 });
 
 test("the real-stack harness prepares every shared package before application builds", async () => {

@@ -78,8 +78,8 @@ test("browser evidence cannot silently disappear or be ignored by a passing CI j
     const invalid = structuredClone(workflows[0].workflow);
     const job = invalid.jobs["real-stack-browser"];
     const smoke = job.steps.find((step) => step.run === "npm run e2e:web:real-stack:browser-only");
-    const evidence = job.steps.find((step) => step.uses?.startsWith("actions/upload-artifact@"));
-    if (target === "missing-files") evidence.with["if-no-files-found"] = "warn";
+    const evidence = job.steps.find((step) => step.run === "python3 scripts/workbench-ci-artifacts.py upload");
+    if (target === "missing-files") delete evidence.env.WORKBENCH_ARTIFACT_PATH;
     else ({ job, smoke, evidence })[target]["continue-on-error"] = true;
     assert.throws(() => assertLocalRunnerWorkflow(invalid), /fail closed/u);
   }

@@ -48,52 +48,6 @@ export function browserNetworkFailureClass(value) {
     : "unknown";
 }
 
-const approvedAuthSpotlightRequestClassByHref = new Map([
-  [
-    "https://images.higgs.ai/?default=1&output=webp&url=https%3A%2F%2Fd8j0ntlcm91z4.cloudfront.net%2Fuser_38xzZboKViGWJOttwIXH07lWA1P%2Fhf_20260609_195923_b0ba8ace-1d1d-4f2c-9a28-1ab84b330680.png&w=1280&q=85",
-    "auth-spotlight-primary",
-  ],
-  [
-    "https://images.higgs.ai/?default=1&output=webp&url=https%3A%2F%2Fd8j0ntlcm91z4.cloudfront.net%2Fuser_38xzZboKViGWJOttwIXH07lWA1P%2Fhf_20260609_201152_bba90a12-bf12-459f-91f0-51f237dbaf3b.png&w=1280&q=85",
-    "auth-spotlight-reveal",
-  ],
-]);
-
-export function browserExternalRequestClass(rawUrl, {
-  hasCredentials,
-  initiatorOrigin,
-  initiatorPathClass,
-  isMainFrame,
-  isNavigationRequest,
-  method,
-  redirected,
-  resourceType,
-  webOrigin,
-}) {
-  let url;
-  try {
-    url = new URL(rawUrl);
-  } catch {
-    return null;
-  }
-  if (
-    method !== "GET"
-    || resourceType !== "image"
-    || initiatorOrigin !== webOrigin
-    || initiatorPathClass !== "/register"
-    || isMainFrame !== true
-    || isNavigationRequest !== false
-    || redirected !== false
-    || hasCredentials !== false
-    || url.username !== ""
-    || url.password !== ""
-    || url.hash !== ""
-  ) {
-    return null;
-  }
-  return approvedAuthSpotlightRequestClassByHref.get(url.href) ?? null;
-}
-
 export function hasRequiredBrowserSseEvidence(events, reconnectCursor) {
   if (!Array.isArray(events) || !Number.isSafeInteger(reconnectCursor) || reconnectCursor < 0) {
     return false;

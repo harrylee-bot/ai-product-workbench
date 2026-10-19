@@ -80,15 +80,26 @@ export function assertLocalRunnerWorkflow(workflow, { owner = false } = {}) {
     assert.equal(job.steps.at(-1)?.if, "always()", `${id}: failures also require cleanup`);
     if (id === "real-stack-browser") {
       const smoke = job.steps.find((step) => step.run === "npm run e2e:web:real-stack:browser-only");
-      const evidence = job.steps.find((step) => step.uses?.startsWith("actions/upload-artifact@"));
+      const evidence = job.steps.find((step) => step.run === "python3 scripts/workbench-ci-artifacts.py upload");
       assert(smoke && evidence, "browser smoke and durable evidence are required");
       for (const subject of [job, smoke, evidence]) {
         assert(!subject["continue-on-error"], "browser checks and evidence must fail closed");
       }
-      assert.equal(evidence.with?.["if-no-files-found"], "error", "missing browser evidence must fail closed");
+      assert.equal(evidence.env?.WORKBENCH_ARTIFACT_PATH, "output/playwright/real-stack", "missing browser evidence must fail closed");
+      assert.equal(evidence.env?.WORKBENCH_ARTIFACT_NAME, "real-stack-browser-${{ github.sha }}-${{ github.run_attempt }}", "browser evidence must bind the candidate and attempt");
       assert.equal(evidence.if, "always()", "failed browser tests must also publish diagnostics");
     }
     for (const step of job.steps) {
+      if (step.run?.startsWith("python3 scripts/workbench-ci-artifacts.py ")) {
+        assert(["python3 scripts/workbench-ci-artifacts.py upload", "python3 scripts/workbench-ci-artifacts.py download"].includes(step.run), `${id}: exact local artifact transport required`);
+        assert(!step["continue-on-error"], `${id}: local evidence must fail closed`);
+        assert(step.env?.WORKBENCH_ARTIFACT_NAME?.includes("${{ github.run_attempt }}"), `${id}: evidence must bind the exact attempt`);
+        assert(step.env?.WORKBENCH_ARTIFACT_PATH?.startsWith("output/") || step.env?.WORKBENCH_ARTIFACT_PATH === "output", `${id}: evidence must stay in output`);
+        if (step.run.endsWith(" upload")) {
+          assert.equal(step.env.WORKBENCH_ARTIFACT_RETENTION_DAYS, owner && id === "release" ? "7" : "1", `${id}: bounded local evidence retention required`);
+        }
+      }
+      if (owner) assert(!/actions\/(?:upload|download)-artifact@/u.test(step.uses ?? ""), `${id}: owner evidence must not depend on cloud artifact quota`);
       assert(!step.uses?.startsWith("actions/cache"), `${id}: Actions cloud cache forbidden`);
       assert(!step.env?.DOCKER_HOST && !step.env?.DOCKER_CONTEXT, `${id}: remote Docker step override forbidden`);
       if (step.uses?.startsWith("actions/checkout@")) {

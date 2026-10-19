@@ -55,6 +55,7 @@ jobs:
       - name: Test local runner safety contracts
         run: |-
           python3 scripts/workbench-local-runner.test.py
+          python3 scripts/workbench-ci-artifacts.test.py
           node --test scripts/workbench-local-runner-workflow.test.mjs
 
       - name: Validate release-chain workflow contract
@@ -485,14 +486,13 @@ jobs:
       - name: Run real-stack browser-only smoke
         run: npm run e2e:web:real-stack:browser-only
 
-      - name: Upload real-stack browser evidence
+      - name: Retain real-stack browser evidence
         if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        with:
-          name: real-stack-browser-${{ github.sha }}-${{ github.run_attempt }}
-          path: output/playwright/real-stack/**
-          if-no-files-found: error
-          retention-days: 1
+        run: python3 scripts/workbench-ci-artifacts.py upload
+        env:
+          WORKBENCH_ARTIFACT_NAME: real-stack-browser-${{ github.sha }}-${{ github.run_attempt }}
+          WORKBENCH_ARTIFACT_PATH: output/playwright/real-stack
+          WORKBENCH_ARTIFACT_RETENTION_DAYS: "1"
       - name: Clean only verified current job resources
         if: always()
         run: python3 scripts/workbench-local-runner.py cleanup
@@ -1099,7 +1099,7 @@ jobs:
             --vulnerability-path "output/trivy-${{ matrix.name }}.json" \
             > "output/image-record-${{ matrix.name }}.json"
 
-      - name: Upload image evidence
+      - name: Retain image evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:

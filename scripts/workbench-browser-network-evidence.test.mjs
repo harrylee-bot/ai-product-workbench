@@ -3,7 +3,6 @@ import test from "node:test";
 
 import {
   assertRealStackBrowserMode,
-  browserExternalRequestClass,
   browserNetworkFailureClass,
   browserOriginClass,
   browserSseEventEvidence,
@@ -44,43 +43,6 @@ test("classifies browser origins and failures without retaining unknown location
   assert.equal(browserOriginClass("not a url", origins), "invalid");
   assert.equal(browserNetworkFailureClass("net::ERR_ABORTED"), "net::ERR_ABORTED");
   assert.equal(browserNetworkFailureClass("private failure detail"), "unknown");
-});
-
-test("allowlists only the known read-only auth spotlight image endpoint", () => {
-  const primary = "https://images.higgs.ai/?default=1&output=webp&url=https%3A%2F%2Fd8j0ntlcm91z4.cloudfront.net%2Fuser_38xzZboKViGWJOttwIXH07lWA1P%2Fhf_20260609_195923_b0ba8ace-1d1d-4f2c-9a28-1ab84b330680.png&w=1280&q=85";
-  const reveal = "https://images.higgs.ai/?default=1&output=webp&url=https%3A%2F%2Fd8j0ntlcm91z4.cloudfront.net%2Fuser_38xzZboKViGWJOttwIXH07lWA1P%2Fhf_20260609_201152_bba90a12-bf12-459f-91f0-51f237dbaf3b.png&w=1280&q=85";
-  const request = {
-    hasCredentials: false,
-    initiatorOrigin: "https://workbench.example.test",
-    initiatorPathClass: "/register",
-    isMainFrame: true,
-    isNavigationRequest: false,
-    method: "GET",
-    redirected: false,
-    resourceType: "image",
-    webOrigin: "https://workbench.example.test",
-  };
-  assert.equal(browserExternalRequestClass(primary, request), "auth-spotlight-primary");
-  assert.equal(browserExternalRequestClass(reveal, request), "auth-spotlight-reveal");
-  assert.equal(browserExternalRequestClass(
-    "https://images.higgs.ai/?default=1&output=webp&url=https%3A%2F%2Fprivate.invalid%2Fasset.png&w=1280&q=85",
-    request,
-  ), null);
-  assert.equal(browserExternalRequestClass("https://other.example.test/image.png", request), null);
-  assert.equal(browserExternalRequestClass("https://images.higgs.ai/script.js", request), null);
-  assert.equal(browserExternalRequestClass("https://images.higgs.ai:444/", request), null);
-  assert.equal(browserExternalRequestClass("https://user:secret@images.higgs.ai/", request), null);
-  assert.equal(browserExternalRequestClass("http://images.higgs.ai/", request), null);
-  assert.equal(browserExternalRequestClass(`${primary}#fragment`, request), null);
-  assert.equal(browserExternalRequestClass(`${primary}&extra=1`, request), null);
-  assert.equal(browserExternalRequestClass(primary, { ...request, method: "POST" }), null);
-  assert.equal(browserExternalRequestClass(primary, { ...request, resourceType: "script" }), null);
-  assert.equal(browserExternalRequestClass(primary, { ...request, initiatorPathClass: "/projects/:id" }), null);
-  assert.equal(browserExternalRequestClass(primary, { ...request, initiatorOrigin: "https://preview.example.test" }), null);
-  assert.equal(browserExternalRequestClass(primary, { ...request, isMainFrame: false }), null);
-  assert.equal(browserExternalRequestClass(primary, { ...request, isNavigationRequest: true }), null);
-  assert.equal(browserExternalRequestClass(primary, { ...request, redirected: true }), null);
-  assert.equal(browserExternalRequestClass(primary, { ...request, hasCredentials: true }), null);
 });
 
 test("requires forward SSE replay plus completed and failed browser terminal evidence", () => {

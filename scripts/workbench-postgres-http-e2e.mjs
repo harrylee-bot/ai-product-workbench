@@ -15,7 +15,6 @@ import pg from "pg";
 import { chromium } from "playwright";
 import {
   assertRealStackBrowserMode,
-  browserExternalRequestClass,
   browserNetworkFailureClass,
   browserOriginClass,
   browserSseEventEvidence,
@@ -4957,12 +4956,11 @@ async function runRealStackBrowserScenario({
   const navigationEvidence = evidenceManifest.navigation;
   const bffRequests = evidenceManifest.bffRequests;
   const httpResponses = [];
-  const externalRequests = [];
+  const authImageResponses = [];
   const unknownRequests = [];
-  const externalRequestClassifications = [];
   const sseSequences = [];
   evidenceManifest.httpResponses = httpResponses;
-  evidenceManifest.externalRequests = externalRequests;
+  evidenceManifest.authImageResponses = authImageResponses;
   evidenceManifest.unknownRequests = unknownRequests;
   evidenceManifest.sseEvents = browserSseEvents;
   evidenceManifest.sseObservationFailures = browserSseObservationFailures;
@@ -4979,44 +4977,7 @@ async function runRealStackBrowserScenario({
         navigationRequest: request.isNavigationRequest(),
       });
     } else if (originClass !== "preview" && originClass !== "other-scheme") {
-      const method = request.method();
-      const resourceType = request.resourceType();
-      let initiatorOrigin = null;
-      let initiatorPathClass = null;
-      let isMainFrame = false;
-      try {
-        const frame = request.frame();
-        const initiatorUrl = new URL(frame.url());
-        initiatorOrigin = initiatorUrl.origin;
-        initiatorPathClass = browserPathClass(initiatorUrl.pathname);
-        isMainFrame = frame === page.mainFrame();
-      } catch {
-        // Requests without an attributable frame remain unknown and fail closed.
-      }
-      const evidence = { originClass, method, resourceType };
-      const classification = (async () => {
-        try {
-          const headers = await request.allHeaders();
-          const hasCredentials = Object.keys(headers).some((name) => (
-            name.toLowerCase() === "authorization" || name.toLowerCase() === "cookie"
-          ));
-          const requestClass = browserExternalRequestClass(request.url(), {
-            hasCredentials,
-            initiatorOrigin,
-            initiatorPathClass,
-            isMainFrame,
-            isNavigationRequest: request.isNavigationRequest(),
-            method,
-            redirected: request.redirectedFrom() !== null,
-            resourceType,
-            webOrigin,
-          });
-          return { ...evidence, requestClass };
-        } catch {
-          return { ...evidence, inspection: "failed", requestClass: null };
-        }
-      })();
-      externalRequestClassifications.push(classification);
+      unknownRequests.push({ originClass, method: request.method(), resourceType: request.resourceType() });
     }
   };
   page.on("request", captureBrowserRequest);
@@ -5036,6 +4997,9 @@ async function runRealStackBrowserScenario({
       pathClass,
       status: response.status(),
     };
+    if (originClass === "web" && ["/auth/spotlight-primary.webp", "/auth/spotlight-reveal.webp"].includes(url.pathname)) {
+      authImageResponses.push({ path: url.pathname, status: response.status() });
+    }
     if (originClass === "preview" || (originClass === "web" && url.pathname.startsWith("/api/"))) {
       httpResponses.push(responseEvidence);
     }
@@ -5527,11 +5491,6 @@ async function runRealStackBrowserScenario({
     const terminalSseAborts = await attributePersistedTerminalSseAborts(terminalSseAbortCandidates);
     evidenceManifest.terminalSseAborts = terminalSseAborts;
     page.off("request", captureBrowserRequest);
-    const requestClassifications = await Promise.all(externalRequestClassifications);
-    for (const { requestClass, ...evidence } of requestClassifications) {
-      if (requestClass) externalRequests.push({ ...evidence, requestClass });
-      else unknownRequests.push(evidence);
-    }
     assert.ok(bffRequests.some((request) => /\/runs\/:id\/events$/u.test(request.pathClass)), "browser did not open the real BFF SSE endpoint");
     assert.ok(bffRequests.some((request) => request.method === "POST" && /\/runs\/:id\/retry$/u.test(request.pathClass) && request.status === 202), "browser did not retry the failed Run through the real BFF");
     assert.ok(bffRequests.some((request) => request.method === "POST" && /\/runs\/:id\/cancel$/u.test(request.pathClass) && request.status === 202), "browser did not cancel the active Run through the real BFF");
@@ -5562,9 +5521,9 @@ async function runRealStackBrowserScenario({
       `real-stack browser issued requests to unknown origins: ${JSON.stringify(unknownRequests)}`,
     );
     assert.deepEqual(
-      externalRequests.map((request) => request.requestClass).sort(),
-      ["auth-spotlight-primary", "auth-spotlight-reveal"],
-      `real-stack browser external request evidence was incomplete: ${JSON.stringify(externalRequests)}`,
+      [...new Set(authImageResponses.filter((response) => response.status === 200).map((response) => response.path))].sort(),
+      ["/auth/spotlight-primary.webp", "/auth/spotlight-reveal.webp"],
+      "auth artwork must load successfully from the application origin",
     );
     const unexpectedHttpResponses = httpResponses.filter((response) => (
       response.status < 200 || response.status >= 400
@@ -5625,7 +5584,8 @@ async function runRealStackBrowserScenario({
       runFailureRetry: true,
       runCancellation: true,
       failedNetworkRequestsAttributed: true,
-      externalRequestsClassified: true,
+      authImagesServedLocally: true,
+      externalRequestsAbsent: true,
       httpResponsesAllowlisted: true,
       sseEventSequenceRecorded: true,
     };
@@ -5649,7 +5609,7 @@ async function runRealStackBrowserScenario({
         terminalStatus: deliveryAfterConfirmation.status,
       },
       bffRequests: bffRequests.map(({ method, pathClass, status }) => ({ method, pathClass, status })),
-      externalRequests,
+      authImageResponses,
       httpResponses,
       previewEvidence,
       navigationAborts,
