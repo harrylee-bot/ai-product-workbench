@@ -93,7 +93,6 @@ COPY --chown=node:node deploy/check-workbench-document-export.mjs deploy/check-w
 COPY deploy/remove-node-package-managers.mjs /usr/local/lib/remove-node-package-managers.mjs
 RUN node /usr/local/lib/remove-node-package-managers.mjs
 USER node
-RUN node deploy/check-workbench-document-export.mjs
 HEALTHCHECK --interval=20s --timeout=5s --start-period=30s --retries=4 \
   CMD ["node", "apps/workbench-export-worker/dist/healthcheck.js"]
 CMD ["node", "apps/workbench-export-worker/dist/main.js"]

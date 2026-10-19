@@ -307,6 +307,16 @@ class Deployment:
             time.sleep(2)
         fail(f"{service} readiness timed out")
 
+    def document_export_preflight(self, image):
+        if image.get("id") != "export-worker" or not re.search(r"@sha256:[a-f0-9]{64}$", image.get("imageRef", "")):
+            fail("Document export preflight requires the verified immutable export-worker image")
+        command = ["docker", "run", "--rm", "--platform", "linux/amd64", "--network", "none",
+                   "--read-only", "--cap-drop", "ALL", "--security-opt", "no-new-privileges:true",
+                   "--memory", "1024m", "--cpus", "1", "--pids-limit", "128",
+                   "--tmpfs", "/tmp:rw,nosuid,nodev,size=512m,mode=1777",
+                   "--entrypoint", "node", image["imageRef"], "deploy/check-workbench-document-export.mjs"]
+        self.run(command, "Check production DOCX/PDF rendering", timeout=360)
+
     def start(self, filename, project, service, recreate=False):
         self.started.append((filename, project, service))
         command = ["up", "--detach", "--no-build", "--no-deps"]
@@ -372,7 +382,7 @@ class Deployment:
                 "applicationProject": app["name"], "runtimeProject": runtime["name"],
                 "images": [{"id": image["id"], "imageRef": image["imageRef"]} for image in release["images"]],
                 "gatewayImages": {name: app["services"][name]["image"] for name in GATEWAYS},
-                "sequence": ["pull all images", "verify local labels", "check Runtime worker signing identity and key permissions", "check gateway configuration and permissions", "verified database backup", "stop queue participants", "migrate", "preview", "deerflow", "api and workers and web and knowledge", "gateways", "health"],
+                "sequence": ["pull all images", "verify local labels", "check Runtime worker signing identity and key permissions", "check production DOCX/PDF rendering in an isolated AMD64 container", "check gateway configuration and permissions", "verified database backup", "stop queue participants", "migrate", "preview", "deerflow", "api and workers and web and knowledge", "gateways", "health"],
                 "runningApplicationServices": sorted(previous_app), "runningRuntimeServices": sorted(previous_runtime)}
         print(json.dumps(plan, ensure_ascii=False, indent=2), flush=True)
         if not self.args.execute:
@@ -404,6 +414,10 @@ class Deployment:
         self.run(self.compose(signer_check_file, signer_check["name"], "run", "--rm", "--no-deps",
                               "--entrypoint", "node", "workbench-worker", "--input-type=module", "-e",
                               WORKER_SIGNER_CHECK), "Check Runtime worker signing identity and key permissions", timeout=120)
+        export_worker = next((image for image in release["images"] if image.get("id") == "export-worker"), None)
+        if export_worker is None:
+            fail("Verified release is missing the export-worker image required for document rendering")
+        self.document_export_preflight(export_worker)
         gateway_check = gateway_preflight_config(app)
         gateway_check_file = self.backup / "gateway-check.json"
         write_compose(gateway_check_file, gateway_check)

@@ -229,6 +229,29 @@ process.stdout.write('sha256:' + createHash('sha256').update(pair.publicKey.expo
             key.chmod(0o644)
             self.assertEqual(invoke(environment).returncode, 1)
 
+    def test_document_export_preflight_uses_only_verified_amd64_image_without_network_or_writable_root(self):
+        with tempfile.TemporaryDirectory() as directory:
+            deployment = FakeDeployment(self.args(Path(directory), True))
+            image = next(item for item in IMAGES if item["id"] == "export-worker")
+            deployment.document_export_preflight(image)
+            label, command = deployment.calls[-1]
+            self.assertEqual(label, "Check production DOCX/PDF rendering")
+            self.assertEqual(command[:4], ["docker", "run", "--rm", "--platform"])
+            self.assertIn("linux/amd64", command)
+            self.assertIn("--network", command)
+            self.assertIn("none", command)
+            self.assertIn("--read-only", command)
+            self.assertIn("--cap-drop", command)
+            self.assertIn("ALL", command)
+            self.assertIn("--memory", command)
+            self.assertIn("1024m", command)
+            self.assertIn("--cpus", command)
+            self.assertIn("--pids-limit", command)
+            self.assertIn("/tmp:rw,nosuid,nodev,size=512m,mode=1777", command)
+            self.assertEqual(command[-2:], [image["imageRef"], "deploy/check-workbench-document-export.mjs"])
+            with self.assertRaisesRegex(RuntimeError, "verified immutable export-worker"):
+                deployment.document_export_preflight({**image, "imageRef": "registry.test/export-worker:latest"})
+
     def test_gateway_checks_resolve_missing_upstreams_without_network_or_candidate_dns_overrides(self):
         candidate = DEPLOY.prepare_config(fixture(), IMAGES, COMMIT)
         candidate["services"]["gateway"].update({"depends_on": {"workbench-web": {}}, "ports": ["127.0.0.1:4180:8080"]})
@@ -319,7 +342,7 @@ process.stdout.write('sha256:' + createHash('sha256').update(pair.publicKey.expo
                         deployment.check_resources(after_pull=after_pull)
 
     def test_signature_and_backup_failure_never_stop_live_services(self):
-        for failure in ["signature", "backup", "Check Runtime worker signing identity and key permissions", "Check preview-gateway configuration and permissions", "Check gateway configuration and permissions"]:
+        for failure in ["signature", "backup", "Check Runtime worker signing identity and key permissions", "Check production DOCX/PDF rendering", "Check preview-gateway configuration and permissions", "Check gateway configuration and permissions"]:
             with self.subTest(failure=failure), tempfile.TemporaryDirectory() as directory:
                 deployment = FakeDeployment(self.args(Path(directory), True), failure)
                 with self.assertRaises(RuntimeError):
@@ -343,6 +366,9 @@ process.stdout.write('sha256:' + createHash('sha256').update(pair.publicKey.expo
             signer_check = names.index("Check Runtime worker signing identity and key permissions")
             self.assertLess(names.index("verify-local"), signer_check)
             self.assertLess(signer_check, names.index("backup"))
+            export_check = names.index("Check production DOCX/PDF rendering")
+            self.assertLess(signer_check, export_check)
+            self.assertLess(export_check, names.index("backup"))
             self.assertLess(names.index("backup"), stop)
             self.assertLess(names.index("Start workbench-preview"), names.index("Start deerflow"))
             for _, command in deployment.calls:
