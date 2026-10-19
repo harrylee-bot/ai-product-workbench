@@ -828,7 +828,7 @@ function buildConfiguration(id) {
         : ["api", "api-migrator", "runtime-worker", "file-worker", "import-worker", "preview"].includes(id)
           ? `NODE_IMAGE=node:22-alpine@sha256:${"a".repeat(64)}`
           : id === "export-worker"
-            ? `NODE_IMAGE=node:22-bookworm-slim@sha256:${"9".repeat(64)}`
+            ? `NODE_IMAGE=node:22-alpine@sha256:${"a".repeat(64)}`
           : "";
   return createProductionBuildConfiguration({ id, sourceCommit: commit, dockerfile, target, buildArgsSource });
 }

@@ -607,9 +607,7 @@ services:
       dockerfile: apps/workbench-export-worker/Dockerfile
       target: runner
       args:
-        # LibreOffice PDF rendering is stable on the pinned Debian Node base;
-        # the other Workbench services continue to use WORKBENCH_NODE_IMAGE.
-        NODE_IMAGE: ${WORKBENCH_DEERFLOW_NODE_IMAGE_REF:-node:22-bookworm-slim}
+        NODE_IMAGE: ${WORKBENCH_NODE_IMAGE:-node:22-alpine}
     restart: unless-stopped
     init: true
     depends_on:

@@ -667,10 +667,6 @@ jobs:
                 --build-arg WORKBENCH_SOURCE_COMMIT="$GITHUB_SHA"
               )
               ;;
-            export-worker)
-              require_digest WORKBENCH_DEERFLOW_NODE_IMAGE_REF "$DEERFLOW_NODE_IMAGE"
-              args+=(--build-arg NODE_IMAGE="$DEERFLOW_NODE_IMAGE")
-              ;;
             *)
               require_digest WORKBENCH_NODE_IMAGE "$NODE_IMAGE"
               args+=(--build-arg NODE_IMAGE="$NODE_IMAGE")
@@ -859,7 +855,7 @@ jobs:
             dockerfile: apps/workbench-export-worker/Dockerfile
             target: runner
             build_args: |
-              NODE_IMAGE=${{ vars.WORKBENCH_DEERFLOW_NODE_IMAGE_REF }}
+              NODE_IMAGE=${{ vars.WORKBENCH_NODE_IMAGE }}
           - name: preview
             dockerfile: apps/workbench-preview/Dockerfile
             target: runner

@@ -936,7 +936,7 @@ function assertBuildConfigurationMatchesDeployment(record, expectedCommit, envir
       expectedBuildArgs = withNodeImage({});
       break;
     case "export-worker":
-      expectedBuildArgs = withNodeImage({}, "WORKBENCH_DEERFLOW_NODE_IMAGE_REF");
+      expectedBuildArgs = withNodeImage({});
       break;
     default:
       expectedBuildArgs = {};
