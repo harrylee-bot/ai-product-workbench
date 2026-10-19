@@ -102,7 +102,7 @@ test("the image helper still rejects unapproved Alpine packages before installin
   assert.match(result.stderr, /unsupported Alpine container package: unapproved-package/u);
 });
 
-test("the Export image includes the template and checker and verifies both document formats as its runtime user", async () => {
+test("the Export image includes the template and checker for deployment-time AMD64 verification", async () => {
   const source = await readFile(path.join(root, "apps/workbench-export-worker/Dockerfile"), "utf8");
   for (const file of [
     "integrations/deerflow/skills/requirement-doc-template/assets/requirement-template.docx",
@@ -113,7 +113,12 @@ test("the Export image includes the template and checker and verifies both docum
   }
   assert.match(source, /--system-site-packages \/opt\/workbench-export-python/u);
   assert.match(source, /--only-binary=:all: --no-deps --require-hashes/u);
-  assert.match(source, /USER node\nRUN node deploy\/check-workbench-document-export\.mjs/u);
+  assert.match(source, /USER node\nHEALTHCHECK /u);
+  assert.doesNotMatch(
+    source,
+    /USER node\nRUN node deploy\/check-workbench-document-export\.mjs/u,
+    "document rendering must be verified by the deployment preflight on a real linux\/amd64 image",
+  );
 });
 
 test("all candidate Node Dockerfiles use the hardened Alpine helper", async () => {
