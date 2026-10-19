@@ -279,7 +279,18 @@ def image_smoke(image, name, commit):
     existed = command(['docker', 'image', 'inspect', image], check=False).returncode == 0
     pulled = False
     try:
-        command(['docker', 'pull', '--platform', 'linux/amd64', image], timeout=600)
+        pull_error = None
+        for attempt in range(1, 4):
+            try:
+                command(['docker', 'pull', '--platform', 'linux/amd64', image], timeout=1200)
+                pull_error = None
+                break
+            except Exception as error:
+                pull_error = error
+                if attempt < 3:
+                    print(json.dumps({'status': 'RETRY', 'image': name, 'attempt': attempt, 'reason': 'registry-pull-timeout-or-transient-failure'}), flush=True)
+        if pull_error is not None:
+            raise pull_error
         pulled = True
         inspected = json.loads(command(['docker', 'image', 'inspect', image]).stdout)[0]
         require(inspected.get('Os') == 'linux' and inspected.get('Architecture') == 'amd64'
