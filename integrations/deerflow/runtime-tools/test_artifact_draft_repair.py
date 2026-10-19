@@ -74,6 +74,47 @@ class ArtifactDraftRepairTests(unittest.TestCase):
         self.assertFalse(result["ok"])
         self.assertNotIn("draft",artifact)
 
+    def test_restores_contract_text_without_model_retyping_and_preserves_business_content(self):
+        invalid = copy.deepcopy(self.draft)
+        invalid["content"]["sections"]["safetyBaseline"]["intro"] = "模型改写的固定说明"
+        ack, _ = self.publish("initial", draft=invalid)
+        self.assertFalse(ack["ok"])
+        repair = ack["templateRepair"]
+        self.assertEqual(repair, self.repair(ack, [{"op": "restore", "path": "/content/sections/safetyBaseline/intro"}]))
+        result, artifact = self.publish("restore", repair=repair)
+        self.assertTrue(result["ok"], result["issues"])
+        self.assertEqual(artifact["draft"], self.draft)
+        self.assertEqual(latest_accepted_artifact_draft(self.runtime.state, run_id="run_1", runtime_attempt_id="attempt_1", artifact_index=0), self.draft)
+        self.assertEqual(self.runtime.state["messages"][1]["tool_calls"][0]["args"]["draft"], invalid)
+
+    def test_restore_does_not_repair_business_claims_or_bypass_remaining_validation(self):
+        invalid = copy.deepcopy(self.draft)
+        invalid["content"]["sections"]["safetyBaseline"]["intro"] = "wrong template"
+        invalid["title"] = "wrong business title"
+        ack, _ = self.publish("initial", draft=invalid)
+        result, artifact = self.publish("restore", repair=ack["templateRepair"])
+        self.assertFalse(result["ok"])
+        self.assertNotIn("draft", artifact)
+        self.assertNotIn("templateRepair", result)
+        for operation in (
+            {"op": "restore", "path": "/title"},
+            {"op": "restore", "path": "/content/sections/safetyBaseline/rows/0/remarks"},
+            {"op": "restore", "path": "/content/sections/safetyBaseline/intro", "value": "forged"},
+            {"op": "restore", "path": "/content/sections/safetyBaseline/intro"},
+        ):
+            with self.subTest(operation=operation), self.assertRaises(ValueError):
+                _apply_repair(self.draft, self.repair(result, [operation]), result["candidateChecksum"])
+
+    def test_restores_canonical_directory_entries(self):
+        invalid = copy.deepcopy(self.draft)
+        entries = invalid["content"]["tableOfContents"]["entries"]
+        entries[-2:] = ["改写的降级标题", "改写的安全标题"]
+        ack, _ = self.publish("initial", draft=invalid)
+        self.assertEqual(len(ack["templateRepair"]["operations"]), 2)
+        result, artifact = self.publish("restore", repair=ack["templateRepair"])
+        self.assertTrue(result["ok"], result["issues"])
+        self.assertEqual(artifact["draft"], self.draft)
+
     def test_rejects_stale_or_forged_bases_and_all_identity_edits(self):
         for operation in (
             {"op":"replace","path":"/kind","value":"prototype"},

@@ -8,7 +8,7 @@ from langchain.tools import tool
 
 from deerflow.tools.types import Runtime
 
-from .artifact_draft_repair import resolve_artifact_draft_candidate
+from .artifact_draft_repair import resolve_artifact_draft_candidate, template_restore_operation
 from .runtime_result_validator import validate_runtime_artifact_draft
 
 
@@ -34,8 +34,10 @@ def workbench_artifact_draft_publish(
     invalid paths in the latest rejected candidate while preserving all other data.
     Pass exactly one of draft or repair. A repair is {baseCandidateChecksum,
     operations:[{op:"replace",path:"/content/...",value:...}]}; use the checksum
-    from the latest rejection. Supported operations are add, replace, remove, move
-    (move uses from instead of value). Paths use JSON Pointer syntax. Move keeps
+    from the latest rejection. Supported operations are add, replace, remove, move,
+    and restore (move uses from instead of value). For fixed template errors, copy templateRepair
+    from the rejection: restore uses only op and path and loads the exact text from
+    the contract, so never retype its value. Paths use JSON Pointer syntax. Move keeps
     the complete existing object; never overwrite an existing destination object.
     Every repaired candidate is validated in full before it can be accepted.
 
@@ -131,13 +133,26 @@ def workbench_artifact_draft_publish(
         )
         response["repairMode"] = {
             "baseCandidateChecksum": validation["candidateChecksum"],
-            "supportedOperations": ["add", "replace", "remove", "move"],
+            "supportedOperations": ["add", "replace", "remove", "move", "restore"],
             "maximumOperations": 24,
             "maximumBytes": 65_536,
             "editablePaths": ["/title", "/content/...", "/citations/..."],
             "immutableFields": ["kind", "schemaVersion", "operation"],
         }
         response["repairHints"] = _artifact_draft_repair_hints(draft, validation["issues"])
+        template_operations = [operation for issue in validation["issues"]
+                               if (operation := template_restore_operation(issue)) is not None]
+        if template_operations:
+            response["templateRepair"] = {
+                "baseCandidateChecksum": validation["candidateChecksum"],
+                "operations": template_operations[:24],
+            }
+            response["repairInstruction"] = (
+                "First copy templateRepair exactly as the repair argument. Its restore "
+                "operations load fixed template text from the contract without retyping "
+                "expectedValue. Then address any remaining business issues from the next ACK. "
+                + response["repairInstruction"]
+            )
     return json.dumps(response, ensure_ascii=False, separators=(",", ":")), artifact
 
 
@@ -280,19 +295,12 @@ def _artifact_draft_repair_hints(candidate: Any, issues: list[Any]) -> list[dict
                     "path": path[:-1], "owningArrayPath": block_array,
                     "instruction": "This is an authored requirement/goal block misplaced inside table.rows. Use a move operation to relocate the whole object into the owning section's blocks array at the intended position. Preserve its text, IDs, and references; do not turn it into an empty table row or rewrite its business content. Array indexes apply after each preceding move/removal.",
                 })
-        if (
-            isinstance(issue.get("expectedValue"), str)
-            and len(issue["expectedValue"]) <= 2_000
-            and (
-                code == "invalid_literal" and path == ["content", "sections", "safetyBaseline", "intro"]
-                or code == "custom" and len(path) == 4 and path[:3] == ["content", "tableOfContents", "entries"]
-                and isinstance(path[3], int) and not isinstance(path[3], bool)
-            )
-        ):
+        if (restore_operation := template_restore_operation(issue)) is not None:
             append({
                 "path": path,
                 "expectedValue": issue["expectedValue"],
-                "instruction": "Copy this exact contract-owned string, including punctuation and newlines. It is fixed template text, not a business assertion.",
+                "repairOperation": restore_operation,
+                "instruction": "Use this restore operation without a value to load exact contract-owned text, including punctuation and newlines. It is fixed template text, not a business assertion.",
             })
         if code == "invalid_type" and tuple(path) in section_shapes:
             append({

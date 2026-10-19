@@ -233,6 +233,35 @@ def _write(candidate: dict[str, Any], parts: list[str], value: Any, *, replace: 
         parent.insert(_array_index(key, len(parent), insert=True), copy.deepcopy(value))
 
 
+def template_restore_operation(issue: Any) -> dict[str, str] | None:
+    """Only validator-owned fixed template strings can be restored without prose."""
+    if not isinstance(issue, dict) or not isinstance(issue.get("expectedValue"), str):
+        return None
+    path = issue.get("path")
+    if not isinstance(path, list) or len(issue["expectedValue"]) > 2_000:
+        return None
+    fixed_intro = issue.get("code") == "invalid_literal" and path == ["content", "sections", "safetyBaseline", "intro"]
+    fixed_directory = (issue.get("code") == "custom" and len(path) == 4
+                       and path[:3] == ["content", "tableOfContents", "entries"]
+                       and isinstance(path[3], int) and not isinstance(path[3], bool) and path[3] >= 0)
+    if not (fixed_intro or fixed_directory):
+        return None
+    return {"op": "restore", "path": "/" + "/".join(str(part) for part in path)}
+
+
+def _restore_template(candidate: dict[str, Any], operation: dict[str, Any], parts: list[str]) -> None:
+    if candidate.get("kind") != "prd" or candidate.get("schemaVersion") != 2:
+        _fail("TEMPLATE_PATH_FORBIDDEN")
+    # Recompute after earlier operations. Never trust model-supplied expected text
+    # or stale directory indexes from an ACK before a section move.
+    issues = validate_runtime_artifact_draft(candidate)["issues"]
+    matches = [issue for issue in issues if template_restore_operation(issue) == operation]
+    if len(matches) != 1:
+        _fail("TEMPLATE_PATH_FORBIDDEN")
+    parent, key = _parent(candidate, parts)
+    _write(candidate, parts, matches[0]["expectedValue"], replace=not isinstance(parent, dict) or key in parent)
+
+
 def _apply_repair(candidate: dict[str, Any], repair: Any, checksum: str) -> dict[str, Any]:
     if (not isinstance(repair, dict) or set(repair) != {"baseCandidateChecksum", "operations"}
             or not _checksum(repair.get("baseCandidateChecksum"))):
@@ -250,10 +279,12 @@ def _apply_repair(candidate: dict[str, Any], repair: Any, checksum: str) -> dict
             _fail("OPERATION_INVALID")
         op = operation.get("op")
         keys = {"op", "path", "value"} if op in {"add", "replace"} else {"op", "path", "from"} if op == "move" else {"op", "path"}
-        if op not in {"add", "replace", "remove", "move"} or set(operation) != keys:
+        if op not in {"add", "replace", "remove", "move", "restore"} or set(operation) != keys:
             _fail("OPERATION_INVALID")
         parts = _pointer(operation["path"])
-        if op == "remove":
+        if op == "restore":
+            _restore_template(result, operation, parts)
+        elif op == "remove":
             _remove(result, parts)
         elif op == "move":
             origin = _pointer(operation["from"], source=True)
