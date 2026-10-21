@@ -396,9 +396,31 @@ jobs:
           cache: false
 
       - name: Install Cosign
+        id: cosign_installer
+        continue-on-error: true
         uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
         with:
           cosign-release: v3.1.3
+
+      - name: Retry Cosign install with pinned binary
+        if: steps.cosign_installer.outcome == 'failure'
+        env:
+          COSIGN_VERSION: v3.1.3
+          COSIGN_ARM64_SHA256: c5d324e091826b0d7a78eb16fef316450b4eb9aaec045611c08ba06f5e73220a
+        run: |
+          set -euo pipefail
+          case "$(uname -m)" in
+            aarch64|arm64) asset=cosign-linux-arm64 ;;
+            *) echo "Unsupported fallback architecture: $(uname -m)" >&2; exit 1 ;;
+          esac
+          target="$RUNNER_TEMP/cosign"
+          curl --retry 12 --retry-all-errors --retry-delay 5 --connect-timeout 20 --max-time 180 --http1.1 -fsSL \
+            "https://github.com/sigstore/cosign/releases/download/${COSIGN_VERSION}/${asset}" \
+            -o "$target"
+          printf '%s  %s\n' "$COSIGN_ARM64_SHA256" "$target" | sha256sum -c -
+          chmod 0755 "$target"
+          echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
+          "$target" version
 
       - name: Sign SLSA provenance and SPDX image attestations
         env:
@@ -528,9 +550,31 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: Install Cosign
+        id: cosign_installer
+        continue-on-error: true
         uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
         with:
           cosign-release: v3.1.3
+
+      - name: Retry Cosign install with pinned binary
+        if: steps.cosign_installer.outcome == 'failure'
+        env:
+          COSIGN_VERSION: v3.1.3
+          COSIGN_ARM64_SHA256: c5d324e091826b0d7a78eb16fef316450b4eb9aaec045611c08ba06f5e73220a
+        run: |
+          set -euo pipefail
+          case "$(uname -m)" in
+            aarch64|arm64) asset=cosign-linux-arm64 ;;
+            *) echo "Unsupported fallback architecture: $(uname -m)" >&2; exit 1 ;;
+          esac
+          target="$RUNNER_TEMP/cosign"
+          curl --retry 12 --retry-all-errors --retry-delay 5 --connect-timeout 20 --max-time 180 --http1.1 -fsSL \
+            "https://github.com/sigstore/cosign/releases/download/${COSIGN_VERSION}/${asset}" \
+            -o "$target"
+          printf '%s  %s\n' "$COSIGN_ARM64_SHA256" "$target" | sha256sum -c -
+          chmod 0755 "$target"
+          echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
+          "$target" version
       - name: Sign and verify complete release
         env:
           CERTIFICATE_IDENTITY: https://github.com/${{ github.repository }}/.github/workflows/workbench-owner-release.yml@refs/heads/main
