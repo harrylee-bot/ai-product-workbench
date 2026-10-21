@@ -1,4 +1,6 @@
-# syntax=docker/dockerfile:1.7
+# syntax=docker.m.daocloud.io/docker/dockerfile:1.7
+# Keep the Dockerfile frontend on the runner's reachable registry mirror. The
+# default docker.io endpoint intermittently fails during owner-release builds.
 # This immutable input contains only the current audited source snapshot.
 # It has no executable entrypoint, OS packages, dependencies or runtime data.
 FROM scratch AS source

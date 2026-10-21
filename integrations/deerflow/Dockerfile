@@ -1,4 +1,6 @@
-# syntax=docker/dockerfile:1.7
+# syntax=docker.m.daocloud.io/docker/dockerfile:1.7
+# Keep the Dockerfile frontend on the runner's reachable registry mirror. The
+# default docker.io endpoint intermittently fails during owner-release builds.
 
 ARG DEERFLOW_BASE_IMAGE
 ARG DEERFLOW_NODE_IMAGE
