@@ -127,6 +127,7 @@ for (const requiredLine of [
   "FROM ${DEERFLOW_NODE_IMAGE} AS validator-runtime",
   "FROM ${DEERFLOW_BASE_IMAGE} AS recovered-source",
   "FROM cgr.dev/chainguard/wolfi-base@sha256:",
+  "ca-certificates-bundle=20260909-r3",
   "io.workbench.deerflow.runtime-base-image",
   "--mount=from=recovered-source,source=/,target=/source-ro",
   "prepare_source.py",

@@ -29,7 +29,11 @@ LABEL org.opencontainers.image.title="产品工作台 DeerFlow Runtime" \
 
 USER root
 RUN apk upgrade --no-cache \
-    && apk add --no-cache python-3.12=3.12.15-r3 uv=0.13.0-r0 libstdc++=16.2.0-r1 \
+    && apk add --no-cache \
+      ca-certificates-bundle=20260909-r3 \
+      python-3.12=3.12.15-r3 \
+      uv=0.13.0-r0 \
+      libstdc++=16.2.0-r1 \
     && mkdir -p /usr/local/bin \
     && ln -sf /usr/bin/python3.12 /usr/local/bin/python \
     && ln -sf /usr/bin/python3.12 /usr/local/bin/python3
