@@ -123,7 +123,7 @@ const records = fs.readFileSync(file, "utf8").split(/\r?\n/).filter(Boolean).map
 if (records.length === 0) process.exit(1);
 const allowedFlags = [[], ["--allow-insecure-entitlement=network.host"], ["--allow-insecure-entitlement", "network.host"]];
 const policy = value => String(value).replace(/#[^\n]*/g, "").replace(/\s/g, "").replace(/^\[worker\](?=\[worker\.oci\])/, "");
-if (policy(fs.readFileSync(config, "utf8")) !== "[worker.oci]max-parallelism=1") process.exit(1);
+if (policy(fs.readFileSync(config, "utf8")) !== "[worker.oci]max-parallelism=1[registry.\"docker.io\"]mirrors=[\"docker.m.daocloud.io\"]") process.exit(1);
 for (const builder of records) {
   if (builder.Driver !== "docker-container" || builder.Nodes?.length !== 1) process.exit(1);
   const node = builder.Nodes[0];
@@ -133,7 +133,7 @@ for (const builder of records) {
   if (JSON.stringify(Object.keys(node.DriverOpts ?? {}).sort()) !== JSON.stringify(Object.keys(expected).sort())) process.exit(1);
   if (Object.entries(expected).some(([key, value]) => node.DriverOpts[key] !== value)) process.exit(1);
   const configData = node.Files?.["buildkitd.toml"];
-  if (typeof configData !== "string" || policy(Buffer.from(configData, "base64").toString("utf8")) !== "[worker.oci]max-parallelism=1") process.exit(1);
+  if (typeof configData !== "string" || policy(Buffer.from(configData, "base64").toString("utf8")) !== "[worker.oci]max-parallelism=1[registry.\"docker.io\"]mirrors=[\"docker.m.daocloud.io\"]") process.exit(1);
 }
 NODE
   stop_builder=1
@@ -158,7 +158,7 @@ NODE
   node - "$scratch/active.toml" <<'NODE' || build_fail 'the running BuildKit policy must allow only one build step at a time'
 const fs = require("node:fs");
 const policy = fs.readFileSync(process.argv[2], "utf8").replace(/#[^\n]*/g, "").replace(/\s/g, "").replace(/^\[worker\](?=\[worker\.oci\])/, "");
-if (policy !== "[worker.oci]max-parallelism=1") process.exit(1);
+if (policy !== "[worker.oci]max-parallelism=1[registry.\"docker.io\"]mirrors=[\"docker.m.daocloud.io\"]") process.exit(1);
 NODE
   printf 'Building with %s: %s MiB RAM, %s CPU(s), one build step; required %s MiB service headroom at start.\n' \
     "$builder" "$memory_mib" "$cpus" "$reserve_mib"

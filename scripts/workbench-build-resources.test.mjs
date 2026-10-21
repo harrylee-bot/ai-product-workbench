@@ -266,7 +266,7 @@ const name = process.env.WORKBENCH_BUILD_BUILDER || "workbench-validation-bounde
 const memory = Number(process.env.WORKBENCH_BUILD_MEMORY_MIB || 6144) * 1024 * 1024;
 const quota = Number(process.env.WORKBENCH_BUILD_CPUS || 2) * 100000;
 const stateFile = path.join(root, "created");
-const policy = "[worker]\n  [worker.oci]\n    max-parallelism = 1\n";
+const policy = "[worker]\n  [worker.oci]\n    max-parallelism = 1\n\n[registry.\"docker.io\"]\n  mirrors = [\"docker.m.daocloud.io\"]\n";
 const output = value => console.log(typeof value === "string" ? value : JSON.stringify(value));
 if (is("context", "show")) output("default");
 else if (is("context", "inspect")) output(options.endpoint);
