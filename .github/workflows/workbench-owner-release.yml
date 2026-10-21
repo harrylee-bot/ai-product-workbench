@@ -38,6 +38,7 @@ jobs:
         with:
           clean: true
           persist-credentials: false
+          ssh-key: ${{ secrets.WORKBENCH_CHECKOUT_SSH_KEY }}
       - name: Verify dedicated local runner and prepare job isolation
         run: python3 scripts/workbench-local-runner.py prepare
       - name: Use Node.js 22
@@ -126,6 +127,7 @@ jobs:
           ref: ${{ needs.source.outputs.source_commit }}
           clean: true
           persist-credentials: false
+          ssh-key: ${{ secrets.WORKBENCH_CHECKOUT_SSH_KEY }}
       - name: Verify dedicated local runner and prepare job isolation
         run: python3 scripts/workbench-local-runner.py prepare
       - name: Use Node.js 22
@@ -244,6 +246,7 @@ jobs:
           ref: ${{ needs.source.outputs.source_commit }}
           clean: true
           persist-credentials: false
+          ssh-key: ${{ secrets.WORKBENCH_CHECKOUT_SSH_KEY }}
       - name: Verify dedicated local runner and prepare job isolation
         run: python3 scripts/workbench-local-runner.py prepare
       - name: Use Node.js 22
@@ -482,6 +485,7 @@ jobs:
           ref: ${{ needs.source.outputs.source_commit }}
           clean: true
           persist-credentials: false
+          ssh-key: ${{ secrets.WORKBENCH_CHECKOUT_SSH_KEY }}
       - name: Verify dedicated local runner and prepare job isolation
         run: python3 scripts/workbench-local-runner.py prepare
       - name: Use Node.js 22
