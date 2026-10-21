@@ -220,7 +220,7 @@ class BuilderInspectionTests(unittest.TestCase):
         self.job = local_runner.job_identity({"GITHUB_RUN_ID": "1", "GITHUB_RUN_ATTEMPT": "1",
                                               "GITHUB_JOB": "images", "WORKBENCH_IMAGE_ID": "web"})
         node = {"Name": self.job['builder'] + '0', "Endpoint": 'unix:///var/run/docker.sock',
-                "Files": {"buildkitd.toml": "W3dvcmtlci5vY2ldCm1heC1wYXJhbGxlbGlzbSA9IDEK"}}
+                "Files": {"buildkitd.toml": "W3JlZ2lzdHJ5XQpbcmVnaXN0cnkuJ2RvY2tlci5pbyddCm1pcnJvcnMgPSBbJ2RvY2tlci5tLmRhb2Nsb3VkLmlvJ10KW3dvcmtlcl0KW3dvcmtlci5vY2ldCm1heC1wYXJhbGxlbGlzbSA9IDEK"}}
         self.builder = {"Name": self.job['builder'], "Driver": "docker-container", "Nodes": [node]}
         self.container = {"Name": "/buildx_buildkit_" + node['Name'], "State": {"Running": True},
                           "HostConfig": {"Memory": local_runner.MEMORY_BYTES, "MemorySwap": local_runner.MEMORY_BYTES,
@@ -240,7 +240,7 @@ class BuilderInspectionTests(unittest.TestCase):
                 return SimpleNamespace(returncode=0, stdout=json.dumps(self.builder) + '\n' + json.dumps(self.builder))
             if args[:2] == ['docker', 'inspect']:
                 return SimpleNamespace(returncode=0, stdout=json.dumps([self.container]))
-            return SimpleNamespace(returncode=0, stdout='[worker]\n[worker.oci]\nmax-parallelism = 1\n')
+            return SimpleNamespace(returncode=0, stdout='[registry]\n[registry.\'docker.io\']\nmirrors = [\'docker.m.daocloud.io\']\n[worker]\n[worker.oci]\nmax-parallelism = 1\n')
         self.assertEqual(self.invoke(fake), self.job['builder'])
         self.assertIn(['docker', 'buildx', 'ls', '--format', '{{json .Builder}}'], calls)
         self.container['State']['Running'] = False

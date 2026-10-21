@@ -185,8 +185,9 @@ def verify_builder(*, required=True, require_running=True):
         policy = command(['docker', 'exec', 'buildx_buildkit_' + nodes[0]['Name'], 'cat', '/etc/buildkit/buildkitd.toml']).stdout
     else:
         policy = base64.b64decode(nodes[0].get('Files', {}).get('buildkitd.toml', ''), validate=True).decode()
-    normalized = re.sub(r'\s', '', re.sub(r'#[^\n]*', '', policy)).replace('[worker][worker.oci]', '[worker.oci]')
-    require(normalized == '[worker.oci]max-parallelism=1', 'BUILDKIT_PARALLELISM_INVALID')
+    normalized = re.sub(r'\s', '', re.sub(r'#[^\n]*', '', policy)).replace("'", '"')
+    normalized = normalized.replace('[worker][worker.oci]', '[worker.oci]').replace('[registry][registry."docker.io"]', '[registry."docker.io"]')
+    require(normalized == '[registry."docker.io"]mirrors=["docker.m.daocloud.io"][worker.oci]max-parallelism=1', 'BUILDKIT_PARALLELISM_INVALID')
     return identity['builder']
 
 
