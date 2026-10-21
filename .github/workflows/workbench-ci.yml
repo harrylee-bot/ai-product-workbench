@@ -1302,3 +1302,13 @@ jobs:
 env:
   DOCKER_BUILD_RECORD_UPLOAD: "false"
   DOCKER_BUILD_SUMMARY: "false"
+  # The dedicated ARM64 runner reaches GitHub through a local CONNECT bridge.
+  # Keep checkout on one HTTP/1.1 connection so transient proxy resets are
+  # handled by actions/checkout's own retry loop instead of Git's low-speed abort.
+  GIT_CONFIG_COUNT: 3
+  GIT_CONFIG_KEY_0: http.version
+  GIT_CONFIG_VALUE_0: HTTP/1.1
+  GIT_CONFIG_KEY_1: http.maxRequests
+  GIT_CONFIG_VALUE_1: "1"
+  GIT_CONFIG_KEY_2: http.lowSpeedLimit
+  GIT_CONFIG_VALUE_2: "0"
