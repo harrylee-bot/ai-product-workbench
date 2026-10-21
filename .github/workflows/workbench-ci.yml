@@ -1029,6 +1029,7 @@ jobs:
         env:
           TRIVY_PLATFORM: linux/amd64
           TRIVY_IMAGE_SRC: remote
+          TRIVY_DB_REPOSITORY: ghcr.io/aquasecurity/trivy-db:2
 
       - name: Publish signed build provenance attestation
         id: provenance
