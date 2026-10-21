@@ -6,12 +6,13 @@
   "sourceLockSha256": "90a60f15a77e37003c0e477345592313b84d5327c203a6b33e49e9f43df5dad6",
   "constraints": [
     "PyJWT==2.14.0",
-    "aiohttp==3.14.3",
+    "aiohttp==3.14.4",
     "anyio==4.14.2",
+    "certifi==2026.10.19",
     "cryptography==50.0.0",
     "langgraph-sdk==0.4.4",
     "mcp==1.28.1",
-    "pillow==12.3.0",
+    "pillow==13.0.0",
     "pyasn1==0.6.4",
     "soupsieve==2.8.4",
     "urllib3==2.8.0"
