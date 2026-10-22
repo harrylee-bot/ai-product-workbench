@@ -166,7 +166,10 @@ jobs:
       - Linux
       - ARM64
       - workbench-local-build
-    timeout-minutes: 60
+    # DeerFlow and export-worker images can take several minutes to pull on
+    # the isolated ARM64 runner; leave enough room for the immutable pull,
+    # SBOM, and vulnerability database download without weakening any gate.
+    timeout-minutes: 120
     permissions:
       contents: read
       packages: write
@@ -394,6 +397,7 @@ jobs:
           severity: CRITICAL,HIGH
           exit-code: "1"
           cache: false
+          timeout: 30m
 
       - name: Install Cosign
         id: cosign_installer
