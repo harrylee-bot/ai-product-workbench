@@ -54,14 +54,20 @@ COPY integrations/deerflow/runtime-security/dependencies.json \
      integrations/deerflow/runtime-security/uv.lock \
      /opt/workbench/deerflow/runtime-security/
 COPY integrations/deerflow/source-patches/7a6c4a994a86583d2a3c056ee9d0f157d4f030c2/ /opt/workbench/deerflow/source-patch/
+# The dedicated BuildKit bridge may inherit a host proxy that returns 502 for
+# PyPI while direct egress from the isolated builder is healthy. Keep
+# dependency resolution inside the builder, but do not let that proxy turn a
+# transient network issue into a 60-minute release timeout.
 RUN --mount=from=recovered-source,source=/,target=/source-ro \
     python3 /opt/workbench/deerflow/runtime-security/prepare_source.py \
       --source-root /source-ro --destination /app/backend \
       --recovery-root /opt/workbench/deerflow/base-recovery \
       --candidate-patch-root /opt/workbench/deerflow/source-patch \
     && cd /app/backend \
-    && uv sync --locked --no-dev --python /usr/bin/python3.12 \
-    && uv pip check --python /app/backend/.venv/bin/python \
+    && env -u http_proxy -u https_proxy -u HTTP_PROXY -u HTTPS_PROXY -u all_proxy -u ALL_PROXY \
+      uv sync --locked --no-dev --python /usr/bin/python3.12 \
+    && env -u http_proxy -u https_proxy -u HTTP_PROXY -u HTTPS_PROXY -u all_proxy -u ALL_PROXY \
+      uv pip check --python /app/backend/.venv/bin/python \
     && rm -rf /tmp/uv-cache
 
 # The candidate-owned extension is embedded in the derived image. Production
