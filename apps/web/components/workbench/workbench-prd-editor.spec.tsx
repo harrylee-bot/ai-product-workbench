@@ -12,8 +12,16 @@ import { WorkbenchPrdArtifactEditor } from "./workbench-prd-editor";
 import { prdDocument } from "./workbench-prd-test-fixture";
 import { WorkbenchPrdDraftProvider } from "../../lib/workbench/prd-editor/draft-context";
 
-afterEach(() => {
-  cleanup();
+afterEach(async () => {
+  // Tiptap defers editor destruction until the next tick. Keep that teardown
+  // inside this jsdom realm instead of letting it run after Vitest removes it.
+  vi.useFakeTimers();
+  try {
+    cleanup();
+    await vi.runOnlyPendingTimersAsync();
+  } finally {
+    vi.useRealTimers();
+  }
   localStorage.clear();
   vi.restoreAllMocks();
 });

@@ -25,7 +25,17 @@ beforeEach(() => {
   mocks.toastError.mockReset();
 });
 
-afterEach(cleanup);
+afterEach(async () => {
+  // Radix restores focus in a deferred callback on unmount. Execute it before
+  // Vitest replaces the jsdom Event constructor for the next test file.
+  vi.useFakeTimers();
+  try {
+    cleanup();
+    await vi.runOnlyPendingTimersAsync();
+  } finally {
+    vi.useRealTimers();
+  }
+});
 
 describe("Workbench Share dialog", () => {
   it("traps focus, closes on Escape, and restores the opener with modal semantics", async () => {
