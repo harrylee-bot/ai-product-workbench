@@ -21,9 +21,31 @@ if command -v apk >/dev/null 2>&1; then
     alpine_packages="${alpine_packages}${alpine_packages:+ }${package}"
   done
   if [ -n "$alpine_packages" ]; then
-    # Package names are restricted by the allowlist above.
-    # shellcheck disable=SC2086
-    apk add --no-cache $alpine_packages
+    # Package names are restricted by the allowlist above. The build runner
+    # uses a bounded mirror fallback because the proxy occasionally truncates
+    # one Alpine CDN response while the same request succeeds on a mirror.
+    alpine_repositories="/etc/apk/repositories"
+    alpine_mirrors="https://dl-cdn.alpinelinux.org https://mirrors.aliyun.com https://mirrors.cloud.tencent.com"
+    alpine_attempt=0
+    alpine_installed=0
+    for alpine_mirror in $alpine_mirrors; do
+      alpine_attempt=$((alpine_attempt + 1))
+      if [ -f "$alpine_repositories" ]; then
+        sed -i "s#https://dl-cdn.alpinelinux.org#${alpine_mirror}#g; s#https://mirrors.aliyun.com#${alpine_mirror}#g; s#https://mirrors.cloud.tencent.com#${alpine_mirror}#g" "$alpine_repositories"
+      fi
+      # shellcheck disable=SC2086
+      if apk add --no-cache $alpine_packages; then
+        alpine_installed=1
+        break
+      fi
+      if [ "$alpine_attempt" -lt 3 ]; then
+        sleep "$((alpine_attempt * 2))"
+      fi
+    done
+    if [ "$alpine_installed" -ne 1 ]; then
+      echo "unable to install Alpine image packages after bounded mirror retries" >&2
+      exit 1
+    fi
   fi
 elif command -v apt-get >/dev/null 2>&1; then
   if [ -f /etc/apt/sources.list.d/debian.sources ]; then
