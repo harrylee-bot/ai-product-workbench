@@ -9,6 +9,7 @@ import { collectWorkspaceRuntimeDependencies } from "../deploy/collect-workspace
 
 const root = path.resolve(import.meta.dirname, "..");
 const helper = path.join(root, "deploy/prepare-node-image.sh");
+const timeoutExecutable = spawnSync("/bin/sh", ["-c", "command -v timeout"], { encoding: "utf8" }).stdout.trim();
 const nodeDockerfiles = [
   "apps/knowledge/Dockerfile",
   "apps/web/Dockerfile",
@@ -43,7 +44,7 @@ test("the Node image helper maps the approved Alpine package set and pins npm", 
   assert.equal(
     await readFile(log, "utf8"),
     [
-      "apk add --no-cache ca-certificates chromium coreutils font-dejavu openssl",
+      "apk add --no-cache --timeout 30 ca-certificates chromium coreutils font-dejavu openssl",
       "npm install --global --ignore-scripts --no-audit --no-fund npm@11.18.0",
       "npm cache clean --force",
       "",
@@ -57,6 +58,7 @@ for (const distribution of ["alpine", "debian"]) {
     t.after(() => rm(fixture, { recursive: true, force: true }));
     const log = path.join(fixture, "calls.log");
     const packageManager = distribution === "alpine" ? "apk" : "apt-get";
+    if (distribution === "alpine") await symlink(timeoutExecutable, path.join(fixture, "timeout"));
     for (const command of [packageManager, "npm", "sed", "rm"]) {
       const executable = path.join(fixture, command);
       await writeFile(executable, `#!/bin/sh\nprintf '%s\\n' '${command} '"$*" >> "$WORKBENCH_TEST_LOG"\n`);
@@ -83,7 +85,7 @@ for (const distribution of ["alpine", "debian"]) {
     const packageCalls = (await readFile(log, "utf8")).split("\n")
       .filter((line) => line.startsWith(`${packageManager} `));
     assert.deepEqual(packageCalls, distribution === "alpine"
-      ? ["apk add --no-cache python3 py3-lxml py3-pillow py3-virtualenv libreoffice-writer font-noto-cjk"]
+      ? ["apk add --no-cache --timeout 30 python3 py3-lxml py3-pillow py3-virtualenv libreoffice-writer font-noto-cjk"]
       : ["apt-get update", "apt-get install -y --no-install-recommends python3 python3-lxml python3-pil python3-virtualenv libreoffice-writer fonts-noto-cjk"]);
   });
 }
@@ -100,6 +102,44 @@ test("the image helper still rejects unapproved Alpine packages before installin
   });
   assert.equal(result.status, 1);
   assert.match(result.stderr, /unsupported Alpine container package: unapproved-package/u);
+});
+
+for (const recover of [true, false]) {
+  test(`a stalled Alpine package request ${recover ? "recovers on the next attempt" : "stops after three attempts without running npm"}`, async (t) => {
+    const fixture = await mkdtemp(path.join(os.tmpdir(), "workbench-apk-timeout-"));
+    t.after(() => rm(fixture, { recursive: true, force: true }));
+    const log = path.join(fixture, "calls.log");
+    await symlink(timeoutExecutable, path.join(fixture, "timeout"));
+    const commands = {
+      apk: `attempt=0\nif [ -f "$WORKBENCH_TEST_LOG.count" ]; then read -r attempt < "$WORKBENCH_TEST_LOG.count"; fi\nattempt=$((attempt + 1))\nprintf '%s\\n' "$attempt" > "$WORKBENCH_TEST_LOG.count"\nprintf 'apk %s\\n' "$attempt" >> "$WORKBENCH_TEST_LOG"\n${recover ? '[ "$attempt" -gt 1 ] && exit 0' : ':'}\nexec /bin/sleep 30`,
+      npm: 'printf "npm\\n" >> "$WORKBENCH_TEST_LOG"',
+      sleep: ':',
+      sed: ':',
+    };
+    for (const [command, body] of Object.entries(commands)) {
+      const executable = path.join(fixture, command);
+      await writeFile(executable, `#!/bin/sh\n${body}\n`);
+      await chmod(executable, 0o755);
+    }
+    const result = spawnSync("/bin/sh", [helper, "openssl"], {
+      encoding: "utf8", timeout: 12_000,
+      env: { ...process.env, PATH: fixture, WORKBENCH_APK_TIMEOUT_SECONDS: "1", WORKBENCH_TEST_LOG: log },
+    });
+    assert.equal(result.error, undefined, "the helper must return before the outer test deadline");
+    assert.equal(result.status, recover ? 0 : 1, result.stderr);
+    assert.deepEqual((await readFile(log, "utf8")).trim().split("\n"),
+      recover ? ["apk 1", "apk 2", "npm", "npm"] : ["apk 1", "apk 2", "apk 3"]);
+    if (!recover) assert.match(result.stderr, /after bounded mirror retries/u);
+  });
+}
+
+test("Alpine installation fails closed when the deadline utility is missing", async (t) => {
+  const fixture = await mkdtemp(path.join(os.tmpdir(), "workbench-missing-timeout-"));
+  t.after(() => rm(fixture, { recursive: true, force: true }));
+  await writeFile(path.join(fixture, "apk"), "#!/bin/sh\nexit 99\n", { mode: 0o755 });
+  const result = spawnSync("/bin/sh", [helper, "openssl"], { encoding: "utf8", env: { ...process.env, PATH: fixture } });
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /timeout is required/u);
 });
 
 test("the Export image includes the template and checker for deployment-time AMD64 verification", async () => {

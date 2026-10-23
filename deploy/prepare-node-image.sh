@@ -2,7 +2,7 @@
 set -eu
 
 NPM_VERSION="${WORKBENCH_CONTAINER_NPM_VERSION:-11.18.0}"
-APK_TIMEOUT_SECONDS="${WORKBENCH_APK_TIMEOUT_SECONDS:-300}"
+APK_TIMEOUT_SECONDS="${WORKBENCH_APK_TIMEOUT_SECONDS:-1800}"
 
 case "$APK_TIMEOUT_SECONDS" in
   ''|*[!0-9]*)
@@ -33,11 +33,15 @@ if command -v apk >/dev/null 2>&1; then
     alpine_packages="${alpine_packages}${alpine_packages:+ }${package}"
   done
   if [ -n "$alpine_packages" ]; then
+    if ! command -v timeout >/dev/null 2>&1; then
+      echo "timeout is required for bounded Alpine package installation" >&2
+      exit 1
+    fi
     # Package names are restricted by the allowlist above. The build runner
     # uses a bounded mirror fallback because the proxy occasionally truncates
     # one Alpine CDN response while the same request succeeds on a mirror.
     alpine_repositories="/etc/apk/repositories"
-    alpine_mirrors="https://dl-cdn.alpinelinux.org https://mirrors.aliyun.com https://mirrors.cloud.tencent.com"
+    alpine_mirrors="https://mirrors.aliyun.com https://dl-cdn.alpinelinux.org https://mirrors.cloud.tencent.com"
     alpine_attempt=0
     alpine_installed=0
     for alpine_mirror in $alpine_mirrors; do
@@ -45,20 +49,15 @@ if command -v apk >/dev/null 2>&1; then
       if [ -f "$alpine_repositories" ]; then
         sed -i "s#https://dl-cdn.alpinelinux.org#${alpine_mirror}#g; s#https://mirrors.aliyun.com#${alpine_mirror}#g; s#https://mirrors.cloud.tencent.com#${alpine_mirror}#g" "$alpine_repositories"
       fi
-      # A proxy or CDN can leave apk waiting on a response forever. Alpine's
-      # BusyBox images include timeout; the fallback keeps the helper runnable
-      # in the shell-only fixtures used by the contract tests.
-      if command -v timeout >/dev/null 2>&1; then
-        # shellcheck disable=SC2086
-        if timeout "$APK_TIMEOUT_SECONDS" apk add --no-cache $alpine_packages; then
-          alpine_installed=1
-          break
-        fi
+      # Bound both an idle connection and the complete attempt. The outer
+      # deadline also catches a response that keeps trickling data. -k is
+      # supported by Alpine BusyBox and GNU timeout and bounds TERM handling.
       # shellcheck disable=SC2086
-      elif apk add --no-cache $alpine_packages; then
+      if timeout -k 10 "$APK_TIMEOUT_SECONDS" apk add --no-cache --timeout 30 $alpine_packages; then
         alpine_installed=1
         break
       fi
+      echo "Alpine package installation attempt $alpine_attempt failed or timed out" >&2
       if [ "$alpine_attempt" -lt 3 ]; then
         sleep "$((alpine_attempt * 2))"
       fi
