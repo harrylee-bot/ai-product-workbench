@@ -1,4 +1,4 @@
-import { mkdir, readFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { chromium } from "playwright";
 import sharp from "sharp";
 import { injectWorkbenchPreviewBridge } from "../../apps/workbench-preview/dist/preview-bridge.js";
@@ -85,6 +85,7 @@ let artifactPreferenceReads = 0;
 let artifactPreferencePutsInFlight = 0;
 let maxArtifactPreferencePutsInFlight = 0;
 let delayNextArtifactPreferencePut = false;
+let artifactPreferenceResponseGate = null;
 let projectPreviewCount = 0;
 let previewTokenCount = 0;
 let runnablePreviewEnabled = false;
@@ -418,6 +419,7 @@ await context.route("**/api/v1/**", async (route) => {
           updatedAt: timestamp,
         };
         artifactPreferenceUpdates.push(structuredClone(artifactPreference));
+        if (artifactPreferenceResponseGate) await artifactPreferenceResponseGate;
         await json(route, artifactPreference, { etag: preferenceEtag(artifactPreference.revision) });
         return;
       } finally {
@@ -784,17 +786,50 @@ assert(
 );
 await waitForSelectedNodeIds(["node-1"], "selection preservation across the zoom gate");
 
-await screenToolbar.getByRole("button", { name: "More" }).click();
-await singleMoreMenu.waitFor();
-await contextMenuItem(singleMoreMenu, "Favourite").click();
-await singleMoreMenu.waitFor({ state: "detached" });
-await waitForValue(() => artifactPreferenceUpdates.length === 1, "favorite preference update");
-await screenToolbar.getByRole("button", { name: "More" }).click();
-const preferenceMoreMenu = screenToolbar.getByRole("menu");
-await preferenceMoreMenu.waitFor();
-await contextMenuItem(preferenceMoreMenu, "Like").click();
-await preferenceMoreMenu.waitFor({ state: "detached" });
-await waitForValue(() => artifactPreferenceUpdates.length === 2, "like preference update");
+let releasePreferenceResponse;
+artifactPreferenceResponseGate = new Promise((resolve) => { releasePreferenceResponse = resolve; });
+try {
+  await screenToolbar.getByRole("button", { name: "More" }).click();
+  await singleMoreMenu.waitFor();
+  await contextMenuItem(singleMoreMenu, "Favourite").click();
+  await singleMoreMenu.waitFor({ state: "detached" });
+  await waitForValue(() => artifactPreferenceUpdates.length === 1, "favorite preference update");
+  // Reopen while the response is pending, then deliver it with the menu open.
+  // The response may update the actions, but must not dismiss the user's menu.
+  await screenToolbar.getByRole("button", { name: "More" }).click();
+  const preferenceMoreMenu = screenToolbar.getByRole("menu");
+  await preferenceMoreMenu.waitFor();
+  assert(
+    await contextMenuItem(preferenceMoreMenu, "Like").isDisabled(),
+    "Preference actions must remain disabled while the favorite response is pending",
+  );
+  releasePreferenceResponse();
+  await waitForAsyncValue(
+    () => contextMenuItem(preferenceMoreMenu, "Unfavourite").isEnabled({ timeout: 250 }).catch(() => false),
+    "favorite response reflected in the reopened menu",
+  );
+  assert(
+    await screenToolbar.getByRole("button", { name: "More" }).getAttribute("aria-expanded") === "true",
+    "Saving a preference must preserve the reopened menu",
+  );
+  await contextMenuItem(preferenceMoreMenu, "Like").click();
+  await preferenceMoreMenu.waitFor({ state: "detached" });
+  await waitForValue(() => artifactPreferenceUpdates.length === 2, "like preference update");
+} catch (error) {
+  const diagnostics = await page.evaluate(() => ({
+    toolbar: document.querySelector("[data-screen-context-toolbar]")?.outerHTML ?? null,
+    selectedNodes: Array.from(document.querySelectorAll(".react-flow__node.selected"), (node) => node.getAttribute("data-id")),
+    focusedElement: document.activeElement?.outerHTML ?? null,
+  }));
+  await writeFile("output/audit/1.0.0/browser-remediation/preference-menu-failure.json", JSON.stringify({
+    ...diagnostics, artifactPreferenceUpdates, artifactPreferencePutsInFlight, consoleErrors,
+  }, null, 2));
+  await page.screenshot({ path: "output/audit/1.0.0/browser-remediation/preference-menu-failure.png" });
+  throw error;
+} finally {
+  releasePreferenceResponse?.();
+  artifactPreferenceResponseGate = null;
+}
 assert(artifactPreference.favorite === true, "The selected screen must persist its favorite state");
 assert(artifactPreference.reaction === "like", "The selected screen must persist its like reaction");
 

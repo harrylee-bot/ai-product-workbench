@@ -210,6 +210,7 @@ export function WorkbenchScreenContextToolbar({
   onToggleLike,
 }: WorkbenchScreenContextToolbarProps) {
   const [menu, setMenu] = useState<ToolbarMenu>(null);
+  const menuInstanceRef = useRef(0);
   const pendingMenuFocusRef = useRef<"first" | "last">("first");
   const actionBarRef = useRef<HTMLDivElement>(null);
   const triggerRefs = useRef<Record<OpenToolbarMenu, HTMLButtonElement | null>>({
@@ -243,6 +244,7 @@ export function WorkbenchScreenContextToolbar({
 
   const openMenu = useCallback((kind: OpenToolbarMenu, focus: "first" | "last" = "first") => {
     pendingMenuFocusRef.current = focus;
+    menuInstanceRef.current += 1;
     setMenu(kind);
   }, []);
 
@@ -250,6 +252,7 @@ export function WorkbenchScreenContextToolbar({
     setMenu((current) => {
       if (current === kind) return null;
       pendingMenuFocusRef.current = "first";
+      menuInstanceRef.current += 1;
       return kind;
     });
   }, []);
@@ -389,6 +392,7 @@ export function WorkbenchScreenContextToolbar({
               <ContextMenu
                 align="center"
                 id={menuId("more")}
+                key={`more-${menuInstanceRef.current}`}
                 labelledBy={triggerId("more")}
                 onClose={() => closeMenuAndRestoreFocus("more")}
                 onDismiss={() => setMenu(null)}
@@ -542,6 +546,7 @@ export function WorkbenchScreenContextToolbar({
               <ContextMenu
                 align="start"
                 id={menuId("align")}
+                key={`align-${menuInstanceRef.current}`}
                 labelledBy={triggerId("align")}
                 onClose={() => closeMenuAndRestoreFocus("align")}
                 onDismiss={() => setMenu(null)}
@@ -561,6 +566,7 @@ export function WorkbenchScreenContextToolbar({
               <ContextMenu
                 align="start"
                 id={menuId("distribute")}
+                key={`distribute-${menuInstanceRef.current}`}
                 labelledBy={triggerId("distribute")}
                 leftOffset={86}
                 onClose={() => closeMenuAndRestoreFocus("distribute")}
