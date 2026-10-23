@@ -2,6 +2,18 @@
 set -eu
 
 NPM_VERSION="${WORKBENCH_CONTAINER_NPM_VERSION:-11.18.0}"
+APK_TIMEOUT_SECONDS="${WORKBENCH_APK_TIMEOUT_SECONDS:-300}"
+
+case "$APK_TIMEOUT_SECONDS" in
+  ''|*[!0-9]*)
+    echo "WORKBENCH_APK_TIMEOUT_SECONDS must be a positive integer" >&2
+    exit 1
+    ;;
+esac
+if [ "$APK_TIMEOUT_SECONDS" -lt 1 ]; then
+  echo "WORKBENCH_APK_TIMEOUT_SECONDS must be a positive integer" >&2
+  exit 1
+fi
 
 if command -v apk >/dev/null 2>&1; then
   alpine_packages=""
@@ -33,8 +45,17 @@ if command -v apk >/dev/null 2>&1; then
       if [ -f "$alpine_repositories" ]; then
         sed -i "s#https://dl-cdn.alpinelinux.org#${alpine_mirror}#g; s#https://mirrors.aliyun.com#${alpine_mirror}#g; s#https://mirrors.cloud.tencent.com#${alpine_mirror}#g" "$alpine_repositories"
       fi
+      # A proxy or CDN can leave apk waiting on a response forever. Alpine's
+      # BusyBox images include timeout; the fallback keeps the helper runnable
+      # in the shell-only fixtures used by the contract tests.
+      if command -v timeout >/dev/null 2>&1; then
+        # shellcheck disable=SC2086
+        if timeout "$APK_TIMEOUT_SECONDS" apk add --no-cache $alpine_packages; then
+          alpine_installed=1
+          break
+        fi
       # shellcheck disable=SC2086
-      if apk add --no-cache $alpine_packages; then
+      elif apk add --no-cache $alpine_packages; then
         alpine_installed=1
         break
       fi
