@@ -18,6 +18,7 @@ import {
   browserNetworkFailureClass,
   browserOriginClass,
   browserSseEventEvidence,
+  clientRoutePrefetchAbortAttribution,
   connectionErrorClass,
   createScriptedNavigationAbortTracker,
   hasRequiredBrowserSseEvidence,
@@ -5028,7 +5029,7 @@ async function runRealStackBrowserScenario({
   page.on("requestfailed", (request) => {
     const url = new URL(request.url());
     const rawErrorText = request.failure()?.errorText ?? "unknown";
-    const abortAttribution = navigationAbortTracker.classifyFailure(request, rawErrorText);
+    let abortAttribution = navigationAbortTracker.classifyFailure(request, rawErrorText);
     const originClass = browserOriginClass(url.href, { previewOrigin, webOrigin });
     const failure = {
       originClass,
@@ -5040,6 +5041,14 @@ async function runRealStackBrowserScenario({
       resourceType: request.resourceType(),
       abortAttribution,
     };
+    if (abortAttribution === null && originClass === "web") {
+      abortAttribution = clientRoutePrefetchAbortAttribution({
+        currentPathClass: browserPathClass(new URL(page.url()).pathname),
+        failure,
+        navigationEvidence,
+      });
+      failure.abortAttribution = abortAttribution;
+    }
     failedRequests.push(failure);
     if (originClass === "web") {
       const sseRoute = url.pathname.match(/^\/api\/v1\/runs\/([^/]+)\/events$/u);
@@ -5507,6 +5516,7 @@ async function runRealStackBrowserScenario({
     );
     const expectedAbortCauses = new Set([
       "scripted-hard-navigation",
+      "client-route-prefetch",
       "persisted-terminal-run-sse-cleanup",
     ]);
     const unexpectedFailedRequests = failedRequests.filter((request) => (

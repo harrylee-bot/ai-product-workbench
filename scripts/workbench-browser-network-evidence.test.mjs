@@ -6,6 +6,7 @@ import {
   browserNetworkFailureClass,
   browserOriginClass,
   browserSseEventEvidence,
+  clientRoutePrefetchAbortAttribution,
   connectionErrorClass,
   createScriptedNavigationAbortTracker,
   hasRequiredBrowserSseEvidence,
@@ -30,6 +31,42 @@ test("source drift invalidates otherwise successful real-stack evidence", () => 
   assert.equal(shouldFailRealStackEvidenceForSourceDrift("passed", false), false);
   assert.equal(shouldFailRealStackEvidenceForSourceDrift("failed", true), false);
   assert.equal(shouldFailRealStackEvidenceForSourceDrift("running", true), false);
+});
+
+test("attributes only a same-route client prefetch abort with successful route evidence", () => {
+  const failure = {
+    abortAttribution: null,
+    originClass: "web",
+    method: "GET",
+    pathClass: "/projects/:id",
+    errorText: "net::ERR_ABORTED",
+    resourceType: "fetch",
+  };
+  const navigationEvidence = [{
+    actualPathClass: "/projects/:id",
+    status: 200,
+    targetPathClass: "/projects/:id",
+  }];
+  assert.deepEqual(clientRoutePrefetchAbortAttribution({
+    currentPathClass: "/projects/:id",
+    failure,
+    navigationEvidence,
+  }), { cause: "client-route-prefetch" });
+  assert.equal(clientRoutePrefetchAbortAttribution({
+    currentPathClass: "/",
+    failure,
+    navigationEvidence,
+  }), null);
+  assert.equal(clientRoutePrefetchAbortAttribution({
+    currentPathClass: "/projects/:id",
+    failure: { ...failure, resourceType: "document" },
+    navigationEvidence,
+  }), null);
+  assert.equal(clientRoutePrefetchAbortAttribution({
+    currentPathClass: "/projects/:id",
+    failure,
+    navigationEvidence: [],
+  }), null);
 });
 
 test("classifies browser origins and failures without retaining unknown locations or messages", () => {

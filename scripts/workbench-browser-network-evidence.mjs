@@ -8,6 +8,31 @@ export function shouldFailRealStackEvidenceForSourceDrift(status, sourceDrift) {
   return status === "passed" && sourceDrift === true;
 }
 
+export function clientRoutePrefetchAbortAttribution({
+  currentPathClass,
+  failure,
+  navigationEvidence,
+}) {
+  if (
+    failure?.abortAttribution !== null
+    || failure?.originClass !== "web"
+    || failure?.method !== "GET"
+    || failure?.pathClass !== "/projects/:id"
+    || failure?.errorText !== "net::ERR_ABORTED"
+    || failure?.resourceType !== "fetch"
+    || currentPathClass !== "/projects/:id"
+    || !Array.isArray(navigationEvidence)
+    || !navigationEvidence.some((entry) => (
+      entry?.actualPathClass === "/projects/:id"
+      && entry?.targetPathClass === "/projects/:id"
+      && entry?.status === 200
+    ))
+  ) {
+    return null;
+  }
+  return { cause: "client-route-prefetch" };
+}
+
 const browserSseEventNames = new Set([
   "activity.changed",
   "artifact.draft.created",
