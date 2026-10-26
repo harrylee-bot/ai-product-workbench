@@ -34,6 +34,9 @@ RUN apk upgrade --no-cache \
       python-3.12=3.12.15-r3 \
       uv=0.13.0-r0 \
       libstdc++=16.2.0-r1 \
+      libbrotlicommon1=1.2.0-r7 \
+      libbrotlidec1=1.2.0-r7 \
+      libbrotlienc1=1.2.0-r7 \
     && mkdir -p /usr/local/bin \
     && ln -sf /usr/bin/python3.12 /usr/local/bin/python \
     && ln -sf /usr/bin/python3.12 /usr/local/bin/python3
