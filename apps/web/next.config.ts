@@ -47,7 +47,6 @@ const nextConfig: NextConfig = {
       : undefined,
     prefetchInlining: true,
     cachedNavigations: true,
-    appNewScrollHandler: true,
     inlineCss: true,
   },
   async headers() {
