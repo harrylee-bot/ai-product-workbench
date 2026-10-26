@@ -133,7 +133,10 @@ test("attributes old-document cleanup until the main frame navigates", () => {
   tracker.requestStarted(preCommitRequest);
   tracker.requestStarted(navigationRequest, { navigationRequest: true });
   tracker.mainFrameNavigated();
-  tracker.requestStarted(newDocumentRequest);
+  tracker.requestStarted(newDocumentRequest, {
+    pathClass: "/projects/:id",
+    resourceType: "document",
+  });
   tracker.endNavigation(scope);
 
   assert.deepEqual(tracker.classifyFailure(existingRequest, "net::ERR_ABORTED"), {
@@ -156,6 +159,23 @@ test("attributes old-document cleanup until the main frame navigates", () => {
     null,
     "a request started by the committed new document must not be hidden",
   );
+
+  const committedRouteFetch = {};
+  const secondScope = tracker.beginNavigation({
+    kind: "goto",
+    targetPathClass: "/projects/:id",
+  });
+  tracker.mainFrameNavigated();
+  tracker.requestStarted(committedRouteFetch, {
+    pathClass: "/projects/:id",
+    resourceType: "fetch",
+  });
+  assert.deepEqual(tracker.classifyFailure(committedRouteFetch, "net::ERR_ABORTED"), {
+    cause: "scripted-hard-navigation",
+    navigationKind: "goto",
+    targetPathClass: "/projects/:id",
+  });
+  tracker.endNavigation(secondScope);
 });
 
 test("does not attribute failures outside the exact navigation abort contract", () => {

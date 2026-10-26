@@ -4975,6 +4975,8 @@ async function runRealStackBrowserScenario({
     if (originClass === "web") {
       navigationAbortTracker.requestStarted(request, {
         navigationRequest: request.isNavigationRequest(),
+        pathClass: browserPathClass(new URL(request.url()).pathname),
+        resourceType: request.resourceType(),
       });
     } else if (originClass !== "preview" && originClass !== "other-scheme") {
       unknownRequests.push({ originClass, method: request.method(), resourceType: request.resourceType() });

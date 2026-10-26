@@ -107,9 +107,14 @@ export function createScriptedNavigationAbortTracker() {
   let activeNavigation = null;
 
   return {
-    requestStarted(request, { navigationRequest = false } = {}) {
+    requestStarted(request, { navigationRequest = false, pathClass = null, resourceType = null } = {}) {
       inFlight.add(request);
-      if (activeNavigation && !activeNavigation.committed && !navigationRequest) {
+      const committedRouteFetch = activeNavigation
+        && activeNavigation.committed
+        && !navigationRequest
+        && resourceType === "fetch"
+        && pathClass === activeNavigation.targetPathClass;
+      if (activeNavigation && !navigationRequest && (!activeNavigation.committed || committedRouteFetch)) {
         abortAttributions.set(request, attributionFor(activeNavigation));
       }
     },
