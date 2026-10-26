@@ -3938,11 +3938,11 @@ async function writeSuccessfulRuntimeStream(
       }, String(index + 3));
       await delay(controlledProviderDelayMs);
     }
-    if (draftGate) await draftGate.wait(response);
     sendSse(response, "values", {
       node: "generate_prd",
       values: { messages: draftSnapshot },
     }, String(stageSnapshots.length + 3));
+    if (draftGate) await draftGate.wait(response);
     if (finalizationGate) await finalizationGate.wait(response);
     else await delay(controlledProviderDelayMs);
     sendSse(response, "values", {
