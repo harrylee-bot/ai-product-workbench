@@ -188,6 +188,7 @@ try {
     NO_COLOR: "1",
     FORCE_COLOR: "0",
     WORKBENCH_DATABASE_URL: databaseUrl,
+    WORKBENCH_E2E_DATABASE_DIAGNOSTICS: "1",
     WORKBENCH_S3_BUCKET: fakeStorageBucket,
     WORKBENCH_S3_REGION: "us-east-1",
     WORKBENCH_S3_INTERNAL_ENDPOINT: fakeRuntime.url,

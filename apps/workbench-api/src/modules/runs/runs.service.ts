@@ -186,6 +186,25 @@ export class RunsService {
           orderBy: [{ version: "desc" }, { createdAt: "desc" }],
         });
         if (!knowledgeRelease) {
+          if (process.env.WORKBENCH_E2E_DATABASE_DIAGNOSTICS === "1") {
+            const rows = await tx.$queryRaw<Array<{
+              id: string;
+              status: string;
+              projectId: string | null;
+              workspaceId: string | null;
+            }>>(Prisma.sql`
+              SELECT id, status::text AS status, project_id AS "projectId", workspace_id AS "workspaceId"
+              FROM knowledge_releases
+              ORDER BY created_at ASC
+            `);
+            console.error(JSON.stringify({
+              diagnostic: "knowledge-release-miss",
+              threadId,
+              projectId: thread.projectId,
+              workspaceId: thread.project.workspaceId,
+              releases: rows,
+            }));
+          }
           throw knowledgeRetrievalUnavailableProblem(
             "KNOWLEDGE_RELEASE_REQUIRED",
             "No ready knowledge release is available. Publish project knowledge before generating artifacts.",
