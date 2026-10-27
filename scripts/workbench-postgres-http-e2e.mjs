@@ -3940,11 +3940,11 @@ async function writeSuccessfulRuntimeStream(
       }, String(index + 3));
       await delay(controlledProviderDelayMs);
     }
+    if (draftGate) await draftGate.wait(response);
     sendSse(response, "values", {
       node: "generate_prd",
       values: { messages: draftSnapshot },
     }, String(stageSnapshots.length + 3));
-    if (draftGate) await draftGate.wait(response);
     if (finalizationGate) await finalizationGate.wait(response);
     else await delay(controlledProviderDelayMs);
     sendSse(response, "values", {
@@ -5161,8 +5161,6 @@ async function runRealStackBrowserScenario({
       page,
     });
     assertActiveGenerationVisualEvidence(visualEvidence, "prd");
-    fakeRuntime.releaseBrowserPrdDraft();
-
     await page.setViewportSize({ width: 1440, height: 900 });
     await page.emulateMedia({ reducedMotion: "no-preference" });
     const cdpSession = await context.newCDPSession(page);
@@ -5178,6 +5176,7 @@ async function runRealStackBrowserScenario({
         downloadThroughput: 5 * 1024 * 1024,
         uploadThroughput: 5 * 1024 * 1024,
       });
+      fakeRuntime.releaseBrowserPrdDraft();
       await pendingDocument.waitFor({ state: "visible", timeout: scenarioTimeoutMs });
       pendingDocumentEvidence = await capturePendingDocumentVisualEvidence({
         outputDir,
