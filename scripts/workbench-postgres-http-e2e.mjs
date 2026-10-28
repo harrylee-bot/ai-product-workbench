@@ -179,7 +179,10 @@ try {
   const webPort = runRealStackBrowser ? await reservePort() : null;
   const webOrigin = webPort === null ? "http://127.0.0.1:3000" : `http://127.0.0.1:${webPort}`;
   const previewPort = runRealStackBrowser ? await reservePort() : 4300;
-  const previewHost = "127.0.0.1";
+  // Use a distinct loopback host to model the production Web/Preview host
+  // split. Cookies are scoped by host, not port, so two ports on 127.0.0.1
+  // would create a false same-host credential leak in this browser lane.
+  const previewHost = runRealStackBrowser ? "127.0.0.2" : "127.0.0.1";
   const previewOrigin = `http://${previewHost}:${previewPort}`;
   const apiBaseUrl = `http://127.0.0.1:${apiPort}/api/v1`;
   const commonEnvironment = {
@@ -265,7 +268,7 @@ try {
 
     const preview = spawnService("workbench-preview-real-stack", process.execPath, ["apps/workbench-preview/dist/main.js"], {
       ...commonEnvironment,
-      WORKBENCH_PREVIEW_HOST: "127.0.0.1",
+      WORKBENCH_PREVIEW_HOST: runRealStackBrowser ? "0.0.0.0" : "127.0.0.1",
       WORKBENCH_PREVIEW_PORT: String(previewPort),
       WORKBENCH_PREVIEW_ORIGIN: previewOrigin,
       WORKBENCH_WEB_ORIGIN: webOrigin,
@@ -5355,9 +5358,12 @@ async function runRealStackBrowserScenario({
       secure: false,
       sameSite: "Lax",
     }]);
-    const previewCanaryCookiePresent = (await context.cookies(`${previewOrigin}/preview/canary`))
+    const previewCanaryCookiePresent = (await context.cookies(`${webOrigin}/preview/canary`))
       .some((cookie) => cookie.name === "workbench_preview_ambient_canary");
-    assert.equal(previewCanaryCookiePresent, true, "Preview credential canary cookie was not installed");
+    assert.equal(previewCanaryCookiePresent, true, "Web credential canary cookie was not installed");
+    const previewCanaryCookieLeaked = (await context.cookies(`${previewOrigin}/preview/canary`))
+      .some((cookie) => cookie.name === "workbench_preview_ambient_canary");
+    assert.equal(previewCanaryCookieLeaked, false, "Preview credential canary cookie leaked to the independent host");
 
     const previewHttpResponseStart = httpResponses.length;
     let previewEvidence = null;
