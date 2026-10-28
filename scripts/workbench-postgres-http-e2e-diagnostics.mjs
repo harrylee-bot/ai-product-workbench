@@ -67,6 +67,24 @@ const runtimeStatuses = new Set(["running", "success", "error", "interrupted", "
 const httpMethods = new Set(["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE"]);
 const storageRoles = new Set(["export", "preview", "api-canvas-visual"]);
 const mediaTypeClasses = new Set(["application", "audio", "font", "image", "model", "text", "video"]);
+const previewHttpMethods = new Set(["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE"]);
+const previewResourceTypes = new Set([
+  "document",
+  "stylesheet",
+  "image",
+  "media",
+  "font",
+  "script",
+  "texttrack",
+  "xhr",
+  "fetch",
+  "eventsource",
+  "websocket",
+  "manifest",
+  "other",
+]);
+const previewFrameRoles = new Set(["top-level", "subframe", "unknown"]);
+const previewFrameOrigins = new Set(["web", "preview", "http-loopback", "http-remote", "https-remote", "other-scheme", "invalid", "unknown"]);
 const errorClasses = new Set([
   "AbortError",
   "AssertionError",
@@ -103,6 +121,20 @@ const successfulHttpScenarioNames = [
 
 export function diagnosticErrorClass(error) {
   return enumClass(connectionErrorClass(error), errorClasses, "UnknownError");
+}
+
+export function previewRequestSecurityEvidence(requests) {
+  return arrayOf(requests).map((request) => ({
+    method: enumClass(request?.method, previewHttpMethods),
+    pathClass: previewPathClass(request?.path),
+    resourceType: enumClass(request?.resourceType, previewResourceTypes),
+    isNavigationRequest: request?.isNavigationRequest === true,
+    frameRole: enumClass(request?.frameRole, previewFrameRoles),
+    frameOrigin: enumClass(request?.frameOrigin, previewFrameOrigins),
+    headerInspection: request?.headerInspection === "complete" ? "complete" : "failed",
+    hasCookie: typeof request?.hasCookie === "boolean" ? request.hasCookie : null,
+    hasAuthorization: typeof request?.hasAuthorization === "boolean" ? request.hasAuthorization : null,
+  }));
 }
 
 export function httpDiagnosticSuccessEvidence({
@@ -202,6 +234,18 @@ function httpDiagnosticPathClass(value) {
   if (/^\/threads\/[^/]+\/runs\/stream$/u.test(pathname)) return "/threads/:id/runs/stream";
   const pathClass = httpPathClass(pathname);
   return diagnosticPathClasses.has(pathClass) ? pathClass : "unknown";
+}
+
+function previewPathClass(value) {
+  if (typeof value !== "string") return "unknown";
+  let pathname;
+  try {
+    pathname = new URL(value, "http://preview-diagnostic.invalid").pathname;
+  } catch {
+    return "unknown";
+  }
+  if (pathname === "/healthz") return "/healthz";
+  return /^\/preview\/[^/]+$/u.test(pathname) ? "/preview/:capability" : "other";
 }
 
 function storageRecordSummary(record) {
