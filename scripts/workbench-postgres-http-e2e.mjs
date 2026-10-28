@@ -5165,6 +5165,22 @@ async function runRealStackBrowserScenario({
     await page.emulateMedia({ reducedMotion: "no-preference" });
     const cdpSession = await context.newCDPSession(page);
     await cdpSession.send("Network.enable");
+    let releaseArtifactVersionReads;
+    const artifactVersionReadsReleased = new Promise((resolve) => {
+      releaseArtifactVersionReads = resolve;
+    });
+    const holdArtifactVersionRead = async (route) => {
+      const request = route.request();
+      const pathname = new URL(request.url()).pathname;
+      if (
+        request.method() === "GET"
+        && /^\/api\/v1\/artifacts\/[^/]+\/versions\/[^/]+$/u.test(pathname)
+      ) {
+        await artifactVersionReadsReleased;
+      }
+      await route.continue();
+    };
+    await page.route("**/api/v1/artifacts/*/versions/*", holdArtifactVersionRead);
     const pendingDocument = page
       .locator('[data-workbench-artifact-state="pending"][data-workbench-artifact-variant="document"]')
       .filter({ hasText: "正在细化：需求文档" });
@@ -5187,6 +5203,8 @@ async function runRealStackBrowserScenario({
       assertPendingDocumentVisualEvidence(pendingDocumentEvidence);
       console.log("[e2e] browser PRD early and refining visual matrices passed");
     } finally {
+      releaseArtifactVersionReads();
+      await page.unroute("**/api/v1/artifacts/*/versions/*", holdArtifactVersionRead);
       fakeRuntime.releaseBrowserPrdFinalization();
       await cdpSession.send("Network.emulateNetworkConditions", {
         offline: false,
