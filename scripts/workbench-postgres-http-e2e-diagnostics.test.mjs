@@ -8,6 +8,7 @@ import {
   diagnosticErrorClass,
   diagnosticFakeRuntimeState,
   httpDiagnosticSuccessEvidence,
+  previewRequestSecurityEvidence,
 } from "./workbench-postgres-http-e2e-diagnostics.mjs";
 
 const checksum = "a".repeat(64);
@@ -276,6 +277,59 @@ test("successful HTTP evidence fails closed for invalid candidate and provider v
   assert.equal(evidence.candidate.sourceTreeAtStart, "dirty");
   assert.equal(evidence.candidate.candidateBound, false);
   assert.equal(evidence.runtime.threadCreates, null);
+});
+
+test("preview request diagnostics retain only allowlisted security metadata", () => {
+  const secret = "signed-preview-token-must-not-be-retained";
+  const evidence = previewRequestSecurityEvidence([
+    {
+      method: "GET",
+      path: `/preview/${secret}`,
+      resourceType: "document",
+      isNavigationRequest: true,
+      frameRole: "subframe",
+      frameOrigin: "preview",
+      headerInspection: "complete",
+      hasCookie: false,
+      hasAuthorization: false,
+    },
+    {
+      method: "TRACE",
+      path: `https://preview.example/${secret}`,
+      resourceType: "unknown",
+      frameRole: "unknown",
+      frameOrigin: "unknown",
+      headerInspection: "failed",
+      hasCookie: true,
+      hasAuthorization: true,
+    },
+  ]);
+  const output = JSON.stringify(evidence);
+  assert.doesNotMatch(output, new RegExp(secret, "u"));
+  assert.deepEqual(evidence, [
+    {
+      method: "GET",
+      pathClass: "/preview/:capability",
+      resourceType: "document",
+      isNavigationRequest: true,
+      frameRole: "subframe",
+      frameOrigin: "preview",
+      headerInspection: "complete",
+      hasCookie: false,
+      hasAuthorization: false,
+    },
+    {
+      method: "unknown",
+      pathClass: "other",
+      resourceType: "unknown",
+      isNavigationRequest: false,
+      frameRole: "unknown",
+      frameOrigin: "unknown",
+      headerInspection: "failed",
+      hasCookie: true,
+      hasAuthorization: true,
+    },
+  ]);
 });
 
 test("the real-stack harness records error classes and delegates diagnostic serialization", async () => {

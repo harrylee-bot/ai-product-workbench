@@ -31,6 +31,7 @@ import {
   diagnosticErrorClass,
   diagnosticFakeRuntimeState,
   httpDiagnosticSuccessEvidence,
+  previewRequestSecurityEvidence,
 } from "./workbench-postgres-http-e2e-diagnostics.mjs";
 import { executeCanvasToolRequest } from "./workbench-postgres-http-e2e-canvas-client.mjs";
 import { startControlledKnowledgeFixture } from "./workbench-postgres-http-e2e-knowledge.mjs";
@@ -5363,12 +5364,27 @@ async function runRealStackBrowserScenario({
     const productPreviewRequestHeaders = [];
     const captureProductPreviewRequest = (request) => {
       if (new URL(request.url()).origin !== previewOrigin) return;
-      productPreviewRequestHeaders.push(request.allHeaders().then((headers) => ({
-        method: request.method(),
-        pathClass: browserPathClass(new URL(request.url()).pathname),
-        hasCookie: headers.cookie !== undefined,
-        hasAuthorization: headers.authorization !== undefined,
-      })));
+      productPreviewRequestHeaders.push((async () => {
+        const url = new URL(request.url());
+        const frame = request.frame();
+        let headers = null;
+        try {
+          headers = await request.allHeaders();
+        } catch {
+          // Preserve the request itself when Chromium closes it before header inspection.
+        }
+        return {
+          method: request.method(),
+          path: url.pathname,
+          resourceType: request.resourceType(),
+          isNavigationRequest: request.isNavigationRequest(),
+          frameRole: frame === page.mainFrame() ? "top-level" : frame ? "subframe" : "unknown",
+          frameOrigin: frame ? browserOriginClass(frame.url(), { previewOrigin, webOrigin }) : "unknown",
+          headerInspection: headers ? "complete" : "failed",
+          hasCookie: headers ? headers.cookie !== undefined : null,
+          hasAuthorization: headers ? headers.authorization !== undefined : null,
+        };
+      })());
     };
     page.on("request", captureProductPreviewRequest);
     try {
@@ -5397,7 +5413,7 @@ async function runRealStackBrowserScenario({
       const productPreviewRequests = await Promise.all(productPreviewRequestHeaders);
       assert.ok(productPreviewRequests.length > 0, "product Preview iframe did not request the independent origin");
       assert.ok(
-        productPreviewRequests.every((request) => !request.hasCookie && !request.hasAuthorization),
+        productPreviewRequests.every((request) => request.headerInspection === "complete" && !request.hasCookie && !request.hasAuthorization),
         "product Preview iframe carried ambient credentials",
       );
       assert.ok(
@@ -5426,7 +5442,7 @@ async function runRealStackBrowserScenario({
           cookieBlocked: productPreviewRequests.every((request) => !request.hasCookie),
           requestCount: productPreviewRequests.length,
         },
-        requests: productPreviewRequests.map(({ method, pathClass }) => ({ method, pathClass })),
+        requests: previewRequestSecurityEvidence(productPreviewRequests),
         responses: previewResponses,
       };
       evidenceManifest.previewEvidence = previewEvidence;
@@ -5439,6 +5455,10 @@ async function runRealStackBrowserScenario({
         outputDir,
         page,
         projectId,
+        previewRequestHeaders: productPreviewRequestHeaders,
+        previewFrame: page.locator("[data-project-preview] iframe[data-preview-capability]"),
+        previewOrigin,
+        webOrigin,
       });
       throw error;
     } finally {
@@ -6500,15 +6520,47 @@ async function latestBrowserExternalDelivery(projectId) {
   };
 }
 
-async function captureBrowserPreviewFailure({ bffRequests, outputDir, page, projectId }) {
+async function captureBrowserPreviewFailure({
+  bffRequests,
+  outputDir,
+  page,
+  projectId,
+  previewRequestHeaders = [],
+  previewFrame,
+  previewOrigin,
+  webOrigin,
+}) {
   const diagnostics = {
     bffRequests: bffRequests
       .filter(({ pathClass }) => /(?:\/previews|\/projects\/:id\/previews)/u.test(pathClass))
       .map(({ method, pathClass, status }) => ({ method, pathClass, status })),
     database: null,
+    requests: null,
+    iframe: null,
     screenshot: null,
     ui: null,
   };
+
+  try {
+    diagnostics.requests = previewRequestSecurityEvidence(await Promise.all(previewRequestHeaders));
+  } catch {
+    diagnostics.requests = { capture: "failed" };
+  }
+
+  try {
+    diagnostics.iframe = await previewFrame.evaluate((frame) => ({
+      credentialless: frame.getAttribute("credentialless"),
+      referrerPolicy: frame.getAttribute("referrerpolicy"),
+      sandbox: frame.getAttribute("sandbox"),
+      srcOrigin: frame.getAttribute("src") ? new URL(frame.getAttribute("src")).origin : null,
+    }));
+    diagnostics.iframe.expectedPreviewOrigin = previewOrigin;
+    diagnostics.iframe.pageOrigin = new URL(page.url()).origin;
+    diagnostics.iframe.originsMatch = diagnostics.iframe.srcOrigin === previewOrigin;
+    diagnostics.iframe.pageIsWebOrigin = diagnostics.iframe.pageOrigin === webOrigin;
+  } catch {
+    diagnostics.iframe = { capture: "failed" };
+  }
 
   try {
     diagnostics.ui = await page.locator("[data-project-preview]").evaluate((element) => {
