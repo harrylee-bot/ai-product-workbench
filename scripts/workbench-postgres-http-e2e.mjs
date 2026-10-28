@@ -5204,7 +5204,6 @@ async function runRealStackBrowserScenario({
       console.log("[e2e] browser PRD early and refining visual matrices passed");
     } finally {
       releaseArtifactVersionReads();
-      await page.unroute("**/api/v1/artifacts/*/versions/*", holdArtifactVersionRead);
       fakeRuntime.releaseBrowserPrdFinalization();
       await cdpSession.send("Network.emulateNetworkConditions", {
         offline: false,
