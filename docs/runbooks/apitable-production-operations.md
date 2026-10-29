@@ -88,6 +88,8 @@ docker compose logs --tail=100 backend-server web-server room-server
 
 `workbench-requirement-account-sync.timer` 每分钟执行一次；成员新增、密码更新、停用/移除通常在下一轮生效。同步身份用 `auth_accounts` 的 `apitable-sync` provider 和需求池用户 UUID 固定绑定，不能因邮箱变化合并其他用户。密码改变或成员失效时撤销该工作台账号的旧会话；已签发 API JWT 仍受原有 5 分钟有效期限制。删除成员不会删除其项目。两套系统各自持有登录会话，用户分别登录。
 
+若首次同步遇到同邮箱但尚未绑定的工作台本地账号，整批停止并先核验真实身份；不能仅凭邮箱自动接管已有账号。当前首次导入成员与工作台原有账号无此冲突。
+
 安装前先上线工作台密码兼容代码并验证，再运行同步及安装两个 systemd 单元；使用 `systemctl list-timers workbench-requirement-account-sync.timer` 和服务日志检查计数。停用 timer 可停止后续同步；回退代码之前必须恢复同步前的账号表备份。不要将私有备份或数据库输出复制进仓库。
 
 回归测试：`python3 -m unittest discover -s deploy -p test_sync_requirement_accounts.py`；服务器隔离 PostgreSQL 验证：`python3 scripts/e2e/requirement-account-sync-postgres.py`；上线后可显式执行 `python3 scripts/e2e/requirement-account-login-production-smoke.py`，用两个随即清理的专用账号核对已安装需求池原生密码校验器、公网工作台登录、错误密码、改密和停用后的旧会话失效。真实成员明文密码不参与测试。

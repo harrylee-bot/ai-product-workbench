@@ -93,7 +93,11 @@ def plan_sync(source, target):
         if len(matches) > 1 or (user_id and matches and matches[0]["id"] != user_id):
             raise ValueError("Email conflicts with an existing Workbench account")
         if not user_id:
-            user_id = matches[0]["id"] if matches else str(uuid.uuid4())
+            # An email alone is not authority to take over an unlinked local
+            # account. Existing identities need a separately approved mapping.
+            if matches:
+                raise ValueError("Existing Workbench email needs an approved identity mapping")
+            user_id = str(uuid.uuid4())
         if user_id in assigned or any(uid == user_id and sid != source_id for sid, uid in links.items()):
             raise ValueError("Source identities would merge into one Workbench user")
         assigned.add(user_id)

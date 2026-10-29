@@ -73,6 +73,12 @@ class SyncPlanTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             sync.plan_sync([source(sourceId="b" * 32)], target())
 
+    def test_email_alone_cannot_take_over_an_unlinked_native_account(self):
+        existing = target()
+        existing["accounts"] = [existing["accounts"][1]]
+        with self.assertRaises(ValueError):
+            sync.plan_sync([source()], existing)
+
     def test_rejects_email_collision_and_multiple_credentials(self):
         conflicting = copy.deepcopy(target())
         conflicting["users"].append(dict(id="other", email="new@example.com", name="Other"))
