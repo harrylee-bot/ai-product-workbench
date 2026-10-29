@@ -157,6 +157,13 @@ export class PrototypePatchProjectorStore {
       || artifact.screens.size === 0
       || [...artifact.screens.values()].some((screen) => screen.state.phase !== "finalized")
     ) return false;
+    return this.releaseReadyVersion(artifactVersionId);
+  }
+
+  // Call only after the authoritative ready ArtifactVersion is installed in Query.
+  releaseReadyVersion(artifactVersionId: string): boolean {
+    const artifact = this.#artifacts.get(artifactVersionId);
+    if (!artifact) return false;
     const changedKeys = [...artifact.screens.keys()].map((screenId) => (
       prototypePatchProjectionKey(artifactVersionId, screenId)
     ));

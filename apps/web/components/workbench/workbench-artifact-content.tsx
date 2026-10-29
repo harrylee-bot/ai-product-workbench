@@ -156,12 +156,17 @@ export function WorkbenchArtifactContent({
     : query.isError || !version
       ? "error"
       : "ready";
-  const readyQueryOwnsProjection = activePrototypeProjection?.phase === "finalized"
-    && activePrototypeProjection.documentChecksum !== null
+  const readyQueryOwnsProjection = activePrototypeProjection !== null
     && version?.status === "ready"
     && version.kind === "prototype"
     && version.contentMode === "inline"
-    && version.checksum === activePrototypeProjection.documentChecksum;
+    && (
+      activePrototypeProjection.phase !== "finalized"
+      || (
+        activePrototypeProjection.documentChecksum !== null
+        && version.checksum === activePrototypeProjection.documentChecksum
+      )
+    );
 
   useEffect(() => {
     onArtifactVersionStateChange?.(artifactVersionState);
@@ -190,8 +195,13 @@ export function WorkbenchArtifactContent({
       ),
       privateQuery.data,
     );
-    prototypePatchProjector.releaseFinalized(reference.artifactVersionId);
+    if (activePrototypeProjection?.phase === "finalized") {
+      prototypePatchProjector.releaseFinalized(reference.artifactVersionId);
+    } else {
+      prototypePatchProjector.releaseReadyVersion(reference.artifactVersionId);
+    }
   }, [
+    activePrototypeProjection?.phase,
     privateQuery.data,
     prototypePatchProjector,
     queryClient,
@@ -204,7 +214,20 @@ export function WorkbenchArtifactContent({
   if (activePrototypeProjection && !readyQueryOwnsProjection) {
     const projectedDocument = activePrototypeProjection.document;
     if (!projectedDocument) {
-      return <ArtifactStatus>Generating artifact...</ArtifactStatus>;
+      if (query.isError) {
+        return (
+          <ArtifactStatus onRetry={() => void query.refetch()}>
+            Artifact unavailable
+          </ArtifactStatus>
+        );
+      }
+      return (
+        <ArtifactStatus>
+          {activePrototypeProjection.phase === "finalizing"
+            ? "Loading artifact..."
+            : "Generating artifact..."}
+        </ArtifactStatus>
+      );
     }
     if (
       reference.screenId !== undefined

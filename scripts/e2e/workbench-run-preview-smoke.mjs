@@ -16,7 +16,9 @@ const origin = normalizedOrigin(
 );
 const evidenceLevel = process.env.WORKBENCH_E2E_EVIDENCE_LEVEL ?? "fixture";
 const incrementalPreview = process.env.WORKBENCH_E2E_GENERATION_PREVIEW === "1";
-let visibleSequence = incrementalPreview ? 9 : Infinity;
+const readyHandoff = process.env.WORKBENCH_E2E_READY_HANDOFF === "1";
+let checkpointFailures = 0;
+let visibleSequence = incrementalPreview || readyHandoff ? 9 : Infinity;
 const previewWaiters = new Set();
 function advancePreview(sequence) {
   visibleSequence = sequence;
@@ -313,7 +315,7 @@ try {
       assert(runSubmitted, "Run events must not be requested before SubmissionIntent submit succeeds");
       const afterSequence = Number(url.searchParams.get("afterSequence") ?? "0");
       streamCursors.push(afterSequence);
-      if (incrementalPreview && afterSequence >= visibleSequence) await new Promise((resolve) => previewWaiters.add(resolve));
+      if ((incrementalPreview || readyHandoff) && afterSequence >= visibleSequence) await new Promise((resolve) => previewWaiters.add(resolve));
       const pendingEvents = events.filter((event) => event.sequence > afterSequence && event.sequence <= visibleSequence);
       return sse(route, pendingEvents);
     }
@@ -374,7 +376,14 @@ try {
         selectedThreadId: thread.id,
         entries: runSubmitted ? [promptEntry] : [],
         board,
-        artifacts: [],
+        artifacts: readyHandoff && run.status === "succeeded" ? [{
+          id: prototypeArtifactId, projectId: project.id, kind: "prototype",
+          title: prototypeDocument.title, revision: 1,
+          currentVersion: { artifactId: prototypeArtifactId, artifactVersionId: prototypeVersionId,
+            version: 1, kind: "prototype", schemaVersion: 1, status: "ready",
+            checksum: prototypeChecksum, createdByRunId: run.id, createdAt: timestamp },
+          createdAt: timestamp, updatedAt: timestamp,
+        }] : [],
         latestRun: runSubmitted ? run : null,
       }, { etag: '"1"' });
     }
@@ -497,7 +506,7 @@ try {
         version: 1,
         kind: "prototype",
         schemaVersion: 1,
-        status: "staging",
+        status: readyHandoff && run.status === "succeeded" ? "ready" : "staging",
         checksum: prototypeChecksum,
         citations: [],
         createdByRunId: run.id,
@@ -511,6 +520,11 @@ try {
       method === "GET"
       && requestPath === `/api/v1/runs/${run.id}/artifact-drafts/${prototypeVersionId}/checkpoint`
     ) {
+      if (readyHandoff) {
+        checkpointFailures += 1;
+        return json(route, { type: "about:blank", title: "Checkpoint unavailable",
+          status: 404, code: "PROTOTYPE_PATCH_CHECKPOINT_NOT_FOUND" }, {}, 404);
+      }
       const requestedScreenId = url.searchParams.get("screenId");
       const screens = requestedScreenId === null
         ? prototypeCheckpointScreens
@@ -666,6 +680,36 @@ try {
     ].join("\n"), { cause: error });
   }
   const runSurface = page.locator("[data-workbench-project]");
+  if (readyHandoff) {
+    await waitForValue(() => checkpointFailures >= 3, page, "bounded checkpoint failures");
+    await previewNode.getByText("Generating artifact...", { exact: true }).waitFor();
+    Object.assign(run, { status: "succeeded", attempt: 1, lastEventSequence: 11, finishedAt: timestamp });
+    board = { ...board, revision: board.revision + 1, nodes: [{
+      id: "node-ready-handoff", kind: "artifact", parentNodeId: null, order: 0,
+      position: { x: 120, y: 120 }, size: { width: 390, height: 844 },
+      artifactId: prototypeArtifactId, artifactVersionId: prototypeVersionId,
+      data: { protocol: "workbench.board-node.v1", nodeType: "artifact",
+        title: prototypeDocument.title, artifactKind: "prototype", screenId: "screen-request" },
+    }] };
+    events.push(runEvent(10, "artifact.version.created", {
+      artifactId: prototypeArtifactId, artifactVersionId: prototypeVersionId, version: 1,
+    }), runEvent(11, "run.completed", { artifactCount: 1 }));
+    advancePreview(11);
+    const formalNode = page.locator('[data-id="node-ready-handoff"]');
+    await formalNode.locator('[data-canvas-visual-screen][data-canvas-screen-id="screen-request"]').waitFor({ timeout: 15_000 });
+    assert(await page.getByText("Generating artifact...", { exact: true }).count() === 0,
+      "Ready content must replace the stuck projection in the same page");
+    await page.screenshot({ path: path.join(outputDir, "ready-handoff-desktop.png"), fullPage: true });
+    await page.setViewportSize({ width: 390, height: 844 });
+    await formalNode.locator('[data-canvas-visual-screen][data-canvas-screen-id="screen-request"]').waitFor();
+    await assertNoHorizontalPageOverflow(page, "ready handoff at 390px");
+    await page.screenshot({ path: path.join(outputDir, "ready-handoff-mobile.png"), fullPage: true });
+    assert(consoleErrors.filter((error) => !error.includes("status of 404 (Not Found)")
+      && !error.includes("RuntimeStylesForWebpack")).length === 0,
+      `Unexpected browser errors: ${consoleErrors.join(" | ")}`);
+    console.log(JSON.stringify({ ok: true, evidenceLevel, mockedTransport: true,
+      readyHandoff: true, withoutReload: true, checkpointFailures, consoleErrors }));
+  } else {
   await previewNode.getByText("正在细化：采购审批页", { exact: true }).first().waitFor();
   await runSurface.getByText(prompt, { exact: true }).first().waitFor();
   await runSurface.getByText(activityLabel, { exact: true }).first().waitFor();
@@ -759,6 +803,7 @@ try {
       "output/audit/1.0.0/browser-remediation/workbench-run-preview-mobile-390x844.png",
     ],
   }, null, 2));
+  }
 } finally {
   await browser.close();
 }
@@ -873,7 +918,7 @@ async function waitForValue(predicate, page, label) {
 
 async function sse(route, streamEvents) {
   const body = [
-    incrementalPreview ? "retry: 100\n\n" : "retry: 10000\n\n",
+    incrementalPreview || readyHandoff ? "retry: 100\n\n" : "retry: 10000\n\n",
     ...streamEvents.map((event) => (
       `id: ${event.sequence}\nevent: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`
     )),

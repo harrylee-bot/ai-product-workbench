@@ -220,6 +220,50 @@ describe("Workbench Artifact content", () => {
     expect(screen.queryByRole("button", { name: "Open success" })).toBeNull();
   });
 
+  it.each(["checkpoint_loading", "recovering", "finalizing"] as const)(
+    "renders the ready version without a reload when the projection is stuck %s",
+    (phase) => {
+      const releaseReadyVersion = vi.fn();
+      mocks.usePrototypePatchProjector.mockReturnValue({ releaseReadyVersion });
+      mocks.usePrototypePatchProjection.mockReturnValue(prototypeProjection(null, phase));
+      mocks.useArtifactVersion.mockReturnValue(readyPrototypeQuery(prototypeDocument(), "a".repeat(64)));
+
+      render(<WorkbenchArtifactContent reference={{ ...reference(), screenId: "screen-home" }} />);
+
+      expect(screen.getByRole("button", { name: "Open success" })).not.toBeNull();
+      expect(screen.queryByText("Generating artifact...")).toBeNull();
+      expect(releaseReadyVersion).toHaveBeenCalledWith("version-1");
+      expect(mocks.queryClientSetData.mock.invocationCallOrder[0])
+        .toBeLessThan(releaseReadyVersion.mock.invocationCallOrder[0]!);
+    },
+  );
+
+  it("replaces the last staging document with the ready version during finalization", () => {
+    const staging = prototypeDocument();
+    const button = staging.nodes.find((node) => node.id === "button-open");
+    if (!button || button.kind !== "button") throw new Error("button fixture missing");
+    button.label = "Staging button";
+    mocks.usePrototypePatchProjection.mockReturnValue(prototypeProjection(staging, "finalizing"));
+    mocks.useArtifactVersion.mockReturnValue(readyPrototypeQuery(prototypeDocument(), "a".repeat(64)));
+
+    render(<WorkbenchArtifactContent reference={{ ...reference(), screenId: "screen-home" }} />);
+
+    expect(screen.getByRole("button", { name: "Open success" })).not.toBeNull();
+    expect(screen.queryByRole("button", { name: "Staging button" })).toBeNull();
+  });
+
+  it("offers a retry when finalization has no document and the ready query failed", async () => {
+    const refetch = vi.fn(async () => undefined);
+    mocks.useArtifactVersion.mockReturnValue({ data: undefined, isError: true, isPending: false, refetch });
+    mocks.usePrototypePatchProjection.mockReturnValue(prototypeProjection(null, "finalizing"));
+
+    render(<WorkbenchArtifactContent reference={{ ...reference(), screenId: "screen-home" }} />);
+    fireEvent.click(screen.getByRole("button", { name: "重试加载产物" }));
+
+    expect(refetch).toHaveBeenCalledOnce();
+    expect(screen.queryByText("Generating artifact...")).toBeNull();
+  });
+
   it("hands a finalized projection to Query only after the ready checksum matches", () => {
     const checkpointDocument = prototypeDocument();
     const checkpointButton = checkpointDocument.nodes.find((node) => node.id === "button-open");
@@ -1203,7 +1247,7 @@ function readyPrototypeQuery(content: PrototypeDocument, checksum: string) {
 
 function prototypeProjection(
   document: PrototypeDocument | null,
-  phase: "checkpoint_loading" | "live" | "finalized",
+  phase: "checkpoint_loading" | "recovering" | "finalizing" | "live" | "finalized",
   documentChecksum: string | null = null,
   screenId = "screen-home",
 ) {

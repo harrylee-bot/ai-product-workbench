@@ -155,6 +155,30 @@ describe("Prototype patch projector store", () => {
     expect(store.releaseFinalized("version-1")).toBe(false);
   });
 
+  it("releases an unfinished projection after the ready version is cached and ignores late checkpoints", async () => {
+    const document = prototypeEditorDocumentFixture();
+    const pending = deferred<RunPrototypePatchCheckpoint>();
+    const transport = queuedTransport([pending.promise]);
+    const store = new PrototypePatchProjectorStore({ transport });
+    store.setScope(scope);
+    store.ingest(await draftEvent(document, 1));
+    store.settleTerminal("succeeded");
+    const signal = transport.getCheckpoint.mock.calls[0]?.[2];
+    const released = vi.fn();
+    store.subscribeProjection("version-1", "screen-main", released);
+
+    expect(store.releaseFinalized("version-1")).toBe(false);
+    expect(store.releaseReadyVersion("version-1")).toBe(true);
+    expect(signal?.aborted).toBe(true);
+    expect(store.getProjectionSnapshot("version-1", "screen-main")).toBeNull();
+    expect(released).toHaveBeenCalledOnce();
+    pending.resolve(await checkpoint(document, 0, 1));
+    await flushTasks();
+    expect(store.getProjectionSnapshot("version-1", "screen-main")).toBeNull();
+    expect(transport.getCheckpoint).toHaveBeenCalledOnce();
+    expect(store.releaseReadyVersion("version-1")).toBe(false);
+  });
+
   it("finalizes from an authoritative terminal Run when the version-created event was missed", async () => {
     const staging = prototypeEditorDocumentFixture();
     const ready = structuredClone(staging);
