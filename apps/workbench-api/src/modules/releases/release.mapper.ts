@@ -182,7 +182,7 @@ export function projectPrototypeShareRelease(release: ProjectRelease, versionId:
   const artifactPins = [{ ...pin, position: 0 }];
   // Retain only the selected artifact. Frames, notes and edges may contain private project text.
   const nodes = release.boardSnapshot.nodes.filter((node) => node.artifactVersionId === versionId)
-    .map((node, index) => ({ ...node, parentNodeId: null, sortOrder: index }));
+    .map((node, index) => ({ ...node, parentNodeId: null, order: index }));
   const boardSnapshot = { ...release.boardSnapshot, nodes, edges: [] };
   const boardChecksum = canonicalSha256(boardSnapshot);
   const manifest = { ...release.manifest, board: { ...release.manifest.board, checksum: boardChecksum }, artifacts: artifactPins };

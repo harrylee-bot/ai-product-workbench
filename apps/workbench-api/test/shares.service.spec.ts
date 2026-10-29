@@ -449,6 +449,43 @@ describe("ShareGrant security and lifecycle", () => {
     expect(wire).not.toContain("blobId");
   });
 
+  it("shares real prototype canvas nodes in public order without private frames", async () => {
+    const token = `wbs_${"K".repeat(43)}`;
+    const release = pinnedRelease("prototype");
+    const board = {
+      id: "board_1", projectId: "project_1", revision: 1,
+      viewport: { x: 0, y: 0, zoom: 1 },
+      nodes: [
+        { id: "private-frame", parentNodeId: null, order: 0, kind: "frame", position: { x: 0, y: 0 },
+          size: { width: 1000, height: 1000 }, artifactId: null, artifactVersionId: null,
+          data: { protocol: "workbench.board-node.v1", nodeType: "frame", title: "PRIVATE_FRAME_TEXT", fill: null, stroke: "#000000" } },
+        ...[7, 9].map((order, index) => ({
+          id: `prototype-node-${index}`, parentNodeId: "private-frame", order, kind: "artifact",
+          position: { x: index * 400, y: 100 }, size: null, artifactId: "artifact_1", artifactVersionId: "version_1",
+          data: { protocol: "workbench.board-node.v1", nodeType: "artifact", artifactKind: "prototype", title: `Screen ${index}`, screenId: `screen-${index}` },
+        })),
+      ],
+      edges: [{ id: "private-edge", sourceNodeId: "private-frame", targetNodeId: "prototype-node-0", kind: "related", data: {} }],
+    };
+    release.boardSnapshot = board;
+    release.boardChecksum = canonicalSha256(board);
+    const manifest = release.manifest as { board: { checksum: string } };
+    manifest.board.checksum = release.boardChecksum;
+    release.manifestSha256 = canonicalSha256(manifest);
+    const before = JSON.stringify(release.boardSnapshot);
+    const service = new SharesService({ shareGrant: { findUnique: vi.fn().mockResolvedValue({ ...shareRecord(), release }) } } as never, {} as never, objectStorage() as never);
+    const { share } = await service.getPublic(token);
+    expect(share.release.boardSnapshot.nodes.map(({ id, parentNodeId, order }) => ({ id, parentNodeId, order }))).toEqual([
+      { id: "prototype-node-0", parentNodeId: null, order: 0 },
+      { id: "prototype-node-1", parentNodeId: null, order: 1 },
+    ]);
+    expect(share.release.boardSnapshot.edges).toEqual([]);
+    expect(JSON.stringify(share)).not.toContain("sortOrder");
+    expect(JSON.stringify(share)).not.toContain("PRIVATE_FRAME_TEXT");
+    expect(share.release.boardChecksum).toBe(canonicalSha256(share.release.boardSnapshot));
+    expect(JSON.stringify(release.boardSnapshot)).toBe(before);
+  });
+
   it("does not expose other artifacts in the same immutable Release", async () => {
     const token = `wbs_${"H".repeat(43)}`;
     const release = pinnedRelease("prototype");
