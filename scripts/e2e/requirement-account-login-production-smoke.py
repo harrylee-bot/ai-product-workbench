@@ -11,6 +11,7 @@ import pathlib
 import secrets
 import subprocess
 import sys
+import time
 import urllib.error
 import urllib.request
 import uuid
@@ -77,11 +78,17 @@ def request(opener, path, data=None):
         with opener.open(req, timeout=25) as response:
             return response.status, json.load(response)
     except urllib.error.HTTPError as error:
+        if error.code == 429:
+            return error.code, {"retryAfter": int(error.headers.get("Retry-After", "10"))}
         return error.code, None
 
 
 def login(opener, row, password, expected=200):
-    status, body = request(opener, "sign-in/email", {"email": row["email"], "password": password})
+    for attempt in range(3):
+        status, body = request(opener, "sign-in/email", {"email": row["email"], "password": password})
+        if status != 429:
+            break
+        time.sleep(min(61, max(1, body["retryAfter"])) + 1)
     assert status == expected
     if expected == 200:
         assert body["user"]["id"] == row["userId"]
