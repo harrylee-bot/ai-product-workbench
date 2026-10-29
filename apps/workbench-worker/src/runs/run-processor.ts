@@ -1323,6 +1323,14 @@ export class RunProcessor {
       { type: "text.delta" } | { type: "artifact.draft" } | { type: "artifact.prototype.patch" }
     >,
   ) {
+    if (event.type === "artifact.preview") {
+      const run = await tx.run.findUniqueOrThrow({ where: { id: runId }, select: { attempt: true } });
+      await this.events.append(tx, runId, "artifact.preview.updated", {
+        attempt: run.attempt,
+        preview: event.preview,
+      });
+      return;
+    }
     if (event.type === "phase") {
         await tx.run.update({
           where: { id: runId },

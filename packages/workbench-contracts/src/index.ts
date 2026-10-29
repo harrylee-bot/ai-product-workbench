@@ -13,6 +13,7 @@ export * from "./files.js";
 export * from "./finalizations.js";
 export * from "./exports.js";
 export * from "./figma-export.js";
+export * from "./generation-preview.js";
 export * from "./http-routes.js";
 export * from "./identity.js";
 export * from "./import-sources.js";

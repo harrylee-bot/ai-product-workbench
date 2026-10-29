@@ -1,5 +1,6 @@
 import type {
   ArtifactVersionReference,
+  GenerationPreview,
   Run,
   RunEvent,
   RunGenerationStage,
@@ -42,6 +43,7 @@ export type RunProjectionState = {
   artifacts: ArtifactVersionReference[];
   draftArtifacts: Record<string, RunArtifactDraftProjection>;
   draftArtifactOrder: number[];
+  generationPreviews: Record<string, GenerationPreview>;
   pendingInputs: Record<string, RunInputProjection>;
   pendingInputOrder: string[];
   failure: RunFailureProjection | null;
@@ -71,6 +73,7 @@ export function createRunProjection(run: Run): RunProjectionState {
     artifacts: [],
     draftArtifacts: {},
     draftArtifactOrder: [],
+    generationPreviews: {},
     pendingInputs: {},
     pendingInputOrder: [],
     failure: run.failure,
@@ -108,6 +111,7 @@ export function reduceRunEvent(state: RunProjectionState, event: RunEvent): RunP
         generationStageAttempt: null,
         draftArtifacts: {},
         draftArtifactOrder: [],
+        generationPreviews: {},
         failure: null,
         cancellationReason: null,
         pendingInputs: {},
@@ -184,6 +188,14 @@ export function reduceRunEvent(state: RunProjectionState, event: RunEvent): RunP
           : [...state.activityOrder, event.payload.activityId],
       };
     }
+    case "artifact.preview.updated": {
+      if (event.payload.attempt !== state.attempt) {
+        throw new RunProtocolError("Run generation preview attempt mismatch");
+      }
+      const preview = event.payload.preview;
+      if (state.draftArtifacts[String(preview.artifactIndex)]) return next;
+      return { ...next, generationPreviews: { ...state.generationPreviews, [String(preview.artifactIndex)]: preview } };
+    }
     case "artifact.draft.created": {
       if (event.payload.attempt !== state.attempt) {
         throw new RunProtocolError(
@@ -192,8 +204,11 @@ export function reduceRunEvent(state: RunProjectionState, event: RunEvent): RunP
       }
       const key = String(event.payload.artifactIndex);
       const exists = Boolean(state.draftArtifacts[key]);
+      const generationPreviews = { ...state.generationPreviews };
+      delete generationPreviews[key];
       return {
         ...next,
+        generationPreviews,
         status: state.status === "cancelling" ? "cancelling" : "running",
         draftArtifacts: {
           ...state.draftArtifacts,
@@ -221,6 +236,7 @@ export function reduceRunEvent(state: RunProjectionState, event: RunEvent): RunP
     case "run.cancelled":
       return {
         ...next,
+        generationPreviews: {},
         status: "cancelled",
         generationStage: null,
         generationStageAttempt: null,
@@ -233,6 +249,7 @@ export function reduceRunEvent(state: RunProjectionState, event: RunEvent): RunP
     case "run.completed":
       return {
         ...next,
+        generationPreviews: {},
         status: "succeeded",
         progress: 1,
         generationStage: null,
@@ -244,6 +261,7 @@ export function reduceRunEvent(state: RunProjectionState, event: RunEvent): RunP
     case "run.failed":
       return {
         ...next,
+        generationPreviews: {},
         status: "failed",
         generationStage: null,
         generationStageAttempt: null,

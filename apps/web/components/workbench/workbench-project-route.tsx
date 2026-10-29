@@ -1358,6 +1358,7 @@ function WorkbenchProjectRouteInner() {
             }}
             run={{
               draftArtifacts: workbench.runDraftArtifacts,
+              generationPreviews: workbench.runGenerationPreviews,
               generationProgress: workbench.generationProgress,
               generationStage: workbench.generationStage,
               onCancelRun: runActions.cancel,
@@ -1520,6 +1521,7 @@ type ProjectScreenProps = {
   };
   run: {
     draftArtifacts: RunArtifactDraftProjection[];
+    generationPreviews?: import("@workbench/workbench-contracts").GenerationPreview[];
     generationProgress: number;
     generationStage: RunGenerationStage | null;
     onCancelRun: () => Promise<unknown>;
@@ -1612,6 +1614,7 @@ function ProjectScreen({
   },
   run: {
     draftArtifacts,
+    generationPreviews,
     generationProgress,
     generationStage,
     onCancelRun,
@@ -4304,6 +4307,7 @@ function ProjectScreen({
       onTargetSurfaceChange: changeTargetSurface,
     },
     runPanels: {
+      generationPreviews,
       actionBusy: runActionBusy,
       actionError: runActionError,
       activities: runActivities,
