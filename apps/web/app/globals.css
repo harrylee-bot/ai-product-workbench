@@ -2018,14 +2018,137 @@ textarea:focus-visible {
   transform: scale(0.97);
 }
 
-.workbench-shell :where(button, a, span, h1, h2, h3, p, label) {
-  overflow: hidden;
-  text-overflow: ellipsis;
+.workbench-shell {
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+/* Truncation belongs on individual labels, never on document paragraphs. */
+.workbench-shell :where(h1, h2, h3, p, label) {
+  overflow-wrap: anywhere;
+}
+
+.workbench-composer-model,
+.workbench-chrome-pill {
   white-space: nowrap;
+}
+
+.workbench-home-content {
+  position: absolute;
+  inset: 72px 0 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+  padding: clamp(24px, 7vh, 80px) 20px 40px;
+}
+
+.workbench-home-content-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 24px 16px;
+  max-width: 1000px;
+  margin-inline: auto;
+}
+
+.workbench-home-announcement,
+.workbench-home-composer,
+.workbench-home-inspiration {
+  grid-column: 1 / -1;
+  min-width: 0;
+}
+
+.workbench-home-announcement { grid-row: 1; }
+.workbench-home-heading { grid-column: 1; grid-row: 2; min-width: 0; }
+.workbench-home-design-entry { grid-column: 2; grid-row: 2; }
+.workbench-home-composer { position: relative; grid-row: 3; }
+.workbench-home-inspiration { grid-row: 4; margin-top: 12px; }
+
+@media (min-width: 1024px) {
+  .workbench-home-content { left: 320px; padding-inline: 32px; }
+}
+
+@media (max-width: 639px) {
+  .workbench-home-content { padding-inline: 16px; }
+  .workbench-home-content-grid { gap: 20px 12px; }
+  .workbench-home-heading { grid-column: 1 / -1; }
+  .workbench-home-design-entry { grid-column: 1 / -1; grid-row: 3; justify-self: start; }
+  .workbench-home-composer { grid-row: 4; }
+  .workbench-home-inspiration { grid-row: 5; }
+}
+
+/* Keep all actions available without compressing icons or overflowing phones. */
+@media (max-width: 767px) {
+  [data-home-composer-toolbar],
+  [data-project-composer-toolbar] {
+    display: grid;
+    height: auto;
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+    gap: 8px 4px;
+  }
+
+  [data-home-composer-toolbar] > .flex-1,
+  [data-project-composer-toolbar] > .flex-1 { display: none; }
+
+  [data-home-composer-toolbar] > button,
+  [data-project-composer-toolbar] > button { flex-shrink: 0; justify-self: center; }
+
+  [data-home-composer-toolbar] > .workbench-composer-model,
+  [data-project-composer-toolbar] > .workbench-composer-model {
+    grid-column: 1 / 5;
+    grid-row: 2;
+    justify-self: stretch;
+    justify-content: center;
+    min-width: 0;
+    padding-inline: 8px;
+  }
+
+  [data-home-composer-toolbar] > .workbench-composer-refresh,
+  [data-project-composer-toolbar] > .workbench-composer-refresh { grid-column: 5; grid-row: 2; }
+
+  [data-home-composer-toolbar] > .workbench-composer-send,
+  [data-project-composer-toolbar] > .workbench-composer-send { grid-column: 6; grid-row: 2; }
+
+  [data-home-composer-toolbar] > .workbench-composer-style { grid-column: 6; }
+
+  [data-project-composer-toolbar] > [role="group"] {
+    grid-column: 3 / 5;
+    grid-row: 1;
+    justify-self: center;
+  }
+
+  .workbench-shell :where(input:not([type="checkbox"]):not([type="radio"]), textarea, select),
+  [data-slot="dialog-content"] :where(input:not([type="checkbox"]):not([type="radio"]), textarea, select) {
+    font-size: 16px !important;
+  }
+
+  .workbench-project-suggestions {
+    bottom: calc(var(--workbench-project-composer-height, 180px) + 28px);
+    overflow-x: auto;
+    padding-bottom: 4px;
+  }
+
+  .workbench-project-suggestions > button {
+    flex: 0 0 220px;
+  }
 }
 
 .workbench-shell .workbench-tool-button {
   overflow: visible !important;
+}
+
+@media (min-width: 768px) and (max-height: 480px) {
+  .workbench-tool-rail {
+    top: 76px !important;
+    right: auto !important;
+    bottom: auto !important;
+    left: 50% !important;
+    width: auto !important;
+    flex-direction: row !important;
+    gap: 4px !important;
+    padding: 5px 7px !important;
+    transform: translateX(-50%) !important;
+  }
 }
 
 .workbench-shell .whitespace-normal {

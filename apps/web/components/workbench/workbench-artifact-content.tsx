@@ -470,15 +470,15 @@ function PrdArtifact({ document }: { document: PrdDocument }) {
 
 function PrdArtifactV1({ document }: { document: PrdDocumentV1 }) {
   return (
-    <article className="nowheel h-full w-full overflow-auto break-words bg-[#1d1d1f] px-[38px] py-[34px] text-[#e8eaed] [overflow-wrap:anywhere]">
-      <h2 className="mb-[42px] text-[50px] font-semibold leading-none tracking-normal text-[#f1f3f4]">
+    <article className="workbench-prd-document nowheel h-full w-full overflow-auto break-words bg-[#1d1d1f] [container-type:inline-size] px-[clamp(16px,4%,38px)] py-[24px] text-[#e8eaed] [overflow-wrap:anywhere]">
+      <h2 className="mb-[28px] text-[clamp(24px,5cqi,32px)] font-semibold leading-[1.35] tracking-normal text-[#f1f3f4]">
         {document.title}
       </h2>
       {prdSectionKeys.map((key, sectionIndex) => {
         const section = document.sections[key];
         return (
-          <section className="mb-[46px] text-[22px] leading-[36px]" key={key}>
-            <h3 className="mb-[22px] text-[35px] font-semibold leading-none text-[#f1f3f4]">
+          <section className="mb-[32px] text-[16px] leading-[27px]" key={key}>
+            <h3 className="mb-[16px] text-[clamp(20px,4cqi,24px)] font-semibold leading-[1.4] text-[#f1f3f4]">
               {formatPrdSectionTitle(section.title, sectionIndex + 1)}
             </h3>
             <div className="space-y-[18px]">
@@ -495,7 +495,7 @@ function PrdArtifactV2({ document }: { document: PrdDocumentV2 }) {
   const { businessRequirements, degradation, introduction, safetyBaseline } = document.sections;
   return (
     <article
-      className="nowheel h-full w-full overflow-auto break-words bg-[#1d1d1f] px-[20px] py-[28px] text-[16px] leading-[27px] text-[#e8eaed] [overflow-wrap:anywhere] sm:px-[38px] sm:py-[34px]"
+      className="workbench-prd-document nowheel h-full w-full overflow-auto break-words bg-[#1d1d1f] [container-type:inline-size] px-[20px] py-[28px] text-[16px] leading-[27px] text-[#e8eaed] [overflow-wrap:anywhere] sm:px-[38px] sm:py-[34px]"
       data-prd-protocol={document.protocol}
     >
       <div className="mx-auto w-full max-w-[1120px]">
@@ -504,7 +504,7 @@ function PrdArtifactV2({ document }: { document: PrdDocumentV2 }) {
           data-prd-cover
         >
           <p className="mb-[14px] text-[13px] font-semibold text-[#aeb4bd]">{document.cover.workOrderName}</p>
-          <h1 className="max-w-[900px] text-[42px] font-semibold leading-[1.16] tracking-normal text-[#f1f3f4]">
+          <h1 className="max-w-[900px] text-[clamp(24px,5cqi,32px)] font-semibold leading-[1.35] tracking-normal text-[#f1f3f4]">
             {document.cover.title}
           </h1>
           <dl className="mt-[34px] flex flex-wrap gap-x-[32px] gap-y-[8px] text-[14px] text-[#c7cad0]">
@@ -516,7 +516,7 @@ function PrdArtifactV2({ document }: { document: PrdDocumentV2 }) {
         </header>
 
         <section className="border-b border-white/[0.12] py-[42px]" aria-labelledby="prd-version-history">
-          <h2 className="mb-[20px] text-[28px] font-semibold text-[#f1f3f4]" id="prd-version-history">版 本 历 史</h2>
+          <h2 className="mb-[20px] text-[24px] font-semibold text-[#f1f3f4]" id="prd-version-history">版 本 历 史</h2>
           <div className="overflow-x-auto border border-white/[0.12]">
             <table className="w-full border-collapse text-[14px] leading-[22px]">
               <thead className="bg-white/[0.05] text-[#f1f3f4]">
@@ -542,7 +542,7 @@ function PrdArtifactV2({ document }: { document: PrdDocumentV2 }) {
         </section>
 
         <nav className="border-b border-white/[0.12] py-[42px]" aria-label="需求说明书目录">
-          <h2 className="mb-[20px] text-center text-[28px] font-semibold text-[#f1f3f4]">{document.tableOfContents.title}</h2>
+          <h2 className="mb-[20px] text-center text-[24px] font-semibold text-[#f1f3f4]">{document.tableOfContents.title}</h2>
           <ol className="mx-auto grid max-w-[760px] gap-x-[40px] gap-y-[8px] text-[15px] text-[#d8dce2] sm:grid-cols-2">
             {document.tableOfContents.entries.map((entry) => (
               <li className="border-b border-white/[0.07] py-[7px]" key={entry}>
@@ -779,7 +779,7 @@ function PrdBlockView({ block }: { block: PrdBlock }) {
       return <p>{renderPrdInlines(block.content)}</p>;
     case "heading":
       return block.level === 2
-        ? <h4 className="text-[28px] font-semibold text-[#f1f3f4]">{renderPrdInlines(block.content)}</h4>
+        ? <h4 className="text-[24px] font-semibold text-[#f1f3f4]">{renderPrdInlines(block.content)}</h4>
         : <h5 className="text-[24px] font-semibold text-[#f1f3f4]">{renderPrdInlines(block.content)}</h5>;
     case "bulletList":
     case "orderedList": {
@@ -1704,7 +1704,7 @@ function PrototypeImagePlaceholder({
           className="absolute inset-0 flex min-h-0 min-w-0 items-center justify-center gap-[6px] overflow-hidden bg-[#111214]/65 p-[6px] text-center text-white"
           role="alert"
         >
-          <span className="min-w-0 truncate text-[11px] font-medium leading-[14px]">
+          <span className="min-w-0 truncate text-[12px] font-medium leading-[14px]">
             图片加载失败
           </span>
           <button

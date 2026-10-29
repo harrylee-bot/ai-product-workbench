@@ -246,12 +246,12 @@ export function HomeScreen({
         transition={{ ...viewTransition, delay: 0.04 }}
       >
         <div className="flex items-center gap-[10px]">
-          <div className="text-[29px] font-semibold leading-none tracking-normal max-sm:text-[22px]">产品工作台</div>
+          <div className="text-[24px] font-semibold leading-none tracking-normal max-sm:text-[20px]">产品工作台</div>
           <span className="rounded-full border border-white/80 px-[9px] py-[4px] text-[11px] font-semibold uppercase leading-none">
             Beta
           </span>
         </div>
-        <div className="flex items-center gap-[8px] md:hidden">
+        <div className="flex items-center gap-[8px] lg:hidden">
         <button
           aria-label="知识库"
           className="grid size-[36px] place-items-center rounded-full border border-white/[0.10] bg-[#1c1d20]/86 text-[#f1f3f4]"
@@ -264,7 +264,7 @@ export function HomeScreen({
         <button
           aria-expanded={mobileProjectsOpen}
           aria-label="项目列表"
-          className="grid size-[36px] place-items-center rounded-full border border-white/[0.10] bg-[#1c1d20]/86 text-[#f1f3f4] md:hidden"
+          className="grid size-[36px] place-items-center rounded-full border border-white/[0.10] bg-[#1c1d20]/86 text-[#f1f3f4] lg:hidden"
           onClick={(event) => {
             event.stopPropagation();
             toggleMobileProjects();
@@ -274,7 +274,7 @@ export function HomeScreen({
           {mobileProjectsOpen ? <XIcon className="size-[18px]" /> : <Grid3X3Icon className="size-[18px]" />}
         </button>
         </div>
-        <div className="hidden items-center gap-[12px] text-[#e8eaed] md:flex" data-home-more-menu onMouseDown={(event) => event.stopPropagation()}>
+        <div className="hidden items-center gap-[12px] text-[#e8eaed] lg:flex" data-home-more-menu onMouseDown={(event) => event.stopPropagation()}>
           <button
             className="flex h-[34px] items-center gap-[7px] rounded-full px-[4px] text-[14px] font-semibold hover:bg-white/[0.05]"
             onClick={() => openWorkbenchKnowledgePage()}
@@ -332,8 +332,8 @@ export function HomeScreen({
       <motion.aside
         animate={{ opacity: 1 }}
         className={cn(
-          "workbench-mobile-project-drawer fixed inset-x-0 bottom-0 top-auto z-[70] h-[calc(100vh-80px)] overflow-hidden rounded-t-[16px] border border-white/[0.08] bg-[#18191b]/96 p-[17px] shadow-[0_24px_74px_-46px_rgba(0,0,0,0.95)] backdrop-blur-2xl transition-transform duration-300 ease-[var(--ease-smooth)] md:absolute md:bottom-[12px] md:left-[12px] md:right-auto md:top-[68px] md:z-20 md:h-auto md:w-[375px] md:rounded-[16px] md:bg-[#18191b]/72 md:transition-none md:translate-y-0",
-          !mobileProjectsOpen && "pointer-events-none translate-y-full md:pointer-events-auto md:translate-y-0",
+          "workbench-mobile-project-drawer fixed inset-x-0 bottom-0 top-auto z-[70] h-[calc(100dvh-80px)] overflow-hidden rounded-t-[16px] border border-white/[0.08] bg-[#18191b]/96 p-[17px] shadow-[0_24px_74px_-46px_rgba(0,0,0,0.95)] backdrop-blur-2xl transition-transform duration-300 ease-[var(--ease-smooth)] lg:absolute lg:bottom-[12px] lg:left-[12px] lg:right-auto lg:top-[68px] lg:z-20 lg:h-auto lg:w-[288px] lg:rounded-[16px] lg:bg-[#18191b]/72 lg:transition-none lg:translate-y-0",
+          !mobileProjectsOpen && "pointer-events-none translate-y-full lg:pointer-events-auto lg:translate-y-0",
         )}
         initial={{ opacity: 0 }}
         transition={{ ...panelTransition, delay: 0.08 }}
@@ -388,93 +388,97 @@ export function HomeScreen({
         />
       </motion.aside>
 
-      <motion.button
-        animate={{ opacity: 1, y: 0 }}
-        className="absolute right-[clamp(24px,calc(100vw-1442px),59px)] top-[260px] z-20 hidden h-[33px] items-center gap-[8px] rounded-full border border-white/[0.10] bg-[#242629]/82 px-[10px] text-[13px] font-semibold text-[#f1f3f4] backdrop-blur-2xl md:flex"
-        initial={{ opacity: 0, y: 6 }}
-        disabled={busy}
-        onClick={toggleHomeStyleMenu}
-        transition={{ ...viewTransition, delay: 0.16 }}
-        type="button"
-      >
-        <PlusIcon className="size-[15px]" />
-        以您的设计为基础
-      </motion.button>
+      <div className="workbench-home-content">
+        <div className="workbench-home-content-grid">
+          <motion.button
+            animate={{ opacity: 1, y: 0 }}
+            className="workbench-home-design-entry z-20 flex min-h-[36px] items-center gap-[8px] rounded-full border border-white/[0.10] bg-[#242629]/82 px-[12px] text-[13px] font-medium text-[#f1f3f4] backdrop-blur-2xl"
+            initial={{ opacity: 0, y: 6 }}
+            disabled={busy}
+            onClick={toggleHomeStyleMenu}
+            transition={{ ...viewTransition, delay: 0.16 }}
+            type="button"
+          >
+            <PlusIcon className="size-[15px]" />
+            以您的设计为基础
+          </motion.button>
 
-      <AnimatePresence>
-        {announcementOpen && (
-        <motion.div
-          animate={{ opacity: 1, y: 0 }}
-          className="absolute left-[20px] right-[20px] top-[166px] z-20 hidden md:left-[clamp(383px,calc(100vw-1092px),409px)] md:right-[24px] md:block"
-          exit={{ opacity: 0, y: -4 }}
-          initial={{ opacity: 0, y: -4 }}
-          transition={{ ...popoverTransition, delay: 0.1 }}
-        >
-          <div className="mx-auto flex max-w-[1000px] justify-center">
-            <button
-              className="flex h-[42px] items-center gap-[8px] rounded-[5px] border border-white/[0.10] bg-[#18191b]/86 px-[32px] text-[14px] font-semibold text-[#f1f3f4] shadow-[0_18px_60px_-42px_rgba(0,0,0,0.95)] backdrop-blur-2xl"
-              onClick={dismissAnnouncement}
-              type="button"
+          <AnimatePresence>
+            {announcementOpen && (
+            <motion.div
+              animate={{ opacity: 1, y: 0 }}
+              className="workbench-home-announcement z-20"
+              exit={{ opacity: 0, y: -4 }}
+              initial={{ opacity: 0, y: -4 }}
+              transition={{ ...popoverTransition, delay: 0.1 }}
             >
-              产品工作台：<span className="text-[#8b80ff]">新版功能已更新</span>
-              <XIcon
-                className="ml-[4px] size-[15px] text-[#c7cad0]"
-              />
-            </button>
-          </div>
-        </motion.div>
-        )}
-      </AnimatePresence>
+              <div className="mx-auto flex max-w-[1000px] justify-center">
+                <button
+                  className="flex min-h-[40px] items-center gap-[8px] rounded-[5px] border border-white/[0.10] bg-[#18191b]/86 px-[14px] py-[8px] text-[13px] font-semibold text-[#f1f3f4] shadow-[0_18px_60px_-42px_rgba(0,0,0,0.95)] backdrop-blur-2xl"
+                  onClick={dismissAnnouncement}
+                  type="button"
+                >
+                  产品工作台：<span className="text-[#8b80ff]">新版功能已更新</span>
+                  <XIcon
+                    className="ml-[4px] size-[15px] text-[#c7cad0]"
+                  />
+                </button>
+              </div>
+            </motion.div>
+            )}
+          </AnimatePresence>
 
-      <motion.section
-        animate={{ opacity: 1, y: 0 }}
-        className="absolute left-[20px] right-[20px] top-[247px] z-10 md:left-[clamp(383px,calc(100vw-1092px),409px)] md:right-[24px] md:top-[247px]"
-        initial={{ opacity: 0, y: 12 }}
-        transition={{ ...viewTransition, delay: 0.12 }}
-      >
-        <div className="mx-auto max-w-[1000px] md:pr-[176px]">
-          <h1 className="whitespace-normal text-[24px] font-medium leading-[1.3] tracking-normal text-[#f1f3f4] sm:text-[28px] lg:text-[32px]">
-            欢迎使用产品工作台
-          </h1>
+          <motion.section
+            animate={{ opacity: 1, y: 0 }}
+            className="workbench-home-heading z-10"
+            initial={{ opacity: 0, y: 12 }}
+            transition={{ ...viewTransition, delay: 0.12 }}
+          >
+            <div className="min-w-0">
+              <h1 className="whitespace-normal text-[24px] font-medium leading-[1.3] tracking-normal text-[#f1f3f4] sm:text-[28px] lg:text-[32px]">
+                欢迎使用产品工作台
+              </h1>
+            </div>
+          </motion.section>
+
+          <HomeComposer
+            busy={busy}
+            designSystemCatalogFetchingNextPage={designSystemCatalogFetchingNextPage}
+            designSystemCatalogHasNextPage={designSystemCatalogHasNextPage}
+            designSystemCatalogItems={designSystemCatalogItems}
+            designSystemCatalogStatus={designSystemCatalogStatus}
+            model={homeModel}
+            modelCatalog={modelCatalog}
+            modelChoices={homeModelChoices}
+            modelMenuOpen={homeModelMenuOpen}
+            onSelectModel={selectHomeModel}
+            onCloseModel={closeHomeModelMenu}
+            onToggleModel={toggleHomeModelMenu}
+            onToggleStyle={toggleHomeStyleMenu}
+            onSubmitPrompt={onSubmitPrompt}
+            onCreateExternalSource={onCreateExternalSource}
+            importSourcesOpen={importSourcesOpen}
+            onImportSourcesOpenChange={setImportSourcesOpen}
+            onLoadMoreDesignSystems={onLoadMoreDesignSystems}
+            onRetryDesignSystems={onRetryDesignSystems}
+            onRetryModels={onRetryModels}
+            prompt={prompt}
+            setPrompt={setPrompt}
+            styleMenuOpen={homeStyleMenuOpen}
+          />
+          <InspirationStrip
+            onSelectTemplate={(template) => {
+              setPrompt(template.prompt);
+            }}
+            rotationRequest={inspirationRotationRequest}
+          />
         </div>
-      </motion.section>
-
-      <HomeComposer
-        busy={busy}
-        designSystemCatalogFetchingNextPage={designSystemCatalogFetchingNextPage}
-        designSystemCatalogHasNextPage={designSystemCatalogHasNextPage}
-        designSystemCatalogItems={designSystemCatalogItems}
-        designSystemCatalogStatus={designSystemCatalogStatus}
-        model={homeModel}
-        modelCatalog={modelCatalog}
-        modelChoices={homeModelChoices}
-        modelMenuOpen={homeModelMenuOpen}
-        onSelectModel={selectHomeModel}
-        onCloseModel={closeHomeModelMenu}
-        onToggleModel={toggleHomeModelMenu}
-        onToggleStyle={toggleHomeStyleMenu}
-        onSubmitPrompt={onSubmitPrompt}
-        onCreateExternalSource={onCreateExternalSource}
-        importSourcesOpen={importSourcesOpen}
-        onImportSourcesOpenChange={setImportSourcesOpen}
-        onLoadMoreDesignSystems={onLoadMoreDesignSystems}
-        onRetryDesignSystems={onRetryDesignSystems}
-        onRetryModels={onRetryModels}
-        prompt={prompt}
-        setPrompt={setPrompt}
-        styleMenuOpen={homeStyleMenuOpen}
-      />
-      <InspirationStrip
-        onSelectTemplate={(template) => {
-          setPrompt(template.prompt);
-        }}
-        rotationRequest={inspirationRotationRequest}
-      />
+      </div>
       <AnimatePresence>
         {newsletterOpen && (
         <motion.div
           animate={{ opacity: 1, y: 0 }}
-          className="absolute bottom-[10px] left-[20px] right-[20px] z-50 max-w-[852px] rounded-[18px] border border-white/[0.14] bg-[#6b6d70]/92 px-[28px] py-[20px] shadow-[0_22px_80px_-30px_rgba(0,0,0,0.95)] backdrop-blur-xl md:left-[383px] md:right-[24px] md:mx-auto"
+          className="absolute bottom-[10px] left-[20px] right-[20px] z-50 max-w-[852px] rounded-[18px] border border-white/[0.14] bg-[#6b6d70]/92 px-[28px] py-[20px] shadow-[0_22px_80px_-30px_rgba(0,0,0,0.95)] backdrop-blur-xl lg:left-[383px] lg:right-[24px] lg:mx-auto"
           exit={{ opacity: 0, y: 10 }}
           initial={{ opacity: 0, y: 10 }}
           transition={{ ...viewTransition, delay: 0.2 }}
@@ -753,7 +757,7 @@ function HomeComposer({
     <motion.div
       animate={{ opacity: 1, y: 0 }}
       className={cn(
-        "absolute left-[20px] right-[20px] top-[331px] md:left-[clamp(383px,calc(100vw-1092px),409px)] md:right-[24px] md:top-[329px]",
+        "workbench-home-composer",
         modelMenuOpen ? "z-[60]" : "z-30",
       )}
       data-home-composer
@@ -790,7 +794,7 @@ function HomeComposer({
           <textarea
             aria-label="提示词"
             className={cn(
-              "workbench-composer-field relative z-10 h-[128px] w-full resize-none bg-transparent text-[18px] leading-[28px] outline-none placeholder:text-[#a5a9b0]",
+              "workbench-composer-field relative z-10 h-[128px] w-full resize-none bg-transparent text-[16px] leading-[26px] outline-none placeholder:text-[#a5a9b0]",
               selectedFiles.length > 0 && "pt-[42px]",
             )}
             onBlur={() => setComposerFocused(false)}
@@ -815,7 +819,7 @@ function HomeComposer({
             ref={attachments.fileInputRef}
             type="file"
           />
-          <div className="relative z-10 mt-[18px] flex h-[36px] items-center gap-[12px] text-[#d7d9de]">
+          <div className="relative z-10 mt-[18px] items-center text-[#d7d9de] md:flex md:h-[36px] md:gap-[12px]" data-home-composer-toolbar>
             <button
               aria-expanded={composerPanel === "attachments"}
               aria-haspopup="menu"
@@ -848,7 +852,7 @@ function HomeComposer({
               aria-haspopup="menu"
               aria-label={`样式: ${selectedStyle.label}`}
               className={cn(
-                "workbench-composer-tool grid size-[36px] place-items-center rounded-full text-[#d7d9de] hover:bg-white/[0.06]",
+                "workbench-composer-tool workbench-composer-style grid size-[36px] place-items-center rounded-full text-[#d7d9de] hover:bg-white/[0.06]",
                 styleMenuOpen && "bg-[#707378] text-[#202124]",
               )}
               onClick={() => {
@@ -864,7 +868,7 @@ function HomeComposer({
               aria-expanded={modelMenuOpen}
               aria-haspopup="menu"
               aria-label="选择生成类型"
-              className="workbench-composer-model flex h-[36px] items-center gap-[7px] rounded-full bg-[#2b2d31]/86 px-[14px] text-[13px] font-semibold text-[#f1f3f4]"
+              className="workbench-composer-model flex h-[36px] items-center gap-[7px] rounded-full bg-[#2b2d31]/86 px-[8px] text-[13px] font-semibold text-[#f1f3f4] md:px-[14px]"
               disabled={modelCatalog.status !== "ready"}
               onClick={() => {
                 setComposerPanel(null);
@@ -878,7 +882,7 @@ function HomeComposer({
             </button>
             <button
               aria-label="换一个示例提示"
-              className="workbench-composer-tool grid size-[36px] place-items-center rounded-full text-[#d7d9de] hover:bg-white/[0.06] disabled:cursor-not-allowed disabled:opacity-40"
+              className="workbench-composer-tool workbench-composer-refresh grid size-[36px] place-items-center rounded-full text-[#d7d9de] hover:bg-white/[0.06] disabled:cursor-not-allowed disabled:opacity-40"
               disabled={composerBusy}
               onClick={refreshSuggestion}
               type="button"
@@ -965,7 +969,7 @@ function HomeComposer({
             />
           )}
         </AnimatePresence>
-        <div className="mt-[28px] flex gap-[9px] overflow-hidden">
+        <div className="mt-[20px] flex gap-[9px] overflow-x-auto pb-[4px]">
           {visibleSuggestions.map((suggestion) => (
             <button
               className="h-[32px] max-w-[282px] shrink-0 truncate rounded-full border border-white/[0.12] bg-[#28292c]/90 px-[13px] text-[13px] font-semibold text-[#f0f1f3] transition-colors hover:bg-white/[0.08]"
@@ -1034,12 +1038,12 @@ export function InspirationStrip({
   return (
     <motion.section
       animate={{ opacity: 1, y: 0 }}
-      className="absolute left-[20px] right-[20px] top-[674px] z-20 [@media(max-height:820px)]:hidden md:left-[423px] md:right-[24px] md:top-[676px]"
+      className="workbench-home-inspiration z-20"
       initial={{ opacity: 0, y: 18 }}
       transition={{ ...viewTransition, delay: 0.22 }}
     >
       <div className="mb-[18px] flex items-center justify-between">
-        <h2 className="text-[27px] font-semibold leading-none text-[#f1f3f4]">需要灵感?</h2>
+        <h2 className="text-[20px] font-semibold leading-[1.4] text-[#f1f3f4]">需要灵感?</h2>
         <div className="flex items-center gap-[22px] pr-[18px] text-[#d7d9de]">
           <button
             aria-label="上一组灵感"
@@ -1059,7 +1063,7 @@ export function InspirationStrip({
           </button>
         </div>
       </div>
-      <div className="flex gap-[12px] overflow-hidden">
+      <div className="flex gap-[12px] overflow-x-auto pb-[8px]">
         <AnimatePresence mode="popLayout">
           {orderedCards.map((card, index) => (
           <motion.article

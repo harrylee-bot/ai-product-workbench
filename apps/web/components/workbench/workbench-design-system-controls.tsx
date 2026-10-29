@@ -150,18 +150,18 @@ export function HomeDesignSystemMenu({
     <motion.div
       animate={{ opacity: 1, y: 0 }}
       aria-busy={status === "loading"}
-      className="absolute right-[220px] top-[-161px] z-[70] w-[298px] origin-bottom-right overflow-hidden rounded-[10px] border border-white/[0.08] bg-[#18191b]/96 p-[14px] text-[#e8eaed] shadow-[0_24px_90px_-42px_rgba(0,0,0,0.95)] backdrop-blur-2xl"
+      className="absolute right-0 bottom-[160px] md:bottom-[112px] z-[70] w-[298px] max-w-full origin-bottom-right overflow-hidden rounded-[10px] border border-white/[0.08] bg-[#18191b]/96 p-[14px] text-[#e8eaed] shadow-[0_24px_90px_-42px_rgba(0,0,0,0.95)] backdrop-blur-2xl"
       exit={{ opacity: 0, scale: 0.992, y: 4 }}
       initial={{ opacity: 0, scale: 0.992, y: 6 }}
       role="menu"
-      style={{ maxHeight: 430, overflowY: "auto" }}
+      style={{ maxHeight: "min(430px, calc(100dvh - 160px))", overflowY: "auto" }}
       transition={popoverTransition}
     >
       <div className="mb-[10px] flex items-center gap-[9px] text-[14px] font-semibold text-[#f1f3f4]">
         <PaletteIcon className="size-[16px] text-[#d8dce2]" />
         DESIGN.md
       </div>
-      <p className="mb-[12px] whitespace-normal text-[12px] leading-[17px] text-[#aeb3bb]">
+      <p className="mb-[12px] whitespace-normal text-[13px] leading-[17px] text-[#aeb3bb]">
         选择或导入一套设计系统后，产品工作台会根据您的偏好自动生成界面。
       </p>
       <button
@@ -177,7 +177,7 @@ export function HomeDesignSystemMenu({
         以您的设计为基础
         {selected.provision?.kind === "create" && <CheckCircle2Icon className="ml-auto size-[15px]" />}
       </button>
-      <div className="mb-[6px] px-[6px] text-[12px] font-semibold text-[#9aa0a6]">工作区设计系统</div>
+      <div className="mb-[6px] px-[6px] text-[13px] font-semibold text-[#9aa0a6]">工作区设计系统</div>
       <DesignStyleMenuItem
         compact={false}
         onSelect={onSelect}
@@ -186,7 +186,7 @@ export function HomeDesignSystemMenu({
       />
       {status === "loading" && <DesignSystemMenuSkeleton />}
       {status === "error" && (
-        <div className="px-[6px] py-[10px] text-[12px] text-[#c8cbd0]">
+        <div className="px-[6px] py-[10px] text-[13px] text-[#c8cbd0]">
           <div className="mb-[8px]">设计系统加载失败</div>
           <button
             className="flex h-[30px] items-center gap-[7px] rounded-[8px] border border-white/[0.10] px-[9px] font-semibold hover:bg-white/[0.06]"
@@ -199,7 +199,7 @@ export function HomeDesignSystemMenu({
         </div>
       )}
       {status === "ready" && catalogItems.length === 0 && (
-        <div className="px-[6px] py-[10px] text-[12px] text-[#9aa0a6]">工作区暂无可用设计系统</div>
+        <div className="px-[6px] py-[10px] text-[13px] text-[#9aa0a6]">工作区暂无可用设计系统</div>
       )}
       {status === "ready" && catalogItems.map((item) => (
         <DesignStyleMenuItem
@@ -213,7 +213,7 @@ export function HomeDesignSystemMenu({
       ))}
       {status === "ready" && hasNextPage && (
         <button
-          className="mt-[6px] flex h-[32px] w-full items-center justify-center rounded-[8px] border border-white/[0.08] text-[12px] font-semibold text-[#c8cbd0] hover:bg-white/[0.06] disabled:opacity-50"
+          className="mt-[6px] flex h-[32px] w-full items-center justify-center rounded-[8px] border border-white/[0.08] text-[13px] font-semibold text-[#c8cbd0] hover:bg-white/[0.06] disabled:opacity-50"
           disabled={fetchingNextPage}
           onClick={onLoadMore}
           type="button"
@@ -251,22 +251,22 @@ export function ProjectDesignSystemMenu({
   return (
     <motion.div
       animate={{ opacity: 1, y: 0 }}
-      className="absolute bottom-[48px] right-[102px] w-[300px] overflow-hidden rounded-[10px] border border-white/[0.08] bg-[#18191b]/94 p-[12px] text-[#e8eaed] shadow-[0_24px_90px_-42px_rgba(0,0,0,0.95)] backdrop-blur-2xl"
+      className="absolute bottom-[78px] right-0 w-[300px] max-w-full md:bottom-[48px] md:right-[102px] overflow-hidden rounded-[10px] border border-white/[0.08] bg-[#18191b]/94 p-[12px] text-[#e8eaed] shadow-[0_24px_90px_-42px_rgba(0,0,0,0.95)] backdrop-blur-2xl"
       exit={{ opacity: 0, y: 3 }}
       initial={{ opacity: 0, y: 5 }}
       role="menu"
-      style={{ maxHeight: 430, overflowY: "auto" }}
+      style={{ maxHeight: "min(430px, calc(100dvh - 160px))", overflowY: "auto" }}
       transition={popoverTransition}
     >
       <div className="mb-[10px] flex items-center gap-[8px] text-[13px] font-semibold text-[#f1f3f4]">
         <FileTextIcon className="size-[15px] text-[#d8dce2]" />
         DESIGN.md
       </div>
-      <p className="mb-[12px] whitespace-normal text-[12px] leading-[17px] text-[#aeb3bb]">
+      <p className="mb-[12px] whitespace-normal text-[13px] leading-[17px] text-[#aeb3bb]">
         选择或导入一套设计系统后，产品工作台会根据您的偏好自动生成界面。
       </p>
       <button
-        className="mb-[12px] flex h-[34px] w-full items-center gap-[9px] rounded-[8px] px-[6px] text-left text-[12px] font-semibold text-[#f1f3f4] hover:bg-white/[0.06]"
+        className="mb-[12px] flex h-[34px] w-full items-center gap-[9px] rounded-[8px] px-[6px] text-left text-[13px] font-semibold text-[#f1f3f4] hover:bg-white/[0.06]"
         onClick={onCreateCustom}
         role="menuitem"
         type="button"
@@ -274,12 +274,12 @@ export function ProjectDesignSystemMenu({
         <PlusIcon className="size-[15px] shrink-0" />
         以您的设计为基础
       </button>
-      <div className="mb-[6px] px-[6px] text-[12px] font-semibold text-[#9aa0a6]">产品工作台样式</div>
+      <div className="mb-[6px] px-[6px] text-[13px] font-semibold text-[#9aa0a6]">产品工作台样式</div>
       {options.map((selection) => (
         <button
           aria-pressed={selected.key === selection.key}
           className={cn(
-            "flex h-[32px] w-full items-center gap-[9px] rounded-[8px] px-[6px] text-left text-[12px] font-semibold text-[#f1f3f4] hover:bg-white/[0.06]",
+            "flex h-[32px] w-full items-center gap-[9px] rounded-[8px] px-[6px] text-left text-[13px] font-semibold text-[#f1f3f4] hover:bg-white/[0.06]",
             selected.key === selection.key && "bg-white/[0.10]",
           )}
           key={selection.key}
@@ -294,7 +294,7 @@ export function ProjectDesignSystemMenu({
       ))}
       {presetStatus === "loading" && <DesignSystemMenuSkeleton />}
       {presetStatus === "error" && (
-        <div className="px-[6px] py-[8px] text-[12px] text-[#c8cbd0]">
+        <div className="px-[6px] py-[8px] text-[13px] text-[#c8cbd0]">
           <div className="mb-[7px]">产品工作台样式加载失败</div>
           <button
             className="flex h-[30px] items-center gap-[7px] rounded-[8px] border border-white/[0.10] px-[9px] font-semibold hover:bg-white/[0.06]"
@@ -307,11 +307,11 @@ export function ProjectDesignSystemMenu({
         </div>
       )}
       {presetStatus === "ready" && presetSelections.length === 0 && (
-        <div className="px-[6px] py-[8px] text-[12px] text-[#9aa0a6]">暂无可用产品工作台样式</div>
+        <div className="px-[6px] py-[8px] text-[13px] text-[#9aa0a6]">暂无可用产品工作台样式</div>
       )}
-      <div className="mb-[6px] mt-[10px] px-[6px] text-[12px] font-semibold text-[#9aa0a6]">项目设计系统</div>
+      <div className="mb-[6px] mt-[10px] px-[6px] text-[13px] font-semibold text-[#9aa0a6]">项目设计系统</div>
       {projectSelections.length === 0 && (
-        <div className="px-[6px] py-[8px] text-[12px] text-[#9aa0a6]">此项目暂无可用设计系统</div>
+        <div className="px-[6px] py-[8px] text-[13px] text-[#9aa0a6]">此项目暂无可用设计系统</div>
       )}
       {projectSelections.map((selection, index) => (
         <DesignStyleMenuItem
@@ -358,7 +358,7 @@ export function CustomDesignSystemDialog({
 
   return (
     <Dialog onOpenChange={(nextOpen) => !busy && onOpenChange(nextOpen)} open={open}>
-      <DialogContent className="max-h-[calc(100vh-32px)] w-[560px] max-w-[calc(100vw-32px)] overflow-y-auto border-white/[0.10] bg-[#18191b]/98 text-[#f1f3f4]">
+      <DialogContent className="max-h-[calc(100dvh-32px)] w-[560px] max-w-[calc(100vw-32px)] overflow-y-auto border-white/[0.10] bg-[#18191b]/98 text-[#f1f3f4]">
         <DialogHeader>
           <DialogTitle>创建项目设计系统</DialogTitle>
         </DialogHeader>
@@ -378,7 +378,7 @@ export function CustomDesignSystemDialog({
                 <button
                   aria-pressed={activeColor === field.name}
                   className={cn(
-                    "flex min-w-0 items-center gap-[7px] rounded-[8px] border border-white/[0.08] bg-white/[0.03] px-[8px] py-[7px] text-left text-[11px] text-[#c8cbd0]",
+                    "flex min-w-0 items-center gap-[7px] rounded-[8px] border border-white/[0.08] bg-white/[0.03] px-[8px] py-[7px] text-left text-[12px] text-[#c8cbd0]",
                     activeColor === field.name && "border-white/[0.22] bg-white/[0.08] text-[#f1f3f4]",
                   )}
                   key={field.name}
@@ -410,7 +410,7 @@ export function CustomDesignSystemDialog({
                   {...form.register(activeColor)}
                 />
                 {form.formState.errors[activeColor]?.message && (
-                  <span className="text-[11px] text-[#f3a6ad]">{form.formState.errors[activeColor]?.message}</span>
+                  <span className="text-[12px] text-[#f3a6ad]">{form.formState.errors[activeColor]?.message}</span>
                 )}
               </div>
             </div>
@@ -466,7 +466,7 @@ function DesignStyleMenuItem({
       aria-pressed={selected}
       className={cn(
         "flex w-full items-center gap-[9px] rounded-[8px] px-[6px] text-left font-semibold text-[#f1f3f4] hover:bg-white/[0.06]",
-        compact ? "min-h-[32px] text-[12px]" : "min-h-[38px] text-[13px]",
+        compact ? "min-h-[32px] text-[13px]" : "min-h-[38px] text-[13px]",
         selected && "bg-white/[0.10]",
       )}
       onClick={() => onSelect(selection)}
@@ -478,7 +478,7 @@ function DesignStyleMenuItem({
         style={{ background: selection.swatch }}
       />
       <span className="min-w-0 flex-1 truncate">{selection.label}</span>
-      {meta && <span className="max-w-[106px] shrink-0 truncate text-[10px] font-medium text-[#8f949c]">{meta}</span>}
+      {meta && <span className="max-w-[106px] shrink-0 truncate text-[12px] font-medium text-[#8f949c]">{meta}</span>}
       {selected && <CheckCircle2Icon className="size-[14px] shrink-0" />}
     </button>
   );
@@ -507,10 +507,10 @@ function FormField({
   label: string;
 }) {
   return (
-    <label className="grid gap-[7px] text-[12px] font-medium text-[#d8dce2]">
+    <label className="grid gap-[7px] text-[13px] font-medium text-[#d8dce2]">
       {label}
       {children}
-      {error && <span className="text-[11px] text-[#f3a6ad]">{error}</span>}
+      {error && <span className="text-[12px] text-[#f3a6ad]">{error}</span>}
     </label>
   );
 }

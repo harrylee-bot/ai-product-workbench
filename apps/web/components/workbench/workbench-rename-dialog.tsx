@@ -137,7 +137,7 @@ export function RenameProjectDialog({
           value={title}
         />
         <div
-          className="mt-[8px] min-h-[17px] text-[11px] text-[#f2a7a7]"
+          className="mt-[8px] min-h-[17px] text-[12px] text-[#f2a7a7]"
           id={errorId}
           role={failed ? "alert" : undefined}
         >

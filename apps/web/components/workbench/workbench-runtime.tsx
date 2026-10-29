@@ -301,7 +301,7 @@ function WorkbenchCommittedRoute({
 
   return (
     <main
-      className="workbench-shell relative h-screen w-screen overflow-hidden bg-[var(--workbench-bg)] text-[#e5e2e3]"
+      className="workbench-shell relative h-dvh w-full overflow-hidden bg-[var(--workbench-bg)] text-[#e5e2e3]"
       data-workbench-stage
     >
       <WorkbenchScene

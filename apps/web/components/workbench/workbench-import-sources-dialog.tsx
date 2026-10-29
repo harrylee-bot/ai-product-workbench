@@ -206,21 +206,21 @@ export function WorkbenchImportSourcesDialog({
   return (
     <Dialog onOpenChange={onOpenChange} open={open}>
       <DialogContent
-        className="w-[min(760px,calc(100vw-28px))] max-w-none gap-0 overflow-hidden border-white/[0.12] bg-[#17181b]/96 p-0 text-[#e7e9ed] shadow-[0_28px_110px_-42px_rgba(0,0,0,0.98)]"
+        className="w-[min(760px,calc(100vw-28px))] max-w-none max-h-[calc(100dvh-32px)] flex flex-col gap-0 overflow-hidden max-sm:max-h-dvh border-white/[0.12] bg-[#17181b]/96 p-0 text-[#e7e9ed] shadow-[0_28px_110px_-42px_rgba(0,0,0,0.98)]"
         data-import-sources-dialog
       >
-        <DialogHeader className="border-b border-white/[0.08] px-[24px] pb-[18px] pt-[22px]">
+        <DialogHeader className="shrink-0 border-b border-white/[0.08] px-[20px] pr-[52px] pb-[18px] pt-[22px]">
           <DialogTitle className="text-[18px] font-semibold text-[#f1f3f4]">添加来源</DialogTitle>
-          <DialogDescription className="max-w-[620px] text-[12px] leading-[18px] text-[#aeb3bb]">
+          <DialogDescription className="max-w-[620px] text-[13px] leading-[18px] text-[#aeb3bb]">
             {projectId
               ? "来源会固定为本项目的一次输入快照，只有状态为“可用”的来源才能参与生成。"
               : "确认外部来源后会创建一个真实项目，来源完成后可继续生成。"}
           </DialogDescription>
         </DialogHeader>
 
-        <div className="grid min-h-[430px] grid-cols-1 md:grid-cols-[220px_1fr]">
+        <div className="grid min-h-0 overflow-y-auto grid-cols-1 md:grid-cols-[220px_1fr]">
           <div className="border-b border-white/[0.08] bg-[#141518]/72 p-[14px] md:border-b-0 md:border-r">
-            <div className="mb-[12px] text-[11px] font-semibold uppercase tracking-[0.08em] text-[#858b94]">
+            <div className="mb-[12px] text-[12px] font-semibold uppercase tracking-[0.08em] text-[#858b94]">
               新来源
             </div>
             <div className="grid grid-cols-2 gap-[6px] md:grid-cols-1">
@@ -231,11 +231,11 @@ export function WorkbenchImportSourcesDialog({
             </div>
             {projectId && (
               <div className="mt-[22px] border-t border-white/[0.08] pt-[18px]">
-                <div className="mb-[10px] flex items-center justify-between text-[11px] font-semibold uppercase tracking-[0.08em] text-[#858b94]">
+                <div className="mb-[10px] flex items-center justify-between text-[12px] font-semibold uppercase tracking-[0.08em] text-[#858b94]">
                   <span>项目来源</span>
                   <span className="tabular-nums text-[#6f747c]">{sources.length}</span>
                 </div>
-                <p className="text-[12px] leading-[18px] text-[#9ca1aa]">
+                <p className="text-[13px] leading-[18px] text-[#9ca1aa]">
                   选择可用来源后，它会作为下一次生成的固定输入。
                 </p>
               </div>
@@ -292,7 +292,7 @@ export function WorkbenchImportSourcesDialog({
             {projectId && (
               <div className="mt-[25px] border-t border-white/[0.08] pt-[17px]">
                 <div className="mb-[10px] flex items-center justify-between">
-                  <div className="flex items-center gap-[7px] text-[12px] font-semibold text-[#d7d9de]">
+                  <div className="flex items-center gap-[7px] text-[13px] font-semibold text-[#d7d9de]">
                     <CircleDashedIcon className="size-[14px] text-[#9ca1aa]" />
                     已添加来源
                   </div>
@@ -325,8 +325,8 @@ export function WorkbenchImportSourcesDialog({
           </div>
         </div>
 
-        <DialogFooter className="border-t border-white/[0.08] px-[24px] py-[14px]">
-          <div className="mr-auto flex items-center gap-[7px] text-[11px] text-[#858b94]">
+        <DialogFooter className="shrink-0 border-t border-white/[0.08] px-[20px] py-[14px]">
+          <div className="mr-auto flex items-center gap-[7px] text-[12px] text-[#858b94]">
             <InfoIcon className="size-[13px]" />
             {projectId ? `${selectedSourceIds.length} 个来源将用于下一次生成` : "文件会随当前提示一起上传"}
           </div>
@@ -351,7 +351,7 @@ function ModeButton({
     <button
       aria-pressed={active}
       className={cn(
-        "flex h-[38px] items-center gap-[9px] rounded-[9px] px-[10px] text-left text-[12px] font-semibold transition-colors duration-150",
+        "flex h-[38px] items-center gap-[9px] rounded-[9px] px-[10px] text-left text-[13px] font-semibold transition-colors duration-150",
         active ? "bg-white/[0.11] text-[#f1f3f4]" : "text-[#b5bac2] hover:bg-white/[0.06] hover:text-[#e8eaed]",
       )}
       onClick={onClick}
@@ -376,7 +376,7 @@ function FileSourceForm({
         <UploadIcon className="size-[18px]" />
       </div>
       <h3 className="mt-[13px] text-[15px] font-semibold text-[#f1f3f4]">上传文件</h3>
-      <p className="mx-auto mt-[6px] max-w-[390px] text-[12px] leading-[18px] text-[#9ca1aa]">
+      <p className="mx-auto mt-[6px] max-w-[390px] text-[13px] leading-[18px] text-[#9ca1aa]">
         支持图片、文档、代码和 DESIGN.md，文件会在提交时校验并固定为来源。
       </p>
       <button
@@ -502,7 +502,7 @@ function ExternalSourceForm({
           value={label}
         />
       </Field>
-      <p className="mt-[16px] flex items-start gap-[7px] text-[11px] leading-[17px] text-[#858b94]">
+      <p className="mt-[16px] flex items-start gap-[7px] text-[12px] leading-[17px] text-[#858b94]">
         <InfoIcon className="mt-px size-[13px] shrink-0" />
         添加后会先显示“处理中”。外部内容只有在后台完成安全校验和快照固定后才会变为“可用”。
       </p>
@@ -523,7 +523,7 @@ function Field({
 }) {
   return (
     <label className={cn("block", className)}>
-      <span className="mb-[7px] flex items-center gap-[7px] text-[11px] font-semibold text-[#c4c7ce]">
+      <span className="mb-[7px] flex items-center gap-[7px] text-[12px] font-semibold text-[#c4c7ce]">
         {label}
         {hint && <span className="font-normal text-[#777d86]">{hint}</span>}
       </span>
@@ -560,18 +560,18 @@ function SourceList({
   sources: readonly ImportSource[];
 }) {
   if (isLoading) {
-    return <div className="flex h-[68px] items-center justify-center text-[12px] text-[#858b94]"><LoaderCircleIcon className="mr-[7px] size-[15px] animate-spin" />正在读取来源</div>;
+    return <div className="flex h-[68px] items-center justify-center text-[13px] text-[#858b94]"><LoaderCircleIcon className="mr-[7px] size-[15px] animate-spin" />正在读取来源</div>;
   }
   if (error) {
     return (
-      <div className="flex items-center justify-between rounded-[9px] border border-[#e27676]/25 bg-[#4a2226]/25 px-[12px] py-[10px] text-[12px] text-[#f1b3b3]">
+      <div className="flex items-center justify-between rounded-[9px] border border-[#e27676]/25 bg-[#4a2226]/25 px-[12px] py-[10px] text-[13px] text-[#f1b3b3]">
         <span>来源列表读取失败</span>
         <button className="rounded-full px-[9px] py-[4px] text-[#f6d2d2] hover:bg-white/[0.08]" onClick={onRetry} type="button">重试</button>
       </div>
     );
   }
   if (sources.length === 0 && deletedSources.length === 0) {
-    return <div className="rounded-[9px] border border-white/[0.08] bg-white/[0.02] px-[12px] py-[13px] text-[12px] text-[#858b94]">还没有项目来源</div>;
+    return <div className="rounded-[9px] border border-white/[0.08] bg-white/[0.02] px-[12px] py-[13px] text-[13px] text-[#858b94]">还没有项目来源</div>;
   }
   const deletedSourceIds = new Set(deletedSources.map((source) => source.id));
   const visibleSources = [
@@ -653,8 +653,8 @@ function SourceRow({
         </button>
         <div className="grid size-[27px] shrink-0 place-items-center rounded-[7px] bg-white/[0.07] text-[#cfcaff]"><Icon className="size-[14px]" /></div>
         <button className="min-w-0 flex-1 text-left" onClick={() => onDetail(source.id)} type="button">
-          <span className="block truncate text-[12px] font-semibold text-[#e8eaed]">{importSourceLabel(source)}</span>
-          <span className="mt-[2px] block truncate text-[10px] text-[#858b94]">{importSourceKindLabels[source.kind]}</span>
+          <span className="block truncate text-[13px] font-semibold text-[#e8eaed]">{importSourceLabel(source)}</span>
+          <span className="mt-[2px] block truncate text-[12px] text-[#858b94]">{importSourceKindLabels[source.kind]}</span>
         </button>
         <StatusPill status={source.status} />
         <button
@@ -680,7 +680,7 @@ function SourceRow({
         )}
       </div>
       {source.failure && (
-        <div className="mt-[7px] flex items-start gap-[6px] pl-[33px] text-[10px] leading-[15px] text-[#f1b3b3]"><AlertCircleIcon className="mt-px size-[12px] shrink-0" />{source.failure.message}</div>
+        <div className="mt-[7px] flex items-start gap-[6px] pl-[33px] text-[12px] leading-[15px] text-[#f1b3b3]"><AlertCircleIcon className="mt-px size-[12px] shrink-0" />{source.failure.message}</div>
       )}
     </motion.div>
   );
@@ -691,7 +691,7 @@ function StatusPill({ status }: { status: ImportSource["status"] }) {
   const ready = status === "ready";
   return (
     <span className={cn(
-      "inline-flex h-[22px] shrink-0 items-center gap-[5px] rounded-full border px-[7px] text-[10px] font-semibold",
+      "inline-flex h-[22px] shrink-0 items-center gap-[5px] rounded-full border px-[7px] text-[12px] font-semibold",
       ready ? "border-[#9bc9a8]/25 bg-[#284130]/50 text-[#b6e2bf]" : status === "failed" ? "border-[#e27676]/25 bg-[#4a2226]/35 text-[#f1b3b3]" : status === "deleted" ? "border-white/[0.10] bg-white/[0.04] text-[#858b94]" : "border-[#d4bf7c]/25 bg-[#5c4d23]/30 text-[#e8d89c]",
     )}>
       {pending && <LoaderCircleIcon className="size-[11px] animate-spin" />}
@@ -713,7 +713,7 @@ function SourceDetail({
   return (
     <motion.div
       animate={{ opacity: 1, y: 0 }}
-      className="mt-[10px] rounded-[10px] border border-white/[0.10] bg-[#111216]/88 px-[12px] py-[11px] text-[11px] text-[#aeb3bb]"
+      className="mt-[10px] rounded-[10px] border border-white/[0.10] bg-[#111216]/88 px-[12px] py-[11px] text-[12px] text-[#aeb3bb]"
       exit={{ opacity: 0, y: -4 }}
       initial={{ opacity: 0, y: -4 }}
       transition={{ duration: 0.15, ease: [0.4, 0, 0.2, 1] }}

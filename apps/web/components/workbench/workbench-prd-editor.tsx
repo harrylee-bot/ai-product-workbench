@@ -114,10 +114,10 @@ export function WorkbenchPrdArtifactEditor({
   }, [document, editor, reference, store]);
   return (
     <article
-      className="relative h-full w-full overflow-auto break-words bg-[#1d1d1f] px-[38px] py-[34px] text-[#e8eaed] [overflow-wrap:anywhere]"
+      className="relative h-full w-full overflow-auto break-words bg-[#1d1d1f] px-[clamp(16px,4%,38px)] py-[24px] [container-type:inline-size] text-[#e8eaed] [overflow-wrap:anywhere]"
       data-prd-editor="active"
     >
-      <div className="absolute right-[38px] top-[34px] z-10 flex items-center gap-[8px] bg-[#1d1d1f] py-[2px]">
+      <div className="sticky top-0 z-10 mb-[24px] ml-auto flex w-fit max-w-full flex-wrap items-center justify-end gap-[8px] bg-[#1d1d1f] py-[4px]">
         {dirty && <span className="text-[12px] text-[#d6cfff]">未保存草稿</span>}
         {error && <span className="max-w-[220px] text-[12px] text-[#f2a6a6]">{error}</span>}
         <button

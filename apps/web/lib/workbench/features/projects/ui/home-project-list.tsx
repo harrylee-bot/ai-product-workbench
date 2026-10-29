@@ -88,7 +88,7 @@ export function HomeProjectList({
 
           return (
             <section className="pb-[20px]" key={group}>
-              <h2 className="mb-[12px] text-[20px] font-semibold leading-[28px] text-[#cfd3da]">{group}</h2>
+              <h2 className="mb-[12px] text-[16px] font-semibold leading-[24px] text-[#cfd3da]">{group}</h2>
               <div className="space-y-[10px]">
                 {groupProjects.map((project) => (
                   <div className="group/project relative" key={project.id}>
@@ -99,10 +99,10 @@ export function HomeProjectList({
                     >
                       <HomeProjectThumbnail project={project} />
                       <span className="min-w-0 flex-1">
-                        <span className="block max-w-[230px] truncate whitespace-normal text-[15px] font-semibold leading-[20px] text-[#f1f3f4]">
+                        <span className="line-clamp-2 break-words text-[14px] font-semibold leading-[20px] text-[#f1f3f4]">
                           {project.title}
                         </span>
-                        <span className="mt-[4px] flex items-center gap-[7px] text-[11px] font-medium text-[#aeb4bd] group-hover:text-[#d8dce2]">
+                        <span className="mt-[4px] flex items-center gap-[7px] text-[12px] font-medium text-[#aeb4bd] group-hover:text-[#d8dce2]">
                           <MonitorIcon className="size-[12px]" />
                           {project.date}
                           {project.shared && (

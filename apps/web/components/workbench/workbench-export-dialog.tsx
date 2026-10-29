@@ -242,7 +242,7 @@ export function ExportDialog({
                     </span>
                     <span className="min-w-0">
                       <span className="block truncate text-[13px] font-semibold text-[#f1f3f4]">{selectionTitle}</span>
-                      <span className="mt-[1px] block text-[10px] text-[#aeb3bb]">{selectionMeta}</span>
+                      <span className="mt-[1px] block text-[12px] text-[#aeb3bb]">{selectionMeta}</span>
                     </span>
                   </div>
                   <div className="flex h-[60px] gap-[8px] rounded-[8px] bg-[#101114] p-[6px]">
@@ -250,10 +250,10 @@ export function ExportDialog({
                     <span className="flex-1 rounded-[6px] bg-[linear-gradient(135deg,#8274ef,#62d1df)]" />
                   </div>
                 </div>
-                <div className="mb-[8px] text-[11px] font-semibold text-[#aeb3bb]">导出至</div>
+                <div className="mb-[8px] text-[12px] font-semibold text-[#aeb3bb]">导出至</div>
                 {Boolean(capabilitiesError) && (
                   <button
-                    className="mb-[8px] flex h-[30px] w-full items-center justify-center gap-[7px] rounded-[8px] border border-[#ef8c8c]/25 bg-[#ef8c8c]/10 text-[10px] font-semibold text-[#f2a7a7] hover:bg-[#ef8c8c]/15"
+                    className="mb-[8px] flex h-[30px] w-full items-center justify-center gap-[7px] rounded-[8px] border border-[#ef8c8c]/25 bg-[#ef8c8c]/10 text-[12px] font-semibold text-[#f2a7a7] hover:bg-[#ef8c8c]/15"
                     onClick={() => void onRetryCapabilities().catch(() => undefined)}
                     type="button"
                   >
@@ -289,8 +289,8 @@ export function ExportDialog({
                           <Icon className="size-[14px]" />
                         </span>
                         <span className="min-w-0 flex-1">
-                          <span className="block truncate text-[12px] font-semibold">{target.label}</span>
-                          <span className="mt-[1px] block truncate text-[10px] text-[#aeb3bb]" title={availability.reason ?? target.meta}>{availability.reason ?? target.meta}</span>
+                          <span className="block truncate text-[13px] font-semibold">{target.label}</span>
+                          <span className="mt-[1px] block truncate text-[12px] text-[#aeb3bb]" title={availability.reason ?? target.meta}>{availability.reason ?? target.meta}</span>
                         </span>
                         {active && <CheckCircle2Icon className="size-[14px] shrink-0 text-[#d8dce2]" />}
                       </button>
@@ -299,8 +299,8 @@ export function ExportDialog({
                 </div>
                 {externalDeliveryMatches && activeExternalDelivery?.status === "pending_confirmation" && (
                   <div className="mt-[10px] border-t border-white/[0.10] pt-[10px]" data-external-delivery-confirmation>
-                    <div className="text-[11px] font-semibold text-[#e8eaed]">即将传输</div>
-                    <div className="mt-[6px] space-y-[3px] text-[10px] leading-[15px] text-[#aeb3bb]">
+                    <div className="text-[12px] font-semibold text-[#e8eaed]">即将传输</div>
+                    <div className="mt-[6px] space-y-[3px] text-[12px] leading-[15px] text-[#aeb3bb]">
                       <div>{externalSelectionSummary(activeExternalDelivery.payload.selection)}</div>
                       <div>{activeExternalDelivery.payload.format} / {activeExternalDelivery.payload.packaging}</div>
                       <div>{activeExternalDelivery.payload.output.fileName}</div>
@@ -311,18 +311,18 @@ export function ExportDialog({
               </div>
               <div className="border-t border-white/[0.12] p-[12px]">
                 {activeExportMatches && activeExport.failure?.code === "EXPORT_OUTPUT_BLOB_NOT_READABLE" && (
-                  <p className="mb-[8px] text-[11px] leading-[16px] text-[#f2a7a7]" role="alert">
+                  <p className="mb-[8px] text-[12px] leading-[16px] text-[#f2a7a7]" role="alert">
                     文件已不可用，请重新导出。
                   </p>
                 )}
                 {downloadFailed && !busy && (
-                  <p className="mb-[8px] text-[11px] leading-[16px] text-[#f2a7a7]" role="alert">
+                  <p className="mb-[8px] text-[12px] leading-[16px] text-[#f2a7a7]" role="alert">
                     文件下载失败，请重试。
                   </p>
                 )}
                 <button
                   aria-busy={busy}
-                  className="h-[32px] w-full rounded-full bg-[#c9b3ff] text-[12px] font-semibold text-[#241832]"
+                  className="h-[32px] w-full rounded-full bg-[#c9b3ff] text-[13px] font-semibold text-[#241832]"
                   disabled={busy || ((!exportRunning && !exportSucceeded && !externalDeliveryMatches)
                     && (!selectedAvailability.available || capabilitiesPending)) || (externalDeliveryMatches && (
                     activeExternalDelivery?.status === "succeeded"
@@ -363,26 +363,26 @@ export function ExportDialog({
                   <span className="block size-[32px] rounded-[7px] border-2 border-dashed border-[#d8dce2]" />
                 </div>
                 <h3 className="mb-[10px] text-[16px] font-semibold text-[#f1f3f4]">未选择任何界面</h3>
-                <p className="mb-[49px] whitespace-normal text-[12px] leading-[18px] text-[#9aa0a6]">
+                <p className="mb-[49px] whitespace-normal text-[13px] leading-[18px] text-[#9aa0a6]">
                   在画布上选择界面以查看导出选项。
                 </p>
-                <div className="text-[10px] text-[#8f949c]">
+                <div className="text-[12px] text-[#8f949c]">
                   <div className="mb-[20px]">快捷提示</div>
                   <button
-                    className="mb-[5px] text-[12px] font-semibold text-[#f1f3f4]"
+                    className="mb-[5px] text-[13px] font-semibold text-[#f1f3f4]"
                     onClick={onSelectAll}
                     type="button"
                   >
                     全选
                   </button>
                   <div>
-                    按 <span className="rounded-[5px] border border-white/[0.12] bg-[#2b2c30] px-[6px] py-[2px] font-mono text-[11px] text-[#d8dce2]">⌘ + A</span>
+                    按 <span className="rounded-[5px] border border-white/[0.12] bg-[#2b2c30] px-[6px] py-[2px] font-mono text-[12px] text-[#d8dce2]">⌘ + A</span>
                   </div>
                 </div>
               </div>
               <div className="border-t border-white/[0.12] p-[12px]">
                 <button
-                  className="h-[32px] w-full rounded-full border border-[#313234] bg-[#242625] text-[12px] font-semibold text-[#969799]"
+                  className="h-[32px] w-full rounded-full border border-[#313234] bg-[#242625] text-[13px] font-semibold text-[#969799]"
                   disabled
                   type="button"
                 >

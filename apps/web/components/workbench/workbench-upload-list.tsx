@@ -86,8 +86,8 @@ export function WorkbenchUploadList({
       transition={panelTransition}
     >
       <div className="flex h-[34px] items-center border-b border-white/[0.08] px-[12px]">
-        <span className="text-[12px] font-semibold text-[#f1f3f4]">文件处理</span>
-        <span className="ml-auto text-[11px] tabular-nums text-[#9da2aa]">
+        <span className="text-[13px] font-semibold text-[#f1f3f4]">文件处理</span>
+        <span className="ml-auto text-[12px] tabular-nums text-[#9da2aa]">
           {uploads.length + (recovery?.files.length ?? 0)}
         </span>
       </div>
@@ -149,10 +149,10 @@ function SubmissionRecoveryRow({
         )}
       />
       <div className="min-w-0">
-        <div className="text-[12px] font-medium text-[#eef0f3]">恢复未完成的提交</div>
+        <div className="text-[13px] font-medium text-[#eef0f3]">恢复未完成的提交</div>
         <div
           className={cn(
-            "mt-[3px] text-[10px] leading-[14px] text-[#9fa4ac]",
+            "mt-[3px] text-[12px] leading-[14px] text-[#9fa4ac]",
             recovery.files.length === 0 && "truncate",
           )}
           title={recovery.error ?? recovery.message}
@@ -163,7 +163,7 @@ function SubmissionRecoveryRow({
           <div className="mt-[6px] space-y-[2px]">
             {recovery.files.map((file) => (
               <div
-                className="flex min-w-0 items-center gap-[6px] text-[10px] text-[#b9bec6]"
+                className="flex min-w-0 items-center gap-[6px] text-[12px] text-[#b9bec6]"
                 key={file.position}
               >
                 <span className="min-w-0 flex-1 truncate" title={file.fileName}>{file.fileName}</span>
@@ -270,12 +270,12 @@ function UploadRow({
       />
       <div className="min-w-0">
         <div className="flex items-center gap-[8px]">
-          <span className="min-w-0 flex-1 truncate text-[12px] font-medium text-[#eef0f3]" title={upload.fileName}>
+          <span className="min-w-0 flex-1 truncate text-[13px] font-medium text-[#eef0f3]" title={upload.fileName}>
             {upload.fileName}
           </span>
-          <span className="shrink-0 text-[10px] tabular-nums text-[#a9aeb6]">{upload.progress}%</span>
+          <span className="shrink-0 text-[12px] tabular-nums text-[#a9aeb6]">{upload.progress}%</span>
         </div>
-        <div className="mt-[3px] truncate text-[10px] leading-[14px] text-[#9fa4ac]" title={upload.error?.message}>
+        <div className="mt-[3px] truncate text-[12px] leading-[14px] text-[#9fa4ac]" title={upload.error?.message}>
           {upload.error?.message ?? upload.statusLabel}
         </div>
         <div

@@ -251,7 +251,7 @@ export function WorkbenchArtifactVersionDialog({
                 <HistoryIcon className="size-[17px] text-[#b8b0ff]" />
                 版本记录
               </DialogTitle>
-              <DialogDescription className="mt-[6px] text-[12px] text-[#9da2aa]">
+              <DialogDescription className="mt-[6px] text-[13px] text-[#9da2aa]">
                 画布固定在 v{pinnedVersionNumber ?? "-"}。选择历史版本只会预览，固定操作才会更新 Board。
               </DialogDescription>
             </div>
@@ -309,7 +309,7 @@ export function WorkbenchArtifactVersionDialog({
         </div>
 
         <DialogFooter className="min-h-[76px] items-center justify-between gap-[16px] border-t border-white/[0.08] bg-[#18191b] px-[18px] py-[10px] max-sm:flex-col max-sm:items-stretch">
-          <div className="min-w-0 flex-1 space-y-[5px] text-[11px] leading-[16px] text-[#9da2aa]">
+          <div className="min-w-0 flex-1 space-y-[5px] text-[12px] leading-[16px] text-[#9da2aa]">
             <div>
               {pinError ? <span className="text-[#f2a7a7]">{pinError}</span>
                 : !canPin ? "当前角色只能预览版本"
@@ -332,7 +332,7 @@ export function WorkbenchArtifactVersionDialog({
             )}
           </div>
           <button
-            className="flex h-[34px] shrink-0 items-center justify-center gap-[8px] rounded-[6px] bg-[#e8eaed] px-[15px] text-[12px] font-semibold text-[#202124] transition hover:bg-white disabled:cursor-not-allowed disabled:opacity-45"
+            className="flex h-[34px] shrink-0 items-center justify-center gap-[8px] rounded-[6px] bg-[#e8eaed] px-[15px] text-[13px] font-semibold text-[#202124] transition hover:bg-white disabled:cursor-not-allowed disabled:opacity-45"
             disabled={!canSubmitPin}
             onClick={() => void handlePin()}
             type="button"
@@ -481,7 +481,7 @@ function VersionViewButton({
     <button
       aria-pressed={active}
       className={cn(
-        "h-[24px] rounded-[4px] px-[12px] text-[11px] font-semibold transition-colors",
+        "h-[24px] rounded-[4px] px-[12px] text-[12px] font-semibold transition-colors",
         active ? "bg-[#4b4d52] text-white" : "text-[#aeb3bb] hover:text-white",
       )}
       onClick={onClick}
@@ -545,18 +545,18 @@ function VersionList({
             type="button"
           >
             <span className={cn(
-              "grid size-[20px] shrink-0 place-items-center rounded-full border text-[10px]",
+              "grid size-[20px] shrink-0 place-items-center rounded-full border text-[12px]",
               selected ? "border-[#8f83ff] bg-[#7467f6]/20 text-[#ddd9ff]" : "border-white/[0.10] text-[#858b93]",
             )}>
               {selected ? <CheckIcon className="size-[11px]" /> : version.version}
             </span>
             <span className="min-w-0 flex-1">
-              <span className="flex items-center gap-[5px] text-[12px] font-semibold">
+              <span className="flex items-center gap-[5px] text-[13px] font-semibold">
                 v{version.version}
                 {version.artifactVersionId === pinnedVersionId && <VersionBadge>画布</VersionBadge>}
                 {version.artifactVersionId === currentVersionId && <VersionBadge>当前</VersionBadge>}
               </span>
-              <span className="mt-[2px] block truncate text-[10px] text-[#838991]">
+              <span className="mt-[2px] block truncate text-[12px] text-[#838991]">
                 {version.createdAt.slice(0, 10)} · {version.status}
               </span>
             </span>
@@ -565,7 +565,7 @@ function VersionList({
       })}
       {hasNextPage && (
         <button
-          className="w-full px-[8px] py-[8px] text-center text-[10px] leading-[14px] text-[#9f98ff] transition-colors hover:text-white disabled:cursor-wait disabled:text-[#777d85]"
+          className="w-full px-[8px] py-[8px] text-center text-[12px] leading-[14px] text-[#9f98ff] transition-colors hover:text-white disabled:cursor-wait disabled:text-[#777d85]"
           disabled={loadingMore}
           onClick={onLoadMore}
           type="button"
@@ -582,7 +582,7 @@ function VersionList({
 }
 
 function VersionBadge({ children }: { children: string }) {
-  return <span className="rounded-[3px] bg-white/[0.08] px-[4px] py-[1px] text-[9px] text-[#b8bdc5]">{children}</span>;
+  return <span className="rounded-[3px] bg-white/[0.08] px-[4px] py-[1px] text-[12px] text-[#b8bdc5]">{children}</span>;
 }
 
 function VersionPreview({
@@ -630,11 +630,11 @@ function VersionComparison({
   return (
     <div className="grid h-full min-h-0 grid-rows-[auto_minmax(0,1fr)]">
       <div className="border-b border-white/[0.08] bg-[#17181b] px-[12px] py-[8px]">
-        <div className="grid grid-cols-2 gap-[12px] text-[10px] font-semibold text-[#aeb3bb]">
+        <div className="grid grid-cols-2 gap-[12px] text-[12px] font-semibold text-[#aeb3bb]">
           <span>{beforeLabel}</span>
           <span>{afterLabel}</span>
         </div>
-        {note && <p className="mt-[5px] text-[10px] leading-[14px] text-[#d1b680]">{note}</p>}
+        {note && <p className="mt-[5px] text-[12px] leading-[14px] text-[#d1b680]">{note}</p>}
       </div>
       <WorkbenchArtifactVersionMerge after={after.value.text} before={before.value.text} />
     </div>
@@ -643,7 +643,7 @@ function VersionComparison({
 
 function VersionState({ children, icon }: { children: React.ReactNode; icon?: React.ReactNode }) {
   return (
-    <div className="flex h-full min-h-[80px] flex-col items-center justify-center gap-[8px] px-[20px] text-center text-[12px] text-[#969ca4]">
+    <div className="flex h-full min-h-[80px] flex-col items-center justify-center gap-[8px] px-[20px] text-center text-[13px] text-[#969ca4]">
       {icon}
       {children}
     </div>

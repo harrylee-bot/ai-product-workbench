@@ -51,7 +51,7 @@ export function WorkbenchAccountMenu({
         <div className="min-w-0 px-[10px] py-[8px]">
           <div className="truncate text-[13px] font-semibold">{displayName}</div>
           {user?.email && (
-            <div className="mt-[3px] truncate text-[11px] text-[#9aa0a6]">{user.email}</div>
+            <div className="mt-[3px] truncate text-[12px] text-[#9aa0a6]">{user.email}</div>
           )}
         </div>
         <DropdownMenuSeparator className="bg-white/[0.08]" />

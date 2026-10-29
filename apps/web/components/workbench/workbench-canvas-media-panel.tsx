@@ -89,7 +89,7 @@ export function WorkbenchCanvasMediaPanel({
         </span>
         <span className="min-w-0 flex-1">
           <strong className="block text-[14px] font-semibold leading-[18px]">Media</strong>
-          <span className="block truncate text-[12px] leading-[17px] text-[#aeb3bb]">
+          <span className="block truncate text-[13px] leading-[17px] text-[#aeb3bb]">
             {file?.name ?? "图片素材"}
           </span>
         </span>
@@ -148,7 +148,7 @@ export function WorkbenchCanvasMediaPanel({
             <button
               aria-pressed={aspect === item.value}
               className={cn(
-                "h-[24px] rounded-full px-[9px] text-[10px] font-semibold transition-colors",
+                "h-[24px] rounded-full px-[9px] text-[12px] font-semibold transition-colors",
                 aspect === item.value ? "bg-[#4a4c51] text-white" : "text-[#9da2aa] hover:text-white",
               )}
               disabled={busy || !file}
@@ -161,7 +161,7 @@ export function WorkbenchCanvasMediaPanel({
           ))}
         </div>
         <label className="flex min-w-0 flex-1 items-center gap-[7px]">
-          <span className="text-[10px] font-medium text-[#9da2aa]">Zoom</span>
+          <span className="text-[12px] font-medium text-[#9da2aa]">Zoom</span>
           <input
             aria-label="Zoom"
             className="h-[3px] min-w-0 flex-1 accent-[#c9b3ff]"
@@ -177,7 +177,7 @@ export function WorkbenchCanvasMediaPanel({
       </div>
 
       {(localError || error) && (
-        <p className="mt-[10px] rounded-[10px] border border-[#d96868]/35 bg-[#6e2525]/18 px-[10px] py-[8px] text-[11px] leading-[16px] text-[#f0aaaa]" role="alert">
+        <p className="mt-[10px] rounded-[10px] border border-[#d96868]/35 bg-[#6e2525]/18 px-[10px] py-[8px] text-[12px] leading-[16px] text-[#f0aaaa]" role="alert">
           {localError ?? error}
         </p>
       )}
@@ -193,7 +193,7 @@ export function WorkbenchCanvasMediaPanel({
           <UploadIcon className="size-[15px]" />
         </button>
         <button
-          className="h-[34px] min-w-0 flex-1 rounded-full bg-[#e8eaed] px-[14px] text-[12px] font-semibold text-[#202124] transition hover:bg-white disabled:opacity-45"
+          className="h-[34px] min-w-0 flex-1 rounded-full bg-[#e8eaed] px-[14px] text-[13px] font-semibold text-[#202124] transition hover:bg-white disabled:opacity-45"
           disabled={busy || !file}
           onClick={() => {
             if (!file) return;

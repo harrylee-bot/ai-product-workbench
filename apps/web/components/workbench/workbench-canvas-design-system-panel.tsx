@@ -56,7 +56,7 @@ export function WorkbenchCanvasDesignSystemPanel({
         </span>
         <span className="min-w-0 flex-1">
           <strong className="block text-[14px] font-semibold leading-[18px]">Design system</strong>
-          <span className="block text-[12px] leading-[17px] text-[#aeb3bb]">调整颜色和排版</span>
+          <span className="block text-[13px] leading-[17px] text-[#aeb3bb]">调整颜色和排版</span>
         </span>
         <button
           aria-label="关闭 Design system"
@@ -78,7 +78,7 @@ export function WorkbenchCanvasDesignSystemPanel({
             aria-label="切换主题"
             aria-pressed={draft.theme === "dark"}
             className={cn(
-              "h-[24px] min-w-[42px] rounded-full px-[9px] text-[11px] font-semibold transition-colors",
+              "h-[24px] min-w-[42px] rounded-full px-[9px] text-[12px] font-semibold transition-colors",
               draft.theme === "dark"
                 ? "bg-[#c9b3ff] text-[#31254b]"
                 : "bg-[#f1f3f4] text-[#202124]",
@@ -96,7 +96,7 @@ export function WorkbenchCanvasDesignSystemPanel({
             <span className="sr-only">圆角</span>
             <input
               aria-label="圆角"
-              className="h-[26px] w-[38px] appearance-none rounded-full border-0 bg-white/[0.09] px-[6px] text-center text-[11px] font-medium text-[#d9dde3] outline-none focus:ring-1 focus:ring-[#9d78ff]"
+              className="h-[26px] w-[38px] appearance-none rounded-full border-0 bg-white/[0.09] px-[6px] text-center text-[12px] font-medium text-[#d9dde3] outline-none focus:ring-1 focus:ring-[#9d78ff]"
               disabled={locked}
               inputMode="numeric"
               max={32}
@@ -119,7 +119,7 @@ export function WorkbenchCanvasDesignSystemPanel({
       </div>
 
       <section className="mt-[13px] rounded-[15px] border border-white/[0.09] bg-[#17181a] p-[12px]">
-        <div className="mb-[10px] flex items-center justify-between text-[12px]">
+        <div className="mb-[10px] flex items-center justify-between text-[13px]">
           <span className="font-medium text-[#dfe3e8]">Theme</span>
           <span className="text-[#c5cad1]">{draft.theme === "dark" ? "Dark" : "Light"}</span>
         </div>
@@ -146,7 +146,7 @@ export function WorkbenchCanvasDesignSystemPanel({
       </section>
 
       {error && (
-        <p className="mt-[10px] rounded-[10px] border border-[#d96868]/35 bg-[#6e2525]/18 px-[10px] py-[8px] text-[11px] leading-[16px] text-[#f0aaaa]" role="alert">
+        <p className="mt-[10px] rounded-[10px] border border-[#d96868]/35 bg-[#6e2525]/18 px-[10px] py-[8px] text-[12px] leading-[16px] text-[#f0aaaa]" role="alert">
           {error}
         </p>
       )}
@@ -166,8 +166,8 @@ function DesignSystemSettingRow({
   return (
     <div className="flex min-h-[58px] items-center rounded-[14px] border border-white/[0.08] bg-white/[0.025] px-[12px]">
       <span className="min-w-0 flex-1">
-        <strong className="block text-[12px] font-semibold leading-[17px] text-[#f1f3f4]">{label}</strong>
-        <span className="block truncate text-[11px] leading-[16px] text-[#969ca5]">{description}</span>
+        <strong className="block text-[13px] font-semibold leading-[17px] text-[#f1f3f4]">{label}</strong>
+        <span className="block truncate text-[12px] leading-[16px] text-[#969ca5]">{description}</span>
       </span>
       {children}
     </div>

@@ -159,6 +159,21 @@ export function ProjectComposer({
   const [importSourcesOpen, setImportSourcesOpen] = useWorkbenchProjectState(session, () => false);
   const [selectedSourceIds, setSelectedSourceIds] = useWorkbenchProjectState<string[]>(session, () => []);
   const promptInputRef = useRef<HTMLInputElement | null>(null);
+  const composerRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    const composer = composerRef.current;
+    const stage = composer?.parentElement;
+    if (!composer || !stage) return;
+    const updateHeight = () => stage.style.setProperty("--workbench-project-composer-height", `${composer.offsetHeight}px`);
+    updateHeight();
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(updateHeight);
+    observer.observe(composer);
+    return () => {
+      observer.disconnect();
+      stage.style.removeProperty("--workbench-project-composer-height");
+    };
+  }, []);
   const attachments = useWorkbenchComposerAttachments(projectId);
   const importSourcesQuery = useWorkbenchImportSources(projectId);
   const selectedFiles = attachments.selectedFiles;
@@ -302,6 +317,7 @@ export function ProjectComposer({
         "w-[580px] max-w-[calc(100vw-32px)]",
       )}
       data-project-composer
+      ref={composerRef}
       initial={{ opacity: 0, x: "-50%", y: 14 }}
       transition={{ ...viewTransition, delay: 0.18 }}
     >
@@ -367,7 +383,7 @@ export function ProjectComposer({
                 >
                   <Link2Icon className="size-[14px] shrink-0" />
                   <span className="min-w-0 flex-1 truncate">{importSourceLabel(source)}</span>
-                  <span className="text-[10px] text-[#b8b1ea]">{isReadyImportSource(source) ? "可用" : "处理中"}</span>
+                  <span className="text-[12px] text-[#b8b1ea]">{isReadyImportSource(source) ? "可用" : "处理中"}</span>
                   <XIcon className="size-[13px] shrink-0 text-[#bbb5e8]" />
                 </button>
               );
@@ -375,7 +391,7 @@ export function ProjectComposer({
           </div>
         )}
         <input
-          className="workbench-composer-field mb-[14px] h-[24px] w-full border-none bg-transparent text-[15px] outline-none placeholder:text-[#8d9299]"
+          className="workbench-composer-field mb-[14px] h-[24px] w-full border-none bg-transparent text-[16px] leading-[24px] outline-none placeholder:text-[#8d9299]"
           disabled={disabled}
           onBlur={() => setComposerFocused(false)}
           onChange={(event) => setPrompt(event.target.value)}
@@ -401,7 +417,7 @@ export function ProjectComposer({
           type="file"
         />
         <div
-          className="flex h-[36px] items-center gap-[14px] text-[#d7d9de] max-sm:gap-[4px]"
+          className="items-center text-[#d7d9de] md:flex md:h-[36px] md:gap-[14px]"
           data-project-composer-toolbar
         >
           <button
@@ -494,7 +510,7 @@ export function ProjectComposer({
           </AnimatePresence>
           <button
             aria-label="重试上一次生成"
-            className="workbench-composer-tool grid size-[32px] place-items-center rounded-full hover:bg-white/[0.06]"
+            className="workbench-composer-tool workbench-composer-refresh grid size-[32px] place-items-center rounded-full hover:bg-white/[0.06]"
             disabled={disabled || isBusy || !canRefresh}
             onClick={() => void onRefresh().catch(() => undefined)}
             title={canRefresh ? "重试上一次生成" : "当前没有可重试的生成"}
