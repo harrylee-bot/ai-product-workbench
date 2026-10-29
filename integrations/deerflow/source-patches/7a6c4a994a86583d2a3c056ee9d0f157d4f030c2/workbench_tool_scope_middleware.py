@@ -1984,10 +1984,18 @@ class WorkbenchToolScopeMiddleware(AgentMiddleware[AgentState]):
             _artifact_draft_from_declaration(
                 request.state, request.tool_call, self._run_id, self._runtime_attempt_id,
             )
-        except (ValueError, RuntimeError, ImportError):
+        except (ValueError, RuntimeError, ImportError) as error:
+            try:
+                from deerflow_workbench_tools.artifact_draft_repair import repair_error_feedback
+
+                feedback = repair_error_feedback(error)
+            except ImportError:
+                feedback = ""
+
             return _error_tool_message(
                 request, "WORKBENCH_ARTIFACT_DRAFT_REPAIR_INVALID",
-                "Use the latest rejected ACK's candidateChecksum for this run and artifact_index, omit draft, and repair only permitted paths. Accepted drafts are immutable.",
+                "Use the latest rejected ACK's candidateChecksum for this run and artifact_index, omit draft, and repair only permitted paths. Accepted drafts are immutable."
+                + feedback,
             )
         return None
 

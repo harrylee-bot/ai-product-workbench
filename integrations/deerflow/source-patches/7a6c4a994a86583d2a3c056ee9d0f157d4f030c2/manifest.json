@@ -15,7 +15,7 @@
   },
   "toolScopeMiddleware": {
     "path": "deerflow/agents/middlewares/workbench_tool_scope_middleware.py",
-    "sha256": "f585dfea8f0a2f73fe1685f6694b54eafbdb96b0865288f94f7d525984bfa50c"
+    "sha256": "3f02bb7fed237f45003d1299b1547f6c534010c72bed9fd9e137c5e099edaa00"
   },
   "additionalSources": [
     {
@@ -94,7 +94,7 @@
     "sha256": "2d18f25f77a489f17771550a32f06efc6e8e780e09ba789f2562d94a4b6bb2fb"
   },
   "contractTest": {
-    "sha256": "904ac6de3cf768e7bb877c3d10b01c35fdf4405a771369a2b410069956a5e777"
+    "sha256": "6cc1cd508d3ff07835a88514fbc137503a9d7313e5a6f2f084b01c9b5ead0df5"
   },
   "requestContextTest": {
     "sha256": "c546a3440ea71d32723da6180d86e5eb9a266186062b3cb3103c1a8aabfe5550"

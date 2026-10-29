@@ -8,8 +8,10 @@ from types import SimpleNamespace
 
 from test_artifact_draft_tool import workbench_artifact_draft_publish
 from deerflow_workbench_tools.artifact_draft_repair import (
+    ArtifactDraftRepairPathError,
     _apply_repair,
     latest_accepted_artifact_draft,
+    repair_error_feedback,
     resolve_artifact_draft_candidate,
 )
 
@@ -104,6 +106,38 @@ class ArtifactDraftRepairTests(unittest.TestCase):
         ):
             with self.subTest(operation=operation), self.assertRaises(ValueError):
                 _apply_repair(self.draft, self.repair(result, [operation]), result["candidateChecksum"])
+
+    def test_wrong_table_path_reports_actual_typed_block_shape_without_applying_partial_edits(self):
+        candidate = copy.deepcopy(self.draft)
+        candidate["title"] = "PRIVATE_CANDIDATE_TEXT"
+        original = copy.deepcopy(candidate)
+        path = "/content/sections/businessRequirements/acceptanceCriteria/blocks/0/rows/0/cells/2/content/0/text"
+        repair = {"baseCandidateChecksum": "a" * 64, "operations": [
+            {"op": "replace", "path": "/title", "value": "PRIVATE_REPLACEMENT_TEXT"},
+            {"op": "replace", "path": path, "value": "PRIVATE_NEW_CRITERION"},
+        ]}
+        with self.assertRaises(ArtifactDraftRepairPathError) as caught:
+            _apply_repair(candidate, repair, "a" * 64)
+        self.assertEqual(candidate, original)
+        error = caught.exception
+        self.assertEqual(str(error), "WORKBENCH_ARTIFACT_DRAFT_REPAIR_PATH_MISSING")
+        self.assertEqual(error.feedback["operationIndex"], 1)
+        self.assertEqual(error.feedback["path"]["pointer"], path)
+        self.assertEqual(error.feedback["path"]["existingPath"], "/content/sections/businessRequirements/acceptanceCriteria/blocks/0")
+        self.assertEqual(error.feedback["path"]["type"], "object")
+        self.assertIn("requirementIds", error.feedback["path"]["keys"])
+        self.assertNotIn("rows", error.feedback["path"]["keys"])
+        feedback = repair_error_feedback(error)
+        self.assertIn("entire repair was not applied", feedback)
+        self.assertNotIn("PRIVATE_", feedback)
+
+    def test_out_of_range_repair_reports_array_length_and_unrelated_errors_have_no_details(self):
+        path = "/content/sections/businessRequirements/acceptanceCriteria/blocks/99"
+        repair = {"baseCandidateChecksum": "b" * 64, "operations": [{"op": "add", "path": path, "value": {}}]}
+        with self.assertRaises(ArtifactDraftRepairPathError) as caught:
+            _apply_repair(self.draft, repair, "b" * 64)
+        self.assertEqual(caught.exception.feedback["path"]["length"], len(self.draft["content"]["sections"]["businessRequirements"]["acceptanceCriteria"]["blocks"]))
+        self.assertEqual(repair_error_feedback(ValueError("PRIVATE_ERROR_TEXT")), "")
 
     def test_restores_canonical_directory_entries(self):
         invalid = copy.deepcopy(self.draft)

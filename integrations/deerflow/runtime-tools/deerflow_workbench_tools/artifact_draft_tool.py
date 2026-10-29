@@ -30,6 +30,8 @@ def workbench_artifact_draft_publish(
 
     Call this after an Artifact becomes complete enough to render. Publish another
     checkpoint only after its renderable content materially changes.
+    For a PRD, call workbench_generation_stage_update(stage="validating-prd")
+    immediately before the first draft call, after drafting-prd.
     For the initial call, pass draft. After a rejection, prefer repair to edit only
     invalid paths in the latest rejected candidate while preserving all other data.
     Pass exactly one of draft or repair. A repair is {baseCandidateChecksum,

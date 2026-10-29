@@ -38,6 +38,17 @@ test("matching persistent builder is reused and an empty service list builds all
   assert.equal(builds(result)[0].args.at(-1), "--with-dependencies");
 });
 
+test("Buildx normalized TOML retains the same resource policy", () => {
+  for (const serializedPolicy of [
+    "[registry]\n[registry.'docker.io']\nmirrors = ['docker.m.daocloud.io']\n\n[worker]\n[worker.oci]\nmax-parallelism = 1\n",
+    "[worker.oci]\nmax-parallelism = 1\n[registry.\"docker.io\"]\nmirrors = [\"docker.m.daocloud.io\"]\n",
+  ]) {
+    const result = runBuild({ existing: true, serializedPolicy });
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(builds(result).length, 1);
+  }
+});
+
 test("bounded custom budgets and builder names are applied together", () => {
   const result = runBuild({ env: {
     WORKBENCH_BUILD_MEMORY_MIB: "3072",
@@ -266,7 +277,7 @@ const name = process.env.WORKBENCH_BUILD_BUILDER || "workbench-validation-bounde
 const memory = Number(process.env.WORKBENCH_BUILD_MEMORY_MIB || 6144) * 1024 * 1024;
 const quota = Number(process.env.WORKBENCH_BUILD_CPUS || 2) * 100000;
 const stateFile = path.join(root, "created");
-const policy = "[worker]\n  [worker.oci]\n    max-parallelism = 1\n\n[registry.\"docker.io\"]\n  mirrors = [\"docker.m.daocloud.io\"]\n";
+const policy = options.serializedPolicy || "[worker]\n  [worker.oci]\n    max-parallelism = 1\n\n[registry.\"docker.io\"]\n  mirrors = [\"docker.m.daocloud.io\"]\n";
 const output = value => console.log(typeof value === "string" ? value : JSON.stringify(value));
 if (is("context", "show")) output("default");
 else if (is("context", "inspect")) output(options.endpoint);

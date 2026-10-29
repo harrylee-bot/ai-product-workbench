@@ -473,6 +473,30 @@ class DraftRepairScopeTests(unittest.IsolatedAsyncioTestCase):
                 self.assertNotIn("businessRequirements", reconstructed["content"]["sections"]["introduction"])
                 self.assertEqual(reconstructed["title"], candidate["title"])
 
+    async def test_missing_path_feedback_reaches_model_without_executing_or_mutating_repair(self):
+        for asynchronous in (False, True):
+            with self.subTest(asynchronous=asynchronous):
+                state, _candidate, repair = self.rejected_state()
+                repair["operations"] = [{"op": "replace", "path": "/content/sections/introduction/businessRequirements/rows/0", "value": "PRIVATE_REPLACEMENT"}]
+                request = request_in_state(state["messages"], "workbench_artifact_draft_publish", "missing-path", {"artifact_index": 0, "repair": repair})
+                before = copy.deepcopy(request.state)
+
+                def handler(_request):
+                    self.fail("a repair with a missing path reached the tool")
+
+                async def async_handler(actual):
+                    return handler(actual)
+
+                middleware = self.middleware()
+                result = await middleware.awrap_tool_call(request, async_handler) if asynchronous else middleware.wrap_tool_call(request, handler)
+                self.assertEqual(result.status, "error")
+                self.assertIn("WORKBENCH_ARTIFACT_DRAFT_REPAIR_INVALID", result.content)
+                self.assertIn('"keys":["authored","title"]', result.content)
+                self.assertIn('"operationIndex":0', result.content)
+                self.assertIn("entire repair was not applied", result.content)
+                self.assertNotIn("PRIVATE_REPLACEMENT", result.content)
+                self.assertEqual(request.state, before)
+
     def test_bad_repair_history_blocks_before_the_tool_handler(self):
         for case in ("checksum", "run", "attempt", "response-name", "duplicate-response", "new-turn", "index", "old-base", "unanswered"):
             with self.subTest(case=case):

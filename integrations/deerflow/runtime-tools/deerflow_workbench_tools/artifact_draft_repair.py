@@ -27,6 +27,56 @@ _ROOT_MOVE_SOURCES = frozenset({
 _IDENTITY_FIELDS = ("kind", "schemaVersion", "operation")
 
 
+class ArtifactDraftRepairPathError(ValueError):
+    """A rejected edit with bounded structural feedback, never candidate prose."""
+
+    def __init__(self, code: str, feedback: dict[str, Any]):
+        super().__init__(code)
+        self.feedback = feedback
+
+
+def repair_error_feedback(error: Exception) -> str:
+    if not isinstance(error, ArtifactDraftRepairPathError):
+        return ""
+    return (
+        " The entire repair was not applied; the latest rejected ACK remains the base. "
+        "Correct this operation using the existing field names and types, without "
+        "discarding other valid content. Repair diagnostic: "
+        + json.dumps(error.feedback, ensure_ascii=False, separators=(",", ":"))
+    )
+
+
+def _path_feedback(candidate: dict[str, Any], operation: dict[str, Any], index: int) -> dict[str, Any]:
+    # Include only object keys and array lengths. Never echo field values,
+    # candidate text, replacement values, or an unvalidated path.
+    details: dict[str, Any] = {"operationIndex": index, "operation": operation["op"]}
+    for name in ("path", "from"):
+        if name not in operation:
+            continue
+        parts = _pointer(operation[name], source=name == "from")
+        value: Any = candidate
+        reached: list[str] = []
+        for part in parts:
+            if isinstance(value, dict) and part in value:
+                value = value[part]
+            elif isinstance(value, list) and re.fullmatch(r"0|[1-9][0-9]*", part) and len(part) <= 8 and int(part) < len(value):
+                value = value[int(part)]
+            else:
+                break
+            reached.append(part)
+        shape: dict[str, Any] = {
+            "pointer": operation[name],
+            "existingPath": "/" + "/".join(part.replace("~", "~0").replace("/", "~1") for part in reached),
+            "type": "object" if isinstance(value, dict) else "array" if isinstance(value, list) else "scalar",
+        }
+        if isinstance(value, dict):
+            shape["keys"] = sorted(key for key in value if re.fullmatch(r"[A-Za-z][A-Za-z0-9_]{0,48}", key))[:24]
+        elif isinstance(value, list):
+            shape["length"] = len(value)
+        details[name] = shape
+    return details
+
+
 def _fail(reason: str) -> None:
     raise ValueError("WORKBENCH_ARTIFACT_DRAFT_REPAIR_" + reason)
 
@@ -274,7 +324,7 @@ def _apply_repair(candidate: dict[str, Any], repair: Any, checksum: str) -> dict
     if not isinstance(operations, list) or not 1 <= len(operations) <= MAX_REPAIR_OPERATIONS:
         _fail("OPERATIONS_INVALID")
     result = _copy_candidate(candidate)
-    for operation in operations:
+    for index, operation in enumerate(operations):
         if not isinstance(operation, dict):
             _fail("OPERATION_INVALID")
         op = operation.get("op")
@@ -282,18 +332,24 @@ def _apply_repair(candidate: dict[str, Any], repair: Any, checksum: str) -> dict
         if op not in {"add", "replace", "remove", "move", "restore"} or set(operation) != keys:
             _fail("OPERATION_INVALID")
         parts = _pointer(operation["path"])
-        if op == "restore":
-            _restore_template(result, operation, parts)
-        elif op == "remove":
-            _remove(result, parts)
-        elif op == "move":
-            origin = _pointer(operation["from"], source=True)
-            if parts[:len(origin)] == origin:
-                _fail("MOVE_CYCLE")
-            value = _remove(result, origin)
-            _write(result, parts, value, replace=False)
-        else:
-            _write(result, parts, operation["value"], replace=op == "replace")
+        before_operation = copy.deepcopy(result)
+        try:
+            if op == "restore":
+                _restore_template(result, operation, parts)
+            elif op == "remove":
+                _remove(result, parts)
+            elif op == "move":
+                origin = _pointer(operation["from"], source=True)
+                if parts[:len(origin)] == origin:
+                    _fail("MOVE_CYCLE")
+                value = _remove(result, origin)
+                _write(result, parts, value, replace=False)
+            else:
+                _write(result, parts, operation["value"], replace=op == "replace")
+        except ValueError as error:
+            if str(error) not in {"WORKBENCH_ARTIFACT_DRAFT_REPAIR_PATH_MISSING", "WORKBENCH_ARTIFACT_DRAFT_REPAIR_TARGET_EXISTS"}:
+                raise
+            raise ArtifactDraftRepairPathError(str(error), _path_feedback(before_operation, operation, index)) from None
         if len(_json(result).encode("utf-8")) > MAX_CANDIDATE_BYTES:
             _fail("CANDIDATE_TOO_LARGE")
     if any((field in result) != (field in candidate) or _json(result.get(field)) != _json(candidate.get(field)) for field in _IDENTITY_FIELDS):
