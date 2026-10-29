@@ -13,7 +13,7 @@ import { WorkbenchTransportProvider } from "@/lib/workbench/transport";
 export default function Layout({ children }: { children: React.ReactNode }) {
   return (
     <WorkbenchDataProviders>
-      <Suspense fallback={<div className="flex h-screen bg-background" />}>
+      <Suspense fallback={<div className="flex h-dvh bg-background" />}>
         <WorkbenchAuthenticatedShell>
           <WorkbenchRuntimeProvider />
           {children}
@@ -49,11 +49,11 @@ function WorkbenchAuthenticatedShell({ children }: { children: React.ReactNode }
   }, [loading, pathname, router, searchParams, user]);
 
   if (loading || !user) {
-    return <div className="flex h-screen bg-background" />;
+    return <div className="flex h-dvh bg-background" />;
   }
 
   return (
-    <div className="h-screen w-screen overflow-hidden bg-[#131314] text-white">
+    <div className="h-dvh w-full overflow-hidden bg-[#131314] text-white">
       <Toaster
         position="top-center"
         theme="dark"

@@ -42,7 +42,7 @@ export function WorkbenchCanvasFavouritesPanel({
         </span>
         <span className="min-w-0 flex-1">
           <strong className="block text-[14px] font-semibold leading-[18px]">Favourites</strong>
-          <span className="block text-[12px] leading-[17px] text-[#aeb3bb]">已收藏的界面和产物版本</span>
+          <span className="block text-[13px] leading-[17px] text-[#aeb3bb]">已收藏的界面和产物版本</span>
         </span>
         <button
           aria-label="关闭 Favourites"
@@ -63,7 +63,7 @@ export function WorkbenchCanvasFavouritesPanel({
           <div className="grid min-h-[180px] place-items-center px-[22px] text-center text-[13px] leading-[19px] text-[#b9bec7]" role="alert">
             收藏列表暂时不可用，请重试。
             <button
-              className="mt-[10px] inline-flex h-[32px] items-center gap-[6px] rounded-full border border-white/[0.12] px-[12px] text-[12px] font-semibold text-[#f1f3f4] hover:bg-white/[0.07]"
+              className="mt-[10px] inline-flex h-[32px] items-center gap-[6px] rounded-full border border-white/[0.12] px-[12px] text-[13px] font-semibold text-[#f1f3f4] hover:bg-white/[0.07]"
               onClick={() => void query.refetch()}
               type="button"
             >
@@ -99,7 +99,7 @@ export function WorkbenchCanvasFavouritesPanel({
                     <span className="block truncate text-[13px] font-semibold text-[#eef0f4]">
                       {item.screenName ?? item.artifactTitle}
                     </span>
-                    <span className="mt-[3px] block truncate text-[11px] text-[#9298a2]">
+                    <span className="mt-[3px] block truncate text-[12px] text-[#9298a2]">
                       {item.screenName ? `${item.artifactTitle} · v${item.artifactVersion}` : `v${item.artifactVersion}`}
                     </span>
                   </span>
@@ -110,7 +110,7 @@ export function WorkbenchCanvasFavouritesPanel({
             {hasNextPage && (
               <button
                 className={cn(
-                  "mt-[8px] flex h-[34px] w-full items-center justify-center gap-[6px] rounded-full border border-white/[0.10] text-[12px] font-semibold text-[#d6dae1] hover:bg-white/[0.06]",
+                  "mt-[8px] flex h-[34px] w-full items-center justify-center gap-[6px] rounded-full border border-white/[0.10] text-[13px] font-semibold text-[#d6dae1] hover:bg-white/[0.06]",
                   query.isFetchingNextPage && "cursor-wait opacity-70",
                 )}
                 disabled={query.isFetchingNextPage}

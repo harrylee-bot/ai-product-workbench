@@ -173,7 +173,7 @@ describe("Workbench home responsive shell", () => {
     const open = vi.spyOn(window, "open").mockImplementation(() => null);
     render(<HomeScreenHarness onSubmitPrompt={vi.fn(async () => "project-1")} />);
     const knowledge = screen.getByRole("button", { name: "知识库" });
-    expect(knowledge.parentElement?.className).toContain("md:hidden");
+    expect(knowledge.parentElement?.className).toContain("lg:hidden");
     fireEvent.click(knowledge);
     expect(String(open.mock.calls[0]?.[0])).toContain("/knowledge/");
     expect(open.mock.calls[0]?.slice(1)).toEqual(["_blank", "noopener,noreferrer"]);
@@ -229,9 +229,9 @@ describe("Workbench home responsive shell", () => {
   it("keeps the parity dimensions in the source contract", async () => {
     const source = await readFile(homeScreenFile, "utf8");
     expect(source).toContain("h-[56px]");
-    expect(source).toContain("md:w-[375px]");
-    expect(source).toContain("md:rounded-[16px]");
-    expect(source).toContain("h-[calc(100vh-80px)]");
+    expect(source).toContain("lg:w-[288px]");
+    expect(source).toContain("lg:rounded-[16px]");
+    expect(source).toContain("h-[calc(100dvh-80px)]");
     expect(source).toContain("duration-300");
   });
 });

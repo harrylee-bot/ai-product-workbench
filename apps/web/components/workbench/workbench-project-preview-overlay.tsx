@@ -149,7 +149,7 @@ export function ProjectPreviewOverlay({
             <div className="max-w-[240px] truncate text-[14px] font-semibold max-md:max-w-[140px]">
               {projectTitle}
             </div>
-            <div className="mt-[1px] text-[11px] text-[#989da5]">
+            <div className="mt-[1px] text-[12px] text-[#989da5]">
               {documentPreview ? "文档预览" : "交互预览"}
             </div>
           </div>
@@ -246,7 +246,7 @@ function PreviewDeviceControls({
               aria-label={option.label}
               aria-pressed={mode === option.mode}
               className={cn(
-                "flex h-[32px] shrink-0 items-center gap-[6px] rounded-[4px] px-[9px] text-[11px] font-medium transition-colors",
+                "flex h-[32px] shrink-0 items-center gap-[6px] rounded-[4px] px-[9px] text-[12px] font-medium transition-colors",
                 mode === option.mode
                   ? "bg-[#4b4d52] text-white"
                   : "text-[#aeb3bb] hover:bg-white/[0.06] hover:text-white",
@@ -272,7 +272,7 @@ function PreviewDeviceControls({
             }))}
             value={customViewport.width}
           />
-          <span className="text-[11px] text-[#747982]">x</span>
+          <span className="text-[12px] text-[#747982]">x</span>
           <PreviewDimensionInput
             ariaLabel="自定义预览高度"
             onChange={(height) => onCustomViewportChange(normalizePreviewCustomViewport({
@@ -299,7 +299,7 @@ function PreviewDimensionInput({
   return (
     <input
       aria-label={ariaLabel}
-      className="h-[28px] w-[64px] rounded-[4px] border border-white/[0.09] bg-[#24262a] px-[7px] text-right text-[11px] text-white outline-none focus:border-[#8ab4f8]"
+      className="h-[28px] w-[64px] rounded-[4px] border border-white/[0.09] bg-[#24262a] px-[7px] text-right text-[12px] text-white outline-none focus:border-[#8ab4f8]"
       inputMode="numeric"
       onChange={(event) => onChange(Number(event.currentTarget.value))}
       type="number"
@@ -453,7 +453,7 @@ function PreviewQrPopover({
                 value={capability.url}
               />
             </div>
-            <div className="mt-[8px] flex items-center justify-between gap-[8px] text-[11px] text-[#6f747c]">
+            <div className="mt-[8px] flex items-center justify-between gap-[8px] text-[12px] text-[#6f747c]">
               <span>{formatCapabilityExpiry(capability.expiresAt)}</span>
               <a
                 aria-label="在新窗口打开预览"

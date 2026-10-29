@@ -328,9 +328,9 @@ export function RightToolRail({
       animate={{ opacity: 1, scale: floatingToolScale, x: 0 }}
       aria-label="画布工具"
       className={cn(
-        "workbench-tool-rail absolute right-[16px] top-1/2 z-40 flex w-[48px] -translate-y-1/2 flex-col items-center gap-[6px] rounded-full border border-white/[0.10] bg-[#1c1d20]/94 py-[7px] shadow-[0_24px_74px_-36px_rgba(0,0,0,0.95)] backdrop-blur-xl max-md:left-1/2 max-md:right-auto max-md:w-auto max-md:-translate-x-1/2 max-md:translate-y-0 max-md:flex-row max-md:px-[7px] max-md:py-[5px]",
+        "workbench-tool-rail absolute right-[16px] top-1/2 z-40 flex w-[48px] -translate-y-1/2 flex-col items-center gap-[6px] rounded-full border border-white/[0.10] bg-[#1c1d20]/94 py-[7px] shadow-[0_24px_74px_-36px_rgba(0,0,0,0.95)] backdrop-blur-xl max-md:left-1/2 max-md:right-auto max-md:w-[min(344px,calc(100vw-32px))] max-md:justify-between max-md:gap-0 max-md:-translate-x-1/2 max-md:translate-y-0 max-md:flex-row max-md:px-[7px] max-md:py-[5px]",
         activePanel === null
-          ? "max-md:bottom-[222px] max-md:top-auto"
+          ? "max-md:bottom-[calc(var(--workbench-project-composer-height,142px)+84px)] max-md:top-auto"
           : "max-md:bottom-auto max-md:top-[76px]",
       )}
       data-right-tool-rail
@@ -351,7 +351,7 @@ export function RightToolRail({
             aria-label={tool.label}
             aria-pressed={isActive}
             className={cn(
-              "workbench-tool-button group/tool relative grid size-[36px] place-items-center rounded-full transition-colors hover:bg-[#3a393a]/45",
+              "workbench-tool-button group/tool relative grid size-[36px] shrink-0 max-[360px]:size-[32px] place-items-center rounded-full transition-colors hover:bg-[#3a393a]/45",
               isActive ? "text-[#202124]" : "text-[#d5d8de]",
             )}
             disabled={disabled}
@@ -382,7 +382,7 @@ export function RightToolRail({
           aria-haspopup="menu"
           aria-label="More tools"
           className={cn(
-            "workbench-tool-button group/tool relative grid size-[36px] place-items-center rounded-full text-[#d5d8de] transition-colors hover:bg-[#3a393a]/45",
+            "workbench-tool-button group/tool relative grid size-[36px] shrink-0 max-[360px]:size-[32px] place-items-center rounded-full text-[#d5d8de] transition-colors hover:bg-[#3a393a]/45",
             moreOpen && "bg-[#3a393a]/60 text-[#f1f3f4]",
           )}
           onClick={() => setMoreOpen((open) => !open)}
@@ -547,7 +547,7 @@ export function UtilityPill({
               shortcut="Shift + 2"
             />
             <div className="my-[6px] h-px bg-white/[0.08]" />
-            <div aria-label="常用比例" className="px-[12px] pb-[3px] pt-[4px] text-[10px] font-semibold uppercase tracking-[0.08em] text-[#858b94]" role="group">
+            <div aria-label="常用比例" className="px-[12px] pb-[3px] pt-[4px] text-[12px] font-semibold uppercase tracking-[0.08em] text-[#858b94]" role="group">
               Common scale
             </div>
             <div className="grid grid-cols-3 gap-[3px]" role="group">
@@ -604,7 +604,7 @@ function ZoomCommandItem({
       type="button"
     >
       <span>{label}</span>
-      <span aria-hidden="true" className="text-[11px] font-medium text-[#858b94]">{shortcut}</span>
+      <span aria-hidden="true" className="text-[12px] font-medium text-[#858b94]">{shortcut}</span>
     </button>
   );
 }

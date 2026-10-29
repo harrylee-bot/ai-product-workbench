@@ -49,8 +49,8 @@ export function ComposerArtifactOutputMenu({
     <motion.div
       animate={{ opacity: 1, y: 0 }}
       className={cn(
-        "absolute z-[70] w-[210px] overflow-hidden rounded-[10px] border border-white/[0.08] bg-[#18191b]/94 p-[8px] text-[#e8eaed] shadow-[0_24px_90px_-42px_rgba(0,0,0,0.95)] backdrop-blur-2xl",
-        placement === "home" ? "right-[74px] top-[154px]" : "bottom-[42px] right-[202px]",
+        "absolute z-[70] w-[240px] max-w-[calc(100vw-64px)] max-h-[min(360px,calc(100dvh-120px))] overflow-y-auto rounded-[10px] border border-white/[0.08] bg-[#18191b]/94 p-[8px] text-[#e8eaed] shadow-[0_24px_90px_-42px_rgba(0,0,0,0.95)] backdrop-blur-2xl",
+        placement === "home" ? "right-0 bottom-[160px] md:bottom-[112px]" : "bottom-[78px] right-0 md:bottom-[42px] md:right-[202px]",
       )}
       exit={{ opacity: 0, y: 3 }}
       initial={{ opacity: 0, y: 5 }}
@@ -74,7 +74,7 @@ export function ComposerArtifactOutputMenu({
             <Icon className="size-[17px] shrink-0 text-[#f1f3f4]" />
             <span className="min-w-0 flex-1">
               <span className="block text-[13px] font-semibold leading-[17px]">{option.label}</span>
-              <span className="mt-[2px] block text-[11px] leading-[15px] text-[#aeb3bb]">{option.description}</span>
+              <span className="mt-[2px] block text-[12px] leading-[15px] text-[#aeb3bb]">{option.description}</span>
             </span>
             {kind === option.kind && <CheckCircle2Icon className="size-[15px] shrink-0 text-[#e8eaed]" />}
           </button>
@@ -101,8 +101,8 @@ export function ComposerCommandMenu({
     <motion.div
       animate={{ opacity: 1, y: 0 }}
       className={cn(
-        "absolute w-[254px] overflow-hidden rounded-[14px] border border-white/[0.08] bg-[#18191b]/94 p-[7px] text-[#e8eaed] shadow-[0_22px_80px_-42px_rgba(0,0,0,0.95)] backdrop-blur-2xl",
-        placement === "home" ? "bottom-[68px] left-[54px]" : "bottom-[42px] left-[54px]",
+        "absolute w-[254px] max-w-full overflow-hidden rounded-[14px] border border-white/[0.08] bg-[#18191b]/94 p-[7px] text-[#e8eaed] shadow-[0_22px_80px_-42px_rgba(0,0,0,0.95)] backdrop-blur-2xl",
+        placement === "home" ? "bottom-[160px] left-0 md:bottom-[112px]" : "bottom-[78px] left-0 md:bottom-[42px] md:left-[54px]",
       )}
       exit={{ opacity: 0, y: 3 }}
       initial={{ opacity: 0, y: 5 }}
@@ -113,7 +113,7 @@ export function ComposerCommandMenu({
         const Icon = command.icon;
         return (
           <button
-            className="flex h-[38px] w-full items-center gap-[10px] rounded-[9px] px-[10px] text-left text-[12px] font-semibold text-[#f1f3f4] hover:bg-white/[0.06]"
+            className="flex h-[38px] w-full items-center gap-[10px] rounded-[9px] px-[10px] text-left text-[13px] font-semibold text-[#f1f3f4] hover:bg-white/[0.06]"
             key={command.label}
             onClick={() => onSelect(command.value)}
             role="menuitem"
@@ -150,10 +150,10 @@ export function ComposerAttachmentMenu({
     <motion.div
       animate={{ opacity: 1, y: 0 }}
       className={cn(
-        "absolute w-[184px] overflow-hidden rounded-[14px] border border-white/[0.08] bg-[#18191b]/94 p-[7px] text-[#e8eaed] shadow-[0_22px_80px_-42px_rgba(0,0,0,0.95)] backdrop-blur-2xl",
+        "absolute w-[264px] max-w-full overflow-hidden rounded-[14px] border border-white/[0.08] bg-[#18191b]/94 p-[7px] text-[#e8eaed] shadow-[0_22px_80px_-42px_rgba(0,0,0,0.95)] backdrop-blur-2xl",
         placement === "home"
-          ? "bottom-[68px] left-[16px]"
-          : "bottom-[42px] right-[202px] max-sm:left-0 max-sm:right-auto",
+          ? "bottom-[160px] left-[16px] md:bottom-[112px]"
+          : "bottom-[78px] left-0 md:bottom-[42px] md:left-auto md:right-[202px]",
       )}
       exit={{ opacity: 0, y: 3 }}
       initial={{ opacity: 0, y: 5 }}
@@ -164,7 +164,7 @@ export function ComposerAttachmentMenu({
         const Icon = item.icon;
         return (
           <button
-            className="flex h-[38px] w-full items-center gap-[10px] rounded-[9px] px-[10px] text-left text-[12px] font-semibold text-[#f1f3f4] hover:bg-white/[0.06]"
+            className="flex h-[38px] w-full items-center gap-[10px] rounded-[9px] px-[10px] text-left text-[13px] font-semibold text-[#f1f3f4] hover:bg-white/[0.06]"
             key={item.label}
             onClick={() => onSelect?.(item.kind)}
             role="menuitem"
@@ -211,7 +211,7 @@ export function ModelChoiceMenu({
           <SparklesIcon className="size-[18px] shrink-0 text-[#f1f3f4]" />
           <span className="min-w-0 flex-1">
             <span className="block text-[14px] font-semibold leading-[18px]">{option.label}</span>
-            <span className="mt-[4px] block whitespace-normal text-[12px] leading-[17px] text-[#c4c7ce]">{option.description}</span>
+            <span className="mt-[4px] block whitespace-normal text-[13px] leading-[17px] text-[#c4c7ce]">{option.description}</span>
           </span>
           {model === option.key && <CheckCircle2Icon className="size-[16px] shrink-0 text-[#e8eaed]" />}
         </button>

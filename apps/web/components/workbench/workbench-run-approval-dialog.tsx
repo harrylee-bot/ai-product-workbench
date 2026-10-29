@@ -94,7 +94,7 @@ export function WorkbenchRunApprovalDialog({
               <h2 className="text-[16px] font-semibold text-[#f1f3f4]">需要您的确认</h2>
             </Dialog.Title>
             <Dialog.Description asChild>
-              <p className="mt-[2px] text-[11px] text-[#9aa0a6]">运行将在提交后继续</p>
+              <p className="mt-[2px] text-[12px] text-[#9aa0a6]">运行将在提交后继续</p>
             </Dialog.Description>
           </div>
         </div>
@@ -124,7 +124,7 @@ export function WorkbenchRunApprovalDialog({
                 >
                   <span className="block text-[13px] font-semibold text-[#f1f3f4]">{option.label}</span>
                   {option.description && (
-                    <span className="mt-[3px] block whitespace-normal text-[11px] leading-[16px] text-[#aeb3bb]">
+                    <span className="mt-[3px] block whitespace-normal text-[12px] leading-[16px] text-[#aeb3bb]">
                       {option.description}
                     </span>
                   )}
@@ -133,7 +133,7 @@ export function WorkbenchRunApprovalDialog({
             })}
           </RadioGroup.Root>
         )}
-        <div className="mt-[8px] min-h-[17px] text-[11px] text-[#f2a7a7]">
+        <div className="mt-[8px] min-h-[17px] text-[12px] text-[#f2a7a7]">
           {error ? "提交失败，请重试" : null}
         </div>
         <div className="mt-[12px] flex justify-end gap-[8px]">

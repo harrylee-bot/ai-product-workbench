@@ -73,8 +73,7 @@ export function AuthSpotlightShell({ children }: AuthSpotlightShellProps) {
 
   return (
     <div
-      className="dark min-h-screen bg-white tracking-[-0.02em]"
-      style={{ fontFamily: "'Inter', sans-serif" }}
+      className="dark min-h-screen bg-white font-sans"
     >
       <section
         className="relative h-screen w-full overflow-hidden bg-black"
@@ -104,7 +103,7 @@ export function AuthSpotlightShell({ children }: AuthSpotlightShellProps) {
             >
               <path d="M 256 256 L 128 256 L 0 128 L 128 128 Z M 256 128 L 128 128 L 0 0 L 128 0 Z" />
             </svg>
-            <span className="text-2xl">产品工作台</span>
+            <span className="text-[20px] font-semibold sm:text-[24px]">产品工作台</span>
           </Link>
 
           <div
@@ -193,14 +192,14 @@ export function AuthSpotlightShell({ children }: AuthSpotlightShellProps) {
         </nav>
 
         {authOpen && (
-          <div className="fixed inset-0 z-[120] flex items-center justify-center px-4 py-20">
+          <div className="fixed inset-0 z-[120] flex items-center justify-center px-4 py-4">
             <button
               aria-label="关闭登录注册窗口"
               className="absolute inset-0 bg-black/30 backdrop-blur-[2px]"
               onClick={() => setAuthOpen(false)}
               type="button"
             />
-            <div className="hero-anim hero-reveal relative w-full max-w-[360px] rounded-[16px] border border-white/12 bg-black/42 px-5 pt-14 pb-5 text-white shadow-[0_24px_80px_-36px_rgba(0,0,0,0.95)] ring-1 ring-white/[0.05] backdrop-blur-xl sm:px-6 sm:pt-14 sm:pb-6">
+            <div className="hero-anim hero-reveal relative max-h-[calc(100dvh-32px)] w-full max-w-[360px] overflow-y-auto rounded-[16px] border border-white/12 bg-black/42 px-5 pt-14 pb-5 text-white shadow-[0_24px_80px_-36px_rgba(0,0,0,0.95)] ring-1 ring-white/[0.05] backdrop-blur-xl sm:px-6 sm:pt-14 sm:pb-6">
               <button
                 aria-label="关闭登录注册窗口"
                 className="absolute top-4 right-4 flex size-8 items-center justify-center rounded-full text-white/50 transition-colors hover:bg-white/10 hover:text-white"

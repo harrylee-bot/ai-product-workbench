@@ -439,7 +439,7 @@ export function ProjectTranscriptPanel({
         <div
           className="mb-[18px] flex h-[46px] w-full items-center gap-[9px] rounded-[14px] border border-white/[0.10] bg-[#2b2d31]/84 px-[12px] text-left text-[13px] font-medium text-[#d8dce2]"
         >
-          <span className="grid size-[22px] shrink-0 place-items-center rounded-full bg-[#526872] text-[11px] font-semibold">L</span>
+          <span className="grid size-[22px] shrink-0 place-items-center rounded-full bg-[#526872] text-[12px] font-semibold">L</span>
           <span className="min-w-0 flex-1 truncate">{displayedPromptCopy}</span>
           <button
             aria-label="复制提示词"
@@ -592,7 +592,7 @@ export function MobileRunStatus({
           )}
         </span>
         {showPromptContext && (
-          <span className="mt-[2px] block truncate text-[11px] font-medium text-[#aeb2b9]" data-mobile-run-prompt>
+          <span className="mt-[2px] block truncate text-[12px] font-medium text-[#aeb2b9]" data-mobile-run-prompt>
             {prompt}
           </span>
         )}

@@ -269,7 +269,7 @@ export function ProjectSuggestionPills({
     >
       {items.map((item, index) => (
         <button
-          className="flex h-[32px] min-w-0 flex-1 items-center justify-between rounded-full border border-[#4a5563]/80 bg-[#202327]/88 px-[14px] text-left text-[13px] font-medium text-[#e8eaed] shadow-[0_18px_60px_-38px_rgba(0,0,0,0.95)] backdrop-blur-xl hover:bg-[#2a2d32]/92"
+          className="flex h-[32px] min-w-[220px] shrink-0 items-center justify-between md:min-w-0 md:flex-1 rounded-full border border-[#4a5563]/80 bg-[#202327]/88 px-[14px] text-left text-[13px] font-medium text-[#e8eaed] shadow-[0_18px_60px_-38px_rgba(0,0,0,0.95)] backdrop-blur-xl hover:bg-[#2a2d32]/92"
           disabled={disabled}
           key={item}
           onClick={() => onSelect(item)}
@@ -425,17 +425,17 @@ export function ProjectTopBar({
   return (
     <motion.header
       animate={{ opacity: 1, y: 0 }}
-      className="absolute left-0 right-0 top-0 z-50 flex h-[56px] items-center justify-between bg-transparent px-[16px] text-[13px] sm:px-[28px]"
+      className="absolute left-0 right-0 top-0 z-50 flex h-[56px] items-center justify-between gap-[12px] bg-transparent px-[16px] text-[13px] sm:px-[28px]"
       data-project-menu
       initial={{ opacity: 0, y: -8 }}
       transition={{ ...viewTransition, delay: 0.04 }}
     >
-      <div className="flex min-w-0 items-center gap-[8px] sm:gap-[14px]">
+      <div className="flex min-w-0 flex-1 items-center gap-[8px] sm:gap-[14px]">
         <button
           aria-expanded={projectMenuOpen}
           aria-haspopup="menu"
           aria-label="项目菜单"
-          className="workbench-chrome-button grid h-[32px] w-[48px] place-items-center rounded-full border border-white/[0.11] bg-[#1c1d20]/86 text-[#e8eaed] transition-colors hover:bg-[#2b2c30]/90"
+          className="workbench-chrome-button grid h-[36px] w-[44px] shrink-0 place-items-center rounded-full border border-white/[0.11] bg-[#1c1d20]/86 text-[#e8eaed] transition-colors hover:bg-[#2b2c30]/90"
           onClick={onToggleMenu}
           type="button"
         >
@@ -457,7 +457,7 @@ export function ProjectTopBar({
           )}
         </AnimatePresence>
         <div
-          className="hidden h-[32px] max-w-[290px] items-center gap-[8px] rounded-[18px] px-[2px] text-left transition-colors hover:bg-[#353436]/30 sm:flex"
+          className="hidden h-[32px] min-w-0 max-w-[290px] items-center gap-[8px] rounded-[18px] px-[2px] text-left transition-colors hover:bg-[#353436]/30 sm:flex"
           title={projectTitle}
         >
           <span className="max-w-[280px] truncate text-[14px] font-semibold leading-[20px] text-[#f1f3f4]">
@@ -465,7 +465,7 @@ export function ProjectTopBar({
           </span>
         </div>
       </div>
-      <div className="flex items-center gap-[4px] sm:gap-[8px]">
+      <div className="flex shrink-0 items-center gap-[4px] sm:gap-[8px]">
         <button
           aria-label="预览项目"
           className="workbench-chrome-button group hidden size-[34px] place-items-center rounded-full border border-white/[0.10] bg-[#1c1d20]/86 text-[#f1f3f4] transition hover:border-white/[0.18] hover:bg-[#34353a]/94 active:scale-95 disabled:cursor-not-allowed disabled:opacity-45 sm:grid"
@@ -477,6 +477,7 @@ export function ProjectTopBar({
           <PlayIcon className="size-[17px]" />
         </button>
         <button
+          aria-label="导出"
           aria-pressed={exportOpen}
           className={cn(
             "workbench-chrome-pill flex h-[34px] items-center gap-[8px] rounded-full border px-[9px] text-[14px] font-semibold transition-colors sm:px-[14px]",
@@ -493,6 +494,7 @@ export function ProjectTopBar({
           <span className="hidden sm:inline">导出</span>
         </button>
         <button
+          aria-label="共享"
           aria-pressed={shareOpen}
           className={cn(
             "workbench-chrome-pill flex h-[34px] items-center gap-[8px] rounded-full border px-[9px] text-[14px] font-semibold transition-colors sm:px-[14px]",
@@ -583,7 +585,7 @@ function ProjectMenu({
         </span>
         <span className="min-w-0">
           <span className="block truncate text-[14px] font-semibold leading-[18px] text-[#f1f3f4]">{projectTitle}</span>
-          <span className="mt-[2px] block text-[11px] font-medium leading-[14px] text-[#9aa0a6]">产品工作台项目</span>
+          <span className="mt-[2px] block text-[12px] font-medium leading-[14px] text-[#9aa0a6]">产品工作台项目</span>
         </span>
       </div>
       {[primaryItems, secondaryItems].map((group, groupIndex) => (

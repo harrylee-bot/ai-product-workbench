@@ -117,12 +117,12 @@ export function WorkbenchShareDialog({
               <XIcon className="size-[17px]" />
             </button>
           </div>
-          <div className="min-h-0 flex-1 px-[20px] pb-[18px] pt-[10px]">
+          <div className="min-h-0 flex-1 overflow-y-auto px-[20px] pb-[18px] pt-[10px]">
             <div className="mb-[20px] rounded-[16px] border border-white/[0.08] bg-[#202124]/76 p-[14px]">
               <div className="mb-[12px] flex items-center justify-between gap-[14px]">
                 <div className="min-w-0">
                   <div className="text-[15px] font-semibold text-[#f1f3f4]">启用共享和重混功能</div>
-                  <div className="mt-[6px] text-[12px] leading-[17px] text-[#aeb3bb]">
+                  <div className="mt-[6px] text-[13px] leading-[17px] text-[#aeb3bb]">
                     {statePending
                       ? "正在读取共享状态..."
                       : stateError
@@ -168,14 +168,14 @@ export function WorkbenchShareDialog({
                   />
                 </button>
               </div>
-              <div className="whitespace-normal rounded-[10px] border border-white/[0.08] bg-[#191a1d]/76 p-[12px] text-[12px] leading-[18px] text-[#cbc3d7]">
+              <div className="whitespace-normal rounded-[10px] border border-white/[0.08] bg-[#191a1d]/76 p-[12px] text-[13px] leading-[18px] text-[#cbc3d7]">
                 将项目设为公开后，知道链接的任何人都可以查看和重混该项目生成的设计和代码。您可以随时撤销公开访问权限。
               </div>
             </div>
             <div className="rounded-[16px] border border-white/[0.08] bg-[#111214]/58 p-[14px]">
               <div className="mb-[10px] text-[13px] font-semibold text-[#f1f3f4]">链接访问权限</div>
               <button
-                className="flex h-[38px] w-full items-center justify-between rounded-[10px] bg-[#242528]/84 px-[12px] text-[12px] text-[#c7cad0] hover:bg-[#2b2d31]/90"
+                className="flex h-[38px] w-full items-center justify-between rounded-[10px] bg-[#242528]/84 px-[12px] text-[13px] text-[#c7cad0] hover:bg-[#2b2d31]/90"
                 disabled={!shareEnabled || interactionDisabled}
                 onClick={copyShareLinkWithFeedback}
                 type="button"
