@@ -1,4 +1,5 @@
-import { Body, Controller, Get, Header, HttpCode, Param, Post, UseGuards } from "@nestjs/common";
+import { Body, Controller, Get, Header, HttpCode, Param, Post, Res, UseGuards } from "@nestjs/common";
+import type { Response } from "express";
 import { confirmArtifactFinalizationRequestSchema as confirmationSchema } from "@workbench/workbench-contracts";
 import { ZodValidationPipe } from "../../common/zod-validation.pipe.js";
 import { CurrentPrincipal } from "../identity/current-principal.decorator.js";
@@ -13,8 +14,9 @@ export class ArtifactFinalizationsController {
 
   @Get()
   @Header("Cache-Control", "private, no-store")
-  async get(@CurrentPrincipal() principal: AuthenticatedPrincipal, @Param("artifactId") artifactId: string, @Param("artifactVersionId") versionId: string) {
-    return mapArtifactFinalization(await this.finalizations.get(principal.id, artifactId, versionId));
+  async get(@CurrentPrincipal() principal: AuthenticatedPrincipal, @Param("artifactId") artifactId: string, @Param("artifactVersionId") versionId: string,
+    @Res() response: Response) {
+    response.json(mapArtifactFinalization(await this.finalizations.get(principal.id, artifactId, versionId)));
   }
 
   @Post()
