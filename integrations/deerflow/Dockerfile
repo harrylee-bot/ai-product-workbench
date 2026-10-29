@@ -15,17 +15,6 @@ FROM cgr.dev/chainguard/wolfi-base@sha256:1c451d46a0d5c4e9f2b38e0e8d3e299564a1aa
 ARG DEERFLOW_BASE_IMAGE
 ARG DEERFLOW_NODE_IMAGE
 ARG DEERFLOW_SOURCE_COMMIT
-ARG WORKBENCH_SOURCE_COMMIT
-ARG WORKBENCH_DEERFLOW_TOOL_SCOPE_PATCH_SHA256=930396c5e39c5b00f5f01b089c6a3d64f3b921f724718c84070ac4a2e70814e3
-
-LABEL org.opencontainers.image.title="产品工作台 DeerFlow Runtime" \
-      org.opencontainers.image.revision="${WORKBENCH_SOURCE_COMMIT}" \
-      io.workbench.deerflow.base-image="${DEERFLOW_BASE_IMAGE}" \
-      io.workbench.deerflow.runtime-base-image="cgr.dev/chainguard/wolfi-base@sha256:1c451d46a0d5c4e9f2b38e0e8d3e299564a1aa95c21973efcc1980a9d1d2e73e" \
-      io.workbench.deerflow.validator-node-image="${DEERFLOW_NODE_IMAGE}" \
-      io.workbench.deerflow.source-commit="${DEERFLOW_SOURCE_COMMIT}" \
-      io.workbench.deerflow.tool-scope-patch-sha256="${WORKBENCH_DEERFLOW_TOOL_SCOPE_PATCH_SHA256}" \
-      io.workbench.deerflow.contract-version="1"
 
 USER root
 RUN apk upgrade --no-cache \
@@ -114,3 +103,15 @@ RUN --network=none cd /app/backend \
     && PYTHONPATH=/app/backend/packages/harness:/app/backend \
       uv run --no-sync python /opt/workbench/deerflow/runtime-security/test_runtime.py \
     && rm -rf /tmp/uv-cache
+
+# Source metadata must not invalidate dependency layers on every app-only fix.
+ARG WORKBENCH_SOURCE_COMMIT
+ARG WORKBENCH_DEERFLOW_TOOL_SCOPE_PATCH_SHA256=930396c5e39c5b00f5f01b089c6a3d64f3b921f724718c84070ac4a2e70814e3
+LABEL org.opencontainers.image.title="产品工作台 DeerFlow Runtime" \
+      org.opencontainers.image.revision="${WORKBENCH_SOURCE_COMMIT}" \
+      io.workbench.deerflow.base-image="${DEERFLOW_BASE_IMAGE}" \
+      io.workbench.deerflow.runtime-base-image="cgr.dev/chainguard/wolfi-base@sha256:1c451d46a0d5c4e9f2b38e0e8d3e299564a1aa95c21973efcc1980a9d1d2e73e" \
+      io.workbench.deerflow.validator-node-image="${DEERFLOW_NODE_IMAGE}" \
+      io.workbench.deerflow.source-commit="${DEERFLOW_SOURCE_COMMIT}" \
+      io.workbench.deerflow.tool-scope-patch-sha256="${WORKBENCH_DEERFLOW_TOOL_SCOPE_PATCH_SHA256}" \
+      io.workbench.deerflow.contract-version="1"

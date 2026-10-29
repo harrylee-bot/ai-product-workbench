@@ -407,6 +407,42 @@ class ArtifactDraftToolTests(unittest.TestCase):
         self.assertEqual(_artifact_draft_repair_hints(self.draft, issues), [])
         self.assertEqual(_artifact_draft_repair_hints(self.prd_draft, [None, {"path": [[]]}]), [])
 
+    def test_acceptance_coverage_points_to_actual_table_after_typed_criteria(self) -> None:
+        invalid = copy.deepcopy(self.prd_draft)
+        blocks = invalid["content"]["sections"]["businessRequirements"]["acceptanceCriteria"]["blocks"]
+        table = next(block for block in blocks if block["type"] == "table")
+        blocks.remove(table)
+        blocks.append(table)
+        item_column = table["columns"][1]["id"]
+        for row in table["rows"]:
+            next(cell for cell in row["cells"] if cell["columnId"] == item_column)["content"] = [{"type": "text", "text": "PRIVATE_ITEM_LABEL", "marks": []}]
+        before = copy.deepcopy(invalid)
+        response = json.loads(workbench_artifact_draft_publish.func(self.prd_runtime, 0, invalid)[0])
+        self.assertFalse(response["ok"])
+        self.assertTrue(any(issue["message"].startswith("acceptance criteria must cover ") for issue in response["issues"]))
+        hints = [hint for hint in response["repairHints"] if "itemColumnIndex" in hint]
+        self.assertEqual(len(hints), 1)
+        self.assertEqual(hints[0]["path"], ["content", "sections", "businessRequirements", "acceptanceCriteria", "blocks", len(blocks)-1])
+        self.assertIn("not the separate typed acceptanceCriterion blocks", hints[0]["instruction"])
+        self.assertNotIn("PRIVATE_ITEM_LABEL", json.dumps(hints))
+        self.assertEqual(invalid, before)
+
+    def test_unknown_citation_hints_identify_every_actual_inline_without_choosing_a_source(self) -> None:
+        invalid = copy.deepcopy(self.prd_draft)
+        blocks = invalid["content"]["sections"]["businessRequirements"]["coreRules"]["blocks"]
+        index = next(i for i, block in enumerate(blocks) if block["type"] == "requirement")
+        inline = blocks[index]["description"]
+        citation = {"type": "citation", "citationId": "missing-source-id", "label": "PRIVATE_SOURCE_LABEL"}
+        inline.extend([copy.deepcopy(citation), copy.deepcopy(citation)])
+        before = copy.deepcopy(invalid)
+        response = json.loads(workbench_artifact_draft_publish.func(self.prd_runtime, 0, invalid)[0])
+        self.assertFalse(response["ok"])
+        hints = [hint for hint in response["repairHints"] if "undefined citation" in hint["instruction"]]
+        self.assertEqual([hint["path"] for hint in hints], [["content", "sections", "businessRequirements", "coreRules", "blocks", index, "description", i, "citationId"] for i in (len(inline)-2, len(inline)-1)])
+        self.assertTrue(all("expectedValue" not in hint for hint in hints))
+        self.assertNotIn("PRIVATE_SOURCE_LABEL", json.dumps(hints))
+        self.assertEqual(invalid, before)
+
     def test_field_names_misplaced_in_blocks_are_not_suggested_as_business_text(self) -> None:
         invalid = copy.deepcopy(self.prd_draft)
         blocks = invalid["content"]["sections"]["introduction"]["scope"]["blocks"]

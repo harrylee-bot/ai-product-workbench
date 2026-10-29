@@ -285,6 +285,44 @@ def _artifact_draft_repair_hints(candidate: Any, issues: list[Any]) -> list[dict
         ):
             continue
         code = issue.get("code")
+        if (
+            code == "custom"
+            and path == ["content", "sections", "businessRequirements", "acceptanceCriteria", "blocks"]
+            and isinstance(issue.get("message"), str)
+            and issue["message"].startswith(("acceptance criteria must cover ", "acceptance criteria must contain at least "))
+        ):
+            blocks = _candidate_value(candidate, path)
+            if isinstance(blocks, list):
+                for index, block in enumerate(blocks):
+                    if isinstance(block, dict) and block.get("type") == "table":
+                        append({
+                            "path": [*path, index],
+                            "instruction": "Coverage is checked against the item labels in the second column of this acceptance table, not the separate typed acceptanceCriterion blocks. Repair the table's item labels and observable standards from the requested facts; preserve the typed criteria and their bidirectional requirement references.",
+                            "itemColumnIndex": 1,
+                            "standardColumnIndex": 2,
+                        })
+        if (
+            code == "custom" and path == ["content", "sections"]
+            and isinstance(issue.get("message"), str)
+            and issue["message"].startswith("unknown citation: ")
+        ):
+            unknown_id = issue["message"][len("unknown citation: "):]
+            pending = [(["content", "sections"], _candidate_value(candidate, path))]
+            for _ in range(20_000):
+                if not pending:
+                    break
+                inline_path, value = pending.pop()
+                if len(inline_path) > 24:
+                    continue
+                if isinstance(value, dict):
+                    if value.get("type") == "citation" and value.get("citationId") == unknown_id:
+                        append({
+                            "path": [*inline_path, "citationId"],
+                            "instruction": "This exact inline field refers to an undefined citation. Match it to its original retrieved source and the document's declared citations; do not invent a source, change its meaning, or delete valid surrounding content.",
+                        })
+                    pending.extend(([*inline_path, key], child) for key, child in reversed(list(value.items())) if isinstance(key, str))
+                elif isinstance(value, list):
+                    pending.extend(([*inline_path, index], child) for index, child in reversed(list(enumerate(value))))
         if code == "invalid_type" and len(path) >= 5 and path[-1] == "cells" and path[-3] == "rows":
             row = _candidate_value(candidate, path[:-1])
             block_array = path[:-4]
