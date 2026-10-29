@@ -6,6 +6,7 @@ import { discardStoredOidcIdToken } from "./auth-account-storage";
 import { workbenchAuthIpAddressOptions } from "./workbench-auth-ip";
 import { isWorkbenchEnterpriseSsoEnabled } from "./workbench-enterprise-sso-policy";
 import { isWorkbenchPublicRegistrationEnabled } from "./workbench-registration-policy";
+import { verifyWorkbenchPassword } from "./workbench-password";
 import {
   isWorkbenchUsername,
   WORKBENCH_OIDC_PROVIDER_ID,
@@ -140,6 +141,7 @@ export const auth = betterAuth({
     disableSignUp: !publicRegistrationEnabled,
     minPasswordLength: WORKBENCH_PASSWORD_MIN_LENGTH,
     maxPasswordLength: WORKBENCH_PASSWORD_MAX_LENGTH,
+    password: { verify: verifyWorkbenchPassword },
   },
   session: {
     modelName: "auth_sessions",

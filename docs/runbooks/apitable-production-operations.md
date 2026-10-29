@@ -80,6 +80,16 @@ docker compose logs --tail=100 backend-server web-server room-server
 
 发布时先备份服务器 `.env` 与 Compose 到仅管理员可读的备份目录，保留旧镜像；仅替换 `backend-server` 与 `web-server`，并让 gateway 重新解析容器地址。后端健康、页面加载、匿名重置被拒绝和公开分享只读均通过后，再更新对应源码下载包。需要回退时恢复备份配置并使用保留的旧镜像重建这两个服务。
 
+## 与产品工作台共用账号
+
+需求池可信空间 `spchwV2gnndQw` 的有效成员，以相同邮箱和需求池密码登录产品工作台。需求池是这些账号的密码来源；原生 bcrypt 摘要仅在服务器内同步到工作台，工作台通过 `apitable-bcrypt:` 命名空间校验，并继续支持原有工作台 scrypt 账号。同步不读取或保存明文密码。
+
+运维脚本为 `deploy/sync-requirement-accounts.py`，默认只报告计划；在已核验的源站执行 `--execute` 才写入工作台技术身份表。每次变更前备份工作台三个账号/会话表至私有恢复目录，事务失败整体回滚。需求池数据库只读，不变更表格、空间、成员或分享权限。工作台已有用户 ID、Principal、Workspace 和 Project 关联不变。
+
+`workbench-requirement-account-sync.timer` 每分钟执行一次；成员新增、密码更新、停用/移除通常在下一轮生效。同步身份用 `auth_accounts` 的 `apitable-sync` provider 和需求池用户 UUID 固定绑定，不能因邮箱变化合并其他用户。密码改变或成员失效时撤销该工作台账号的旧会话；已签发 API JWT 仍受原有 5 分钟有效期限制。删除成员不会删除其项目。两套系统各自持有登录会话，用户分别登录。
+
+安装前先上线工作台密码兼容代码并验证，再运行同步及安装两个 systemd 单元；使用 `systemctl list-timers workbench-requirement-account-sync.timer` 和服务日志检查计数。停用 timer 可停止后续同步；回退代码之前必须恢复同步前的账号表备份。不要将私有备份或数据库输出复制进仓库。
+
 ## 需求表单登录入口
 
 表单的登录提示必须跳到本站 `/login`，由原生 Router 编码 `reference` 和 `spaceId`，避免空登录地址产生 `/undefined`，或返回地址里的 `&`、`#` 被拆成登录页参数。普通 `/login` 初始显示账号密码登录，邀请注册流程保留；登录成功后由原生逻辑返回同站表单。浏览器存储失败不应阻断登录导航。
