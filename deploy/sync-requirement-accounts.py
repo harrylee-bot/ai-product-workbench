@@ -119,12 +119,12 @@ def plan_sync(source, target):
 
 def sync_sql(changes):
     payload = io.StringIO()
-    csv.writer(payload).writerow([json.dumps(changes, ensure_ascii=True)])
+    csv.writer(payload, lineterminator="\n").writerow([json.dumps(changes, ensure_ascii=True)])
     return """BEGIN;
 SELECT pg_advisory_xact_lock(hashtext('workbench-apitable-account-sync'));
 CREATE TEMP TABLE _account_sync_payload(data jsonb) ON COMMIT DROP;
 COPY _account_sync_payload(data) FROM STDIN WITH (FORMAT csv);
-""" + payload.getvalue() + """\.
+""" + payload.getvalue() + r"""\.
 DO $sync$
 DECLARE r jsonb; uid uuid; prior text; matches integer;
 BEGIN
