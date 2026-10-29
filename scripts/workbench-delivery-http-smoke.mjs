@@ -567,7 +567,9 @@ const productionPdfTools = {
     ensure(result.status === 0 && !result.error, "PDF_TEXT_TOOL_UNAVAILABLE");
   },
   text(bytes) {
-    const result = spawnSync("pdftotext", ["-", "-"], { input: bytes, encoding: "utf8", timeout: 30_000, maxBuffer: 16 * 1024 * 1024 });
+    // Content order keeps a wrapped table cell together; geometric reading
+    // order can interleave adjacent cells inside an otherwise intact marker.
+    const result = spawnSync("pdftotext", ["-raw", "-", "-"], { input: bytes, encoding: "utf8", timeout: 30_000, maxBuffer: 16 * 1024 * 1024 });
     ensure(result.status === 0 && !result.error, "PDF_TEXT_EXTRACTION_FAILED");
     return result.stdout;
   },
