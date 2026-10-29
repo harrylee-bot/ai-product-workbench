@@ -241,6 +241,7 @@ function reconcileProjectionWithRun(
     generationStageAttempt: attemptChanged ? null : current.generationStageAttempt,
     draftArtifacts: clearsDrafts ? {} : current.draftArtifacts,
     draftArtifactOrder: clearsDrafts ? [] : current.draftArtifactOrder,
+    generationPreviews: clearsDrafts || terminal ? {} : current.generationPreviews,
     pendingInputs: terminal ? {} : current.pendingInputs,
     pendingInputOrder: terminal ? [] : current.pendingInputOrder,
     failure: run.failure,

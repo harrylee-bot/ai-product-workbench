@@ -696,6 +696,7 @@ export function useWorkbenchController({
     retryBoardSave,
     runController,
     runDraftArtifacts,
+    runGenerationPreviews: Object.values(runController.projection?.generationPreviews ?? {}),
     runActivities,
     runMessages,
     runPhaseLabel: liveRunPhaseLabel,

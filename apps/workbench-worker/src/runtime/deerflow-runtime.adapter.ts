@@ -68,6 +68,7 @@ import {
 import { runtimePrdResultGuidance } from "./runtime-prd-guidance.js";
 import { assertPrdReferenceReadEvidence } from "./runtime-prd-reference-evidence.js";
 import { RuntimeProviderContentFilterError } from "./runtime-provider-content-filter-error.js";
+import { RuntimeGenerationPreview } from "./runtime-generation-preview.js";
 
 export {
   assistantTextDelta,
@@ -524,7 +525,7 @@ export class DeerFlowRuntimeAdapter implements RuntimePort {
     // reports a terminal state, so forcing the SDK's five-retry idle watchdog
     // here would turn a healthy long-running Run into a false failure.
     // Other stream modes retain the reconnect watchdog for half-open sockets.
-    const streamIdleReconnect = streamMode === "values"
+    const streamIdleReconnect = execution.request.requestedArtifactKinds.some((kind) => kind === "prd" || kind === "prototype") || streamMode === "values"
       ? 0
       : Math.min(
           30_000,
@@ -582,6 +583,8 @@ export class DeerFlowRuntimeAdapter implements RuntimePort {
     let requestActivityStarted = false;
     let resultToolCallId: string | null = null;
     const prototypeRequested = execution.request.requestedArtifactKinds.includes("prototype");
+    const generationPreview = new RuntimeGenerationPreview(execution.request.requestedArtifactKinds);
+    const hasGenerationPreview = execution.request.requestedArtifactKinds.some((kind) => kind === "prd" || kind === "prototype");
     let partEffects: RuntimeProgressEvent[] | null = null;
     const emitEvent = async (event: RuntimeProgressEvent) => {
       if (!partEffects) throw new Error("RUNTIME_EFFECT_WITHOUT_EXTERNAL_IDENTITY");
@@ -930,6 +933,15 @@ export class DeerFlowRuntimeAdapter implements RuntimePort {
           }
           await externalRunPersistence;
           if (signal?.aborted) throw abortError(signal);
+          const isPreviewTokenFrame = hasGenerationPreview && !resultToolCallId && (part.event === "messages" || part.event === "messages-tuple");
+          const previews = isPreviewTokenFrame ? generationPreview.push(part.event, part.data) : [];
+          // Drain token frames without a database round trip. Only bounded,
+          // sampled previews enter the durable inbox alongside values events.
+          if (isPreviewTokenFrame && (!part.id || previews.length === 0)) {
+            if (part.id) lastExternalEventId = part.id;
+            partEffects = null;
+            continue;
+          }
           const externalPart = part.id
             ? {
                 externalRunId,
@@ -943,6 +955,7 @@ export class DeerFlowRuntimeAdapter implements RuntimePort {
             partEffects = null;
             continue;
           }
+          for (const preview of previews) await emitEvent({ type: "artifact.preview", preview });
 
           const node = extractNode(part.data);
           if (node && collapsePrdActivity && !requestActivityStarted) {
@@ -967,7 +980,7 @@ export class DeerFlowRuntimeAdapter implements RuntimePort {
             inputRequired = extractRuntimeInputRequired(part.data) ?? inputRequired;
             await processArtifactState(part.data);
           }
-          const incoming = extractAssistantTextFrame(part.event, part.data);
+          const incoming = isPreviewTokenFrame ? null : extractAssistantTextFrame(part.event, part.data);
           if (incoming) {
             const delta = assistantTextDelta(assistantText, incoming.text, incoming.kind);
             assistantText += delta;
@@ -1470,9 +1483,8 @@ export class DeerFlowRuntimeAdapter implements RuntimePort {
       return mode as StreamMode;
     });
     if (modes.length === 0) throw new Error("DEERFLOW_STREAM_MODE_MISSING");
-    // PRD and Prototype artifacts are delivered through durable stage/draft/result
-    // tools found in values snapshots. Persisting every token-sized messages event
-    // creates enough backpressure to outrun DeerFlow's retained stream buffer.
+    // Values remain the authority for stages, drafts and results. Messages are
+    // drained in memory to build sampled, inert previews before the first draft.
     if (
       (requestedArtifactKinds.length === 1
         && (requestedArtifactKinds[0] === "prd" || requestedArtifactKinds[0] === "prototype"))
@@ -1480,7 +1492,7 @@ export class DeerFlowRuntimeAdapter implements RuntimePort {
         && requestedArtifactKinds.includes("prd")
         && requestedArtifactKinds.includes("prototype"))
     ) {
-      return "values";
+      return ["values", "messages-tuple"];
     }
     return modes.length === 1 ? modes[0]! : modes;
   }

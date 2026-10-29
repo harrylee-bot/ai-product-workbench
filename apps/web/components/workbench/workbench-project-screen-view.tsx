@@ -16,6 +16,7 @@ import type {
   RunTargetSurface,
 } from "@workbench/workbench-contracts";
 import { AnimatePresence, motion } from "framer-motion";
+import dynamic from "next/dynamic";
 import { XIcon } from "lucide-react";
 import type { ComponentProps, RefObject } from "react";
 
@@ -84,6 +85,10 @@ import {
 import { ProjectComposer, type WorkbenchProjectComposerProps } from "./workbench-project-composer";
 import { WorkbenchProjectMembersDialog } from "./workbench-project-members-dialog";
 import { ProjectPreviewOverlay } from "./workbench-project-preview-overlay";
+const WorkbenchGenerationPreview = dynamic(
+  () => import("./workbench-generation-preview").then((module) => module.WorkbenchGenerationPreview),
+  { ssr: false },
+);
 import {
   LeftInspector,
   MobileRunStatus,
@@ -238,6 +243,7 @@ export type ProjectScreenViewContract = {
     onTargetSurfaceChange: (surface: RunTargetSurface) => void;
   };
   runPanels: {
+    generationPreviews?: import("@workbench/workbench-contracts").GenerationPreview[];
     actionBusy: boolean;
     actionError: unknown;
     activities: WorkbenchRunActivityItem[];
@@ -309,9 +315,11 @@ export function ProjectScreenView({
         isOverview={root.isGeneratedOverview}
         motionKind={runPanels.motionKind}
         phase={root.phase}
-        showPendingArtifact={showTransientPendingArtifact}
+        showPendingArtifact={showTransientPendingArtifact && !runPanels.generationPreviews?.length}
       />
       <ProjectChromeVignette isOverview={root.isGeneratedOverview} />
+      {canvas.activeRun && Boolean(runPanels.generationPreviews?.length)
+        && <WorkbenchGenerationPreview previews={runPanels.generationPreviews ?? []} />}
       <ProjectTopBar
         capabilities={root.capabilities}
         exportOpen={chrome.exportOpen}

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import type { GenerationPreview } from "./generation-preview.js";
 import { approvalDecisionSchema, approvalOptionsSchema } from "./approvals.js";
 import { artifactCitationSchema, type ArtifactCitation } from "./citations.js";
 import { jsonValueSchema, type JsonValue } from "./common.js";
@@ -267,6 +268,7 @@ export const runtimeOutcomeSchema = z.union([
 ]) as z.ZodType<RuntimeOutcome>;
 
 export type RuntimeProgressEvent =
+  | { type: "artifact.preview"; preview: GenerationPreview }
   | { type: "phase"; phase: "understanding" | "retrieving_knowledge" | "planning" | "generating" | "validating" | "publishing"; label: string; progress: number | null }
   | { type: "generation.stage"; stage: RunGenerationStage; sourceEventId: string }
   | {

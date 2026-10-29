@@ -15,6 +15,14 @@ const origin = normalizedOrigin(
   "WORKBENCH_E2E_WEB_ORIGIN",
 );
 const evidenceLevel = process.env.WORKBENCH_E2E_EVIDENCE_LEVEL ?? "fixture";
+const incrementalPreview = process.env.WORKBENCH_E2E_GENERATION_PREVIEW === "1";
+let visibleSequence = incrementalPreview ? 9 : Infinity;
+const previewWaiters = new Set();
+function advancePreview(sequence) {
+  visibleSequence = sequence;
+  for (const resolve of previewWaiters) resolve();
+  previewWaiters.clear();
+}
 const timestamp = "2026-07-14T02:00:00.000Z";
 const projectTitle = "真实采购运行项目";
 const prompt = "为企业采购审批生成真实工作台";
@@ -251,6 +259,14 @@ const events = [
     screens: prototypeDraftScreens,
   }),
 ];
+if (incrementalPreview) {
+  const node = { id: "preview-submit", parentId: null, kind: "button", text: "提交采购审批", x: 24, y: 100, width: 300, height: 44, absolute: true, direction: "column", gap: 0, padding: 8, fill: "#7467f6", color: "#ffffff", fontSize: 16, radius: 8 };
+  const preview = { artifactIndex: 0, kind: "prototype", title: "企业采购审批", markdown: "", screens: [{ id: "preview-request", name: "采购申请", width: 390, height: 500, nodes: [] }] };
+  const draft = events.pop();
+  events.push(runEvent(9, "artifact.preview.updated", { attempt: 1, preview }));
+  events.push(runEvent(10, "artifact.preview.updated", { attempt: 1, preview: { ...preview, screens: [{ ...preview.screens[0], nodes: [node] }] } }));
+  events.push(runEvent(11, draft.type, draft.payload));
+}
 
 await mkdir(outputDir, { recursive: true });
 const browser = await chromium.launch({ headless: true });
@@ -297,7 +313,8 @@ try {
       assert(runSubmitted, "Run events must not be requested before SubmissionIntent submit succeeds");
       const afterSequence = Number(url.searchParams.get("afterSequence") ?? "0");
       streamCursors.push(afterSequence);
-      const pendingEvents = events.filter((event) => event.sequence > afterSequence);
+      if (incrementalPreview && afterSequence >= visibleSequence) await new Promise((resolve) => previewWaiters.add(resolve));
+      const pendingEvents = events.filter((event) => event.sequence > afterSequence && event.sequence <= visibleSequence);
       return sse(route, pendingEvents);
     }
     if (method === "GET" && requestPath === `/api/v1/runs/${run.id}`) {
@@ -616,6 +633,23 @@ try {
     page,
     "SubmissionIntent submit",
   );
+  if (incrementalPreview) {
+    const live = page.getByRole("region", { name: "生成中预览" });
+    await live.waitFor();
+    assert(await page.locator("[data-workbench-generated-node]").count() === 0, "Live preview must precede the first validated Artifact");
+    assert(await live.getByRole("button", { name: "提交采购审批" }).count() === 0, "The first partial screen must not invent later components");
+    advancePreview(10);
+    await live.getByRole("button", { name: "提交采购审批" }).waitFor();
+    await page.screenshot({ path: path.join(outputDir, "generation-preview-desktop.png"), fullPage: true });
+    await page.setViewportSize({ width: 390, height: 844 });
+    await assertNoHorizontalPageOverflow(page, "live preview at 390px");
+    const box = await live.boundingBox();
+    assert(box && box.width > 300 && box.height > 250, "Live preview must remain readable on mobile");
+    await page.screenshot({ path: path.join(outputDir, "generation-preview-mobile.png"), fullPage: true });
+    await page.setViewportSize({ width: 1501, height: 855 });
+    advancePreview(11);
+    await live.waitFor({ state: "detached" });
+  }
   const previewNode = page.locator(
     '[data-workbench-generated-node][data-generated-index="1"]',
   );
@@ -704,6 +738,7 @@ try {
   console.log(JSON.stringify({
     evidenceLevel,
     mockedTransport: true,
+    generationPreview: incrementalPreview,
     ok: true,
     projectTitle,
     prompt,
@@ -716,6 +751,10 @@ try {
     submissionIntentSubmits: submissionIntentSubmits.length,
     currentSubmissionIntentReads,
     screenshots: [
+      ...(incrementalPreview ? [
+        "output/audit/1.0.0/browser-remediation/generation-preview-desktop.png",
+        "output/audit/1.0.0/browser-remediation/generation-preview-mobile.png",
+      ] : []),
       "output/audit/1.0.0/browser-remediation/workbench-run-preview-desktop-1501x855.png",
       "output/audit/1.0.0/browser-remediation/workbench-run-preview-mobile-390x844.png",
     ],
@@ -834,7 +873,7 @@ async function waitForValue(predicate, page, label) {
 
 async function sse(route, streamEvents) {
   const body = [
-    "retry: 10000\n\n",
+    incrementalPreview ? "retry: 100\n\n" : "retry: 10000\n\n",
     ...streamEvents.map((event) => (
       `id: ${event.sequence}\nevent: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`
     )),

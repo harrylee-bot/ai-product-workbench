@@ -851,7 +851,31 @@ describe("DeerFlow runtime adapter", () => {
     expect(runtimeObserver.onExternalFinalization).toHaveBeenCalledTimes(1);
   });
 
-  it("uses values-only streaming for an exact PRD request", async () => {
+  it("drains raw tool tokens without per-token inbox writes and emits a real preview before the first draft", async () => {
+    const artifact = minimalPrototypeArtifact();
+    const result = { protocol: "workbench.runtime.result.v1", message: "done", artifacts: [artifact] };
+    const args = JSON.stringify({ artifact_index: 0, draft: artifact });
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request, init: RequestInit = {}) => {
+      const url = new URL(String(input));
+      if (url.pathname.endsWith("/runs") && (init.method ?? "GET") === "GET") return Response.json([]);
+      if (url.pathname.endsWith("/runs/stream")) return runtimeStreamResponse([
+        { id: "preview-first", event: "messages", data: [{ id: "draft-message", type: "AIMessageChunk", tool_call_chunks: [{ index: 0, name: "workbench_artifact_draft_publish", args }] }, {}] },
+        ...Array.from({ length: 1_000 }, (_, index) => ({ id: `token-${index}`, event: "messages", data: [{ id: "draft-message", type: "AIMessageChunk", tool_call_chunks: [{ index: 0, name: null, args: " " }] }, {}] })),
+        { id: "validated-values", event: "values", data: { messages: [{ type: "human", content: "current turn" }, ...artifactDraftToolMessages(artifact, 0, "validated-draft"), ...validatedResultToolMessages(result)] } },
+      ]);
+      throw new Error(`Unexpected request: ${url}`);
+    }));
+    const runtimeObserver = observer();
+    const adapter = new DeerFlowRuntimeAdapter(workerConfig(), { getObject: vi.fn() } as never);
+    await adapter.execute(execution({ request: { ...execution().request, requestedArtifactKinds: ["prototype"] } }), runtimeObserver);
+    expect(runtimeObserver.onExternalEvent).toHaveBeenCalledTimes(2);
+    const effects = runtimeObserver.onEvent.mock.calls.map(([effect]) => effect);
+    expect(effects[0]).toMatchObject({ type: "artifact.preview", preview: { kind: "prototype", title: artifact.title } });
+    expect(effects.findIndex((effect) => effect.type === "artifact.draft")).toBeGreaterThan(0);
+    expect(effects.filter((effect) => effect.type === "text.delta")).toEqual([]);
+  });
+
+  it("subscribes to sampled previews and authoritative values for a PRD request", async () => {
     let streamMode: unknown;
     vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request, init: RequestInit = {}) => {
       const url = new URL(String(input));
@@ -878,10 +902,10 @@ describe("DeerFlow runtime adapter", () => {
       },
     }), observer())).resolves.toMatchObject({ message: runtimePrdResultFixture.message });
 
-    expect(streamMode).toBe("values");
+    expect(streamMode).toEqual(["values", "messages-tuple"]);
   });
 
-  it("uses values-only streaming for an exact Prototype request", async () => {
+  it("subscribes to sampled previews and authoritative values for a Prototype request", async () => {
     let streamMode: unknown;
     let ownerHeader: string | null = null;
     vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request, init: RequestInit = {}) => {
@@ -909,7 +933,7 @@ describe("DeerFlow runtime adapter", () => {
       },
     }), observer())).rejects.toThrow("RUNTIME_RESULT_SUBMISSION_MISSING");
 
-    expect(streamMode).toBe("values");
+    expect(streamMode).toEqual(["values", "messages-tuple"]);
     expect(ownerHeader).toBe("principal_1");
   });
 
@@ -937,7 +961,7 @@ describe("DeerFlow runtime adapter", () => {
       request: { ...execution().request, requestedArtifactKinds: [first, second] },
     }), runtimeObserver)).resolves.toMatchObject({ artifacts });
 
-    expect(streamMode).toBe("values");
+    expect(streamMode).toEqual(["values", "messages-tuple"]);
     expect(runtimeObserver.onExternalEvent).toHaveBeenCalledWith(
       expect.objectContaining({ event: "values" }),
       expect.arrayContaining([
@@ -4011,7 +4035,7 @@ describe("DeerFlow runtime adapter", () => {
     }).configurable.subagent_enabled).toBe(true);
   });
 
-  it("rejoins a joint values-only Run with Last-Event-ID and never submits a duplicate", async () => {
+  it("rejoins a joint values and preview stream with Last-Event-ID and never submits a duplicate", async () => {
     const requests: Array<{ url: URL; init: RequestInit }> = [];
     const fetchMock = vi.fn(async (input: string | URL | Request, init: RequestInit = {}) => {
       const url = new URL(String(input));
@@ -4049,7 +4073,7 @@ describe("DeerFlow runtime adapter", () => {
     expect(new Headers(joinRequest?.init.headers).get("Last-Event-ID")).toBe("event-existing-1");
     expect(new Headers(joinRequest?.init.headers).get("X-DeerFlow-Owner-User-Id")).toBe("principal_1");
     expect(joinRequest?.url.searchParams.get("cancel_on_disconnect")).toBe("0");
-    expect(joinRequest?.url.searchParams.get("stream_mode")).toBe("values");
+    expect(joinRequest?.url.searchParams.get("stream_mode")).toBe("[\"values\",\"messages-tuple\"]");
     expect(requests.some((request) => request.init.method === "POST")).toBe(false);
     expect(runtimeObserver.onSubmissionStarted).not.toHaveBeenCalled();
     expect(runtimeObserver.onExternalRunCreated).not.toHaveBeenCalled();

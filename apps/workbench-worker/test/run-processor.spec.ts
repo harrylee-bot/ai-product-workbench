@@ -2870,6 +2870,9 @@ type ProcessorInternals = {
     artifactCount: number;
   } | null>;
   persistProgress(claim: typeof executionClaim, event: {
+    type: "artifact.preview";
+    preview: import("@workbench/workbench-contracts").GenerationPreview;
+  } | {
     type: "phase";
     phase: "generating";
     label: string;
@@ -5318,6 +5321,16 @@ describe("Run durable snapshots", () => {
       "RUNTIME_EXTERNAL_RUN_UNRESOLVED",
     );
     expect(finalizeCancellation).not.toHaveBeenCalled();
+  });
+
+  it("persists unfinished previews with the active attempt without creating an Artifact", async () => {
+    const tx = eventTransaction();
+    tx.run.findUniqueOrThrow.mockResolvedValue({ status: "running", attempt: 2 } as never);
+    const { processor } = processorWithTransaction(tx);
+    const preview = { artifactIndex: 0, kind: "prd" as const, title: "采购需求", markdown: "审批规则正在编写", screens: [] };
+    await processor.persistProgress(executionClaim, { type: "artifact.preview", preview });
+    expect(tx.runEvent.create).toHaveBeenCalledWith({ data: expect.objectContaining({ type: "artifact.preview.updated", payload: { attempt: 2, preview } }) });
+    expect(tx.artifactVersion.deleteMany).not.toHaveBeenCalled();
   });
 
   it("stores runtime phase state before appending its event", async () => {

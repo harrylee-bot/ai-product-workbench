@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { generationPreviewSchema } from "./generation-preview.js";
 import {
   artifactKindSchema,
   artifactVersionReferenceSchema,
@@ -494,6 +495,10 @@ export const artifactDraftCreatedEventSchema = event("artifact.draft.created", z
     screenIds.add(screen.id);
   }
 }));
+export const artifactPreviewUpdatedEventSchema = event("artifact.preview.updated", z.object({
+  attempt: z.number().int().positive(),
+  preview: generationPreviewSchema,
+}).strict());
 export const artifactPrototypePatchCreatedEventSchema = event(
   "artifact.prototype.patch.created",
   prototypePatchEventPayloadSchema,
@@ -524,6 +529,7 @@ export type RunEvent =
   | z.infer<typeof messageCompletedEventSchema>
   | z.infer<typeof activityChangedEventSchema>
   | z.infer<typeof artifactDraftCreatedEventSchema>
+  | z.infer<typeof artifactPreviewUpdatedEventSchema>
   | z.infer<typeof artifactPrototypePatchCreatedEventSchema>
   | z.infer<typeof artifactPrototypePatchDegradedEventSchema>
   | z.infer<typeof artifactVersionCreatedEventSchema>
@@ -544,6 +550,7 @@ export const runEventSchema: z.ZodType<RunEvent> = z.discriminatedUnion("type", 
   messageCompletedEventSchema,
   activityChangedEventSchema,
   artifactDraftCreatedEventSchema,
+  artifactPreviewUpdatedEventSchema,
   artifactPrototypePatchCreatedEventSchema,
   artifactPrototypePatchDegradedEventSchema,
   artifactVersionCreatedEventSchema,
