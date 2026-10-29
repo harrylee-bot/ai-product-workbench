@@ -432,9 +432,9 @@ export function HomeScreen({
         initial={{ opacity: 0, y: 12 }}
         transition={{ ...viewTransition, delay: 0.12 }}
       >
-        <div className="mx-auto max-w-[1000px]">
-          <h1 className="text-[34px] font-normal leading-none tracking-normal text-[#f1f3f4] sm:text-[46px] md:text-[56px]">
-            欢迎使用产品工作台...
+        <div className="mx-auto max-w-[1000px] md:pr-[176px]">
+          <h1 className="whitespace-normal text-[24px] font-medium leading-[1.3] tracking-normal text-[#f1f3f4] sm:text-[28px] lg:text-[32px]">
+            欢迎使用产品工作台
           </h1>
         </div>
       </motion.section>
