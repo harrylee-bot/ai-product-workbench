@@ -90,6 +90,8 @@ docker compose logs --tail=100 backend-server web-server room-server
 
 安装前先上线工作台密码兼容代码并验证，再运行同步及安装两个 systemd 单元；使用 `systemctl list-timers workbench-requirement-account-sync.timer` 和服务日志检查计数。停用 timer 可停止后续同步；回退代码之前必须恢复同步前的账号表备份。不要将私有备份或数据库输出复制进仓库。
 
+回归测试：`python3 -m unittest discover -s deploy -p test_sync_requirement_accounts.py`；服务器隔离 PostgreSQL 验证：`python3 scripts/e2e/requirement-account-sync-postgres.py`；上线后可显式执行 `python3 scripts/e2e/requirement-account-login-production-smoke.py`，用两个随即清理的专用账号核对已安装需求池原生密码校验器、公网工作台登录、错误密码、改密和停用后的旧会话失效。真实成员明文密码不参与测试。
+
 ## 需求表单登录入口
 
 表单的登录提示必须跳到本站 `/login`，由原生 Router 编码 `reference` 和 `spaceId`，避免空登录地址产生 `/undefined`，或返回地址里的 `&`、`#` 被拆成登录页参数。普通 `/login` 初始显示账号密码登录，邀请注册流程保留；登录成功后由原生逻辑返回同站表单。浏览器存储失败不应阻断登录导航。
