@@ -319,8 +319,16 @@ export function ProjectScreenView({
         showPendingArtifact={showTransientPendingArtifact && !runPanels.generationPreviews?.length}
       />
       <ProjectChromeVignette isOverview={root.isGeneratedOverview} />
-      {canvas.activeRun && Boolean(runPanels.generationPreviews?.length)
-        && <WorkbenchGenerationPreview previews={runPanels.generationPreviews ?? []} />}
+      {canvas.activeRun && (
+        <WorkbenchGenerationPreview
+          canCancel={runPanels.canCancel}
+          generationProgress={runPanels.generationProgress}
+          generationStage={runPanels.generationStage}
+          onCancel={runPanels.onCancel}
+          previews={runPanels.generationPreviews ?? []}
+          runStatus={runPanels.runStatus}
+        />
+      )}
       <ProjectTopBar
         capabilities={root.capabilities}
         exportOpen={chrome.exportOpen}

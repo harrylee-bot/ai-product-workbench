@@ -13,7 +13,7 @@ describe("generation previews from unfinished tool arguments", () => {
     const prefix = '{"artifact_index":0,"draft":{"kind":"prd","title":"采购需求","content":{"sections":{"introduction":{"title":"引言","background":{"blocks":[{"type":"paragraph","content":[{"type":"text","text":"审批';
     expect(preview.push("messages", chunk(prefix, "workbench_artifact_draft_publish"))[0]?.markdown).toContain("审批");
     for (let index = 0; index < 1_000; index += 1) expect(preview.push("messages", chunk("流"))).toEqual([]);
-    now = 750;
+    now = 300;
     const next = preview.push("messages", chunk("程"));
     expect(next).toHaveLength(1);
     expect(next[0]?.markdown).toContain(`审批${"流".repeat(1_000)}程`);

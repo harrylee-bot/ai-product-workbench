@@ -1,9 +1,41 @@
 "use client";
 
 import { JSONUIProvider, Renderer, type ComponentRenderProps, type RendererProps } from "@json-render/react";
-import type { GenerationPreview, GenerationPreviewNode } from "@workbench/workbench-contracts";
+import type { GenerationPreview, GenerationPreviewNode, Run, RunGenerationStage } from "@workbench/workbench-contracts";
 import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { Streamdown } from "streamdown";
+
+const GENERATION_STAGE_LABELS: Partial<Record<RunGenerationStage, string>> = {
+  thinking: "理解需求",
+  "collecting-prd-context": "整理资料",
+  "structuring-prd": "规划结构",
+  "drafting-prd": "编写需求文档",
+  "validating-prd": "检查需求文档",
+  "design-system": "生成设计系统",
+  "mapping-components": "映射界面组件",
+  "creating-flows": "创建用户流程",
+  "generating-ui": "生成界面",
+  "screen-streaming": "流式生成页面",
+  summarizing: "整理生成结果",
+  "screen-stable": "稳定画布",
+};
+
+const ACTIVE_RUN_STATUSES: ReadonlySet<Run["status"]> = new Set([
+  "queued",
+  "running",
+  "waiting_input",
+  "cancelling",
+]);
+
+function isActiveRun(status: Run["status"] | null): boolean {
+  return status !== null && ACTIVE_RUN_STATUSES.has(status);
+}
+
+function formatElapsed(milliseconds: number): string {
+  const seconds = Math.max(0, Math.floor(milliseconds / 1_000));
+  if (seconds < 60) return `${seconds}s`;
+  return `${Math.floor(seconds / 60)}m${String(seconds % 60).padStart(2, "0")}s`;
+}
 
 function PreviewNode({ element, children }: ComponentRenderProps<{ node: GenerationPreviewNode }>) {
   const node = element.props.node;
@@ -52,14 +84,52 @@ export function generationPreviewTree(nodes: GenerationPreviewNode[]): NonNullab
   return { root, elements };
 }
 
-export function WorkbenchGenerationPreview({ previews }: { previews: GenerationPreview[] }) {
+export function WorkbenchGenerationPreview({
+  canCancel = false,
+  generationProgress = 0,
+  generationStage = null,
+  onCancel,
+  previews,
+  runStatus = null,
+}: {
+  canCancel?: boolean;
+  generationProgress?: number;
+  generationStage?: RunGenerationStage | null;
+  onCancel?: () => void;
+  previews: GenerationPreview[];
+  runStatus?: Run["status"] | null;
+}) {
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [selectedScreenId, setSelectedScreenId] = useState("");
   const scrollRef = useRef<HTMLDivElement>(null);
   const followRef = useRef(true);
   const [availableWidth, setAvailableWidth] = useState<number | null>(null);
+  const [elapsedMilliseconds, setElapsedMilliseconds] = useState(0);
+  const startedAtRef = useRef<number | null>(null);
+  const activeRun = isActiveRun(runStatus);
   const preview = previews.find((item) => item.artifactIndex === selectedIndex) ?? previews.at(-1);
   const activeScreen = preview?.screens.find((item) => item.id === selectedScreenId) ?? preview?.screens[0];
+  const progressPercent = Math.max(0, Math.min(100, Math.round((generationProgress / 3) * 100)));
+
+  useEffect(() => {
+    if (!activeRun) {
+      startedAtRef.current = null;
+      setElapsedMilliseconds(0);
+      return;
+    }
+    startedAtRef.current ??= Date.now();
+    const update = () => setElapsedMilliseconds(Date.now() - (startedAtRef.current ?? Date.now()));
+    update();
+    const timer = window.setInterval(update, 1_000);
+    return () => window.clearInterval(timer);
+  }, [activeRun]);
+
+  useEffect(() => {
+    if (!previews.some((item) => item.artifactIndex === selectedIndex)) {
+      setSelectedIndex(previews.at(-1)?.artifactIndex ?? 0);
+    }
+  }, [previews, selectedIndex]);
+
   useEffect(() => {
     const viewport = scrollRef.current;
     if (!viewport || preview?.kind !== "prototype") return;
@@ -76,23 +146,68 @@ export function WorkbenchGenerationPreview({ previews }: { previews: GenerationP
     const viewport = scrollRef.current;
     if (viewport && followRef.current) viewport.scrollTop = viewport.scrollHeight;
   }, [preview?.markdown]);
-  if (!preview) return null;
+  if (!preview && !activeRun) return null;
   const scale = activeScreen && availableWidth ? Math.min(1, availableWidth / activeScreen.width) : 1;
   return (
     <section
       aria-label="生成中预览"
-      className="pointer-events-auto absolute bottom-[180px] left-1/2 top-[82px] z-50 flex w-[min(760px,calc(100%_-_48px))] -translate-x-1/2 flex-col overflow-hidden rounded-[12px] border border-[#7467f6]/60 bg-[#18191b] shadow-[0_24px_90px_-30px_#000] max-sm:bottom-[150px] max-sm:top-[116px]"
-      data-workbench-generation-preview={preview.kind}
+      className="pointer-events-auto absolute bottom-[164px] right-[24px] top-[86px] z-50 flex w-[min(620px,calc(100%_-_400px))] flex-col overflow-hidden rounded-[14px] border border-[#7467f6]/60 bg-[#18191b] shadow-[0_24px_90px_-30px_#000] max-lg:right-[16px] max-lg:w-[min(560px,calc(100%_-_32px))] max-sm:bottom-[136px] max-sm:left-[12px] max-sm:right-[12px] max-sm:top-[112px] max-sm:w-auto"
+      data-workbench-generation-preview={preview?.kind ?? "pending"}
+      data-workbench-generation-preview-layout="dock"
     >
       <header className="flex shrink-0 flex-wrap items-center gap-3 border-b border-white/10 px-4 py-3">
         <span className="size-2 rounded-full bg-[#a69cff] motion-safe:animate-pulse" />
-        <span className="text-xs text-[#c8c3ff]" role="status">正在生成 · 实时预览</span>
-        <span className="min-w-0 flex-1 truncate text-sm font-semibold text-[#f1f3f4]">{preview.title}</span>
-        {previews.length > 1 && previews.map((item) => <button aria-pressed={preview.artifactIndex === item.artifactIndex} className="rounded bg-white/10 px-2 py-1 text-xs text-white" key={item.artifactIndex} onClick={() => setSelectedIndex(item.artifactIndex)} type="button">{item.kind === "prd" ? "文档" : "原型"}</button>)}
+        <span className="text-xs text-[#c8c3ff]" role="status">
+          {preview || activeRun ? "正在生成 · 实时预览" : "生成结果 · 实时预览"}
+        </span>
+        <span className="min-w-0 flex-1 truncate text-sm font-semibold text-[#f1f3f4]">
+          {preview?.title ?? "正在准备预览"}
+        </span>
+        {activeRun && (
+          <span className="text-[11px] tabular-nums text-[#aeb3bb]">
+            {GENERATION_STAGE_LABELS[generationStage ?? "thinking"] ?? "准备中"} · {formatElapsed(elapsedMilliseconds)}
+          </span>
+        )}
+        {activeRun && (
+          <span
+            aria-label={`生成进度 ${progressPercent}%`}
+            aria-valuemax={100}
+            aria-valuemin={0}
+            aria-valuenow={progressPercent}
+            className="h-1 w-16 overflow-hidden rounded-full bg-white/10"
+            role="progressbar"
+          >
+            <span className="block h-full rounded-full bg-[#a69cff] transition-[width] duration-300" style={{ width: `${progressPercent}%` }} />
+          </span>
+        )}
+        {activeRun && canCancel && onCancel && (
+          <button
+            aria-label="取消生成"
+            className="rounded-md border border-white/10 px-2 py-1 text-xs text-[#c8c3ff] transition hover:bg-white/10 hover:text-white"
+            onClick={onCancel}
+            type="button"
+          >
+            取消
+          </button>
+        )}
+        {previews.length > 1 && previews.map((item) => <button aria-pressed={preview?.artifactIndex === item.artifactIndex} className="rounded bg-white/10 px-2 py-1 text-xs text-white" key={item.artifactIndex} onClick={() => setSelectedIndex(item.artifactIndex)} type="button">{item.kind === "prd" ? "文档" : "原型"}</button>)}
       </header>
-      {preview.kind === "prototype" && preview.screens.length > 1 && <nav aria-label="生成中的页面" className="flex shrink-0 gap-2 overflow-x-auto px-4 py-2">{preview.screens.map((screen) => <button aria-pressed={activeScreen?.id === screen.id} className="shrink-0 rounded bg-white/10 px-3 py-1 text-xs text-white" key={screen.id} onClick={() => setSelectedScreenId(screen.id)} type="button">{screen.name}</button>)}</nav>}
+      {preview?.kind === "prototype" && preview.screens.length > 1 && <nav aria-label="生成中的页面" className="flex shrink-0 gap-2 overflow-x-auto px-4 py-2">{preview.screens.map((screen) => <button aria-pressed={activeScreen?.id === screen.id} className="shrink-0 rounded bg-white/10 px-3 py-1 text-xs text-white" key={screen.id} onClick={() => setSelectedScreenId(screen.id)} type="button">{screen.name}</button>)}</nav>}
       <div className="min-h-0 flex-1 overflow-auto bg-[#f1f3f4] p-5 text-[#202124]" ref={scrollRef} onScroll={(event) => { const node = event.currentTarget; followRef.current = node.scrollHeight - node.scrollTop - node.clientHeight < 80; }}>
-        {preview.kind === "prd" ? <article className="prose prose-sm mx-auto max-w-none rounded bg-white p-7 shadow-sm [&_table]:text-xs"><h1 className="mb-5 text-xl font-semibold">{preview.title}</h1><Streamdown controls={false} isAnimating skipHtml components={{ a: ({ children }) => <span>{children}</span>, img: () => null }}>{preview.markdown}</Streamdown></article>
+        {!preview ? (
+          <div className="flex min-h-full flex-col items-center justify-center gap-4 rounded bg-white p-8 text-center shadow-sm">
+            <div className="w-full max-w-[360px] space-y-3" aria-hidden="true">
+              <div className="h-5 animate-pulse rounded bg-[#e3e5e8]" />
+              <div className="h-3 w-4/5 animate-pulse rounded bg-[#eceef0]" />
+              <div className="grid grid-cols-2 gap-3 pt-3">
+                <div className="h-24 animate-pulse rounded-lg bg-[#eceef0]" />
+                <div className="h-24 animate-pulse rounded-lg bg-[#e3e5e8]" />
+              </div>
+            </div>
+            <p className="text-sm text-[#5f6368]">{GENERATION_STAGE_LABELS[generationStage ?? "thinking"] ?? "准备中"}，首个结构片段到达后会立即显示。</p>
+            <p className="text-xs text-[#80868b]">需求文档继续保留在画布中，原型在右侧预览舱生成。</p>
+          </div>
+        ) : preview.kind === "prd" ? <article className="prose prose-sm mx-auto max-w-none rounded bg-white p-7 shadow-sm [&_table]:text-xs"><h1 className="mb-5 text-xl font-semibold">{preview.title}</h1><Streamdown controls={false} isAnimating skipHtml components={{ a: ({ children }) => <span>{children}</span>, img: () => null }}>{preview.markdown}</Streamdown></article>
           : activeScreen ? <div className="relative mx-auto overflow-hidden bg-white shadow-sm" style={{ width: activeScreen.width * scale, minHeight: activeScreen.height * scale }}><div className="relative" style={{ width: activeScreen.width, minHeight: activeScreen.height, transform: `scale(${scale})`, transformOrigin: "top left" }}><JSONUIProvider registry={registry}><Renderer tree={generationPreviewTree(activeScreen.nodes)} registry={registry} loading /></JSONUIProvider></div></div>
             : <p className="text-sm text-[#5f6368]">正在构建页面结构…</p>}
       </div>

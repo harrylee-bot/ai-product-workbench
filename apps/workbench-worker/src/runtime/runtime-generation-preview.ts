@@ -8,6 +8,7 @@ import { parse } from "partial-json";
 type RecordValue = Record<string, unknown>;
 const record = (value: unknown): RecordValue => value !== null && typeof value === "object" && !Array.isArray(value)
   ? value as RecordValue : {};
+const PREVIEW_SAMPLE_INTERVAL_MS = 300;
 const array = (value: unknown): unknown[] => Array.isArray(value) ? value : [];
 const text = (value: unknown, limit = 2_000): string => typeof value === "string"
   ? value.replace(/wb(?:kg|ct)1\.[A-Za-z0-9_.-]*/gu, "[已隐藏]").slice(0, limit) : "";
@@ -46,8 +47,9 @@ export class RuntimeGenerationPreview {
       const state = { name, args: value, sampledAt: previous.sampledAt };
       this.calls.set(key, state);
       if (name !== "workbench_artifact_draft_publish" && name !== "workbench_runtime_result_submit") continue;
-      if (this.now() - state.sampledAt < 750) continue;
-      state.sampledAt = this.now();
+      const now = this.now();
+      if (now - state.sampledAt < PREVIEW_SAMPLE_INTERVAL_MS) continue;
+      state.sampledAt = now;
       let parsed: RecordValue;
       try { parsed = record(parse(value)); } catch { continue; }
       const candidates = name === "workbench_artifact_draft_publish"
@@ -61,8 +63,8 @@ export class RuntimeGenerationPreview {
         if (!preview) continue;
         const signature = JSON.stringify(preview);
         const published = this.published.get(preview.artifactIndex);
-        if (published && (signature === published.value || this.now() - published.at < 750)) continue;
-        this.published.set(preview.artifactIndex, { at: this.now(), value: signature });
+        if (published && (signature === published.value || now - published.at < PREVIEW_SAMPLE_INTERVAL_MS)) continue;
+        this.published.set(preview.artifactIndex, { at: now, value: signature });
         previews.push(preview);
       }
     }
