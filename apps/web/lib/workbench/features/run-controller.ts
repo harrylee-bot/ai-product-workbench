@@ -49,7 +49,7 @@ export function useWorkbenchRunController({
   const observedRun = selectLatestRun(run, cachedRun, runQuery.data);
   const initialProjection = useMemo(
     () => observedRun
-      ? createRunProjectionAtSequence(observedRun, observedRun.lastEventSequence)
+      ? createRunProjectionAtSequence(observedRun, initialRunSequence(observedRun))
       : null,
     // Identity changes reset the stream. Status changes are reconciled without discarding live details.
     [runIdentity],
@@ -130,7 +130,7 @@ export function useWorkbenchRunController({
     let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
     const afterSequence = cursorRef.current.runIdentity === runIdentity
       ? cursorRef.current.sequence
-      : streamRun.lastEventSequence;
+      : initialRunSequence(streamRun);
     let current = projectionRef.current?.runId === streamRun.id
       ? projectionRef.current
       : createRunProjectionAtSequence(streamRun, afterSequence);
@@ -215,13 +215,19 @@ function createRunProjectionAtSequence(run: Run, sequence: number): RunProjectio
   };
 }
 
+function initialRunSequence(run: Run): number {
+  // Run snapshots omit stage, knowledge activity and preview content. Rebuild
+  // those details on entry; reconnects keep the cursor of consumed events.
+  return isTerminalStatus(run.status) ? run.lastEventSequence : 0;
+}
+
 function reconcileProjectionWithRun(
   current: RunProjectionState | null,
   run: Run,
   adoptSequence: boolean,
 ): RunProjectionState {
   if (!current || !hasSameProjectionIdentity(current, run)) {
-    return createRunProjectionAtSequence(run, run.lastEventSequence);
+    return createRunProjectionAtSequence(run, initialRunSequence(run));
   }
 
   const attemptChanged = current.attempt !== run.attempt;

@@ -51,7 +51,7 @@ beforeEach(() => {
 });
 
 describe("useWorkbenchRunController recovery", () => {
-  it("starts a remounted stream from the durable Run cache cursor", async () => {
+  it("replays an active run to recover details missing from its cached snapshot", async () => {
     const queryClient = client();
     const submittedRun = run({ lastEventSequence: 0, status: "queued" });
     const cachedRun = run({ lastEventSequence: 7, status: "running" });
@@ -65,16 +65,25 @@ describe("useWorkbenchRunController recovery", () => {
     await waitFor(() => expect(mocks.subscribeRunEvents).toHaveBeenCalledOnce());
     expect(mocks.subscribeRunEvents).toHaveBeenCalledWith(expect.objectContaining({
       runId: submittedRun.id,
-      afterSequence: 7,
+      afterSequence: 0,
     }));
-    expect(rendered.result.current.projection?.lastSequence).toBe(7);
+    expect(rendered.result.current.projection?.lastSequence).toBe(0);
+    act(() => {
+      subscription(0).onEvent(event(1, "run.started", { attempt: 1 }));
+      subscription(0).onEvent(event(2, "run.generation.stage.changed", { attempt: 1, stage: "collecting-prd-context" }));
+      subscription(0).onEvent(event(3, "activity.changed", {
+        activityId: "knowledge:retrieval", status: "succeeded", label: "知识库检索", detail: "返回 1 条资料片段",
+      }));
+    });
+    expect(rendered.result.current.projection?.generationStage).toBe("collecting-prd-context");
+    expect(rendered.result.current.projection?.activities["knowledge:retrieval"]?.detail).toBe("返回 1 条资料片段");
     expect(mocks.useWorkbenchRun).toHaveBeenCalledWith(submittedRun.id, {
       enabled: true,
       refetchIntervalMs: 3_000,
     });
   });
 
-  it("keeps the consumed cursor across reconnects and full hook remounts", async () => {
+  it("keeps the consumed cursor on reconnect and rebuilds details on a full remount", async () => {
     const queryClient = client();
     const submittedRun = run({ lastEventSequence: 0, status: "queued" });
     const first = renderHook(
@@ -101,8 +110,8 @@ describe("useWorkbenchRunController recovery", () => {
       { wrapper: wrapper(queryClient) },
     );
     await waitFor(() => expect(mocks.subscribeRunEvents).toHaveBeenCalledOnce());
-    expect(subscription(0).afterSequence).toBe(1);
-    expect(remounted.result.current.projection?.lastSequence).toBe(1);
+    expect(subscription(0).afterSequence).toBe(0);
+    expect(remounted.result.current.projection?.lastSequence).toBe(0);
   });
 
   it("uses a polled terminal Run to close the stream and refresh PRD dependencies", async () => {

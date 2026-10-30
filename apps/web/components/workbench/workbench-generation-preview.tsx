@@ -256,20 +256,6 @@ export function WorkbenchGenerationPreview({
           </button>
           {processOpen && (
             <div className="min-h-0 space-y-3 overflow-y-auto px-4 pb-3">
-              <ol className="grid gap-2 sm:grid-cols-2">
-                {steps.map((step) => {
-                  const state = stepState(step, generationStage, steps);
-                  return (
-                    <li className="flex gap-2 rounded-md border border-white/[0.06] bg-white/[0.025] px-2.5 py-2" data-generation-step={step.stage} data-generation-step-state={state} key={step.stage}>
-                      <span className={state === "done" ? "text-[#9de5b0]" : state === "active" ? "text-[#c8c3ff]" : "text-[#7d838d]"}>{state === "done" ? "✓" : state === "active" ? "•" : "○"}</span>
-                      <span className="min-w-0">
-                        <span className="block text-[11px] font-medium">{step.label}{state === "active" ? " · 进行中" : state === "done" ? " · 已完成" : " · 待进行"}</span>
-                        <span className="mt-0.5 block text-[10px] leading-4 text-[#9da3ad]">{step.summary}</span>
-                      </span>
-                    </li>
-                  );
-                })}
-              </ol>
               {structure.length > 0 && (
                 <div className="rounded-md border border-white/[0.06] px-3 py-2 text-xs text-[#b9bec7]">
                   <p className="font-medium">{preview?.kind === "prd" ? "当前文档结构" : "当前页面结构"}</p>
@@ -288,6 +274,20 @@ export function WorkbenchGenerationPreview({
                   </ul>
                 </div>
               )}
+              <ol className="grid gap-2 sm:grid-cols-2">
+                {steps.map((step) => {
+                  const state = stepState(step, generationStage, steps);
+                  return (
+                    <li className="flex gap-2 rounded-md border border-white/[0.06] bg-white/[0.025] px-2.5 py-2" data-generation-step={step.stage} data-generation-step-state={state} key={step.stage}>
+                      <span className={state === "done" ? "text-[#9de5b0]" : state === "active" ? "text-[#c8c3ff]" : "text-[#7d838d]"}>{state === "done" ? "✓" : state === "active" ? "•" : "○"}</span>
+                      <span className="min-w-0">
+                        <span className="block text-[11px] font-medium">{step.label}{state === "active" ? " · 进行中" : state === "done" ? " · 已完成" : " · 待进行"}</span>
+                        <span className="mt-0.5 block text-[10px] leading-4 text-[#9da3ad]">{step.summary}</span>
+                      </span>
+                    </li>
+                  );
+                })}
+              </ol>
             </div>
           )}
         </div>
