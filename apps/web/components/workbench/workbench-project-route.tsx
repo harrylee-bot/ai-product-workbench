@@ -4005,11 +4005,8 @@ function ProjectScreen({
       onNodeClick: (event, node) => {
         if (activeTool === "pan") return;
         if (event.shiftKey || event.metaKey || event.ctrlKey) {
-          setNodes((currentNodes) => currentNodes.map((candidate) => (
-            candidate.id === node.id
-              ? { ...candidate, selected: !candidate.selected }
-              : candidate
-          )));
+          // React Flow has already applied the modifier selection through
+          // onNodesChange. Toggling again here would undo that selection.
           setSelectedActionOpen(false);
           writeSelectedNodeUrl([]);
           return;
