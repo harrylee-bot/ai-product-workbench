@@ -4319,6 +4319,11 @@ function ProjectScreen({
       onTargetSurfaceChange: changeTargetSurface,
     },
     runPanels: {
+      finalArtifactReferences: draftArtifacts.map((draft) => ({
+        artifactId: draft.artifactId,
+        artifactVersionId: draft.artifactVersionId,
+        projectId,
+      })),
       generationPreviews,
       actionBusy: runActionBusy,
       actionError: runActionError,
@@ -4343,6 +4348,7 @@ function ProjectScreen({
       pendingApproval: runPendingApproval,
       prompt,
       runPhaseLabel,
+      runId,
       runStatus,
       selectedTask: selectedAgentTask,
       submissionError,

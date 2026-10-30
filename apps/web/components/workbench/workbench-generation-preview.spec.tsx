@@ -4,6 +4,12 @@ import type { GenerationPreview, GenerationPreviewNode } from "@workbench/workbe
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { generationPreviewTree, WorkbenchGenerationPreview } from "./workbench-generation-preview";
 
+vi.mock("./workbench-artifact-content", () => ({
+  WorkbenchArtifactContent: ({ reference }: { reference: { artifactId: string } }) => (
+    <div data-testid="final-artifact-content">{reference.artifactId}</div>
+  ),
+}));
+
 afterEach(cleanup);
 const preview: GenerationPreview = { artifactIndex: 0, kind: "prd", title: "采购审批", markdown: "## 业务规则\n\n提交后进入审批。", screens: [] };
 
@@ -51,5 +57,28 @@ describe("live generation canvas", () => {
     expect(cancel).toHaveBeenCalledTimes(1);
     fireEvent.click(screen.getByRole("button", { name: /生成过程/ }));
     expect(screen.queryByText("当前文档结构")).toBeNull();
+  });
+
+  it("switches the same dock to the final artifact after completion", () => {
+    const { rerender } = render(
+      <WorkbenchGenerationPreview previews={[preview]} runId="run-1" runStatus="running" />,
+    );
+    const region = screen.getByRole("region", { name: "生成中预览" });
+
+    rerender(
+      <WorkbenchGenerationPreview
+        finalArtifactReferences={[{ artifactId: "artifact-1", artifactVersionId: "version-1", projectId: "project-1" }]}
+        previews={[]}
+        runId="run-1"
+        runStatus="succeeded"
+      />,
+    );
+
+    expect(screen.getByRole("region", { name: "生成结果预览" })).toBe(region);
+    expect(region.getAttribute("data-workbench-generation-preview"))
+      .toBe("final");
+    expect(screen.getByTestId("final-artifact-content").textContent).toBe("artifact-1");
+    fireEvent.click(screen.getByRole("button", { name: "关闭最终预览" }));
+    expect(screen.queryByRole("region", { name: "生成结果预览" })).toBeNull();
   });
 });

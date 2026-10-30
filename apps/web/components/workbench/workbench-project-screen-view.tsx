@@ -243,6 +243,7 @@ export type ProjectScreenViewContract = {
     onTargetSurfaceChange: (surface: RunTargetSurface) => void;
   };
   runPanels: {
+    finalArtifactReferences: WorkbenchArtifactReference[];
     generationPreviews?: import("@workbench/workbench-contracts").GenerationPreview[];
     actionBusy: boolean;
     actionError: unknown;
@@ -263,6 +264,7 @@ export type ProjectScreenViewContract = {
     pendingApproval: RunApproval | null;
     prompt: string;
     runPhaseLabel: string | null;
+    runId: string | null;
     runStatus: Run["status"] | null;
     selectedTask: string | null;
     submissionError: unknown;
@@ -303,15 +305,17 @@ export function ProjectScreenView({
         phase={root.phase}
       />
       <ProjectChromeVignette isOverview={root.isGeneratedOverview} />
-      {canvas.activeRun && (
+      {(canvas.activeRun || (runPanels.runStatus === "succeeded" && runPanels.finalArtifactReferences.length > 0)) && (
         <WorkbenchGenerationPreview
           activities={runPanels.activities}
           canCancel={runPanels.canCancel}
+          finalArtifactReferences={runPanels.finalArtifactReferences}
           generationStage={runPanels.generationStage}
           motionKind={runPanels.motionKind}
           onCancel={runPanels.onCancel}
           previews={runPanels.generationPreviews ?? []}
           previewTitle={root.projectTitle}
+          runId={runPanels.runId}
           runStatus={runPanels.runStatus}
         />
       )}

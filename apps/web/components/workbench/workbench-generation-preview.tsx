@@ -4,6 +4,7 @@ import { JSONUIProvider, Renderer, type ComponentRenderProps, type RendererProps
 import type { GenerationPreview, GenerationPreviewNode, Run, RunGenerationStage } from "@workbench/workbench-contracts";
 import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { Streamdown } from "streamdown";
+import { WorkbenchArtifactContent, type WorkbenchArtifactReference } from "./workbench-artifact-content";
 
 type GenerationActivity = {
   id: string;
@@ -136,24 +137,30 @@ export function generationPreviewTree(nodes: GenerationPreviewNode[]): NonNullab
 
 export function WorkbenchGenerationPreview({
   canCancel = false,
+  finalArtifactReferences = [],
   generationStage = null,
   onCancel,
   previews,
   previewTitle,
   activities = [],
   motionKind = "neutral",
+  runId = null,
   runStatus = null,
 }: {
   canCancel?: boolean;
+  finalArtifactReferences?: WorkbenchArtifactReference[];
   generationStage?: RunGenerationStage | null;
   onCancel?: () => void;
   previews: GenerationPreview[];
   previewTitle?: string;
   activities?: readonly GenerationActivity[];
   motionKind?: "neutral" | "prd" | "prototype";
+  runId?: string | null;
   runStatus?: Run["status"] | null;
 }) {
   const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
+  const [selectedFinalIndex, setSelectedFinalIndex] = useState(0);
+  const [finalPreviewDismissed, setFinalPreviewDismissed] = useState(false);
   const [selectedScreenId, setSelectedScreenId] = useState("");
   const scrollRef = useRef<HTMLDivElement>(null);
   const followRef = useRef(true);
@@ -161,6 +168,8 @@ export function WorkbenchGenerationPreview({
   const [elapsedMilliseconds, setElapsedMilliseconds] = useState(0);
   const startedAtRef = useRef<number | null>(null);
   const activeRun = isActiveRun(runStatus);
+  const finalPreview = runStatus === "succeeded" && finalArtifactReferences.length > 0 && !finalPreviewDismissed;
+  const finalArtifact = finalArtifactReferences[selectedFinalIndex] ?? finalArtifactReferences[0];
   const [processOpen, setProcessOpen] = useState(true);
   const preview = previews.find((item) => item.artifactIndex === selectedIndex) ?? previews.at(-1);
   const activeScreen = preview?.screens.find((item) => item.id === selectedScreenId) ?? preview?.screens[0];
@@ -168,9 +177,19 @@ export function WorkbenchGenerationPreview({
   const structure = preview?.kind === "prd"
     ? [...new Set((preview.markdown.match(/^#{1,6} .+$/gm) ?? []).map((line) => line.replace(/^#+ /, "")))].slice(0, 8)
     : preview?.screens.map((screen) => screen.name).filter(Boolean) ?? [];
-  const statusLabel = runStatus === "queued" ? "等待开始" : runStatus === "waiting_input" ? "等待你的补充"
-    : runStatus === "cancelling" ? "正在取消" : "正在生成 · 实时预览";
+  const statusLabel = finalPreview ? "已完成 · 最终版本"
+    : runStatus === "queued" ? "等待开始" : runStatus === "waiting_input" ? "等待你的补充"
+      : runStatus === "cancelling" ? "正在取消" : "正在生成 · 实时预览";
   const evidence = activities.filter((activity) => activity.id.startsWith("knowledge:")).slice(-6);
+
+  useEffect(() => {
+    setFinalPreviewDismissed(false);
+    setSelectedFinalIndex(0);
+  }, [runId]);
+
+  useEffect(() => {
+    if (selectedFinalIndex >= finalArtifactReferences.length) setSelectedFinalIndex(0);
+  }, [finalArtifactReferences.length, selectedFinalIndex]);
 
   useEffect(() => {
     if (!activeRun) {
@@ -207,22 +226,22 @@ export function WorkbenchGenerationPreview({
     const viewport = scrollRef.current;
     if (viewport && followRef.current) viewport.scrollTop = viewport.scrollHeight;
   }, [preview?.markdown]);
-  if (!preview && !activeRun) return null;
+  if (!preview && !activeRun && !finalPreview) return null;
   const scale = activeScreen && availableWidth ? Math.min(1, availableWidth / activeScreen.width) : 1;
   return (
     <section
-      aria-label="生成中预览"
+      aria-label={finalPreview ? "生成结果预览" : "生成中预览"}
       className="pointer-events-auto absolute bottom-[164px] right-[24px] top-[86px] z-50 flex w-[min(620px,calc(100%_-_400px))] flex-col overflow-hidden rounded-[14px] border border-[#7467f6]/60 bg-[#18191b] shadow-[0_24px_90px_-30px_#000] max-lg:right-[16px] max-lg:w-[min(560px,calc(100%_-_32px))] max-sm:bottom-[136px] max-sm:left-[12px] max-sm:right-[12px] max-sm:top-[112px] max-sm:w-auto"
-      data-workbench-generation-preview={preview?.kind ?? "pending"}
+      data-workbench-generation-preview={finalPreview ? "final" : preview?.kind ?? "pending"}
       data-workbench-generation-preview-layout="dock"
     >
       <header className="flex shrink-0 flex-wrap items-center gap-3 border-b border-white/10 px-4 py-3">
-        <span className="size-2 rounded-full bg-[#a69cff] motion-safe:animate-pulse" />
+        <span className={finalPreview ? "size-2 rounded-full bg-[#9de5b0]" : "size-2 rounded-full bg-[#a69cff] motion-safe:animate-pulse"} />
         <span className="text-xs text-[#c8c3ff]" role="status">
           {statusLabel}
         </span>
         <span className="min-w-0 flex-1 truncate text-sm font-semibold text-[#f1f3f4]">
-          {preview?.title ?? previewTitle ?? "正在准备预览"}
+          {finalPreview ? "最终产物" : preview?.title ?? previewTitle ?? "正在准备预览"}
         </span>
         {activeRun && (
           <span className="text-[11px] tabular-nums text-[#aeb3bb]">
@@ -240,7 +259,28 @@ export function WorkbenchGenerationPreview({
             取消
           </button>
         )}
+        {finalPreview && (
+          <button
+            aria-label="关闭最终预览"
+            className="rounded-md border border-white/10 px-2 py-1 text-xs text-[#c8c3ff] transition hover:bg-white/10 hover:text-white"
+            onClick={() => setFinalPreviewDismissed(true)}
+            type="button"
+          >
+            关闭
+          </button>
+        )}
         {previews.length > 1 && previews.map((item) => <button aria-pressed={preview?.artifactIndex === item.artifactIndex} className="rounded bg-white/10 px-2 py-1 text-xs text-white" key={item.artifactIndex} onClick={() => setSelectedIndex(item.artifactIndex)} type="button">{item.kind === "prd" ? "文档" : "原型"}</button>)}
+        {finalPreview && finalArtifactReferences.length > 1 && finalArtifactReferences.map((reference, index) => (
+          <button
+            aria-pressed={finalArtifact === reference}
+            className="rounded bg-white/10 px-2 py-1 text-xs text-white"
+            key={`${reference.artifactId}:${reference.artifactVersionId}`}
+            onClick={() => setSelectedFinalIndex(index)}
+            type="button"
+          >
+            结果 {index + 1}
+          </button>
+        ))}
       </header>
       {preview?.kind === "prototype" && preview.screens.length > 1 && <nav aria-label="生成中的页面" className="flex shrink-0 gap-2 overflow-x-auto px-4 py-2">{preview.screens.map((screen) => <button aria-pressed={activeScreen?.id === screen.id} className="shrink-0 rounded bg-white/10 px-3 py-1 text-xs text-white" key={screen.id} onClick={() => setSelectedScreenId(screen.id)} type="button">{screen.name}</button>)}</nav>}
       {activeRun && (
@@ -293,7 +333,11 @@ export function WorkbenchGenerationPreview({
         </div>
       )}
       <div className="min-h-0 flex-1 overflow-auto bg-[#f1f3f4] p-5 text-[#202124]" ref={scrollRef} onScroll={(event) => { const node = event.currentTarget; followRef.current = node.scrollHeight - node.scrollTop - node.clientHeight < 80; }}>
-        {!preview ? (
+        {finalPreview && finalArtifact ? (
+          <div className="min-h-[520px] overflow-hidden rounded bg-[#1d1d1f] shadow-sm" data-workbench-generation-final-content>
+            <WorkbenchArtifactContent reference={finalArtifact} />
+          </div>
+        ) : !preview ? (
           <div className="flex min-h-full flex-col items-center justify-center gap-4 rounded bg-white p-8 text-center shadow-sm">
             <p className="text-sm text-[#5f6368]">{GENERATION_STAGE_LABELS[generationStage ?? "thinking"] ?? "准备中"}，首个内容片段到达后会立即显示。</p>
             <p className="text-xs leading-5 text-[#80868b]">可以先查看上方的生成过程。完成后，最终文档或原型会自动呈现在画布上。</p>
