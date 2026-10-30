@@ -7,6 +7,7 @@ import {
   type OnSelectionChangeFunc,
   PanOnScrollMode,
   ReactFlow,
+  SelectionMode,
   type Viewport,
 } from "@xyflow/react";
 import type {
@@ -468,6 +469,7 @@ export function ProjectScreenView({
           runStatus={runPanels.runStatus}
         >
         <ReactFlow
+          aria-label="画布：拖拽节点移动，空白处拖拽框选；空格、中键或右键拖拽平移；按住 Command 或 Control 滚轮缩放"
           className={cn(
             "workbench-flow h-full w-full",
             canvas.activeTool === "pan" && "cursor-grab active:cursor-grabbing",
@@ -493,15 +495,20 @@ export function ProjectScreenView({
           onNodesChange={canvas.onNodesChange}
           onSelectionChange={canvas.onSelectionChange}
           onPaneClick={canvas.onPaneClick}
-          panOnDrag={canvas.activeTool === "pan"}
+          onPaneContextMenu={(event) => event.preventDefault()}
+          panOnDrag={canvas.activeTool === "pan" ? [0, 1, 2] : [1, 2]}
           panOnScroll
           panOnScrollMode={PanOnScrollMode.Free}
           panOnScrollSpeed={0.8}
+          panActivationKeyCode="Space"
           selectionKeyCode={null}
-          multiSelectionKeyCode="Shift"
-          selectionOnDrag={!canvas.prototypeEditMode && canvas.activeTool === "marquee"}
-          zoomActivationKeyCode="z"
+          selectionMode={SelectionMode.Partial}
+          multiSelectionKeyCode={["Shift", "Meta", "Control"]}
+          selectionOnDrag={!canvas.prototypeEditMode
+            && (canvas.activeTool === "select" || canvas.activeTool === "marquee")}
+          zoomActivationKeyCode={["Meta", "Control", "z"]}
           zoomOnPinch
+          zoomOnDoubleClick={false}
           zoomOnScroll={false}
         >
           <Background

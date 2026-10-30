@@ -54,11 +54,12 @@ const toolItems: Array<{
   id: CanvasMainCommand;
   icon: ComponentType<SVGProps<SVGSVGElement>>;
   label: string;
+  hint?: string;
 }> = [
-  { id: "select", icon: MousePointer2Icon, label: "Select" },
-  { id: "marquee", icon: FrameIcon, label: "Marquee" },
+  { id: "select", icon: MousePointer2Icon, label: "Select", hint: "V · drag empty canvas to select" },
+  { id: "marquee", icon: FrameIcon, label: "Marquee", hint: "drag empty canvas to select" },
   { id: "direct-edit", icon: PencilIcon, label: "Direct edit" },
-  { id: "pan", icon: HandIcon, label: "Pan" },
+  { id: "pan", icon: HandIcon, label: "Pan", hint: "H · Space + drag" },
   { id: "media", icon: ImageIcon, label: "Media" },
   { id: "design-system", icon: PaletteIcon, label: "Design system" },
   { id: "favourites", icon: StarsIcon, label: "Favourites" },
@@ -357,7 +358,7 @@ export function RightToolRail({
             disabled={disabled}
             key={tool.id}
             onClick={() => onSelectTool(tool.id)}
-            title={tool.label}
+            title={tool.hint ? `${tool.label} · ${tool.hint}` : tool.label}
             type="button"
           >
             {isActive && (
@@ -502,6 +503,7 @@ export function UtilityPill({
             zoomMenuOpen ? "border-white/[0.16] bg-[#2a2b2f]/96" : "border-white/[0.10] bg-[#1c1d20]/94",
           )}
           onClick={onToggleZoomMenu}
+          title="滚轮平移 · ⌘/Ctrl+滚轮缩放 · 空格+拖拽平移"
           type="button"
         >
           {zoomLabel}

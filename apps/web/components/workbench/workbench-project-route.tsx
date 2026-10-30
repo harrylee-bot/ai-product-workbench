@@ -3662,6 +3662,19 @@ function ProjectScreen({
         return;
       }
 
+      if (
+        !event.shiftKey
+        && !event.metaKey
+        && !event.ctrlKey
+        && !event.altKey
+        && !isTypingTarget(event.target)
+        && (event.key.toLowerCase() === "v" || event.key.toLowerCase() === "h")
+      ) {
+        event.preventDefault();
+        handleToolAction(event.key.toLowerCase() === "v" ? "select" : "pan");
+        return;
+      }
+
       if ((event.metaKey || event.ctrlKey) && !event.altKey && !isTypingTarget(event.target)) {
         const key = event.key.toLowerCase();
         if (key === "z" && event.shiftKey && boardCanRedo && !activeRunRef.current) {
@@ -3819,6 +3832,7 @@ function ProjectScreen({
     closePreview,
     closeModelMenu,
     closeTransientPanels,
+    handleToolAction,
     artifactSelection.preferenceTargetReference,
     toggleArtifactPreference,
     onExport,
@@ -3990,9 +4004,11 @@ function ProjectScreen({
       },
       onNodeClick: (event, node) => {
         if (activeTool === "pan") return;
-        if (event.shiftKey) {
+        if (event.shiftKey || event.metaKey || event.ctrlKey) {
           setNodes((currentNodes) => currentNodes.map((candidate) => (
-            candidate.id === node.id ? { ...candidate, selected: true } : candidate
+            candidate.id === node.id
+              ? { ...candidate, selected: !candidate.selected }
+              : candidate
           )));
           setSelectedActionOpen(false);
           writeSelectedNodeUrl([]);
