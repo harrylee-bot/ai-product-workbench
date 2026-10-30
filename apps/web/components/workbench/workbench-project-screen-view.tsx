@@ -76,7 +76,6 @@ import type {
   CanvasPanel,
 } from "@/lib/workbench/canvas-tools";
 import {
-  getProjectStageMotionKind,
   ProjectChromeVignette,
   ProjectStageMotionFX,
   ProjectSuggestionPills,
@@ -283,20 +282,6 @@ export function ProjectScreenView({
   controller: ProjectScreenViewContract;
 }) {
   const routeAnimation = useWorkbenchRouteEnterAnimation("project");
-  const activeMotionKind = getProjectStageMotionKind({
-    generationStage: runPanels.generationStage,
-    isOverview: root.isGeneratedOverview,
-    motionKind: runPanels.motionKind,
-    phase: root.phase,
-  });
-  const hasArtifactNode = canvas.nodes.some((node) => (
-    (activeMotionKind === "prd"
-      && node.type === "documentCanvas")
-    || (activeMotionKind === "prototype"
-      && node.type === "generatedScreen")
-  ));
-  const showTransientPendingArtifact = canvas.activeRun && !hasArtifactNode;
-
   return (
     <motion.section
       animate={routeAnimation}
@@ -316,7 +301,6 @@ export function ProjectScreenView({
         isOverview={root.isGeneratedOverview}
         motionKind={runPanels.motionKind}
         phase={root.phase}
-        showPendingArtifact={showTransientPendingArtifact && !runPanels.generationPreviews?.length}
       />
       <ProjectChromeVignette isOverview={root.isGeneratedOverview} />
       {canvas.activeRun && (
@@ -326,6 +310,7 @@ export function ProjectScreenView({
           generationStage={runPanels.generationStage}
           onCancel={runPanels.onCancel}
           previews={runPanels.generationPreviews ?? []}
+          previewTitle={root.projectTitle}
           runStatus={runPanels.runStatus}
         />
       )}

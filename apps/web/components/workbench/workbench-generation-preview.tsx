@@ -90,6 +90,7 @@ export function WorkbenchGenerationPreview({
   generationStage = null,
   onCancel,
   previews,
+  previewTitle,
   runStatus = null,
 }: {
   canCancel?: boolean;
@@ -97,6 +98,7 @@ export function WorkbenchGenerationPreview({
   generationStage?: RunGenerationStage | null;
   onCancel?: () => void;
   previews: GenerationPreview[];
+  previewTitle?: string;
   runStatus?: Run["status"] | null;
 }) {
   const [selectedIndex, setSelectedIndex] = useState(0);
@@ -161,7 +163,7 @@ export function WorkbenchGenerationPreview({
           {preview || activeRun ? "正在生成 · 实时预览" : "生成结果 · 实时预览"}
         </span>
         <span className="min-w-0 flex-1 truncate text-sm font-semibold text-[#f1f3f4]">
-          {preview?.title ?? "正在准备预览"}
+          {preview?.title ?? previewTitle ?? "正在准备预览"}
         </span>
         {activeRun && (
           <span className="text-[11px] tabular-nums text-[#aeb3bb]">
@@ -205,7 +207,11 @@ export function WorkbenchGenerationPreview({
               </div>
             </div>
             <p className="text-sm text-[#5f6368]">{GENERATION_STAGE_LABELS[generationStage ?? "thinking"] ?? "准备中"}，首个结构片段到达后会立即显示。</p>
-            <p className="text-xs text-[#80868b]">需求文档继续保留在画布中，原型在右侧预览舱生成。</p>
+            <div className="w-full max-w-[360px] rounded-lg border border-[#e7e9ec] bg-[#fafbfc] px-4 py-3 text-left text-xs text-[#5f6368]">
+              <p className="font-medium text-[#3c4043]">分段交付</p>
+              <p className="mt-1 leading-5">需求文档先稳定呈现，原型随后在此处继续流式生成，最后再回写到画布。</p>
+            </div>
+            <p className="text-xs text-[#80868b]">需求文档继续保留在画布中，生成内容不会覆盖原有节点。</p>
           </div>
         ) : preview.kind === "prd" ? <article className="prose prose-sm mx-auto max-w-none rounded bg-white p-7 shadow-sm [&_table]:text-xs"><h1 className="mb-5 text-xl font-semibold">{preview.title}</h1><Streamdown controls={false} isAnimating skipHtml components={{ a: ({ children }) => <span>{children}</span>, img: () => null }}>{preview.markdown}</Streamdown></article>
           : activeScreen ? <div className="relative mx-auto overflow-hidden bg-white shadow-sm" style={{ width: activeScreen.width * scale, minHeight: activeScreen.height * scale }}><div className="relative" style={{ width: activeScreen.width, minHeight: activeScreen.height, transform: `scale(${scale})`, transformOrigin: "top left" }}><JSONUIProvider registry={registry}><Renderer tree={generationPreviewTree(activeScreen.nodes)} registry={registry} loading /></JSONUIProvider></div></div>
