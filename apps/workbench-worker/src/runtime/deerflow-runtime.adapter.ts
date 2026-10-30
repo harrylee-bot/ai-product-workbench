@@ -68,7 +68,8 @@ import {
 import { runtimePrdResultGuidance } from "./runtime-prd-guidance.js";
 import { assertPrdReferenceReadEvidence } from "./runtime-prd-reference-evidence.js";
 import { RuntimeProviderContentFilterError } from "./runtime-provider-content-filter-error.js";
-import { RuntimeGenerationPreview } from "./runtime-generation-preview.js";
+import { RuntimeGenerationPreview, projectGenerationPreview } from "./runtime-generation-preview.js";
+import { RuntimeKnowledgeActivity } from "./runtime-knowledge-activity.js";
 
 export {
   assistantTextDelta,
@@ -584,6 +585,7 @@ export class DeerFlowRuntimeAdapter implements RuntimePort {
     let resultToolCallId: string | null = null;
     const prototypeRequested = execution.request.requestedArtifactKinds.includes("prototype");
     const generationPreview = new RuntimeGenerationPreview(execution.request.requestedArtifactKinds);
+    const knowledgeActivity = new RuntimeKnowledgeActivity(execution.runtimeAttemptId, execution.knowledgeTool?.releaseId ?? null);
     const hasGenerationPreview = execution.request.requestedArtifactKinds.some((kind) => kind === "prd" || kind === "prototype");
     let partEffects: RuntimeProgressEvent[] | null = null;
     const emitEvent = async (event: RuntimeProgressEvent) => {
@@ -649,6 +651,8 @@ export class DeerFlowRuntimeAdapter implements RuntimePort {
         sourceEventId,
         checkpointScreens,
       });
+      const preview = projectGenerationPreview(artifactIndex, draft as unknown as Record<string, unknown>);
+      if (preview) await emitEvent({ type: "artifact.preview", preview });
       emittedDraftSources.set(sourceEventId, canonicalJson({ artifactIndex, draft }));
       onCreated?.();
       if (draft.kind === "prototype") {
@@ -977,6 +981,7 @@ export class DeerFlowRuntimeAdapter implements RuntimePort {
           }
           if (part.event === "values") {
             finalState = part.data;
+            for (const activity of knowledgeActivity.push(part.data)) await emitEvent(activity);
             inputRequired = extractRuntimeInputRequired(part.data) ?? inputRequired;
             await processArtifactState(part.data);
           }

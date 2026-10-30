@@ -218,7 +218,7 @@ describe("Mini Workbench Run preview", () => {
       persistedBoardNodes: [],
       projectId: "project-real",
       runStatus: "running",
-    }).map((node) => node.id)).toEqual(["run-draft:artifact-prd:document"]);
+    }).map((node) => node.id)).toEqual([]);
 
     expect(projectRunBoardNodes({
       drafts: [],
@@ -585,7 +585,7 @@ describe("Mini Workbench Run preview", () => {
     expect(runtimeDraftsToWorkbench([], "project-real")).toEqual([]);
   });
 
-  it("overlays an existing Artifact with its real edit Draft while preserving node identity and position", () => {
+  it("keeps the persisted prototype unchanged while the edit Draft is in the dock", () => {
     const persisted = persistedPrototypeNode({
       artifactId: "artifact-prototype",
       artifactVersionId: "version-before-edit",
@@ -612,63 +612,13 @@ describe("Mini Workbench Run preview", () => {
       runStatus: "running",
     });
 
-    expect(nodes).toHaveLength(1);
-    expect(nodes[0]).toMatchObject({
-      data: {
-        artifact: {
-          artifactId: "artifact-prototype",
-          artifactVersionId: "version-edit-draft",
-          projectId: "project-real",
-          screenId: "screen-checkout",
-        },
-        phase: "refining",
-        title: "结算页 v2",
-      },
-      draggable: false,
-      id: "board-node-checkout",
-      position: { x: 320, y: 180 },
-      selectable: false,
-      selected: false,
-      style: { height: 900, width: 1440 },
-    });
+    expect(nodes).toEqual(projectRunBoardNodes({ drafts: [], persistedBoardNodes: [persisted], projectId: "project-real", runStatus: "running" }));
   });
 
-  it("retains the previous persisted PRD reference while its edit Draft is active", () => {
-    const persisted = persistedPrdNode({
-      artifactId: "artifact-prd",
-      artifactVersionId: "version-before-edit",
-      id: "board-node-prd",
-      position: { x: 160, y: 120 },
-    });
-    const nodes = projectRunBoardNodes({
-      drafts: [draftProjection({
-        artifactId: "artifact-prd",
-        artifactVersionId: "version-edit-draft",
-        kind: "prd",
-      })],
-      persistedBoardNodes: [persisted],
-      projectId: "project-real",
-      runStatus: "running",
-    });
-
-    expect(nodes).toHaveLength(1);
-    expect(nodes[0]).toMatchObject({
-      data: {
-        artifact: {
-          artifactId: "artifact-prd",
-          artifactVersionId: "version-edit-draft",
-          projectId: "project-real",
-        },
-        phase: "refining",
-        previousArtifact: {
-          artifactId: "artifact-prd",
-          artifactVersionId: "version-before-edit",
-          projectId: "project-real",
-        },
-      },
-      id: "board-node-prd",
-      position: { x: 160, y: 120 },
-    });
+  it("keeps the persisted PRD while its edit Draft is in the dock", () => {
+    const persisted = persistedPrdNode({ artifactId: "artifact-prd", artifactVersionId: "version-before-edit", id: "board-node-prd", position: { x: 160, y: 120 } });
+    const nodes = projectRunBoardNodes({ drafts: [draftProjection({ artifactId: "artifact-prd", artifactVersionId: "version-edit-draft", kind: "prd" })], persistedBoardNodes: [persisted], projectId: "project-real", runStatus: "running" });
+    expect(nodes).toEqual(projectRunBoardNodes({ drafts: [], persistedBoardNodes: [persisted], projectId: "project-real", runStatus: "running" }));
   });
 
   it("promotes a completed Draft until the final Board arrives, then suppresses duplicate entrance", () => {

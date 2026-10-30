@@ -6,6 +6,7 @@ import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { Streamdown } from "streamdown";
 
 type GenerationActivity = {
+  id: string;
   detail: string | null;
   label: string;
   status: string;
@@ -42,6 +43,7 @@ const PRD_STAGE_STEPS: Array<{ stage: RunGenerationStage; label: string; summary
 ];
 
 const PROTOTYPE_STAGE_STEPS: Array<{ stage: RunGenerationStage; label: string; summary: string }> = [
+  { stage: "thinking", label: "理解需求", summary: "确认目标、范围和交付物" },
   { stage: "design-system", label: "设计系统", summary: "确定颜色、间距和组件层级" },
   { stage: "mapping-components", label: "映射组件", summary: "把需求映射到页面结构和组件" },
   { stage: "creating-flows", label: "串联流程", summary: "串联关键路径、状态和反馈" },
@@ -51,7 +53,7 @@ const PROTOTYPE_STAGE_STEPS: Array<{ stage: RunGenerationStage; label: string; s
   { stage: "screen-stable", label: "稳定画布", summary: "准备把最终版本回写到画布" },
 ];
 
-const PROTOTYPE_STAGES = new Set<RunGenerationStage>(PROTOTYPE_STAGE_STEPS.map((step) => step.stage));
+const PROTOTYPE_STAGES = new Set<RunGenerationStage>(PROTOTYPE_STAGE_STEPS.filter((step) => step.stage !== "thinking").map((step) => step.stage));
 
 function processSteps(
   generationStage: RunGenerationStage | null,
@@ -134,7 +136,6 @@ export function generationPreviewTree(nodes: GenerationPreviewNode[]): NonNullab
 
 export function WorkbenchGenerationPreview({
   canCancel = false,
-  generationProgress = 0,
   generationStage = null,
   onCancel,
   previews,
@@ -144,7 +145,6 @@ export function WorkbenchGenerationPreview({
   runStatus = null,
 }: {
   canCancel?: boolean;
-  generationProgress?: number;
   generationStage?: RunGenerationStage | null;
   onCancel?: () => void;
   previews: GenerationPreview[];
@@ -153,7 +153,7 @@ export function WorkbenchGenerationPreview({
   motionKind?: "neutral" | "prd" | "prototype";
   runStatus?: Run["status"] | null;
 }) {
-  const [selectedIndex, setSelectedIndex] = useState(0);
+  const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
   const [selectedScreenId, setSelectedScreenId] = useState("");
   const scrollRef = useRef<HTMLDivElement>(null);
   const followRef = useRef(true);
@@ -164,9 +164,13 @@ export function WorkbenchGenerationPreview({
   const [processOpen, setProcessOpen] = useState(true);
   const preview = previews.find((item) => item.artifactIndex === selectedIndex) ?? previews.at(-1);
   const activeScreen = preview?.screens.find((item) => item.id === selectedScreenId) ?? preview?.screens[0];
-  const progressPercent = Math.max(0, Math.min(100, Math.round((generationProgress / 3) * 100)));
   const steps = processSteps(generationStage, motionKind);
-  const evidence = activities.filter((activity) => activity.label || activity.detail).slice(-4);
+  const structure = preview?.kind === "prd"
+    ? [...new Set((preview.markdown.match(/^#{1,6} .+$/gm) ?? []).map((line) => line.replace(/^#+ /, "")))].slice(0, 8)
+    : preview?.screens.map((screen) => screen.name).filter(Boolean) ?? [];
+  const statusLabel = runStatus === "queued" ? "等待开始" : runStatus === "waiting_input" ? "等待你的补充"
+    : runStatus === "cancelling" ? "正在取消" : "正在生成 · 实时预览";
+  const evidence = activities.filter((activity) => activity.id.startsWith("knowledge:")).slice(-6);
 
   useEffect(() => {
     if (!activeRun) {
@@ -182,8 +186,8 @@ export function WorkbenchGenerationPreview({
   }, [activeRun]);
 
   useEffect(() => {
-    if (!previews.some((item) => item.artifactIndex === selectedIndex)) {
-      setSelectedIndex(previews.at(-1)?.artifactIndex ?? 0);
+    if (selectedIndex !== null && !previews.some((item) => item.artifactIndex === selectedIndex)) {
+      setSelectedIndex(null);
     }
   }, [previews, selectedIndex]);
 
@@ -215,7 +219,7 @@ export function WorkbenchGenerationPreview({
       <header className="flex shrink-0 flex-wrap items-center gap-3 border-b border-white/10 px-4 py-3">
         <span className="size-2 rounded-full bg-[#a69cff] motion-safe:animate-pulse" />
         <span className="text-xs text-[#c8c3ff]" role="status">
-          {preview || activeRun ? "正在生成 · 实时预览" : "生成结果 · 实时预览"}
+          {statusLabel}
         </span>
         <span className="min-w-0 flex-1 truncate text-sm font-semibold text-[#f1f3f4]">
           {preview?.title ?? previewTitle ?? "正在准备预览"}
@@ -225,22 +229,11 @@ export function WorkbenchGenerationPreview({
             {GENERATION_STAGE_LABELS[generationStage ?? "thinking"] ?? "准备中"} · {formatElapsed(elapsedMilliseconds)}
           </span>
         )}
-        {activeRun && (
-          <span
-            aria-label={`生成进度 ${progressPercent}%`}
-            aria-valuemax={100}
-            aria-valuemin={0}
-            aria-valuenow={progressPercent}
-            className="h-1 w-16 overflow-hidden rounded-full bg-white/10"
-            role="progressbar"
-          >
-            <span className="block h-full rounded-full bg-[#a69cff] transition-[width] duration-300" style={{ width: `${progressPercent}%` }} />
-          </span>
-        )}
         {activeRun && canCancel && onCancel && (
           <button
             aria-label="取消生成"
             className="rounded-md border border-white/10 px-2 py-1 text-xs text-[#c8c3ff] transition hover:bg-white/10 hover:text-white"
+            disabled={runStatus === "cancelling"}
             onClick={onCancel}
             type="button"
           >
@@ -251,18 +244,18 @@ export function WorkbenchGenerationPreview({
       </header>
       {preview?.kind === "prototype" && preview.screens.length > 1 && <nav aria-label="生成中的页面" className="flex shrink-0 gap-2 overflow-x-auto px-4 py-2">{preview.screens.map((screen) => <button aria-pressed={activeScreen?.id === screen.id} className="shrink-0 rounded bg-white/10 px-3 py-1 text-xs text-white" key={screen.id} onClick={() => setSelectedScreenId(screen.id)} type="button">{screen.name}</button>)}</nav>}
       {activeRun && (
-        <div className="shrink-0 border-b border-white/10 bg-[#202125] text-[#d8dbe1]">
+        <div className="flex min-h-0 max-h-[55%] shrink-0 flex-col border-b border-white/10 bg-[#202125] text-[#d8dbe1]">
           <button
             aria-expanded={processOpen}
             className="flex w-full items-center justify-between px-4 py-2 text-left text-xs font-medium hover:bg-white/[0.04]"
             onClick={() => setProcessOpen((open) => !open)}
             type="button"
           >
-            <span>生成过程 · 可核验摘要</span>
+            <span>生成过程</span>
             <span className="text-[11px] text-[#9da3ad]">{processOpen ? "收起" : "展开"}</span>
           </button>
           {processOpen && (
-            <div className="space-y-3 px-4 pb-3">
+            <div className="min-h-0 space-y-3 overflow-y-auto px-4 pb-3">
               <ol className="grid gap-2 sm:grid-cols-2">
                 {steps.map((step) => {
                   const state = stepState(step, generationStage, steps);
@@ -277,11 +270,21 @@ export function WorkbenchGenerationPreview({
                   );
                 })}
               </ol>
+              {structure.length > 0 && (
+                <div className="rounded-md border border-white/[0.06] px-3 py-2 text-xs text-[#b9bec7]">
+                  <p className="font-medium">{preview?.kind === "prd" ? "当前文档结构" : "当前页面结构"}</p>
+                  <ul className="mt-1 space-y-1">{structure.map((title) => <li key={title}>{title}</li>)}</ul>
+                  <p className="mt-2 text-[#9da3ad]">根据当前草稿更新，尚未定稿。</p>
+                </div>
+              )}
               {evidence.length > 0 && (
                 <div className="rounded-md border border-white/[0.06] px-3 py-2">
-                  <p className="text-[10px] font-medium text-[#b9bec7]">已记录的资料与动作</p>
-                  <ul className="mt-1 space-y-1 text-[10px] leading-4 text-[#9da3ad]">
-                    {evidence.map((activity) => <li key={`${activity.label}:${activity.detail ?? ""}`}>{activity.label}{activity.detail ? `：${activity.detail}` : ""}</li>)}
+                  <p className="text-xs font-medium text-[#b9bec7]">参考资料 · 最近检索</p>
+                  <ul className="mt-1 space-y-2 text-xs leading-5 text-[#b9bec7]">
+                    {evidence.map((activity) => <li className="whitespace-pre-wrap break-words" key={activity.id}>
+                      <span className="font-medium">{activity.status === "running" ? "检索中" : activity.status === "succeeded" ? "检索已返回" : "检索未完成"}</span>
+                      {activity.detail ? `\n${activity.detail}` : ""}
+                    </li>)}
                   </ul>
                 </div>
               )}
@@ -292,20 +295,9 @@ export function WorkbenchGenerationPreview({
       <div className="min-h-0 flex-1 overflow-auto bg-[#f1f3f4] p-5 text-[#202124]" ref={scrollRef} onScroll={(event) => { const node = event.currentTarget; followRef.current = node.scrollHeight - node.scrollTop - node.clientHeight < 80; }}>
         {!preview ? (
           <div className="flex min-h-full flex-col items-center justify-center gap-4 rounded bg-white p-8 text-center shadow-sm">
-            <div className="w-full max-w-[360px] space-y-3" aria-hidden="true">
-              <div className="h-5 animate-pulse rounded bg-[#e3e5e8]" />
-              <div className="h-3 w-4/5 animate-pulse rounded bg-[#eceef0]" />
-              <div className="grid grid-cols-2 gap-3 pt-3">
-                <div className="h-24 animate-pulse rounded-lg bg-[#eceef0]" />
-                <div className="h-24 animate-pulse rounded-lg bg-[#e3e5e8]" />
-              </div>
-            </div>
-            <p className="text-sm text-[#5f6368]">{GENERATION_STAGE_LABELS[generationStage ?? "thinking"] ?? "准备中"}，首个结构片段到达后会立即显示。</p>
-            <div className="w-full max-w-[360px] rounded-lg border border-[#e7e9ec] bg-[#fafbfc] px-4 py-3 text-left text-xs text-[#5f6368]">
-              <p className="font-medium text-[#3c4043]">分段交付</p>
-              <p className="mt-1 leading-5">需求文档先稳定呈现，原型随后在此处继续流式生成，最后再回写到画布。</p>
-            </div>
-            <p className="text-xs text-[#80868b]">需求文档继续保留在画布中，生成内容不会覆盖原有节点。</p>
+            <p className="text-sm text-[#5f6368]">{GENERATION_STAGE_LABELS[generationStage ?? "thinking"] ?? "准备中"}，首个内容片段到达后会立即显示。</p>
+            <p className="text-xs leading-5 text-[#80868b]">可以先查看上方的生成过程。完成后，最终文档或原型会自动呈现在画布上。</p>
+            {elapsedMilliseconds >= 60_000 && <p className="text-xs leading-5 text-[#80868b]">本阶段仍在处理，你可以返回项目列表，稍后继续查看。</p>}
           </div>
         ) : preview.kind === "prd" ? <article className="prose prose-sm mx-auto max-w-none rounded bg-white p-7 shadow-sm [&_table]:text-xs"><h1 className="mb-5 text-xl font-semibold">{preview.title}</h1><Streamdown controls={false} isAnimating skipHtml components={{ a: ({ children }) => <span>{children}</span>, img: () => null }}>{preview.markdown}</Streamdown></article>
           : activeScreen ? <div className="relative mx-auto overflow-hidden bg-white shadow-sm" style={{ width: activeScreen.width * scale, minHeight: activeScreen.height * scale }}><div className="relative" style={{ width: activeScreen.width, minHeight: activeScreen.height, transform: `scale(${scale})`, transformOrigin: "top left" }}><JSONUIProvider registry={registry}><Renderer tree={generationPreviewTree(activeScreen.nodes)} registry={registry} loading /></JSONUIProvider></div></div>

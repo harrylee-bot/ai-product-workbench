@@ -307,7 +307,6 @@ export function ProjectScreenView({
         <WorkbenchGenerationPreview
           activities={runPanels.activities}
           canCancel={runPanels.canCancel}
-          generationProgress={runPanels.generationProgress}
           generationStage={runPanels.generationStage}
           motionKind={runPanels.motionKind}
           onCancel={runPanels.onCancel}

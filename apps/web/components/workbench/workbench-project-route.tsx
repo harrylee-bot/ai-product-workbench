@@ -698,6 +698,8 @@ export function projectRunBoardNodes({
   runStatus: Run["status"] | null;
 }): WorkbenchNode[] {
   const persisted = persistedBoardNodesToWorkbench(persistedBoardNodes, projectId);
+  // Generation lives in the preview dock. Keep the saved canvas until success.
+  if (workbenchRunIsActive(runStatus)) return persisted;
   const draftNodes = runtimeDraftsToWorkbench(
     drafts,
     projectId,
@@ -705,9 +707,6 @@ export function projectRunBoardNodes({
   );
   if (draftNodes.length === 0) return persisted;
 
-  if (workbenchRunIsActive(runStatus)) {
-    return mergeDraftNodes(persisted, draftNodes, false);
-  }
   if (runStatus !== "succeeded") return persisted;
 
   const finalDraftNodes = draftNodes.map((node) => draftNodeWithPhase(node, "complete"));

@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import type { GenerationPreview, GenerationPreviewNode } from "@workbench/workbench-contracts";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { generationPreviewTree, WorkbenchGenerationPreview } from "./workbench-generation-preview";
 
 afterEach(cleanup);
@@ -31,14 +31,25 @@ describe("live generation canvas", () => {
   });
 
   it("shows an independent dock skeleton before the first preview arrives", () => {
-    render(<WorkbenchGenerationPreview activities={[{ detail: "已读取需求模板与项目约束", label: "知识库检索", status: "succeeded" }]} motionKind="prototype" previews={[]} generationStage="generating-ui" previewTitle="采购审批" runStatus="running" />);
+    render(<WorkbenchGenerationPreview activities={[{ id: "knowledge:1", detail: "已读取需求模板与项目约束", label: "知识库检索", status: "succeeded" }]} motionKind="prototype" previews={[]} generationStage="generating-ui" previewTitle="采购审批" runStatus="running" />);
 
     expect(screen.getByRole("region", { name: "生成中预览" }).getAttribute("data-workbench-generation-preview-layout"))
       .toBe("dock");
     expect(screen.getByText("采购审批")).toBeTruthy();
-    expect(screen.getByText("生成界面，首个结构片段到达后会立即显示。")).toBeTruthy();
-    expect(screen.getByText("生成过程 · 可核验摘要")).toBeTruthy();
-    expect(screen.getByText("知识库检索：已读取需求模板与项目约束")).toBeTruthy();
+    expect(screen.getByText("生成界面，首个内容片段到达后会立即显示。")).toBeTruthy();
+    expect(screen.getByText("生成过程")).toBeTruthy();
+    expect(screen.getByText(/已读取需求模板与项目约束/)).toBeTruthy();
+    expect(screen.queryByRole("progressbar")).toBeNull();
     expect(screen.getByText("生成界面 · 进行中")).toBeTruthy();
+  });
+  it("shows actual structure and only knowledge events, with working cancel and collapse controls", () => {
+    const cancel = vi.fn();
+    render(<WorkbenchGenerationPreview previews={[preview]} generationStage="drafting-prd" runStatus="running" canCancel onCancel={cancel} activities={[{ id: "deerflow:model", label: "internal model", detail: "not a source", status: "running" }]} />);
+    expect(screen.getByText("当前文档结构")).toBeTruthy();
+    expect(screen.queryByText("not a source")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "取消生成" }));
+    expect(cancel).toHaveBeenCalledTimes(1);
+    fireEvent.click(screen.getByRole("button", { name: /生成过程/ }));
+    expect(screen.queryByText("当前文档结构")).toBeNull();
   });
 });

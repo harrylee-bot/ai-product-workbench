@@ -34,16 +34,17 @@ const run: Run = {
 };
 
 describe("run reducer", () => {
-  it("hands unfinished previews over to validated drafts and clears them across cancellation and retries", () => {
+  it("keeps dock previews through staging and clears them at terminal states and retries", () => {
     const started = reduceRunEvent(createRunProjection(run), event(1, "run.started", { attempt: 1 }));
     const preview = { artifactIndex: 0, kind: "prd" as const, title: "采购说明", markdown: "正在编写的真实内容", screens: [] };
     const writing = reduceRunEvent(started, event(2, "artifact.preview.updated", { attempt: 1, preview }));
     expect(writing.generationPreviews["0"]?.markdown).toBe(preview.markdown);
     expect(started.generationPreviews).toEqual({});
     const drafted = reduceRunEvent(writing, event(3, "artifact.draft.created", draftPayload({ kind: "prd", screens: [] })));
-    expect(drafted.generationPreviews).toEqual({});
+    expect(drafted.generationPreviews["0"]).toEqual(preview);
     const late = reduceRunEvent(drafted, event(4, "artifact.preview.updated", { attempt: 1, preview }));
-    expect(late.generationPreviews).toEqual({});
+    expect(late.generationPreviews["0"]).toEqual(preview);
+    expect(reduceRunEvent(drafted, event(4, "run.completed", { artifactCount: 1 })).generationPreviews).toEqual({});
     expect(reduceRunEvent(writing, event(3, "run.cancelled", { reason: null })).generationPreviews).toEqual({});
     expect(reduceRunEvent(writing, event(3, "run.started", { attempt: 2 })).generationPreviews).toEqual({});
     expect(() => reduceRunEvent(writing, event(3, "artifact.preview.updated", { attempt: 2, preview }))).toThrow(RunProtocolError);

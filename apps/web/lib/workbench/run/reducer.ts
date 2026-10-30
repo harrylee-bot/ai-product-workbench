@@ -193,7 +193,7 @@ export function reduceRunEvent(state: RunProjectionState, event: RunEvent): RunP
         throw new RunProtocolError("Run generation preview attempt mismatch");
       }
       const preview = event.payload.preview;
-      if (state.draftArtifacts[String(preview.artifactIndex)]) return next;
+      if (["succeeded", "failed", "cancelled"].includes(state.status)) return next;
       return { ...next, generationPreviews: { ...state.generationPreviews, [String(preview.artifactIndex)]: preview } };
     }
     case "artifact.draft.created": {
@@ -204,11 +204,8 @@ export function reduceRunEvent(state: RunProjectionState, event: RunEvent): RunP
       }
       const key = String(event.payload.artifactIndex);
       const exists = Boolean(state.draftArtifacts[key]);
-      const generationPreviews = { ...state.generationPreviews };
-      delete generationPreviews[key];
       return {
         ...next,
-        generationPreviews,
         status: state.status === "cancelling" ? "cancelling" : "running",
         draftArtifacts: {
           ...state.draftArtifacts,
