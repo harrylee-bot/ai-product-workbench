@@ -11,7 +11,9 @@ const field = (value: unknown, name: string): unknown => {
 };
 const text = (value: unknown, limit = 240) => typeof value === "string"
   ? value.replace(/wb(?:kg|ct)1\.[A-Za-z0-9_.-]*/gu, "[已隐藏]").replace(/<think>[\s\S]*(?:<\/think>|$)/giu, "").replace(/[\u0000-\u001f]/gu, " ").slice(0, limit) : "";
-const role = (message: unknown) => String(field(message, "role") ?? field(message, "type") ?? array(record(message).id).at(-1) ?? "").toLowerCase();
+const messageRoles = new Set(["user", "human", "humanmessage", "assistant", "ai", "aimessage", "aimessagechunk", "tool", "toolmessage"]);
+const role = (message: unknown) => [field(message, "role"), field(message, "type"), array(record(message).id).at(-1)]
+  .map((value) => String(value ?? "").toLowerCase()).find((value) => messageRoles.has(value)) ?? "";
 function json(value: unknown): unknown {
   if (typeof value !== "string") return value;
   if (value.length > 500_000) return null;

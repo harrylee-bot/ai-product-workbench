@@ -37,6 +37,9 @@ describe("knowledge process facts", () => {
   it("supports serialized message envelopes and OpenAI tool declarations", () => {
     const c = { type: "ai", additional_kwargs: { tool_calls: [{ id: "retrieve-1", function: { name: "workbench_knowledge_retrieve", arguments: JSON.stringify({ query: "活动规则" }) } }] } };
     expect(tracker().push({ values: { messages: [human, c, tool].map(kwargs => ({ kwargs })) } })[0]).toMatchObject({ status: "succeeded" });
+    expect(tracker().push({ messages: [human, c, tool].map((kwargs, index) => ({
+      lc: 1, type: "constructor", id: ["langchain_core", "messages", ["HumanMessage", "AIMessage", "ToolMessage"][index]], kwargs,
+    })) })[0]).toMatchObject({ status: "succeeded" });
   });
   it.each(["error", "wrong-release", "malformed", "duplicate"])("keeps %s results out of evidence", mode => {
     const bad = mode === "wrong-release" ? { ...tool, content: JSON.stringify({ ...response, evidence: { ...response.evidence, release: { id: "other", key: "vault", version: 1 } } }) }
