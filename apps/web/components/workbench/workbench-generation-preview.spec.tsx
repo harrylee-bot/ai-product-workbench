@@ -31,12 +31,14 @@ describe("live generation canvas", () => {
   });
 
   it("shows an independent dock skeleton before the first preview arrives", () => {
-    render(<WorkbenchGenerationPreview previews={[]} generationStage="generating-ui" previewTitle="采购审批" runStatus="running" />);
+    render(<WorkbenchGenerationPreview activities={[{ detail: "已读取需求模板与项目约束", label: "知识库检索", status: "succeeded" }]} motionKind="prototype" previews={[]} generationStage="generating-ui" previewTitle="采购审批" runStatus="running" />);
 
     expect(screen.getByRole("region", { name: "生成中预览" }).getAttribute("data-workbench-generation-preview-layout"))
       .toBe("dock");
     expect(screen.getByText("采购审批")).toBeTruthy();
     expect(screen.getByText("生成界面，首个结构片段到达后会立即显示。")).toBeTruthy();
-    expect(screen.getByText("分段交付")).toBeTruthy();
+    expect(screen.getByText("生成过程 · 可核验摘要")).toBeTruthy();
+    expect(screen.getByText("知识库检索：已读取需求模板与项目约束")).toBeTruthy();
+    expect(screen.getByText("生成界面 · 进行中")).toBeTruthy();
   });
 });

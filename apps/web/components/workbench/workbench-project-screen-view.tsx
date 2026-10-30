@@ -305,9 +305,11 @@ export function ProjectScreenView({
       <ProjectChromeVignette isOverview={root.isGeneratedOverview} />
       {canvas.activeRun && (
         <WorkbenchGenerationPreview
+          activities={runPanels.activities}
           canCancel={runPanels.canCancel}
           generationProgress={runPanels.generationProgress}
           generationStage={runPanels.generationStage}
+          motionKind={runPanels.motionKind}
           onCancel={runPanels.onCancel}
           previews={runPanels.generationPreviews ?? []}
           previewTitle={root.projectTitle}

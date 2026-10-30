@@ -5,6 +5,12 @@ import type { GenerationPreview, GenerationPreviewNode, Run, RunGenerationStage 
 import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { Streamdown } from "streamdown";
 
+type GenerationActivity = {
+  detail: string | null;
+  label: string;
+  status: string;
+};
+
 const GENERATION_STAGE_LABELS: Partial<Record<RunGenerationStage, string>> = {
   thinking: "理解需求",
   "collecting-prd-context": "整理资料",
@@ -26,6 +32,48 @@ const ACTIVE_RUN_STATUSES: ReadonlySet<Run["status"]> = new Set([
   "waiting_input",
   "cancelling",
 ]);
+
+const PRD_STAGE_STEPS: Array<{ stage: RunGenerationStage; label: string; summary: string }> = [
+  { stage: "thinking", label: "理解需求", summary: "确认目标、范围和交付物" },
+  { stage: "collecting-prd-context", label: "整理资料", summary: "读取已授权的项目资料与知识库" },
+  { stage: "structuring-prd", label: "规划结构", summary: "组织背景、业务规则和验收关系" },
+  { stage: "drafting-prd", label: "编写文档", summary: "把结构整理成可编辑的需求文档" },
+  { stage: "validating-prd", label: "检查文档", summary: "核对字段、引用、验收和安全边界" },
+];
+
+const PROTOTYPE_STAGE_STEPS: Array<{ stage: RunGenerationStage; label: string; summary: string }> = [
+  { stage: "design-system", label: "设计系统", summary: "确定颜色、间距和组件层级" },
+  { stage: "mapping-components", label: "映射组件", summary: "把需求映射到页面结构和组件" },
+  { stage: "creating-flows", label: "串联流程", summary: "串联关键路径、状态和反馈" },
+  { stage: "generating-ui", label: "生成界面", summary: "生成首屏和关键交互状态" },
+  { stage: "screen-streaming", label: "流式补齐", summary: "逐步补齐页面内容和细节" },
+  { stage: "summarizing", label: "整理结果", summary: "整理页面说明与生成结果" },
+  { stage: "screen-stable", label: "稳定画布", summary: "准备把最终版本回写到画布" },
+];
+
+const PROTOTYPE_STAGES = new Set<RunGenerationStage>(PROTOTYPE_STAGE_STEPS.map((step) => step.stage));
+
+function processSteps(
+  generationStage: RunGenerationStage | null,
+  motionKind: "neutral" | "prd" | "prototype",
+) {
+  const prototype = motionKind === "prototype" || (generationStage !== null && PROTOTYPE_STAGES.has(generationStage));
+  return prototype ? PROTOTYPE_STAGE_STEPS : PRD_STAGE_STEPS;
+}
+
+function stepState(
+  step: { stage: RunGenerationStage },
+  generationStage: RunGenerationStage | null,
+  steps: ReadonlyArray<{ stage: RunGenerationStage }>,
+) {
+  if (!generationStage) return "pending";
+  const current = steps.findIndex((candidate) => candidate.stage === generationStage);
+  const index = steps.findIndex((candidate) => candidate.stage === step.stage);
+  if (current < 0 || index < 0) return "pending";
+  if (index < current) return "done";
+  if (index === current) return "active";
+  return "pending";
+}
 
 function isActiveRun(status: Run["status"] | null): boolean {
   return status !== null && ACTIVE_RUN_STATUSES.has(status);
@@ -91,6 +139,8 @@ export function WorkbenchGenerationPreview({
   onCancel,
   previews,
   previewTitle,
+  activities = [],
+  motionKind = "neutral",
   runStatus = null,
 }: {
   canCancel?: boolean;
@@ -99,6 +149,8 @@ export function WorkbenchGenerationPreview({
   onCancel?: () => void;
   previews: GenerationPreview[];
   previewTitle?: string;
+  activities?: readonly GenerationActivity[];
+  motionKind?: "neutral" | "prd" | "prototype";
   runStatus?: Run["status"] | null;
 }) {
   const [selectedIndex, setSelectedIndex] = useState(0);
@@ -109,9 +161,12 @@ export function WorkbenchGenerationPreview({
   const [elapsedMilliseconds, setElapsedMilliseconds] = useState(0);
   const startedAtRef = useRef<number | null>(null);
   const activeRun = isActiveRun(runStatus);
+  const [processOpen, setProcessOpen] = useState(true);
   const preview = previews.find((item) => item.artifactIndex === selectedIndex) ?? previews.at(-1);
   const activeScreen = preview?.screens.find((item) => item.id === selectedScreenId) ?? preview?.screens[0];
   const progressPercent = Math.max(0, Math.min(100, Math.round((generationProgress / 3) * 100)));
+  const steps = processSteps(generationStage, motionKind);
+  const evidence = activities.filter((activity) => activity.label || activity.detail).slice(-4);
 
   useEffect(() => {
     if (!activeRun) {
@@ -195,6 +250,45 @@ export function WorkbenchGenerationPreview({
         {previews.length > 1 && previews.map((item) => <button aria-pressed={preview?.artifactIndex === item.artifactIndex} className="rounded bg-white/10 px-2 py-1 text-xs text-white" key={item.artifactIndex} onClick={() => setSelectedIndex(item.artifactIndex)} type="button">{item.kind === "prd" ? "文档" : "原型"}</button>)}
       </header>
       {preview?.kind === "prototype" && preview.screens.length > 1 && <nav aria-label="生成中的页面" className="flex shrink-0 gap-2 overflow-x-auto px-4 py-2">{preview.screens.map((screen) => <button aria-pressed={activeScreen?.id === screen.id} className="shrink-0 rounded bg-white/10 px-3 py-1 text-xs text-white" key={screen.id} onClick={() => setSelectedScreenId(screen.id)} type="button">{screen.name}</button>)}</nav>}
+      {activeRun && (
+        <div className="shrink-0 border-b border-white/10 bg-[#202125] text-[#d8dbe1]">
+          <button
+            aria-expanded={processOpen}
+            className="flex w-full items-center justify-between px-4 py-2 text-left text-xs font-medium hover:bg-white/[0.04]"
+            onClick={() => setProcessOpen((open) => !open)}
+            type="button"
+          >
+            <span>生成过程 · 可核验摘要</span>
+            <span className="text-[11px] text-[#9da3ad]">{processOpen ? "收起" : "展开"}</span>
+          </button>
+          {processOpen && (
+            <div className="space-y-3 px-4 pb-3">
+              <ol className="grid gap-2 sm:grid-cols-2">
+                {steps.map((step) => {
+                  const state = stepState(step, generationStage, steps);
+                  return (
+                    <li className="flex gap-2 rounded-md border border-white/[0.06] bg-white/[0.025] px-2.5 py-2" data-generation-step={step.stage} data-generation-step-state={state} key={step.stage}>
+                      <span className={state === "done" ? "text-[#9de5b0]" : state === "active" ? "text-[#c8c3ff]" : "text-[#7d838d]"}>{state === "done" ? "✓" : state === "active" ? "•" : "○"}</span>
+                      <span className="min-w-0">
+                        <span className="block text-[11px] font-medium">{step.label}{state === "active" ? " · 进行中" : state === "done" ? " · 已完成" : " · 待进行"}</span>
+                        <span className="mt-0.5 block text-[10px] leading-4 text-[#9da3ad]">{step.summary}</span>
+                      </span>
+                    </li>
+                  );
+                })}
+              </ol>
+              {evidence.length > 0 && (
+                <div className="rounded-md border border-white/[0.06] px-3 py-2">
+                  <p className="text-[10px] font-medium text-[#b9bec7]">已记录的资料与动作</p>
+                  <ul className="mt-1 space-y-1 text-[10px] leading-4 text-[#9da3ad]">
+                    {evidence.map((activity) => <li key={`${activity.label}:${activity.detail ?? ""}`}>{activity.label}{activity.detail ? `：${activity.detail}` : ""}</li>)}
+                  </ul>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
       <div className="min-h-0 flex-1 overflow-auto bg-[#f1f3f4] p-5 text-[#202124]" ref={scrollRef} onScroll={(event) => { const node = event.currentTarget; followRef.current = node.scrollHeight - node.scrollTop - node.clientHeight < 80; }}>
         {!preview ? (
           <div className="flex min-h-full flex-col items-center justify-center gap-4 rounded bg-white p-8 text-center shadow-sm">
