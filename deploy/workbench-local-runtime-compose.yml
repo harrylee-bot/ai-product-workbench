@@ -1,0 +1,17 @@
+# Local-only runtime overlay.
+#
+# The base Compose file keeps the production object-storage-egress topology
+# independent from the optional local MinIO profile. When this overlay is used
+# together with --profile local-object-storage, application services wait for
+# the bucket initialization job to finish before the egress gateway becomes
+# healthy. Production deployment commands must not include this file.
+services:
+  object-storage-egress:
+    depends_on:
+      object-storage-init:
+        condition: service_completed_successfully
+
+  gateway:
+    depends_on:
+      object-storage-init:
+        condition: service_completed_successfully
