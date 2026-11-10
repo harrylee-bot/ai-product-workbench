@@ -1,8 +1,9 @@
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { zipSync, strToU8 } from "fflate";
+import { packageRootFromModuleUrl } from "./package-importer-path.mjs";
 
-const root = resolve(new URL("..", import.meta.url).pathname);
+const root = packageRootFromModuleUrl(import.meta.url);
 const outputDirectory = resolve(root, "dist");
 const manifest = JSON.parse(await readFile(resolve(root, "manifest.json"), "utf8"));
 const buildMain = await readFile(resolve(root, "build/main.js"));

@@ -8,6 +8,7 @@
   ],
   "scripts": {
     "dev": "npm run workbench:prepare && node scripts/workbench-dev.mjs",
+    "dev:demo": "npm --workspace @workbench/web run dev",
     "dev:workbench-api": "npm run workbench:prepare && npm --workspace @workbench/workbench-api run dev",
     "dev:workbench-worker": "npm run workbench:prepare && npm --workspace @workbench/workbench-worker run dev",
     "dev:workbench-file-worker": "npm run workbench:prepare && npm --workspace @workbench/workbench-file-worker run dev",

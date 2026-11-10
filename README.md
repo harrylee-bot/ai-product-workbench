@@ -24,6 +24,16 @@ npm run workbench:prepare
 npm run dev
 ```
 
+如果还没有配置 PostgreSQL、对象存储、DeerFlow 和知识库服务，可以先启动只读的页面演示模式。它复用正式的 `HomeScreen`、提示词编辑器、模板卡片和交互样式，不调用后端，也不会写入项目数据：
+
+```sh
+npm run dev:demo
+# 浏览器打开 http://localhost:3000/demo
+```
+
+演示模式用于确认页面可视化渲染和基础交互；真实项目创建、知识检索、原型生成、导出和分享仍需要下面的完整基础设施。
+Demo 使用独立的静态 Transport/Query fixtures，提交只显示本地反馈；生产环境会对 `/demo` 返回 404。
+
 开发命令需要已配置的基础设施。下面的 Compose 构建示例**仅用于本地开发或独立构建环境，禁止在生产服务器执行**：
 
 ```sh
@@ -31,10 +41,17 @@ cp deploy/workbench.env.example deploy/workbench.env
 # 先配置数据库、鉴权、对象存储、模型、预览、Docling 和 ClamAV
 docker compose --env-file deploy/workbench.env \
   -f deploy/workbench-compose.yml \
+  -f deploy/workbench-local-runtime-compose.yml \
   --profile local-object-storage \
   --profile local-docling \
   up -d --build
 ```
+
+`deploy/workbench-local-runtime-compose.yml` is a local-only overlay. With the
+MinIO profile enabled, it keeps the API and workers behind the completed bucket
+initialization job. Do not include this overlay in production deployment
+commands. Runtime smoke commands also require an explicitly approved model ID;
+set `DEERFLOW_SMOKE_MODEL_ID` instead of relying on an arbitrary catalog entry.
 
 空数据库须先完成下面的首次知识初始化。Web 可在 API 启动后提供登录，API 的业务就绪检查仍要求有效知识发布和真实检索服务。主页面与预览使用独立访问来源。数据库迁移、事件与产物合同位于 `packages/workbench-db/`、`packages/workbench-contracts/`；机器验收合同位于 `schemas/`。
 

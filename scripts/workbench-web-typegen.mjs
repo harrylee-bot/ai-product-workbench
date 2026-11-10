@@ -3,9 +3,12 @@ import { promisify } from "node:util";
 import { createRequire } from "node:module";
 import { access, copyFile, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 const execFileAsync = promisify(execFile);
-const repoRoot = path.resolve(new URL("..", import.meta.url).pathname);
+// Convert the module URL before path resolution so an external-drive mount
+// containing spaces or non-ASCII characters remains a valid filesystem path.
+const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const webRoot = path.join(repoRoot, "apps", "web");
 
 export async function runWebTypegen({

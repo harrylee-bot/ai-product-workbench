@@ -17,10 +17,12 @@ const WorkbenchTransportContext = createContext<WorkbenchTransport | null>(null)
 
 export function WorkbenchTransportProvider({
   children,
+  transport,
 }: {
   children: ReactNode;
+  transport?: WorkbenchTransport;
 }) {
-  const value = useMemo<WorkbenchTransport>(() => {
+  const defaultValue = useMemo<WorkbenchTransport>(() => {
     const baseUrl = getWorkbenchApiBaseUrl();
     const api = createWorkbenchApiClient({ baseUrl });
     return {
@@ -28,6 +30,7 @@ export function WorkbenchTransportProvider({
       baseUrl,
     };
   }, []);
+  const value = transport ?? defaultValue;
 
   return (
     <WorkbenchTransportContext.Provider value={value}>

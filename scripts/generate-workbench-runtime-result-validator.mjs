@@ -1,22 +1,26 @@
 #!/usr/bin/env node
 
 import { readFile, writeFile } from "node:fs/promises";
+import { fileURLToPath } from "node:url";
+import path from "node:path";
 
 import { build } from "esbuild";
 
-const root = new URL("../", import.meta.url);
-const entryPath = new URL(
+// Convert file URLs through fileURLToPath so spaces and non-ASCII external-drive
+// mount names remain valid filesystem paths on macOS and Windows.
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const entryPath = path.join(
+  root,
   "integrations/deerflow/runtime-tools/runtime-result-validator.entry.ts",
-  root,
 );
-const outputPath = new URL(
-  "integrations/deerflow/runtime-tools/deerflow_workbench_tools/runtime_result_validator.bundle.mjs",
+const outputPath = path.join(
   root,
+  "integrations/deerflow/runtime-tools/deerflow_workbench_tools/runtime_result_validator.bundle.mjs",
 );
 const check = process.argv.includes("--check");
 
 const result = await build({
-  entryPoints: [entryPath.pathname],
+  entryPoints: [entryPath],
   bundle: true,
   write: false,
   platform: "node",
@@ -38,5 +42,5 @@ if (check) {
   process.stdout.write("Runtime result validator bundle is current.\n");
 } else {
   await writeFile(outputPath, generated, { encoding: "utf8", mode: 0o755 });
-  process.stdout.write(`Wrote ${outputPath.pathname}\n`);
+  process.stdout.write(`Wrote ${outputPath}\n`);
 }

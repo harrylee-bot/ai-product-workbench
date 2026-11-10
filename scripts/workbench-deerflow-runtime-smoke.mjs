@@ -24,8 +24,7 @@ const identityHeaders = {
   "X-DeerFlow-Owner-User-Id": principalId,
 };
 await assertPublicRuntimeSkill(identityHeaders);
-const modelId = process.env.DEERFLOW_SMOKE_MODEL_ID?.trim()
-  || await firstRuntimeModel(identityHeaders);
+const modelId = required("DEERFLOW_SMOKE_MODEL_ID");
 
 const config = {
   databaseUrl: "postgresql://runtime-smoke.invalid/workbench",
@@ -152,16 +151,6 @@ async function assertPublicRuntimeSkill(headers) {
       + "read-only under DEER_FLOW_SKILLS_PATH/public/workbench for every runtime tenant",
     );
   }
-}
-
-async function firstRuntimeModel(headers) {
-  const response = await fetch(`${langGraphUrl}/models`, { headers });
-  const payload = await responseJson(response, "DeerFlow model catalog");
-  const modelId = Array.isArray(payload?.models) ? payload.models[0]?.name : null;
-  if (typeof modelId !== "string" || !modelId.trim()) {
-    throw new Error("DEERFLOW_RUNTIME_MODEL_REQUIRED");
-  }
-  return modelId;
 }
 
 async function responseJson(response, label) {
