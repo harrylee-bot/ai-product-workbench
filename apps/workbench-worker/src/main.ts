@@ -171,9 +171,8 @@ async function main() {
   const shutdownDependencies = {
     log: (message: string) => console.log(message),
     logError: (message: string, error: unknown) => console.error(message, error),
-    stopReconcilers: () => {
-      cancellationReconciler.stop();
-      executionReconciler.stop();
+    stopReconcilers: async () => {
+      await Promise.all([cancellationReconciler.stop(), executionReconciler.stop()]);
     },
     stopQueue: () => boss.stop({ graceful: true, timeout: 30_000 }),
     disconnectDatabase: () => db.$disconnect(),

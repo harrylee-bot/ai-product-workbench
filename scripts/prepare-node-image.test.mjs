@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { chmod, cp, mkdir, mkdtemp, readFile, readlink, rm, symlink, writeFile } from "node:fs/promises";
+import { chmod, cp, mkdir, mkdtemp, readFile, readdir, readlink, rm, symlink, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import os from "node:os";
 import path from "node:path";
@@ -170,11 +170,10 @@ test("all candidate Node Dockerfiles use the hardened Alpine helper", async () =
     assert.doesNotMatch(source, /node:22-bookworm-slim/u, `${relativePath} retains the vulnerable Debian base`);
   }
 
-  const workflow = await readFile(path.join(root, ".github/workflows/workbench-ci.yml"), "utf8");
-  assert.doesNotMatch(workflow, /node:22-bookworm-slim/u, "CI retains the vulnerable Debian Node fallback");
-  assert.doesNotMatch(workflow, /nginx:1\.27\.5-alpine/u, "CI retains the vulnerable Nginx fallback");
-  assert.match(workflow, /NODE_IMAGE=\$\{\{ vars\.WORKBENCH_NODE_IMAGE \}\}/u);
-  assert.match(workflow, /NGINX_IMAGE: .*nginx:stable-alpine/u);
+  const envExample = await readFile(path.join(root, "deploy/workbench.env.example"), "utf8");
+  assert.doesNotMatch(envExample, /node:22-bookworm-slim(?!@sha256:)/u, "the direct release env must not retain the mutable Debian Node fallback");
+  assert.match(envExample, /^WORKBENCH_NODE_IMAGE=node:22-alpine$/mu);
+  assert.match(envExample, /^WORKBENCH_NGINX_IMAGE=nginx:stable-alpine@sha256:/mu);
 });
 
 test("the Web image keeps the isolated compiler heap below the three-GiB builder limit", async () => {
@@ -319,6 +318,52 @@ test("candidate security dependency fixes remain exactly pinned", async () => {
   assert.equal(apiManifest.dependencies?.["@aws-sdk/s3-request-presigner"], "3.896.0");
 });
 
+test("each Docker dependency stage includes the complete local workspace dependency graph", async () => {
+  const lockfile = JSON.parse(await readFile(path.join(root, "package-lock.json"), "utf8"));
+  const workspaces = new Map();
+  for (const group of ["apps", "packages"]) {
+    for (const entry of await readdir(path.join(root, group), { withFileTypes: true })) {
+      if (!entry.isDirectory()) continue;
+      const location = `${group}/${entry.name}`;
+      let manifest;
+      try { manifest = JSON.parse(await readFile(path.join(root, location, "package.json"), "utf8")); }
+      catch (error) { if (error.code === "ENOENT") continue; throw error; }
+      workspaces.set(manifest.name, { location, manifest });
+    }
+  }
+  for (const relativePath of nodeDockerfiles) {
+    const source = await readFile(path.join(root, relativePath), "utf8");
+    const dependencies = source.split(/FROM dependencies AS build/u)[0];
+    const copied = new Set([...dependencies.matchAll(/^COPY (?:--\S+ )?((?:apps|packages)\/[^/]+)\/package\.json /gmu)].map((match) => match[1]));
+    for (const { location, manifest } of workspaces.values()) {
+      if (!copied.has(location)) continue;
+      for (const kind of ["dependencies", "devDependencies", "optionalDependencies"]) {
+        for (const [name, version] of Object.entries(manifest[kind] ?? {})) {
+          const dependency = workspaces.get(name);
+          if (!dependency) continue;
+          assert.ok(copied.has(dependency.location), `${relativePath} must copy ${dependency.location}/package.json for ${location}`);
+          assert.equal(lockfile.packages[location]?.[kind]?.[name], version, `${location} dependency ${name} must agree with npm ci lockfile`);
+        }
+      }
+    }
+  }
+});
+
+test("the API runtime image builds and verifies its source prototype compiler", async () => {
+  const source = await readFile(path.join(root, "apps/workbench-api/Dockerfile"), "utf8");
+  assert.match(source, /COPY packages\/workbench-export-core packages\/workbench-export-core/u);
+  assert.match(source, /npm --workspace @workbench\/workbench-export-core run build/u);
+  assert.match(source, /COPY --chown=node:node packages\/workbench-export-core\/package\.json packages\/workbench-export-core\/package\.json/u);
+  assert.match(source, /COPY --from=build --chown=node:node \/app\/packages\/workbench-export-core\/dist packages\/workbench-export-core\/dist/u);
+  assert.match(source, /SOURCE_PROTOTYPE_RUNTIME_SMOKE_FAILED/u);
+  const smoke = source.match(/node --input-type=module -e "(import \{ buildSourcePrototype \}[^"\n]+)"/u)?.[1];
+  assert.ok(smoke, "the API image must execute its compiler after production dependency pruning");
+  const result = spawnSync(process.execPath, ["--input-type=module", "-e", smoke], {
+    cwd: path.join(root, "apps/workbench-api"), encoding: "utf8", timeout: 20_000,
+  });
+  assert.equal(result.status, 0, result.stderr);
+});
+
 test("every workspace runner preserves production dependency directories with target-platform modules", async () => {
   const lockfile = JSON.parse(await readFile(path.join(root, "package-lock.json"), "utf8"));
   for (const relativePath of nodeDockerfiles.filter((name) => name !== "apps/knowledge/Dockerfile")) {
@@ -340,9 +385,12 @@ test("every workspace runner preserves production dependency directories with ta
     assert.match(runner, new RegExp(`COPY --from=${stage}(?: --chown=node:node)? /app/node_modules node_modules`, "u"));
     assert.match(runner, new RegExp(`COPY --from=${stage}(?: --chown=node:node)? /app/\\.runtime-workspace-dependencies/ \\./`, "u"));
     const workspaces = new Set([...source.matchAll(/^COPY (?:--chown=\S+ )?((?:apps|packages)\/[^/]+)\/package\.json /gmu)].map((match) => match[1]));
-    const nestedProduction = Object.entries(lockfile.packages)
-      .filter(([name, metadata]) => !metadata.dev && workspaces.has(name.split("/node_modules/")[0]) && name.includes("/node_modules/"));
-    assert.ok(nestedProduction.length > 0, `${relativePath} fixture must exercise the current nested dependency layout`);
+    // A valid lockfile may fully hoist these workspaces. The executable
+    // fixtures below exercise both nested and fully hoisted collection.
+    assert.ok(workspaces.size > 0, `${relativePath} must copy workspace manifests`);
+    for (const workspace of workspaces) {
+      assert.ok(lockfile.packages[workspace], `${workspace} must exist in the lockfile`);
+    }
   }
   const web = await readFile(path.join(root, "apps/web/Dockerfile"), "utf8");
   assert.match(web, /FROM --platform=\$BUILDPLATFORM \$\{NODE_IMAGE\} AS deps/u);

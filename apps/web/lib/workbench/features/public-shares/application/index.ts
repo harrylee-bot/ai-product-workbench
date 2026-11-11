@@ -1,7 +1,9 @@
 "use client";
 
-import type { CreateProjectRemixRequest } from "@workbench/workbench-contracts";
+import type { CreateProjectRemixRequest, ExportSelection } from "@workbench/workbench-contracts";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+
+import { useCallback } from "react";
 
 import { workbenchQueryKeys } from "../../../query/keys";
 import { useWorkbenchPublicSharesApi } from "../api-adapter";
@@ -107,4 +109,11 @@ export function useCreateWorkbenchProjectRemix(shareToken: string) {
       });
     },
   });
+}
+
+export function useWorkbenchPublicSourcePrototypePreviewCreator(shareToken: string, artifactId: string, artifactVersionId: string) {
+  const api = useWorkbenchPublicSharesApi();
+  return useCallback((_selection: ExportSelection, signal?: AbortSignal) => (
+    api.createSourcePrototypePreviewToken(shareToken, artifactId, artifactVersionId, signal)
+  ), [api, shareToken, artifactId, artifactVersionId]);
 }

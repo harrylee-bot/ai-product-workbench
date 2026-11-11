@@ -9,7 +9,7 @@ import test from "node:test";
 const preflight = resolve("deploy/deerflow-production-preflight.sh");
 const fragment = resolve("integrations/deerflow/runtime-tools/config.fragment.yaml");
 const patchManifest = resolve(
-  "integrations/deerflow/source-patches/7a6c4a994a86583d2a3c056ee9d0f157d4f030c2/manifest.json",
+  "integrations/deerflow/source-patches/345f08be00c8a9495079b732a39b46aa9af1584e/manifest.json",
 );
 
 test("DeerFlow preflight rejects an empty provider environment", () => {
@@ -141,53 +141,15 @@ test("DeerFlow preflight fails closed when the Validator image probe fails", () 
   assert.match(result.stderr, /WORKBENCH_RUNTIME_VALIDATOR_IMAGE_PROBE_FAILED/u);
 });
 
-test("DeerFlow preflight preserves the exact previous candidate as a legacy rollback", () => {
-  const result = runPreflight(validProviderEnv(), {
-    configOwner: "65532:65532",
-    homeOwner: "65532:65532",
-  }, {
-    workbenchSourceCommit: "4bf8c155678f2b5baf0ab42e938cfbeca09abdf1",
-    nodeImageRef: null,
-    labelNodeImageRef: null,
-  });
-
-  assert.equal(result.status, 0, result.stderr);
-  assert.match(result.stdout, /deerflow production preflight: ok/u);
-  assert.doesNotMatch(result.stderr, /validator-probe-arg=/u);
-});
-
-test("DeerFlow preflight rejects a Node environment binding on the legacy rollback candidate", () => {
-  const result = runPreflight(validProviderEnv(), null, {
-    workbenchSourceCommit: "4bf8c155678f2b5baf0ab42e938cfbeca09abdf1",
-  });
-
-  assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /legacy DeerFlow rollback candidate must not define WORKBENCH_DEERFLOW_NODE_IMAGE_REF/u);
-});
-
-test("DeerFlow preflight rejects a Node image label on the legacy rollback candidate", () => {
-  const result = runPreflight(validProviderEnv(), {
-    configOwner: "65532:65532",
-    homeOwner: "65532:65532",
-  }, {
-    workbenchSourceCommit: "4bf8c155678f2b5baf0ab42e938cfbeca09abdf1",
-    nodeImageRef: null,
-  });
-
-  assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /legacy DeerFlow rollback image unexpectedly declares a Validator Node runtime/u);
-});
-
 function runPreflight(providerEnvSource, ownership = null, overrides = {}) {
   const appDir = mkdtempSync(join(tmpdir(), "workbench-deerflow-preflight-"));
   const deployDir = join(appDir, "deploy");
   const integrationsDir = join(appDir, "integrations/deerflow");
   const runtimeToolsDir = join(integrationsDir, "runtime-tools");
-  const patchDir = join(integrationsDir, "source-patches/7a6c4a994a86583d2a3c056ee9d0f157d4f030c2");
+  const patchDir = join(integrationsDir, "source-patches/345f08be00c8a9495079b732a39b46aa9af1584e");
   const scriptsDir = join(appDir, "scripts");
   const etcDir = join(appDir, "etc/workbench/deerflow");
   const runtimeDir = join(appDir, "var/lib/workbench/deerflow");
-  const releaseDir = join(appDir, "etc/workbench/release");
   const fakeBinDir = join(appDir, "test-bin");
   const effectiveConfig = join(runtimeDir, "config.effective.yaml");
   const runtimeHome = join(runtimeDir, "home");
@@ -198,7 +160,6 @@ function runPreflight(providerEnvSource, ownership = null, overrides = {}) {
   mkdirSync(scriptsDir, { recursive: true });
   mkdirSync(etcDir, { recursive: true, mode: 0o700 });
   mkdirSync(runtimeHome, { recursive: true, mode: 0o700 });
-  mkdirSync(releaseDir, { recursive: true });
 
   writeFileSync(join(runtimeToolsDir, "config.fragment.yaml"), readFixture(fragment));
   writeFileSync(join(patchDir, "manifest.json"), readFixture(patchManifest));
@@ -209,14 +170,11 @@ function runPreflight(providerEnvSource, ownership = null, overrides = {}) {
   writeFileSync(join(etcDir, "provider.env"), providerEnvSource, { mode: 0o600 });
   chmodSync(join(etcDir, "provider.env"), 0o600);
   writeFileSync(join(etcDir, "request-scoped-secrets.attestation.json"), "{}\n");
-  writeFileSync(join(releaseDir, "production-image-manifest.json"), "{}\n");
-  writeFileSync(join(releaseDir, "production-image-manifest.bundle.json"), "{}\n");
   writeFileSync(join(scriptsDir, "assert-deerflow-production-deployment.mjs"), "process.exit(99);\n");
   writeFileSync(join(scriptsDir, "generate-workbench-runtime-result-validator.mjs"), "process.exit(99);\n");
   writeFileSync(join(scriptsDir, "merge-deerflow-config.mjs"), "process.exit(99);\n");
   writeFileSync(join(scriptsDir, "assert-deerflow-runtime-config.mjs"), "process.exit(99);\n");
   writeFileSync(join(scriptsDir, "assert-deerflow-secret-channel-attestation.mjs"), "process.exit(99);\n");
-  writeFileSync(join(scriptsDir, "production-image-inventory.mjs"), "process.exit(99);\n");
 
   const envFile = join(deployDir, "workbench.env");
   const nodeImageRef = overrides.nodeImageRef === undefined
@@ -237,10 +195,6 @@ function runPreflight(providerEnvSource, ownership = null, overrides = {}) {
     ...(nodeImageRef === null ? [] : [`WORKBENCH_DEERFLOW_NODE_IMAGE_REF=${nodeImageRef}`]),
     `WORKBENCH_DEERFLOW_IMAGE_DIGEST=sha256:${"c".repeat(64)}`,
     `WORKBENCH_DEERFLOW_IMAGE_REF=registry.example.test/workbench/deerflow@sha256:${"c".repeat(64)}`,
-    `WORKBENCH_IMAGE_INVENTORY_PATH=${join(releaseDir, "production-image-manifest.json")}`,
-    `WORKBENCH_IMAGE_INVENTORY_BUNDLE_PATH=${join(releaseDir, "production-image-manifest.bundle.json")}`,
-    "WORKBENCH_COSIGN_CERTIFICATE_IDENTITY=https://github.com/example/workbench/.github/workflows/workbench-ci.yml@refs/heads/main",
-    "WORKBENCH_COSIGN_OIDC_ISSUER=https://token.actions.githubusercontent.com",
     `WORKBENCH_DEERFLOW_SECRET_CHANNEL_ATTESTATION_PATH=${join(etcDir, "request-scoped-secrets.attestation.json")}`,
     "",
   ].join("\n"));
@@ -248,7 +202,6 @@ function runPreflight(providerEnvSource, ownership = null, overrides = {}) {
   if (ownership) {
     mkdirSync(fakeBinDir, { recursive: true });
     writeExecutable(join(fakeBinDir, "node"), "#!/bin/sh\nexit 0\n");
-    writeExecutable(join(fakeBinDir, "cosign"), "#!/bin/sh\nexit 0\n");
     writeExecutable(join(fakeBinDir, "stat"), [
       "#!/bin/sh",
       "if { [ \"$1\" = \"-c\" ] || [ \"$1\" = \"-f\" ]; } && [ \"$2\" = \"%u:%g\" ]; then",

@@ -7,7 +7,6 @@ import {
   importSourceProcessQueue,
   importSourceProcessJobOptions,
   importSourceListSchema,
-  importSourceSchema,
   type CreateImportSourceRequest,
   type ImportSource,
 } from "@workbench/workbench-contracts";
@@ -245,7 +244,7 @@ export class ImportSourcesService {
 
     const resolved = await this.resolveLocalFile(tx, input.projectId, request);
     const sourceId = `source_${randomUUID()}`;
-    const created = await tx.importSource.create({
+    await tx.importSource.create({
       data: {
         id: sourceId,
         projectId: input.projectId,

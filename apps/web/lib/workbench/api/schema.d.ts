@@ -3456,7 +3456,113 @@ export interface components {
             schemaVersion: 2;
             content: components["schemas"]["PrdDocumentV2"];
         };
-        ArtifactVersionDetail: components["schemas"]["ArtifactVersionInlineDetail"] | components["schemas"]["ArtifactVersionInlinePrdV2Detail"] | components["schemas"]["ArtifactVersionBlobDetail"];
+        PrdTemplateDiagram: {
+            id: string;
+            /** @enum {string} */
+            kind: "productFlow" | "productArchitecture";
+            title: string;
+            description: string;
+            nodes: components["schemas"]["PrdDiagramNode"][];
+            edges: components["schemas"]["PrdDiagramEdge"][];
+        };
+        PrdV3FunctionSection: {
+            title: string;
+            blocks: components["schemas"]["PrdBlock"][];
+            id: string;
+            /** @default [] */
+            diagrams: components["schemas"]["PrdTemplateDiagram"][];
+        };
+        /** @description PRD v3 uses contiguous function-specific sections, optional typed diagrams, embedded or later acceptance, and the same complete safety, table, citation and semantic-reference validation. */
+        PrdDocumentV3: {
+            /** @enum {string} */
+            protocol: "workbench.prd.v3";
+            documentId: string;
+            title: string;
+            revision: components["schemas"]["PrdRevision"];
+            cover: {
+                workOrderName: string;
+                title: string;
+            };
+            versionHistory: components["schemas"]["PrdVersionHistoryEntry"][];
+            tableOfContents: {
+                /** @enum {string} */
+                title: "目 录";
+                entries: string[];
+            };
+            assumptions: components["schemas"]["PrdAssumption"][];
+            citations: components["schemas"]["ArtifactCitation"][];
+            sections: {
+                introduction: {
+                    /** @enum {string} */
+                    title: "1 引言";
+                    background: {
+                        /** @enum {string} */
+                        title: "1.1项目背景";
+                        blocks: components["schemas"]["PrdBlock"][];
+                    };
+                    scope: {
+                        /** @enum {string} */
+                        title: "1.2文档范围";
+                        blocks: components["schemas"]["PrdBlock"][];
+                    };
+                    usageScenarios: {
+                        /** @enum {string} */
+                        title: "1.3使用场景（必填）";
+                        blocks: components["schemas"]["PrdBlock"][];
+                        channelTable: {
+                            /** @enum {string} */
+                            title: "活动投放渠道";
+                            rows: components["schemas"]["PrdChannelRow"][];
+                        };
+                    };
+                };
+                businessRequirements: {
+                    /** @enum {string} */
+                    title: "2 业务需求";
+                    summary: components["schemas"]["PrdInlineContent"];
+                    pageLinks: {
+                        /** @enum {string} */
+                        title: "2.1页面链接";
+                        blocks: components["schemas"]["PrdBlock"][];
+                    };
+                    functionSections: components["schemas"]["PrdV3FunctionSection"][];
+                };
+                degradation: {
+                    /** @enum {string} */
+                    title: "3 业务降级方案（必填）";
+                    applicable: boolean;
+                    content: components["schemas"]["PrdInlineContent"];
+                };
+                safetyBaseline: {
+                    /** @enum {string} */
+                    title: "4 需求安全基线要求（必填）";
+                    /** @enum {string} */
+                    intro: "该部分内容为必填项，请按照如下表格中的内容先进行自查，并按照如下要求完善需求文档：\n1、如选择“是”，代表本项自查内容已符合安全要求，需要提供截图违依据\n2、如选择“否”，代表本项自查内容暂时不符合安全要求，请在需求文档中增加本部分内容安全改造需求，并发送网信安需求评审邮件，附上本需求文档用于安全评审；\n3、如选择“不涉及”，代表本项目各项需求安全基线均不涉及，则无需召开网信安需求评审会。\n建议：该表格请业务人员和开发人员共同参与自查并填写。";
+                    rows: components["schemas"]["PrdSafetyBaselineRow"][];
+                };
+            };
+        };
+        ArtifactVersionInlinePrdV3Detail: {
+            artifactId: string;
+            artifactVersionId: string;
+            version: number;
+            status: components["schemas"]["ArtifactVersionStatus"];
+            checksum: string;
+            citations: components["schemas"]["ArtifactCitation"][];
+            createdByRunId: string | null;
+            knowledgeReleaseId: string | null;
+            sourcePrdVersionId?: string | null;
+            /** Format: date-time */
+            createdAt: string;
+            /** @enum {string} */
+            contentMode: "inline";
+            /** @enum {string} */
+            kind: "prd";
+            /** @enum {number} */
+            schemaVersion: 3;
+            content: components["schemas"]["PrdDocumentV3"];
+        };
+        ArtifactVersionDetail: components["schemas"]["ArtifactVersionInlineDetail"] | components["schemas"]["ArtifactVersionInlinePrdV2Detail"] | components["schemas"]["ArtifactVersionInlinePrdV3Detail"] | components["schemas"]["ArtifactVersionBlobDetail"];
         /** @description Prototype favourites identify one screen while non-Prototype favourites cannot expose a screen target. */
         ArtifactVersionFavoriteListItem: {
             artifactId: string;
@@ -4817,13 +4923,19 @@ export interface components {
             kind: "prd";
             document: components["schemas"]["PrdDocumentV2"];
         };
+        CreatePrdV3ArtifactVersionRequest: {
+            baseArtifactVersionId: string;
+            /** @enum {string} */
+            kind: "prd";
+            document: components["schemas"]["PrdDocumentV3"];
+        };
         CreatePrototypeArtifactVersionRequest: {
             baseArtifactVersionId: string;
             /** @enum {string} */
             kind: "prototype";
             document: components["schemas"]["PrototypeDocument"];
         };
-        CreateArtifactVersionRequest: components["schemas"]["CreatePrdArtifactVersionRequest"] | components["schemas"]["CreatePrototypeArtifactVersionRequest"] | components["schemas"]["CreatePrdV2ArtifactVersionRequest"];
+        CreateArtifactVersionRequest: components["schemas"]["CreatePrdArtifactVersionRequest"] | components["schemas"]["CreatePrototypeArtifactVersionRequest"] | components["schemas"]["CreatePrdV2ArtifactVersionRequest"] | components["schemas"]["CreatePrdV3ArtifactVersionRequest"];
         CreateDesignSystemRequest: {
             title: string;
             document: components["schemas"]["DesignSystemDocument"];
@@ -5834,9 +5946,18 @@ export interface components {
             /** @description Unique partNumber values in strictly ascending order */
             parts: components["schemas"]["UploadedPart"][];
         };
-        PrdDocument: components["schemas"]["PrdDocumentV1"] | components["schemas"]["PrdDocumentV2"];
+        PrdDocument: components["schemas"]["PrdDocumentV1"] | components["schemas"]["PrdDocumentV2"] | components["schemas"]["PrdDocumentV3"];
         /** @enum {string} */
         PrdSectionKey: "executiveSummary" | "problem" | "goals" | "targetUsers" | "scope" | "requirements" | "userFlows" | "acceptanceCriteria" | "risksAndDependencies";
+        PrdV3Diagram: {
+            id: string;
+            /** @enum {string} */
+            kind: "productFlow" | "productArchitecture";
+            title: string;
+            description: string;
+            nodes: components["schemas"]["PrdDiagramNode"][];
+            edges: components["schemas"]["PrdDiagramEdge"][];
+        };
         /** @enum {string} */
         PreviewStatus: "queued" | "running" | "succeeded" | "failed" | "cancelled" | "expired";
         PreviewTokenResponse: {
@@ -6762,7 +6883,25 @@ export interface components {
             schemaVersion: 2;
             content: components["schemas"]["PrdDocumentV2"];
         };
-        PublicArtifactVersionDetail: components["schemas"]["PublicArtifactVersionInlineDetail"] | components["schemas"]["PublicArtifactVersionInlinePrdV2Detail"] | components["schemas"]["PublicArtifactVersionBlobDetail"];
+        PublicArtifactVersionInlinePrdV3Detail: {
+            artifactId: string;
+            artifactVersionId: string;
+            version: number;
+            /** @enum {string} */
+            status: "ready";
+            checksum: string;
+            citations: components["schemas"]["ArtifactCitation"][];
+            /** Format: date-time */
+            createdAt: string;
+            /** @enum {string} */
+            contentMode: "inline";
+            /** @enum {string} */
+            kind: "prd";
+            /** @enum {number} */
+            schemaVersion: 3;
+            content: components["schemas"]["PrdDocumentV3"];
+        };
+        PublicArtifactVersionDetail: components["schemas"]["PublicArtifactVersionInlineDetail"] | components["schemas"]["PublicArtifactVersionInlinePrdV2Detail"] | components["schemas"]["PublicArtifactVersionInlinePrdV3Detail"] | components["schemas"]["PublicArtifactVersionBlobDetail"];
         PublicProjectReleaseArtifactPin: {
             position: number;
             artifactId: string;
@@ -7058,7 +7197,24 @@ export interface components {
                 target: components["schemas"]["RunArtifactTarget"];
             };
         };
-        RuntimeArtifactDraftPrd: components["schemas"]["RuntimeArtifactDraftPrdV1Revision"] | components["schemas"]["RuntimeArtifactDraftPrdV2"];
+        RuntimeArtifactDraftPrdV3: {
+            title: string;
+            citations: components["schemas"]["ArtifactCitation"][];
+            /** @enum {string} */
+            kind: "prd";
+            /** @enum {number} */
+            schemaVersion: 3;
+            content: components["schemas"]["PrdDocumentV3"];
+            operation: {
+                /** @enum {string} */
+                kind: "create";
+            } | {
+                /** @enum {string} */
+                kind: "revise";
+                target: components["schemas"]["RunArtifactTarget"];
+            };
+        };
+        RuntimeArtifactDraftPrd: components["schemas"]["RuntimeArtifactDraftPrdV1Revision"] | components["schemas"]["RuntimeArtifactDraftPrdV2"] | components["schemas"]["RuntimeArtifactDraftPrdV3"];
         RuntimeArtifactDraftPrototype: {
             title: string;
             citations: components["schemas"]["ArtifactCitation"][];

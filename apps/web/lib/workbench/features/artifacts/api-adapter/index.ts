@@ -12,6 +12,8 @@ import {
   artifactVersionPreferenceSchema,
   createArtifactRequestSchema,
   createArtifactVersionRequestSchema,
+  exportPreviewTokenResponseSchema,
+  type ExportPreviewTokenResponse,
   updateArtifactVersionPreferenceRequestSchema,
   type Artifact,
   type ArtifactCreation,
@@ -100,13 +102,25 @@ export class WorkbenchArtifactsApi {
         path: { projectId },
         header: { "Idempotency-Key": normalizeIdempotencyKey(idempotencyKey) },
       },
-      body: createArtifactRequestSchema.parse(request),
+      body: createArtifactRequestSchema.parse(request) as components["schemas"]["CreateArtifactRequest"],
     });
     return parseContract(
       artifactCreationSchema,
       result.data,
       "create artifact",
     );
+  }
+
+  async createSourcePrototypePreviewToken(
+    artifactId: string,
+    artifactVersionId: string,
+    signal?: AbortSignal,
+  ): Promise<ExportPreviewTokenResponse> {
+    const result = await this.api.POST(
+      "/artifacts/{artifactId}/versions/{artifactVersionId}/preview-token" as never,
+      { params: { path: { artifactId, artifactVersionId } }, signal } as never,
+    );
+    return parseContract(exportPreviewTokenResponseSchema, result.data, "create source prototype preview");
   }
 
   async getArtifact(artifactId: string): Promise<Versioned<Artifact>> {

@@ -9,7 +9,7 @@ import http from "node:http";
 import path from "node:path";
 import process from "node:process";
 import { setTimeout as delay } from "node:timers/promises";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import canonicalize from "canonicalize";
 import pg from "pg";
 import { chromium } from "playwright";
@@ -25,6 +25,8 @@ import {
   httpOriginClass,
   httpPathClass as browserPathClass,
   persistedTerminalSseAbortAttribution,
+  projectRouteFetchSettlement,
+  recoveredBoardRevisionConflicts,
   shouldFailRealStackEvidenceForSourceDrift,
 } from "./workbench-browser-network-evidence.mjs";
 import {
@@ -38,7 +40,11 @@ import { startControlledKnowledgeFixture } from "./workbench-postgres-http-e2e-k
 import { spawnProcessTree, stopProcessTree } from "./workbench-e2e-process.mjs";
 import { managedWorkbenchWebDistDir, warmWorkbenchProtectedRoutes } from "./e2e/workbench-web-startup.mjs";
 import { waitForStableViewportLayout } from "./e2e/workbench-browser-viewport.mjs";
+import { sourcePrototypeInputFixture } from "./workbench-source-prototype-fixture.mjs";
 import { captureGenerationMotion } from "./e2e/workbench-browser-motion.mjs";
+import { installBrowserSseEvidenceObserver } from "./e2e/workbench-browser-sse-evidence.mjs";
+import { deerFlowNativeRunRequestViolation } from "./e2e/workbench-deerflow-run-contract.mjs";
+import { createWorkbenchLocalTls } from "./e2e/workbench-local-tls.mjs";
 
 const { Client } = pg;
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -126,7 +132,7 @@ const generationVisualViewports = [
 ];
 const visualLayoutSelectors = [
   '[data-panel-motion="agent-card"]', "[data-left-task-stack]", "[data-mobile-run-status]",
-  "[data-project-composer]", ".workbench-transient-artifact-surface", ".react-flow__node-documentCanvas",
+  "[data-project-composer]", "[data-workbench-generation-preview]", ".react-flow__node-documentCanvas",
   "[data-right-tool-rail]", "[data-selected-action]", "[data-project-suggestions]", "[data-utility-pill]",
 ];
 const pendingDocumentEvidenceLatencyMs = 10_000;
@@ -134,6 +140,7 @@ const pendingDocumentEvidenceLatencyMs = 10_000;
 const services = [];
 let fakeRuntime;
 let controlledKnowledge;
+let localTls;
 let cleanupPromise;
 let prdV2DocumentFixture;
 
@@ -177,18 +184,25 @@ try {
   controlledKnowledge = await startControlledKnowledgeFixture();
   const apiPort = await reservePort();
   const webPort = runRealStackBrowser ? await reservePort() : null;
-  const webOrigin = webPort === null ? "http://127.0.0.1:3000" : `http://127.0.0.1:${webPort}`;
+  const webOrigin = webPort === null ? "http://127.0.0.1:3000" : `https://127.0.0.1:${webPort}`;
   const previewPort = runRealStackBrowser ? await reservePort() : 4300;
+  const previewBackendPort = runRealStackBrowser ? await reservePort() : previewPort;
   // Use a distinct loopback host to model the production Web/Preview host
   // split. Cookies are scoped by host, not port, so two ports on 127.0.0.1
   // would create a false same-host credential leak in this browser lane.
-  const previewHost = runRealStackBrowser ? "127.0.0.2" : "127.0.0.1";
-  const previewOrigin = `http://${previewHost}:${previewPort}`;
+  // macOS does not route the rest of 127/8 through lo0 without an alias.
+  // localhost still gives Preview a cookie host distinct from Web's 127.0.0.1.
+  const previewHost = runRealStackBrowser
+    ? process.platform === "darwin" ? "localhost" : "127.0.0.2"
+    : "127.0.0.1";
+  const previewOrigin = `${runRealStackBrowser ? "https" : "http"}://${previewHost}:${previewPort}`;
+  if (runRealStackBrowser) localTls = await createWorkbenchLocalTls();
   const apiBaseUrl = `http://127.0.0.1:${apiPort}/api/v1`;
   const commonEnvironment = {
     ...process.env,
     ...controlledKnowledge.environment,
     NODE_ENV: "test",
+    ...(localTls ? { NODE_EXTRA_CA_CERTS: localTls.caPath } : {}),
     NO_COLOR: "1",
     FORCE_COLOR: "0",
     WORKBENCH_DATABASE_URL: databaseUrl,
@@ -249,7 +263,7 @@ try {
     DEERFLOW_GATEWAY_URL: fakeRuntime.url,
     DEERFLOW_ASSISTANT_ID: "workbench-e2e-agent",
     DEERFLOW_INTERNAL_AUTH_TOKEN: fakeRuntimeToken,
-    DEERFLOW_STREAM_MODE: "messages,values",
+    DEERFLOW_STREAM_MODE: "messages-tuple,values",
     DEERFLOW_TIMEOUT_MS: "30000",
     DEERFLOW_IDLE_TIMEOUT_MS: runRealStackBrowser ? "15000" : "5000",
   });
@@ -268,8 +282,8 @@ try {
 
     const preview = spawnService("workbench-preview-real-stack", process.execPath, ["apps/workbench-preview/dist/main.js"], {
       ...commonEnvironment,
-      WORKBENCH_PREVIEW_HOST: runRealStackBrowser ? "0.0.0.0" : "127.0.0.1",
-      WORKBENCH_PREVIEW_PORT: String(previewPort),
+      WORKBENCH_PREVIEW_HOST: "127.0.0.1",
+      WORKBENCH_PREVIEW_PORT: String(previewBackendPort),
       WORKBENCH_PREVIEW_ORIGIN: previewOrigin,
       WORKBENCH_WEB_ORIGIN: webOrigin,
       WORKBENCH_PREVIEW_TOKEN_SECRET: previewTokenSecret,
@@ -277,6 +291,8 @@ try {
       WORKBENCH_PREVIEW_S3_ACCESS_KEY_ID: `${fakeStorageAccessKeyId}-preview`,
       WORKBENCH_PREVIEW_S3_SECRET_ACCESS_KEY: `${fakeStorageSecretAccessKey}-preview`,
     });
+    await localTls.proxy({ port: previewPort, upstreamPort: previewBackendPort, publicOrigin: previewOrigin,
+      listenHost: process.platform === "darwin" ? "::1" : "127.0.0.2" });
     await waitForHttp(`${previewOrigin}/healthz`, preview, scenarioTimeoutMs);
   }
 
@@ -3397,7 +3413,7 @@ async function handleFakeDeerFlow(
     if (exportObject) {
       const role = storageAccessRole(request);
       assert.ok(
-        storageKey.startsWith("pending/exports/") ? role === "export" : role === "export" || role === "preview",
+        storageKey.startsWith("pending/exports/") ? role === "export" : ["export", "preview", "api-ready"].includes(role),
         `fake S3 read used an unexpected dedicated identity for ${storageKey}`,
       );
       state.exportReads.push({ ...read, role });
@@ -3651,6 +3667,12 @@ async function handleFakeDeerFlow(
 
   if (request.method === "POST" && /^\/threads\/[^/]+\/runs\/stream$/.test(url.pathname)) {
     const body = await readJsonRequest(request);
+    const requestViolation = deerFlowNativeRunRequestViolation(body);
+    if (requestViolation) {
+      response.writeHead(422, { "content-type": "application/json" });
+      response.end(JSON.stringify({ code: requestViolation }));
+      return;
+    }
     const serialized = JSON.stringify(body);
     const browserFailure = serialized.includes("E2E_BROWSER_FAILURE");
     const browserVisualPrd = serialized.includes("synthetic browser test");
@@ -3936,6 +3958,9 @@ async function writeSuccessfulRuntimeStream(
       toolCallId: "e2e-result-submit",
     }),
   ));
+  // Artifact Runs expose the approved assistant summary after the trusted
+  // result submission; earlier model tokens belong to the preview stream.
+  messages.push({ type: "ai", content: "E2E generated response" });
   if (streamStages) {
     for (const [index, snapshot] of stageSnapshots.entries()) {
       sendSse(response, "values", {
@@ -4880,6 +4905,7 @@ async function runRealStackBrowserScenario({
   await mkdir(outputDir, { recursive: true });
   await writeEvidenceManifest(evidenceManifestPath, evidenceManifest);
   const oidcApiPort = await reservePort();
+  const webBackendPort = await reservePort();
   const oidcApiBaseUrl = `http://127.0.0.1:${oidcApiPort}/api/v1`;
   const nextEnvPath = path.join(root, "apps", "web", "next-env.d.ts");
   const originalNextEnv = await readFile(nextEnvPath);
@@ -4901,21 +4927,38 @@ async function runRealStackBrowserScenario({
     path.join(root, "apps", "web", "tsconfig.json"),
     temporaryWebTsconfigPath,
   );
-  web = spawnService("workbench-web-real-stack", npm, [
-    "--workspace", "@workbench/web", "exec", "--", "next", "dev", "--turbo",
-    "--hostname", "127.0.0.1", "--port", String(webPort),
-  ], {
+  const webEnvironment = {
     ...commonEnvironment,
-    NODE_ENV: "test",
+    NODE_ENV: "production",
+    NEXT_TELEMETRY_DISABLED: "1",
     BETTER_AUTH_URL: webOrigin,
     BETTER_AUTH_SECRET: "workbench-real-stack-browser-test-secret",
     WORKBENCH_DATABASE_SCHEMA: "workbench",
+    WORKBENCH_AUTH_CLIENT_IP_HEADER: "x-workbench-client-ip",
     WORKBENCH_PUBLIC_REGISTRATION_ENABLED: "true",
     WORKBENCH_API_INTERNAL_URL: oidcApiBaseUrl,
     WORKBENCH_PREVIEW_ORIGIN: previewOrigin,
     WORKBENCH_NEXT_DIST_DIR: temporaryWebDistDir,
     WORKBENCH_NEXT_TSCONFIG_PATH: path.basename(temporaryWebTsconfigPath),
-  });
+  };
+  const build = await runCommand("web:production-build", npm,
+    ["--workspace", "@workbench/web", "exec", "--", "next", "build"], webEnvironment);
+  await writeFile(path.join(outputDir, "web-production-build.log"), build.output);
+  const webBuildRoot = path.join(root, "apps", "web", temporaryWebDistDir);
+  const buildArtifacts = {};
+  for (const name of ["BUILD_ID", "build-manifest.json", "routes-manifest.json", "required-server-files.json"]) {
+    const bytes = await readFile(path.join(webBuildRoot, name));
+    buildArtifacts[name] = { byteLength: bytes.byteLength, sha256: sha256(bytes) };
+  }
+  evidenceManifest.web = { buildCommand: "next build", startCommand: "next start", nodeEnv: "production",
+    buildId: (await readFile(path.join(webBuildRoot, "BUILD_ID"), "utf8")).trim(),
+    distDirectory: temporaryWebDistDir, buildArtifacts, sameBuildAndStartOrigins: true,
+    tls: { ...localTls.evidence, webHttps: true, previewHttps: true, browserSpkiPin: localTls.spkiPin } };
+  await localTls.proxy({ port: webPort, upstreamPort: webBackendPort, publicOrigin: webOrigin });
+  web = spawnService("workbench-web-real-stack", npm, [
+    "--workspace", "@workbench/web", "exec", "--", "next", "start",
+    "--hostname", "127.0.0.1", "--port", String(webBackendPort),
+  ], webEnvironment);
   await waitForHttp(`${webOrigin}/login`, web, scenarioTimeoutMs);
 
   const oidcApi = spawnService("workbench-api-real-stack", process.execPath, ["apps/workbench-api/dist/main.js"], {
@@ -4947,9 +4990,12 @@ async function runRealStackBrowserScenario({
   // still creates a real account and session against PostgreSQL.
   await warmWorkbenchProtectedRoutes(webOrigin, web.exited);
 
-  browser = await chromium.launch({ headless: true });
+  browser = await chromium.launch({ headless: true,
+    args: [`--ignore-certificate-errors-spki-list=${localTls.spkiPin}`] });
   evidenceManifest.browser = `chromium ${browser.version()}`;
   context = await browser.newContext({ colorScheme: "dark", viewport: { width: 1440, height: 900 } });
+  browser.on("disconnected", () => console.log("[e2e] browser disconnected"));
+  context.on("close", () => console.log("[e2e] browser context closed"));
   const browserSseEvents = [];
   const browserSseObservationFailures = [];
   await context.exposeBinding("__workbenchRecordSseEvidence", (_source, value) => {
@@ -4959,9 +5005,27 @@ async function runRealStackBrowserScenario({
   });
   await context.addInitScript(installBrowserSseEvidenceObserver, { webOrigin });
   const page = await context.newPage();
+  page.on("close", () => console.log("[e2e] browser main page closed"));
+  page.on("crash", () => console.log("[e2e] browser main page crashed"));
+  page.on("pageerror", (error) => console.log(`[e2e] browser pageerror ${error.message}`));
   const navigationEvidence = evidenceManifest.navigation;
   const bffRequests = evidenceManifest.bffRequests;
   const httpResponses = [];
+  const boardWrites = [];
+  const boardWriteReads = [];
+  const activeBoardWrites = new Set();
+  let lastBoardWriteActivity = Date.now();
+  const isBoardWrite = (request) => request.method() === "PUT"
+    && /^\/api\/v1\/projects\/[^/]+\/board$/u.test(new URL(request.url()).pathname);
+  const boardWriteFinished = (request) => {
+    if (activeBoardWrites.delete(request)) lastBoardWriteActivity = Date.now();
+  };
+  const waitForBoardWrites = async () => {
+    lastBoardWriteActivity = Date.now();
+    await waitFor(() => activeBoardWrites.size === 0 && Date.now() - lastBoardWriteActivity >= 1_500,
+      scenarioTimeoutMs, "Board autosave did not settle before navigation");
+    await Promise.all(boardWriteReads);
+  };
   const authImageResponses = [];
   const unknownRequests = [];
   const sseSequences = [];
@@ -4976,9 +5040,25 @@ async function runRealStackBrowserScenario({
   const navigationAbortTracker = createScriptedNavigationAbortTracker();
   const sseResponseEvidence = new WeakMap();
   const terminalSseAbortCandidates = [];
+  const routeFetchResponses = new WeakMap();
+  const routeFetchRecords = new WeakMap();
+  const routeFetchLifecycle = [];
+  let routeFetchEventOrder = 0;
+  evidenceManifest.routeFetchLifecycle = routeFetchLifecycle;
+  const routePrefetchAbortCandidates = [];
   const captureBrowserRequest = (request) => {
     const originClass = browserOriginClass(request.url(), { previewOrigin, webOrigin });
     if (originClass === "web") {
+      const url = new URL(request.url());
+      if (/^\/projects\/[^/]+$/u.test(url.pathname) && request.method() === "GET" && request.resourceType() === "fetch") {
+        const headers = request.headers();
+        const record = { requestHash: sha256(url.href), pathHash: sha256(url.pathname),
+          rsc: headers.rsc === "1", prefetch: headers["next-router-prefetch"] === "1",
+          hmr: headers["next-hmr-refresh"] === "1", state: "pending", responseStatus: null,
+          flight: false, startedOrder: ++routeFetchEventOrder, responseOrder: null, settledOrder: null };
+        routeFetchRecords.set(request, record);
+        routeFetchLifecycle.push(record);
+      }
       navigationAbortTracker.requestStarted(request, {
         navigationRequest: request.isNavigationRequest(),
         pathClass: browserPathClass(new URL(request.url()).pathname),
@@ -4989,7 +5069,19 @@ async function runRealStackBrowserScenario({
     }
   };
   page.on("request", captureBrowserRequest);
-  page.on("requestfinished", (request) => navigationAbortTracker.requestFinished(request));
+  page.on("request", (request) => {
+    if (isBoardWrite(request)) {
+      activeBoardWrites.add(request);
+      lastBoardWriteActivity = Date.now();
+    }
+  });
+  page.on("requestfinished", (request) => {
+    const record = routeFetchRecords.get(request);
+    if (record) { record.state = "finished"; record.settledOrder = ++routeFetchEventOrder; }
+    navigationAbortTracker.requestFinished(request);
+  });
+  page.on("requestfinished", boardWriteFinished);
+  page.on("requestfailed", boardWriteFinished);
   page.on("framenavigated", (frame) => {
     if (frame === page.mainFrame() && new URL(frame.url()).origin === webOrigin) {
       navigationAbortTracker.mainFrameNavigated();
@@ -5005,11 +5097,31 @@ async function runRealStackBrowserScenario({
       pathClass,
       status: response.status(),
     };
+    if (originClass === "web" && pathClass === "/projects/:id" && response.request().resourceType() === "fetch") {
+      routeFetchResponses.set(response.request(), response.status());
+      const record = routeFetchRecords.get(response.request());
+      if (record) {
+        record.state = "response";
+        record.responseStatus = response.status();
+        record.flight = response.headers()["content-type"]?.startsWith("text/x-component") ?? false;
+        record.responseOrder = ++routeFetchEventOrder;
+      }
+    }
     if (originClass === "web" && ["/auth/spotlight-primary.webp", "/auth/spotlight-reveal.webp"].includes(url.pathname)) {
       authImageResponses.push({ path: url.pathname, status: response.status() });
     }
     if (originClass === "preview" || (originClass === "web" && url.pathname.startsWith("/api/"))) {
       httpResponses.push(responseEvidence);
+    }
+    if (originClass === "web" && isBoardWrite(response.request())) {
+      const responseIndex = httpResponses.length - 1;
+      boardWriteReads.push((async () => {
+        const headers = await response.request().allHeaders();
+        const body = await response.json();
+        boardWrites.push({ responseIndex, projectPath: url.pathname, status: response.status(),
+          ifMatch: headers["if-match"], request: response.request().postDataJSON(),
+          ...(response.status() === 200 ? { board: body } : { code: body.code }) });
+      })().catch(() => undefined));
     }
     if (originClass !== "web" || !url.pathname.startsWith("/api/v1/")) return;
     bffRequests.push({ method: responseEvidence.method, pathClass, status: responseEvidence.status });
@@ -5028,11 +5140,15 @@ async function runRealStackBrowserScenario({
       consoleErrors.push({
         sourceClass: browserUrlClass(message.location().url, { previewOrigin, webOrigin }),
         type: "error",
+        ...(/^Failed to load resource: the server responded with a status of 412\b/u.test(message.text())
+          ? { httpStatus: 412 } : {}),
       });
     }
   });
   page.on("requestfailed", (request) => {
     const url = new URL(request.url());
+    const record = routeFetchRecords.get(request);
+    if (record) { record.state = "failed"; record.settledOrder = ++routeFetchEventOrder; }
     const rawErrorText = request.failure()?.errorText ?? "unknown";
     let abortAttribution = navigationAbortTracker.classifyFailure(request, rawErrorText);
     const originClass = browserOriginClass(url.href, { previewOrigin, webOrigin });
@@ -5045,6 +5161,14 @@ async function runRealStackBrowserScenario({
       errorText: browserNetworkFailureClass(rawErrorText),
       resourceType: request.resourceType(),
       abortAttribution,
+      ...(originClass === "web" && browserPathClass(url.pathname) === "/projects/:id" && request.resourceType() === "fetch"
+        ? { routeFetch: {
+          rsc: request.headers().rsc === "1",
+          prefetch: request.headers()["next-router-prefetch"] === "1",
+          navigationRequest: request.isNavigationRequest(),
+          pathHash: sha256(url.pathname),
+          responseStatus: routeFetchResponses.get(request) ?? null,
+        } } : {}),
     };
     if (abortAttribution === null && originClass === "web") {
       abortAttribution = clientRoutePrefetchAbortAttribution({
@@ -5055,6 +5179,7 @@ async function runRealStackBrowserScenario({
       failure.abortAttribution = abortAttribution;
     }
     failedRequests.push(failure);
+    if (failure.routeFetch && failure.abortAttribution === null) routePrefetchAbortCandidates.push(failure);
     if (originClass === "web") {
       const sseRoute = url.pathname.match(/^\/api\/v1\/runs\/([^/]+)\/events$/u);
       if (abortAttribution === null && sseRoute) {
@@ -5111,6 +5236,33 @@ async function runRealStackBrowserScenario({
     });
     await page.locator('textarea[aria-label="提示词"]').waitFor({ state: "visible", timeout: scenarioTimeoutMs });
 
+    await context.clearCookies();
+    await runScriptedHardNavigation({
+      action: () => page.goto(`${webOrigin}/login`, { waitUntil: "networkidle" }),
+      kind: "goto", navigationAbortTracker, navigationEvidence, page, targetPathClass: "/login",
+    });
+    await page.setViewportSize({ width: 375, height: 812 });
+    await page.getByRole("button", { name: "打开导航", exact: true }).click();
+    await page.getByRole("button", { name: "登录", exact: true }).click();
+    await page.locator("#account").fill(`browser_${suffix}@example.test`);
+    await page.locator("#password").fill("BrowserRealStack!2026");
+    await runScriptedHardNavigation({
+      action: async () => {
+        const [response] = await Promise.all([
+          page.waitForResponse((response) => response.request().isNavigationRequest()
+            && response.frame() === page.mainFrame() && response.url() === `${webOrigin}/`),
+          page.locator("form").getByRole("button", { name: "登录", exact: true }).click(),
+        ]);
+        await page.waitForURL(`${webOrigin}/`);
+        return response;
+      },
+      kind: "form-submit", navigationAbortTracker, navigationEvidence, page, targetPathClass: "/",
+    });
+    await page.locator('textarea[aria-label="提示词"]').waitFor({ state: "visible", timeout: scenarioTimeoutMs });
+    await page.setViewportSize({ width: 1440, height: 900 });
+    evidenceManifest.checks.betterAuthPasswordLogin = true;
+    console.log("[e2e] browser real password login passed");
+
     // This scenario validates PRD generation followed by the explicit
     // PRD-to-prototype action. The product default generates both artifacts.
     await page.getByRole("button", { name: "选择生成类型" }).click();
@@ -5129,8 +5281,22 @@ async function runRealStackBrowserScenario({
       scenarioTimeoutMs,
       "initial browser SSE request did not expose a replay cursor",
     );
+    // The first project opens through the actual client router. A discarded
+    // Next RSC prefetch can precede this verified destination render, so retain
+    // its request markers and attribute it only after the shell is observed.
+    navigationEvidence.push({ kind: "client-route", targetPathClass: "/projects/:id",
+      actualPathClass: browserPathClass(new URL(page.url()).pathname),
+      pathHash: sha256(new URL(page.url()).pathname), projectShellReady: true, status: null });
+    const initialProjectPathHash = sha256(new URL(page.url()).pathname);
+    await waitFor(() => projectRouteFetchSettlement(routeFetchLifecycle, initialProjectPathHash) !== "pending",
+      scenarioTimeoutMs, "initial project RSC response did not finish before the scripted SSE reload");
+    assert.equal(projectRouteFetchSettlement(routeFetchLifecycle, initialProjectPathHash), "complete",
+      "initial project RSC navigation failed before the scripted SSE reload");
+    evidenceManifest.initialProjectRoute = { pathHash: initialProjectPathHash,
+      shellRendered: true, responseFinished: true, beforeSseReloadOrder: ++routeFetchEventOrder };
     const sseRequestCountBeforeReload = sseSequences.length;
-    const maximumCursorBeforeReload = Math.max(...sseSequences);
+    const sseEventCountBeforeReload = browserSseEvents.length;
+    const lastSequenceBeforeReload = Math.max(0, ...browserSseEvents.map((event) => event.sequence));
     await runScriptedHardNavigation({
       action: () => page.reload({ waitUntil: "domcontentloaded" }),
       kind: "reload",
@@ -5144,13 +5310,20 @@ async function runRealStackBrowserScenario({
     await waitFor(
       () => sseSequences
         .slice(sseRequestCountBeforeReload)
-        .some((cursor) => cursor > maximumCursorBeforeReload),
+        .some((cursor) => cursor === 0),
       scenarioTimeoutMs,
-      "active browser reload did not reconnect after the last consumed SSE sequence",
+      "active browser reload did not replay from sequence zero to rebuild its projection",
     );
     const reconnectCursor = sseSequences
       .slice(sseRequestCountBeforeReload)
-      .find((cursor) => cursor > maximumCursorBeforeReload);
+      .find((cursor) => cursor === 0);
+    await waitFor(
+      () => browserSseEvents.slice(sseEventCountBeforeReload).some((event) => (
+        event.afterSequence === reconnectCursor && event.sequence >= lastSequenceBeforeReload
+      )),
+      scenarioTimeoutMs,
+      "active browser reload did not restore the previously observed Run events",
+    );
     const reconnectMotion = await page.locator('[data-canvas-generation-motion="prd"]').evaluate((element) => ({
       kind: element.getAttribute("data-canvas-generation-motion"),
       stage: element.getAttribute("data-generation-stage"),
@@ -5185,9 +5358,7 @@ async function runRealStackBrowserScenario({
       await route.continue();
     };
     await page.route("**/api/v1/artifacts/*/versions/*", holdArtifactVersionRead);
-    const pendingDocument = page
-      .locator('[data-workbench-artifact-state="pending"][data-workbench-artifact-variant="document"]')
-      .filter({ hasText: "正在细化：需求文档" });
+    const pendingDocument = page.getByRole("region", { name: "生成中预览", exact: true });
     let pendingDocumentEvidence = [];
     try {
       await cdpSession.send("Network.emulateNetworkConditions", {
@@ -5197,6 +5368,11 @@ async function runRealStackBrowserScenario({
         uploadThroughput: 5 * 1024 * 1024,
       });
       fakeRuntime.releaseBrowserPrdDraft();
+      await waitFor(
+        () => browserSseEvents.some((event) => event.eventName === "artifact.draft.created"),
+        scenarioTimeoutMs,
+        "browser did not observe the validated PRD draft before finalization",
+      );
       await pendingDocument.waitFor({ state: "visible", timeout: scenarioTimeoutMs });
       pendingDocumentEvidence = await capturePendingDocumentVisualEvidence({
         outputDir,
@@ -5222,6 +5398,7 @@ async function runRealStackBrowserScenario({
     await page.setViewportSize({ width: 1440, height: 900 });
     await page.emulateMedia({ reducedMotion: "no-preference" });
     await page.locator('[data-phase="complete"]').first().waitFor({ state: "visible", timeout: scenarioTimeoutMs });
+    await waitForBoardWrites();
     await runScriptedHardNavigation({
       action: () => page.reload({ waitUntil: "networkidle" }),
       kind: "reload",
@@ -5232,6 +5409,7 @@ async function runRealStackBrowserScenario({
     });
     await page.locator('[data-phase="complete"]').first().waitFor({ state: "visible", timeout: scenarioTimeoutMs });
 
+    await waitForBoardWrites();
     await runScriptedHardNavigation({
       action: () => page.goto(projectUrl, { waitUntil: "networkidle" }),
       kind: "goto",
@@ -5340,6 +5518,7 @@ async function runRealStackBrowserScenario({
     const artifactPersistence = await assertBrowserArtifactPersistence(projectId);
     evidenceManifest.artifactPersistence = artifactPersistence;
     console.log("[e2e] browser PRD and prototype artifacts persisted");
+    await waitForBoardWrites();
     await runScriptedHardNavigation({
       action: () => page.goto(projectUrl, { waitUntil: "networkidle" }),
       kind: "goto",
@@ -5348,6 +5527,237 @@ async function runRealStackBrowserScenario({
       page,
       targetPathClass: "/projects/:id",
     });
+
+    // Source prototype candidate path: import a bounded React JSON
+    // project through the Composer, place the whole artifact on Board, and
+    // validate the same frozen preview on desktop and mobile.
+    console.log(`[e2e] source import preflight pageClosed=${page.isClosed()} url=${page.url()}`);
+    await page.waitForTimeout(250);
+    console.log(`[e2e] source import stabilized pageClosed=${page.isClosed()} url=${page.url()}`);
+    const sourceArtifactResponsePromise = page.waitForResponse((response) => (
+      response.request().method() === "POST"
+      && /^\/api\/v1\/projects\/[^/]+\/artifacts$/u.test(new URL(response.url()).pathname)
+    ), { timeout: scenarioTimeoutMs }).catch((error) => {
+      console.log(`[e2e] source artifact response waiter failed ${error instanceof Error ? error.message : String(error)}`);
+      return null;
+    });
+    await page.setViewportSize({ width: 375, height: 812 });
+    await page.locator("[data-project-composer]").getByRole("button", { name: "添加附件" }).click();
+    console.log("[e2e] source import attachment menu opened");
+    try {
+      await page.getByRole("menuitem", { name: "导入源码原型" }).click();
+    } catch (error) {
+      console.log(`[e2e] source import menu click failed ${error instanceof Error ? error.message : String(error)}`);
+      throw error;
+    }
+    console.log("[e2e] source import dialog opened");
+    const sourceDialog = page.getByRole("dialog", { name: "导入源码原型" });
+    await sourceDialog.waitFor({ state: "visible" });
+    await waitForStableViewportLayout(page, { width: 375, height: 812 }, { selectors: ['[role="dialog"]'] });
+    const importBounds = await sourceDialog.boundingBox();
+    assert.ok(importBounds && importBounds.x >= -1 && importBounds.y >= -1
+      && importBounds.x + importBounds.width <= 376 && importBounds.y + importBounds.height <= 813,
+      "mobile source import dialog escaped the viewport");
+    await sourceDialog.getByRole("button", { name: "构建并导入", exact: true }).waitFor({ state: "visible" });
+    await page.screenshot({ path: path.join(outputDir, "source-import-mobile.png") });
+    evidenceManifest.checks.sourceMobileImportDialog = { viewport: { width: 375, height: 812 }, bounds: importBounds };
+    await sourceDialog.locator('input[type="file"]').setInputFiles({
+      name: "procurement-source.json", mimeType: "application/json",
+      buffer: Buffer.from(JSON.stringify(sourcePrototypeInputFixture())),
+    });
+    await waitFor(async () => await sourceDialog.getByLabel("原型名称", { exact: true }).inputValue() === "源码采购审批原型",
+      scenarioTimeoutMs, "source JSON import did not populate the editor");
+    await sourceDialog.getByRole("button", { name: "构建并导入", exact: true }).click();
+    const sourceArtifactResponse = await sourceArtifactResponsePromise;
+    if (!sourceArtifactResponse) throw new Error("source prototype import did not return an artifact response");
+    assert.equal(sourceArtifactResponse.status(), 201, "source prototype import did not create a ready artifact");
+    const sourceArtifactCreation = await sourceArtifactResponse.json();
+    const sourceArtifactId = sourceArtifactCreation.artifact.id;
+    const sourceArtifactVersionId = sourceArtifactCreation.artifactVersion.artifactVersionId;
+    assert.equal(sourceArtifactCreation.artifact.kind, "prototype");
+    assert.equal(sourceArtifactCreation.artifactVersion.schemaVersion, 2);
+    console.log("[e2e] source artifact created");
+    await sourceDialog.waitFor({ state: "detached", timeout: scenarioTimeoutMs });
+    await page.locator("[data-workbench-source-prototype]").waitFor({ state: "visible", timeout: scenarioTimeoutMs });
+    const sourcePreviewFrame = page.locator("[data-workbench-source-prototype] iframe[data-preview-capability]");
+    await sourcePreviewFrame.waitFor({ state: "visible", timeout: scenarioTimeoutMs });
+    console.log("[e2e] source preview frame mounted");
+    await sourcePreviewFrame.contentFrame().getByRole("heading", { name: "采购审批工作台", exact: true }).waitFor({ state: "visible", timeout: scenarioTimeoutMs });
+    await page.setViewportSize({ width: 375, height: 812 });
+    await sourcePreviewFrame.contentFrame().getByRole("heading", { name: "采购审批工作台", exact: true }).waitFor({ state: "visible", timeout: scenarioTimeoutMs });
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.reload({ waitUntil: "networkidle" });
+    await sourcePreviewFrame.contentFrame().getByRole("heading", { name: "采购审批工作台", exact: true }).waitFor({ state: "visible", timeout: scenarioTimeoutMs });
+    evidenceManifest.checks.sourcePrototypePersistedAfterReload = true;
+    await waitForBoardWrites();
+    evidenceManifest.checks.sourcePrototypeImported = true;
+    evidenceManifest.checks.sourcePrototypeDesktopAndMobilePreview = true;
+    console.log("[e2e] browser source prototype import and desktop/mobile preview passed");
+
+    // Toggle the actual share drawer, then open the resulting public URL in a
+    // anonymous context using the release and share APIs behind the UI.
+    const sourceCanvasNode = page.locator(".react-flow__node").filter({ has: page.locator("[data-workbench-source-prototype]") });
+    await sourceCanvasNode.focus();
+    await sourceCanvasNode.press("Enter");
+    await page.locator(".react-flow__node.selected").filter({ has: page.locator("[data-workbench-source-prototype]") }).waitFor({ state: "visible", timeout: scenarioTimeoutMs });
+    await page.getByRole("button", { name: "共享", exact: true }).click();
+    const shareDialog = page.getByRole("dialog", { name: "共享" });
+    const shareSwitch = shareDialog.getByRole("switch", { name: "启用共享和重混功能" });
+    if ((await shareSwitch.getAttribute("aria-checked")) !== "true") await shareSwitch.click();
+    await waitFor(
+      async () => /\/share\/wbs_/u.test(await shareDialog.locator("span.truncate").innerText()),
+      scenarioTimeoutMs,
+      "share UI did not produce a public URL",
+    );
+    const publicShareUrl = await shareDialog.locator("span.truncate").innerText();
+    assert.match(publicShareUrl, /\/share\/wbs_[A-Za-z0-9_-]+$/u);
+    await shareDialog.getByRole("button", { name: "关闭共享" }).click();
+    const publicContext = await browser.newContext({ colorScheme: "dark", viewport: { width: 1440, height: 900 } });
+    assert.equal((await publicContext.cookies()).length, 0);
+    const publicPage = await publicContext.newPage();
+    await publicPage.goto(publicShareUrl, { waitUntil: "networkidle" });
+    await publicPage.locator("[data-workbench-source-prototype]").waitFor({ state: "visible", timeout: scenarioTimeoutMs });
+    const publicSourceFrame = publicPage.locator("[data-workbench-source-prototype] iframe[data-preview-capability]");
+    await publicSourceFrame.waitFor({ state: "visible", timeout: scenarioTimeoutMs });
+    await publicSourceFrame.contentFrame().getByRole("heading", { name: "采购审批工作台", exact: true }).waitFor({ state: "visible", timeout: scenarioTimeoutMs });
+    const sourceVisualEvidence = [];
+    for (const viewport of [{ width: 375, height: 812 }, { width: 1440, height: 900 }]) {
+      await publicPage.setViewportSize(viewport);
+      const frame = publicSourceFrame.contentFrame();
+      await frame.getByRole("heading", { name: "采购审批工作台", exact: true }).waitFor({ state: "visible" });
+      await frame.getByLabel("申请名称", { exact: true }).fill(`验收采购-${viewport.width}`);
+      await frame.getByRole("button", { name: "新建采购申请", exact: true }).click();
+      await frame.getByRole("heading", { name: `验收采购-${viewport.width}`, exact: true }).waitFor({ state: "visible" });
+      await frame.getByRole("button", { name: `批准 验收采购-${viewport.width}`, exact: true }).click();
+      await frame.getByRole("button", { name: "审批记录", exact: true }).click();
+      await frame.getByRole("heading", { name: `验收采购-${viewport.width}`, exact: true }).waitFor({ state: "visible" });
+      assert.ok(await publicPage.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), "public share overflowed the viewport");
+      await publicPage.evaluate(() => window.scrollTo(0, 0));
+      const file = `source-public-${viewport.width}x${viewport.height}.png`;
+      await publicPage.screenshot({ path: path.join(outputDir, file) });
+      sourceVisualEvidence.push({ viewport, screenshot: file, submit: true, approve: true, navigate: true });
+      await frame.getByRole("button", { name: "采购申请", exact: true }).click();
+    }
+    evidenceManifest.sourceVisualEvidence = sourceVisualEvidence;
+    evidenceManifest.checks.publicShareSourcePreview = true;
+    console.log("[e2e] browser public share source preview passed");
+
+    // Exercise the actual mobile export panel and browser download first.
+    await page.setViewportSize({ width: 375, height: 812 });
+    await page.getByRole("button", { name: "导出", exact: true }).click();
+    await exportPanel.waitFor({ state: "visible", timeout: scenarioTimeoutMs });
+    await exportPanel.getByRole("button", { name: /^React/u }).click();
+    const sourceUiCreation = page.waitForResponse((response) => response.request().method() === "POST"
+      && /^\/api\/v1\/projects\/[^/]+\/exports$/u.test(new URL(response.url()).pathname));
+    await exportPanel.getByRole("button", { name: "导出 React", exact: true }).click();
+    assert.equal((await sourceUiCreation).status(), 202, "mobile source export did not create a job");
+    await exportPanel.getByRole("button", { name: "下载 React", exact: true }).waitFor({ state: "visible", timeout: scenarioTimeoutMs });
+    const sourceDownload = page.waitForEvent("download");
+    await exportPanel.getByRole("button", { name: "下载 React", exact: true }).click();
+    const sourceUiDownload = await sourceDownload;
+    assert.equal(await sourceUiDownload.failure(), null);
+    await sourceUiDownload.saveAs(path.join(outputDir, "source-react-ui.zip"));
+    await exportPanel.getByRole("button", { name: "Close", exact: true }).click();
+    evidenceManifest.checks.sourceMobileExportDownload = true;
+    await page.setViewportSize({ width: 1440, height: 900 });
+
+    // Drive both source export formats through the authenticated BFF and
+    // consume the worker output. The release id is read from the share state,
+    // so the export is pinned to the exact public release just created.
+    const shareSnapshot = await page.evaluate(async (projectId) => {
+      const response = await fetch(`/api/v1/projects/${projectId}/shares`);
+      if (!response.ok) throw new Error(`share list failed: ${response.status}`);
+      return response.json();
+    }, projectId);
+    const activeShare = shareSnapshot.items.find((item) => item.status === "active");
+    assert.ok(activeShare?.releaseId, "active public share omitted its release id");
+    const exportSource = async (format, packaging) => page.evaluate(async ({ projectId, releaseId, artifactId, artifactVersionId, format, packaging }) => {
+      const key = `source-export:${format}:${crypto.randomUUID()}`;
+      const create = await fetch(`/api/v1/projects/${projectId}/exports`, {
+        method: "POST",
+        headers: { "content-type": "application/json", "idempotency-key": key },
+        body: JSON.stringify({ releaseId, format, packaging, selection: { kind: "artifact", artifactId, artifactVersionId }, options: {} }),
+      });
+      if (create.status !== 202) throw new Error(`source ${format} export create failed: ${create.status}`);
+      const job = await create.json();
+      const deadline = Date.now() + 60_000;
+      let current;
+      while (Date.now() < deadline) {
+        const poll = await fetch(`/api/v1/exports/${job.id}`);
+        if (!poll.ok) throw new Error(`source ${format} export poll failed: ${poll.status}`);
+        current = await poll.json();
+        if (["succeeded", "failed", "cancelled"].includes(current.status)) break;
+        await new Promise((resolve) => setTimeout(resolve, 500));
+      }
+      if (!current || current.status !== "succeeded") throw new Error(`source ${format} export did not succeed: ${current?.status ?? "timeout"}`);
+      const content = await fetch(`/api/v1/exports/${job.id}/content`);
+      if (!content.ok) throw new Error(`source ${format} export content failed: ${content.status}`);
+      const bytes = new Uint8Array(await content.arrayBuffer());
+      const text = new TextDecoder().decode(bytes);
+      let binary = "";
+      for (let offset = 0; offset < bytes.length; offset += 32768) binary += String.fromCharCode(...bytes.subarray(offset, offset + 32768));
+      return { format, status: current.status, mediaType: content.headers.get("content-type"), byteLength: bytes.byteLength, htmlMarker: text.includes("workbench-export-root"), zipMarker: bytes[0] === 0x50 && bytes[1] === 0x4b, bodyBase64: btoa(binary) };
+    }, { projectId, releaseId: activeShare.releaseId, artifactId: sourceArtifactId, artifactVersionId: sourceArtifactVersionId, format, packaging });
+    const sourceHtmlExport = await exportSource("html", "single_file");
+    assert.equal(sourceHtmlExport.htmlMarker, true, "source HTML export did not contain the frozen Workbench root");
+    const sourceReactExport = await exportSource("react", "zip");
+    assert.equal(sourceReactExport.zipMarker, true, "source React export was not a ZIP");
+    const htmlBytes = Buffer.from(sourceHtmlExport.bodyBase64, "base64");
+    const zipBytes = Buffer.from(sourceReactExport.bodyBase64, "base64");
+    delete sourceHtmlExport.bodyBase64;
+    delete sourceReactExport.bodyBase64;
+    const htmlFile = path.join(outputDir, "source-export.html");
+    const zipFile = path.join(outputDir, "source-react.zip");
+    await writeFile(htmlFile, htmlBytes);
+    await writeFile(zipFile, zipBytes);
+    const zipEntry = (name) => execFileSync("unzip", ["-p", zipFile, name], { maxBuffer: 4 * 1024 * 1024 });
+    const frozenHtml = zipEntry("dist/index.html");
+    assert.deepEqual(Buffer.concat([frozenHtml, Buffer.from("\n")]), htmlBytes, "single-file HTML differs from the frozen build plus its export newline");
+    for (const file of sourcePrototypeInputFixture().files) assert.equal(zipEntry(`source/${file.path}`).toString(), file.content);
+    const exportedSource = JSON.parse(zipEntry("workbench-source.json").toString());
+    assert.equal(exportedSource.build.htmlSha256, sha256(frozenHtml));
+    const exportedPackage = JSON.parse(zipEntry("package.json").toString());
+    assert.equal(exportedPackage.scripts.build, "vite build");
+    assert.equal(exportedPackage.devDependencies.vite, "8.1.6", "downloaded React package bypassed the approved Vite security pin");
+    const offlineContext = await browser.newContext({ offline: true });
+    const offlinePage = await offlineContext.newPage();
+    await offlinePage.goto(pathToFileURL(htmlFile).href);
+    for (const viewport of [{ width: 375, height: 812 }, { width: 1440, height: 900 }]) {
+      await offlinePage.setViewportSize(viewport);
+      await offlinePage.getByRole("heading", { name: "采购审批工作台", exact: true }).waitFor({ state: "visible" });
+      await offlinePage.getByLabel("申请名称", { exact: true }).fill(`离线采购-${viewport.width}`);
+      await offlinePage.getByRole("button", { name: "新建采购申请", exact: true }).click();
+      await offlinePage.getByRole("button", { name: `批准 离线采购-${viewport.width}`, exact: true }).click();
+      await offlinePage.getByRole("button", { name: "审批记录", exact: true }).click();
+      await offlinePage.getByRole("heading", { name: `离线采购-${viewport.width}`, exact: true }).waitFor({ state: "visible" });
+      assert.ok(await offlinePage.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), "offline export overflowed the viewport");
+      await offlinePage.evaluate(() => window.scrollTo(0, 0));
+      await offlinePage.screenshot({ path: path.join(outputDir, `source-offline-${viewport.width}.png`) });
+      await offlinePage.getByRole("button", { name: "采购申请", exact: true }).click();
+    }
+    await offlineContext.close();
+    assert.ok(fakeRuntime.state.exportReads.some((read) => read.role === "api-ready"), "downloads did not use the API ready-blob identity");
+    evidenceManifest.checks.sourceHtmlExport = { ...sourceHtmlExport, sha256: sha256(htmlBytes), offlineDesktopAndMobile: true };
+    evidenceManifest.checks.sourceReactExport = { ...sourceReactExport, sha256: sha256(zipBytes), sourceFilesVerified: true, frozenHtmlVerified: true, viteVersion: exportedPackage.devDependencies.vite };
+    console.log("[e2e] browser source HTML and React ZIP exports passed");
+
+    await page.getByRole("button", { name: "共享", exact: true }).click();
+    await publicPage.reload({ waitUntil: "networkidle" });
+    await publicSourceFrame.contentFrame().getByRole("heading", { name: "采购审批工作台", exact: true }).waitFor({ state: "visible", timeout: scenarioTimeoutMs });
+    const publicCapabilityUrl = await publicSourceFrame.getAttribute("src");
+    assert.ok(publicCapabilityUrl);
+    assert.equal((await publicContext.request.get(publicCapabilityUrl)).status(), 200, "source preview was not live immediately before revocation");
+    const revokeResponse = page.waitForResponse((response) => response.request().method() === "POST" && new URL(response.url()).pathname.endsWith("/revoke-all"));
+    await shareDialog.getByRole("switch", { name: "启用共享和重混功能" }).click();
+    assert.ok((await revokeResponse).ok(), "share revocation failed");
+    await shareDialog.getByRole("button", { name: "关闭共享" }).click();
+    const revokedCapability = await publicContext.request.get(publicCapabilityUrl);
+    assert.equal(revokedCapability.status(), 404, "revoked source preview capability remained usable");
+    const revokedShare = await publicContext.request.get(`${webOrigin}/api/v1/public/shares/${new URL(publicShareUrl).pathname.split("/").pop()}`);
+    assert.equal(revokedShare.status(), 404, "revoked share remained public");
+    await publicContext.close();
+    evidenceManifest.checks.sourceShareRevocation = true;
+    console.log("[e2e] browser source share revocation passed");
 
     await context.addCookies([{
       name: "workbench_preview_ambient_canary",
@@ -5548,6 +5958,11 @@ async function runRealStackBrowserScenario({
     assert.ok(bffRequests.some((request) => /\/runs\/:id\/events$/u.test(request.pathClass)), "browser did not open the real BFF SSE endpoint");
     assert.ok(bffRequests.some((request) => request.method === "POST" && /\/runs\/:id\/retry$/u.test(request.pathClass) && request.status === 202), "browser did not retry the failed Run through the real BFF");
     assert.ok(bffRequests.some((request) => request.method === "POST" && /\/runs\/:id\/cancel$/u.test(request.pathClass) && request.status === 202), "browser did not cancel the active Run through the real BFF");
+    for (const failure of routePrefetchAbortCandidates) {
+      failure.abortAttribution = clientRoutePrefetchAbortAttribution({
+        currentPathClass: browserPathClass(new URL(page.url()).pathname), failure, navigationEvidence,
+      });
+    }
     const navigationAborts = failedRequests.filter((request) => (
       request.abortAttribution?.cause === "scripted-hard-navigation"
     ));
@@ -5580,8 +5995,12 @@ async function runRealStackBrowserScenario({
       ["/auth/spotlight-primary.webp", "/auth/spotlight-reveal.webp"],
       "auth artwork must load successfully from the application origin",
     );
-    const unexpectedHttpResponses = httpResponses.filter((response) => (
-      response.status < 200 || response.status >= 400
+    await Promise.all(boardWriteReads);
+    const recoveredBoardConflicts = recoveredBoardRevisionConflicts(boardWrites);
+    evidenceManifest.recoveredBoardConflicts = recoveredBoardConflicts;
+    const recoveredBoardResponseIndices = new Set(recoveredBoardConflicts.map((item) => item.responseIndex));
+    const unexpectedHttpResponses = httpResponses.filter((response, index) => (
+      (response.status < 200 || response.status >= 400) && !recoveredBoardResponseIndices.has(index)
     ));
     assert.equal(
       unexpectedHttpResponses.length,
@@ -5619,13 +6038,19 @@ async function runRealStackBrowserScenario({
       "browser cancellation lacked observed or persisted terminal SSE evidence",
     );
     assert.ok(previewEvidence, "product Preview evidence was not retained in the manifest");
+    const recoveredBoardConsoleErrors = consoleErrors.filter((error) => error.httpStatus === 412
+      && error.sourceClass === "web:/api/v1/projects/:id/board");
+    assert.ok(recoveredBoardConsoleErrors.length <= recoveredBoardConflicts.length,
+      "Board console errors exceeded proven recovered CAS conflicts");
+    const unexpectedConsoleErrors = consoleErrors.filter((error) => !recoveredBoardConsoleErrors.includes(error));
     assert.equal(
-      consoleErrors.length,
+      unexpectedConsoleErrors.length,
       0,
       `real-stack browser console errors: ${JSON.stringify(consoleErrors)}`,
     );
 
     const checks = {
+      ...evidenceManifest.checks,
       betterAuthRegistration: true,
       bffOidcApi: true,
       workerArtifactPersistence: true,
@@ -5862,6 +6287,7 @@ async function runCommand(name, command, args, extraEnvironment = {}) {
   });
 
   let timedOut = false;
+  let cleanupError;
   const timeout = setTimeout(() => {
     timedOut = true;
     void stopProcessTree(child, { graceMs: 2_000 });
@@ -5871,11 +6297,12 @@ async function runCommand(name, command, args, extraEnvironment = {}) {
     child.once("exit", (code, signal) => resolve({ code, signal }));
   }).finally(async () => {
     clearTimeout(timeout);
-    await stopProcessTree(child, { graceMs: 2_000 });
+    await stopProcessTree(child, { graceMs: 2_000 }).catch((error) => { cleanupError = error; });
   });
-  if (timedOut || result.code !== 0) {
-    throw new Error(`${name} failed (${timedOut ? "timeout" : `exit ${result.code}, signal ${result.signal}`})\n${output}`);
+  if (timedOut || result.code !== 0 || cleanupError) {
+    throw new Error(`${name} failed (${timedOut ? "timeout" : `exit ${result.code}, signal ${result.signal}`}${cleanupError ? `, cleanup ${cleanupError.code ?? cleanupError.name}` : ""})\n${output}`);
   }
+  return { output };
 }
 
 async function waitFor(predicate, timeoutMs, message) {
@@ -5911,6 +6338,7 @@ async function runScriptedHardNavigation({
       kind,
       status,
       targetPathClass,
+      pathHash: sha256(new URL(page.url()).pathname),
     });
     recorded = true;
     assert.ok(response, `browser ${kind} to ${targetPathClass} returned no main-resource response`);
@@ -5964,7 +6392,7 @@ async function captureActiveGenerationVisualEvidence({ evidence, kind, outputDir
         await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
       });
       const motion = await captureGenerationMotion(motionElement, { kind, reducedMotion });
-      const layout = await page.evaluate((expectedKind) => {
+      const layout = await page.evaluate(() => {
         const metric = (selector) => {
           const element = document.querySelector(selector);
           if (!(element instanceof HTMLElement)) return { visible: false, rect: null };
@@ -5983,22 +6411,24 @@ async function captureActiveGenerationVisualEvidence({ evidence, kind, outputDir
           };
         };
         const pendingArtifact = document.querySelector(
-          `[data-workbench-transient-artifact="${expectedKind}"] [data-workbench-artifact-state="pending"]`,
+          '[data-workbench-generation-preview-layout="dock"]',
         );
         return {
           agentCard: metric('[data-panel-motion="agent-card"]'),
           taskStack: metric("[data-left-task-stack]"),
           mobileRunStatus: metric("[data-mobile-run-status]"),
           composer: metric("[data-project-composer]"),
-          pendingArtifact: metric(
-            `[data-workbench-transient-artifact="${expectedKind}"] .workbench-transient-artifact-surface`,
-          ),
+          processAnchor: metric(matchMedia("(min-width: 768px)").matches
+            ? '[data-panel-motion="agent-card"] [data-workbench-generation-process-anchor]'
+            : '[data-mobile-run-status] [data-workbench-generation-process-anchor]'),
+          pendingArtifact: metric('[data-workbench-generation-preview-layout="dock"]'),
           pendingArtifactState: pendingArtifact instanceof HTMLElement
             ? {
-                ariaLive: pendingArtifact.getAttribute("aria-live"),
-                hasSkeleton: pendingArtifact.querySelector("[data-workbench-artifact-skeleton]") !== null,
-                hasSpinner: pendingArtifact.querySelector(".workbench-artifact-spinner") !== null,
-                variant: pendingArtifact.getAttribute("data-workbench-artifact-variant"),
+                label: pendingArtifact.getAttribute("aria-label"),
+                layout: pendingArtifact.getAttribute("data-workbench-generation-preview-layout"),
+                hasStatus: pendingArtifact.querySelector('[role="status"]') !== null,
+                hasProcess: pendingArtifact.querySelector("button[aria-expanded]") !== null,
+                canvasDraftCount: document.querySelectorAll('[data-id^="run-draft:"]').length,
               }
             : null,
           rightToolRail: metric("[data-right-tool-rail]"),
@@ -6006,7 +6436,7 @@ async function captureActiveGenerationVisualEvidence({ evidence, kind, outputDir
           suggestions: metric("[data-project-suggestions]"),
           utilityPill: metric("[data-utility-pill]"),
         };
-      }, kind);
+      });
       const runState = await page.locator('[data-panel-motion="agent-card"]').evaluate((element) => ({
         phase: element.getAttribute("data-phase"),
         stage: element.getAttribute("data-generation-stage"),
@@ -6087,7 +6517,8 @@ function assertActiveGenerationVisualEvidence(evidence, kind) {
     assert.equal(item.layout.agentCard.visible, width >= 768, `Agent card breakpoint was incorrect at ${kind} ${item.viewport}`);
     assert.equal(item.layout.taskStack.visible, width >= 1280, `task stack breakpoint was incorrect at ${kind} ${item.viewport}`);
     assert.equal(item.layout.mobileRunStatus.visible, width < 768, `mobile Run status breakpoint was incorrect at ${kind} ${item.viewport}`);
-    assert.equal(item.layout.pendingArtifact.visible, true, `early ${kind} pending surface was not visible at ${item.viewport}`);
+    assert.equal(item.layout.pendingArtifact.visible, false, `early ${kind} showed a preview before generated content at ${item.viewport}`);
+    assert.equal(item.layout.processAnchor.visible, true, `early ${kind} omitted the upper process control at ${item.viewport}`);
     assert.equal(item.layout.rightToolRail.visible, true, `right tool rail was not visible at ${kind} ${item.viewport}`);
     assert.ok(["document", "board", "generated"].includes(item.runState.projectMode), "unknown project mode in visual evidence");
     assert.equal(
@@ -6097,16 +6528,8 @@ function assertActiveGenerationVisualEvidence(evidence, kind) {
     );
     assert.equal(item.layout.utilityPill.visible, true, `Utility Pill was not visible at ${kind} ${item.viewport}`);
     assert.equal(item.layout.selectedAction.visible, false, `selected action remained visible during ${kind} Run at ${item.viewport}`);
-    assert.deepEqual(
-      item.layout.pendingArtifactState,
-      {
-        ariaLive: "polite",
-        hasSkeleton: true,
-        hasSpinner: true,
-        variant: kind === "prd" ? "document" : "prototype",
-      },
-      `early ${kind} pending surface lost truthful loading semantics at ${item.viewport}`,
-    );
+    assert.equal(item.layout.pendingArtifactState, null,
+      `early ${kind} exposed process or placeholder content in the preview at ${item.viewport}`);
     for (const [name, region] of Object.entries(item.layout)) {
       if (name === "pendingArtifactState") continue;
       if (!region.visible || !region.rect) continue;
@@ -6185,25 +6608,18 @@ async function capturePendingDocumentVisualEvidence({ outputDir, page, pendingDo
             ? { left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom }
             : null;
         };
-        const spinner = element.querySelector(".workbench-artifact-spinner");
-        const spinnerSample = () => spinner instanceof HTMLElement
-          ? {
-              animationDuration: getComputedStyle(spinner).animationDuration,
-              animationIterationCount: getComputedStyle(spinner).animationIterationCount,
-              transform: getComputedStyle(spinner).transform,
-            }
-          : null;
-        const firstSpinnerFrame = spinnerSample();
-        await new Promise((resolve) => setTimeout(resolve, 120));
         const rect = element.getBoundingClientRect();
         return {
-          ariaLive: element.getAttribute("aria-live"),
+          label: element.getAttribute("aria-label"),
           transientArtifactCount: document.querySelectorAll('[data-workbench-transient-artifact="prd"]').length,
           documentNodeCount: document.querySelectorAll('.react-flow__node-documentCanvas').length,
           colorScheme: "dark",
-          hasSkeleton: element.querySelector("[data-workbench-artifact-skeleton]") !== null,
-          hasSpinner: spinner !== null,
-          labelKind: element.textContent?.includes("正在细化") ? "refining" : "other",
+          hasStatus: element.querySelector('[role="status"]') !== null,
+          hasProcess: element.querySelector('button[aria-expanded]') !== null,
+          hasUpperProcess: document.querySelector(matchMedia("(min-width: 768px)").matches
+            ? '[data-panel-motion="agent-card"] [data-workbench-generation-process-anchor]'
+            : '[data-mobile-run-status] [data-workbench-generation-process-anchor]') !== null,
+          layout: element.getAttribute("data-workbench-generation-preview-layout"),
           reducedMotionMedia: matchMedia("(prefers-reduced-motion: reduce)").matches,
           runState: {
             phase: document.querySelector('[data-panel-motion="agent-card"]')?.getAttribute("data-phase") ?? null,
@@ -6211,7 +6627,6 @@ async function capturePendingDocumentVisualEvidence({ outputDir, page, pendingDo
             status: "active",
             motionKind: "prd",
           },
-          spinnerFrames: [firstSpinnerFrame, spinnerSample()],
           rect: { left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom },
           suggestions: metric("[data-project-suggestions]"),
           occluders: {
@@ -6253,11 +6668,13 @@ function assertPendingDocumentVisualEvidence(evidence) {
       !rectanglesOverlap(item.occluders.rightToolRail, item.suggestions),
       `rightToolRail overlapped suggestions while refining PRD at ${item.viewport}`,
     );
-    assert.equal(item.ariaLive, "polite", `pending PRD document did not expose a polite live region at ${item.viewport}`);
+    assert.equal(item.label, "生成中预览", `pending PRD lost its live preview at ${item.viewport}`);
     assert.equal(item.transientArtifactCount, 0, `early PRD placeholder remained over the real draft at ${item.viewport}`);
-    assert.equal(item.hasSkeleton, true, `pending PRD document omitted its skeleton at ${item.viewport}`);
-    assert.equal(item.hasSpinner, true, `pending PRD document omitted its progress indicator at ${item.viewport}`);
-    assert.equal(item.labelKind, "refining", `runtime PRD draft did not expose refining context at ${item.viewport}`);
+    assert.equal(item.documentNodeCount, 0, `staging PRD was exposed on the saved canvas at ${item.viewport}`);
+    assert.equal(item.layout, "dock", `pending PRD lost its dock layout at ${item.viewport}`);
+    assert.equal(item.hasStatus, false, `pending PRD mixed status into generated content at ${item.viewport}`);
+    assert.equal(item.hasProcess, false, `pending PRD mixed process into generated content at ${item.viewport}`);
+    assert.equal(item.hasUpperProcess, true, `pending PRD omitted the upper process control at ${item.viewport}`);
     assert.equal(
       item.reducedMotionMedia,
       item.reducedMotion,
@@ -6270,20 +6687,11 @@ function assertPendingDocumentVisualEvidence(evidence) {
       && item.rect.bottom <= height,
       `pending PRD document escaped the viewport at ${item.viewport}`,
     );
-    assert.ok(item.spinnerFrames.every(Boolean), `pending PRD spinner style was unavailable at ${item.viewport}`);
     for (const [name, rect] of Object.entries(item.occluders)) {
       assert.ok(
         !rectanglesOverlap(item.rect, rect),
         `pending PRD document was obscured by ${name} at ${item.viewport}`,
       );
-    }
-    if (item.reducedMotion) {
-      assert.equal(item.spinnerFrames[1].animationDuration, "0.001s", `pending PRD spinner did not reduce motion at ${item.viewport}`);
-      assert.equal(item.spinnerFrames[1].animationIterationCount, "1", `pending PRD spinner kept repeating at ${item.viewport}`);
-      assert.equal(item.spinnerFrames[0].transform, item.spinnerFrames[1].transform, `pending PRD spinner moved with reduced motion at ${item.viewport}`);
-    } else {
-      assert.notEqual(item.spinnerFrames[1].animationDuration, "0.001s", `pending PRD spinner used reduced duration at ${item.viewport}`);
-      assert.notEqual(item.spinnerFrames[0].transform, item.spinnerFrames[1].transform, `pending PRD spinner did not advance at ${item.viewport}`);
     }
   }
 }
@@ -6302,95 +6710,6 @@ function browserUrlClass(rawUrl, { previewOrigin, webOrigin }) {
   }
 }
 
-function installBrowserSseEvidenceObserver({ webOrigin }) {
-  const nativeFetch = globalThis.fetch;
-  if (typeof nativeFetch !== "function") return;
-  globalThis.fetch = async function workbenchEvidenceFetch(...args) {
-    const response = await nativeFetch.apply(this, args);
-    try {
-      const url = new URL(response.url);
-      if (
-        url.origin === webOrigin
-        && /^\/api\/v1\/runs\/[^/]+\/events$/u.test(url.pathname)
-        && response.headers.get("content-type")?.startsWith("text/event-stream")
-      ) {
-        const afterSequence = Number(url.searchParams.get("afterSequence") ?? "0");
-        const observed = response.clone();
-        void observeSseResponse(observed, afterSequence).catch(() => undefined);
-      }
-    } catch {
-      // The application owns fetch errors; evidence collection must stay observational.
-    }
-    return response;
-  };
-
-  async function observeSseResponse(response, afterSequence) {
-    const reader = response.body?.getReader();
-    if (!reader) return;
-    const decoder = new TextDecoder();
-    let buffer = "";
-    let eventName = "message";
-    let eventId = null;
-    let sawData = false;
-
-    const record = () => {
-      const sequence = Number(eventId);
-      const shouldRecord = sawData;
-      const recordedEventName = eventName;
-      eventName = "message";
-      eventId = null;
-      sawData = false;
-      if (!shouldRecord) return;
-      const binding = globalThis.__workbenchRecordSseEvidence;
-      if (typeof binding === "function") {
-        void Promise.resolve(binding({
-          afterSequence,
-          eventName: recordedEventName,
-          sequence,
-        })).catch(() => undefined);
-      }
-    };
-    const consumeLine = (rawLine) => {
-      const line = rawLine.endsWith("\r") ? rawLine.slice(0, -1) : rawLine;
-      if (line === "") {
-        record();
-        return;
-      }
-      if (line.startsWith(":")) return;
-      const separator = line.indexOf(":");
-      const field = separator < 0 ? line : line.slice(0, separator);
-      const rawValue = separator < 0 ? "" : line.slice(separator + 1);
-      const value = rawValue.startsWith(" ") ? rawValue.slice(1) : rawValue;
-      if (field === "event") eventName = value;
-      else if (field === "id") eventId = value;
-      else if (field === "data") sawData = true;
-    };
-
-    while (true) {
-      const { done, value } = await reader.read();
-      buffer += decoder.decode(value ?? new Uint8Array(), { stream: !done });
-      if (buffer.length > 1_048_576) {
-        const binding = globalThis.__workbenchRecordSseEvidence;
-        if (typeof binding === "function") {
-          void Promise.resolve(binding(null)).catch(() => undefined);
-        }
-        await reader.cancel();
-        return;
-      }
-      let newline = buffer.indexOf("\n");
-      while (newline >= 0) {
-        consumeLine(buffer.slice(0, newline));
-        buffer = buffer.slice(newline + 1);
-        newline = buffer.indexOf("\n");
-      }
-      if (done) {
-        if (buffer) consumeLine(buffer);
-        record();
-        return;
-      }
-    }
-  }
-}
 
 async function pollBrowserJson(page, pathname, done, timeoutMs) {
   const deadline = Date.now() + timeoutMs;
@@ -6803,6 +7122,10 @@ async function cleanup() {
     if (controlledKnowledge) {
       await controlledKnowledge.close().catch(() => undefined);
       controlledKnowledge = undefined;
+    }
+    if (localTls) {
+      await localTls.close().catch(() => undefined);
+      localTls = undefined;
     }
   })();
   return cleanupPromise;

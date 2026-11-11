@@ -4,13 +4,14 @@ import "@testing-library/jest-dom/vitest";
 import {
   prdTableOfContentsEntriesFor,
 } from "@workbench/workbench-contracts";
-import { prdDocumentV2Example } from "@workbench/workbench-contracts/test-fixtures";
+import { prdDocumentV2Example, prdDocumentV3Example } from "@workbench/workbench-contracts/test-fixtures";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { WorkbenchPrdArtifactEditor } from "./workbench-prd-editor";
 import { prdDocument } from "./workbench-prd-test-fixture";
 import { WorkbenchPrdDraftProvider } from "../../lib/workbench/prd-editor/draft-context";
+import type { PrdDraftCommit } from "../../lib/workbench/prd-editor/draft-store";
 
 afterEach(async () => {
   // Tiptap defers editor destruction until the next tick. Keep that teardown
@@ -27,6 +28,23 @@ afterEach(async () => {
 });
 
 describe("WorkbenchPrdArtifactEditor", () => {
+  it("shows v3 diagrams inside their functional section and saves the same protocol", async () => {
+    const onDocumentCommit = vi.fn<PrdDraftCommit>(async () => "version-v3-edited");
+    const view = render(<WorkbenchPrdDraftProvider namespace="v3-principal"><WorkbenchPrdArtifactEditor
+      document={prdDocumentV3Example} onDocumentCommit={onDocumentCommit}
+      reference={{ projectId: "project-v3", artifactId: "artifact-v3", artifactVersionId: "version-v3" }}
+    /></WorkbenchPrdDraftProvider>);
+    await screen.findByRole("textbox", { name: "PRD 编辑器" });
+    await waitFor(() => expect(view.container.querySelectorAll('[data-prd-section="v3:function:section-task-state"] [data-prd-inline-diagram] svg')).toHaveLength(2));
+    fireEvent.change(screen.getByRole("textbox", { name: "版本1作者" }), { target: { value: "本地评审人" } });
+    fireEvent.click(screen.getByRole("button", { name: "保存 PRD" }));
+    await waitFor(() => expect(onDocumentCommit).toHaveBeenCalled());
+    const saved = onDocumentCommit.mock.calls[0]?.[1];
+    expect(saved?.protocol).toBe("workbench.prd.v3");
+    expect(saved?.revision.number).toBe(2);
+    expect(saved?.citations).toEqual(prdDocumentV3Example.citations);
+  });
+
   it("rebinds the editor to a newly saved version without using the destroyed editor", async () => {
     const onDocumentCommit = vi.fn(async () => "prd-v2");
     const next = structuredClone(prdDocumentV2Example);

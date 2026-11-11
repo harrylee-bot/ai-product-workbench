@@ -1,12 +1,14 @@
 import { Suspense } from "react";
 import { ShareClient } from "@/components/share/share-client";
 
-export default async function ShareTokenPage({
-  params,
-}: {
-  params: Promise<{ token: string }>;
-}) {
+type ShareTokenPageProps = { params: Promise<{ token: string }> };
+
+async function ShareTokenContent({ params }: ShareTokenPageProps) {
   const { token } = await params;
+  return <ShareClient token={token} />;
+}
+
+export default function ShareTokenPage({ params }: ShareTokenPageProps) {
   return (
     <Suspense
       fallback={
@@ -15,7 +17,7 @@ export default async function ShareTokenPage({
         </div>
       }
     >
-      <ShareClient token={token} />
+      <ShareTokenContent params={params} />
     </Suspense>
   );
 }

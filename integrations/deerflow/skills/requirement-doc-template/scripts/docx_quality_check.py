@@ -9,6 +9,9 @@ import sys
 from pathlib import Path
 
 from docx import Document
+from docx.oxml.ns import qn
+from docx.text.paragraph import Paragraph
+from lxml import etree
 
 
 PLACEHOLDER_PATTERNS = [
@@ -39,9 +42,6 @@ REQUIRED_HEADING_GROUPS = [
     ["使用场景", "使用场景（必填）"],
     ["业务需求"],
     ["页面链接", "页面入口与页面链接"],
-    ["核心业务规则/功能说明"],
-    ["核心流程/状态/页面要求"],
-    ["验收标准"],
     ["业务降级方案", "业务降级方案（必填）"],
     ["需求安全基线要求", "需求安全基线要求（必填）"],
 ]
@@ -129,12 +129,19 @@ def add_placeholder_findings(text: str, errors: list[str], warnings: list[str], 
 
 def check_required_headings(doc: Document, errors: list[str], allow_template: bool) -> None:
     normalized = [normalize_title(text) for _, _, text in heading_paragraphs(doc)]
-    final_only = {"核心业务规则/功能说明", "核心流程/状态/页面要求", "验收标准"}
-    groups = [group for group in REQUIRED_HEADING_GROUPS if not allow_template or group[0] not in final_only]
-    for group in groups:
+    for group in REQUIRED_HEADING_GROUPS:
         normalized_group = [normalize_title(item) for item in group]
-        if not any(any(item in heading for heading in normalized) for item in normalized_group):
+        if not any(item in normalized for item in normalized_group):
             errors.append(f"缺少必需标题：{'/'.join(group)}")
+    main_sections = ["引言", "业务需求", "业务降级方案（必填）", "需求安全基线要求（必填）"]
+    positions = []
+    for name in main_sections:
+        stem = name.replace("（必填）", "")
+        found = next((i for i, title in enumerate(normalized) if title in {name, stem}), None)
+        if found is not None:
+            positions.append(found)
+    if positions != sorted(positions):
+        errors.append("主章顺序应为：引言、业务需求、业务降级方案、需求安全基线要求")
 
 
 def check_toc_matches_headings(doc: Document, warnings: list[str]) -> None:
@@ -232,24 +239,102 @@ def check_tables(doc: Document, errors: list[str], warnings: list[str], allow_te
             errors.append(f"安全基线第 {index} 行标记为“是”，但正文未找到明确业务依据")
 
 
-def check_required_markers(doc: Document, errors: list[str], allow_template: bool) -> None:
+def check_business_sections(doc: Document, errors: list[str], allow_template: bool) -> None:
     if allow_template:
         return
-    full_text = all_document_text(doc)
-    for marker in ["产品流程图", "产品架构图"]:
-        if marker not in full_text:
-            errors.append(f"缺少必需内容：{marker}")
-    if re.search(r"本需求涉及新增/修改的接口|(^|\n)\s*(接口设计|API\s*清单)\s*($|\n)", full_text, re.I):
-        errors.append("包含已禁用的独立接口/API章节")
+    headings = heading_paragraphs(doc)
+    start = next((i for i, _, text in headings if normalize_title(text) == "业务需求"), None)
+    end = next((i for i, _, text in headings if "业务降级方案" in normalize_title(text)), len(doc.paragraphs))
+    auxiliary = {"页面链接", "页面入口与页面链接", "验收标准", "核心流程及页面要求", "核心流程/状态/页面要求", "产品流程图", "产品架构图", "本需求涉及新增/修改的接口", "接口设计", "API清单"}
+    functional = [text for i, style, text in headings if start is not None and start < i < end and style == "Heading 2" and normalize_title(text) not in auxiliary]
+    if start is not None and not functional:
+        errors.append("业务需求章缺少按实际功能或业务规则命名的二级章节（从 2.2 起）")
+    if "验收" not in all_document_text(doc):
+        errors.append("缺少可验证的验收条件；可写在功能节内或独立验收小节中")
+    # Flow, acceptance and interface subsections have no fixed titles or numbers.
+    # Either diagram type may be omitted when the requirement does not need it.
 
 
 def check_heading_bodies(doc: Document, errors: list[str]) -> None:
-    headings = heading_paragraphs(doc)
-    for index, style_name, text in headings:
-        if style_name == "Heading 2":
-            body = collect_until_next_heading(doc, index)
-            if not body:
-                errors.append(f"标题下缺少正文：{text}")
+    for index, style_name, text in heading_paragraphs(doc):
+        if style_name != "Heading 2":
+            continue
+        has_content = False
+        for element in doc.paragraphs[index]._p.itersiblings():
+            if element.tag == qn("w:p"):
+                paragraph = Paragraph(element, doc._body)
+                name = paragraph.style.name if paragraph.style else ""
+                if name in {"Heading 1", "Heading 2"}:
+                    break
+                if name.startswith("Heading"):
+                    continue
+            if element.xpath(".//w:drawing") or any((node.text or "").strip() for node in element.xpath(".//w:t")):
+                has_content = True
+                break
+        if not has_content:
+            errors.append(f"标题下缺少正文、规则表或图示：{text}")
+
+
+def check_black_white_style(doc: Document, errors: list[str]) -> None:
+    namespaces = {"w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main", "a": "http://schemas.openxmlformats.org/drawingml/2006/main"}
+    themes: dict[str, str] = {}
+    stories = []
+    for part in doc.part.package.parts:
+        name = str(part.partname)
+        if name == "/word/theme/theme1.xml":
+            theme = etree.fromstring(part.blob)
+            for entry in theme.xpath(".//a:clrScheme/*", namespaces=namespaces):
+                if len(entry):
+                    themes[etree.QName(entry).localname] = (entry[0].get("lastClr") or entry[0].get("val") or "").upper()
+        if re.fullmatch(r"/word/(?:document|header\d+|footer\d+|footnotes|endnotes|comments)\.xml", name):
+            stories.append((name, etree.fromstring(part.blob)))
+    aliases = {"text1": "dk1", "text2": "dk2", "background1": "lt1", "background2": "lt2", "dark1": "dk1", "dark2": "dk2", "light1": "lt1", "light2": "lt2"}
+
+    def color(element, attr="val", theme_attr="themeColor", default="auto"):
+        theme = element.get(qn("w:" + theme_attr))
+        value = themes.get(aliases.get(theme, theme), "UNKNOWN_THEME") if theme else element.get(qn("w:" + attr), default)
+        tint_attr = "themeFillTint" if theme_attr == "themeFill" else "themeTint"
+        if element.get(qn("w:" + tint_attr), "00").upper() != "00":
+            return "TINTED_COLOR"
+        return value.upper()
+
+    styles = etree.fromstring(doc.styles.element.xml.encode())
+    by_id = {e.get(qn("w:styleId")): e for e in styles.findall("w:style", namespaces)}
+    used = {e.get(qn("w:styleId")) for e in by_id.values() if e.get(qn("w:default")) == "1"}
+    for _, story in stories:
+        used.update(story.xpath(".//w:pStyle/@w:val | .//w:rStyle/@w:val | .//w:tblStyle/@w:val", namespaces=namespaces))
+    pending = list(used)
+    while pending:
+        style = by_id.get(pending.pop())
+        if style is None:
+            continue
+        parent = style.find("w:basedOn", namespaces)
+        if parent is not None and parent.get(qn("w:val")) not in used:
+            used.add(parent.get(qn("w:val")))
+            pending.append(parent.get(qn("w:val")))
+    roots = stories + [("style:" + sid, by_id[sid]) for sid in sorted(used) if sid in by_id]
+    defaults = styles.find("w:docDefaults", namespaces)
+    if defaults is not None:
+        roots.append(("style:docDefaults", defaults))
+    findings: dict[str, set[str]] = {}
+    for name, root in roots:
+        for node in root.xpath(".//w:color", namespaces=namespaces):
+            if color(node) not in {"000000", "AUTO"}:
+                findings.setdefault("存在非黑色文字或主题文字色", set()).add(name)
+        for node in root.xpath(".//w:shd", namespaces=namespaces):
+            if color(node, "fill", "themeFill") not in {"FFFFFF", "AUTO"} or node.get(qn("w:val"), "clear") not in {"clear", "nil"}:
+                findings.setdefault("存在非白色底纹", set()).add(name)
+        for node in root.xpath(".//w:highlight", namespaces=namespaces):
+            if node.get(qn("w:val")) != "none":
+                findings.setdefault("存在文字高亮", set()).add(name)
+        for node in root.xpath(".//w:tblBorders/* | .//w:tcBorders/* | .//w:pBdr/* | .//w:rPr/w:bdr", namespaces=namespaces):
+            if node.get(qn("w:val")) not in {"none", "nil"} and color(node, "color") not in {"000000", "AUTO"}:
+                findings.setdefault("存在非黑色边框", set()).add(name)
+        for node in root.xpath(".//*[local-name()='textFill']//a:srgbClr", namespaces=namespaces):
+            if node.get("val", "").upper() != "000000":
+                findings.setdefault("存在彩色文字填充效果", set()).add(name)
+    for label, locations in findings.items():
+        errors.append(label + "：" + "、".join(sorted(locations)[:5]))
 
 
 def check_degradation(doc: Document, errors: list[str], warnings: list[str]) -> None:
@@ -294,7 +379,8 @@ def main() -> int:
     check_required_headings(doc, errors, args.allow_template_placeholders)
     check_toc_matches_headings(doc, warnings)
     check_tables(doc, errors, warnings, args.allow_template_placeholders)
-    check_required_markers(doc, errors, args.allow_template_placeholders)
+    check_business_sections(doc, errors, args.allow_template_placeholders)
+    check_black_white_style(doc, errors)
     check_heading_bodies(doc, errors)
     check_degradation(doc, errors, warnings)
 

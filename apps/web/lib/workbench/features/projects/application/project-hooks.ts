@@ -168,7 +168,7 @@ export function useArchiveWorkbenchProject(projectId: string) {
       if (!etag) throw new WorkbenchVersionRequiredError("project", targetProjectId);
       return api.archiveProject(targetProjectId, etag);
     },
-    async onSuccess(result, variables) {
+    async onSuccess(_result, variables) {
       const targetProjectId = variables.projectId ?? projectId;
       queryClient.removeQueries({ queryKey: workbenchQueryKeys.project(targetProjectId) });
       await queryClient.invalidateQueries({

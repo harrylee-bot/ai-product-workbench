@@ -15,6 +15,7 @@ import unittest
 
 import httpx
 from langgraph_sdk import get_client
+from packaging.version import Version
 
 
 class RuntimeCompatibility(unittest.TestCase):
@@ -22,7 +23,7 @@ class RuntimeCompatibility(unittest.TestCase):
         policy = json.loads(Path(__file__).with_name("dependencies.json").read_text())
         for constraint in policy["constraints"]:
             name, version = constraint.split("==")
-            self.assertEqual(importlib.metadata.version(name), version, name)
+            self.assertEqual(Version(importlib.metadata.version(name)), Version(version), name)
 
     def test_langgraph_checkpoint_and_message_round_trip(self):
         from langchain_core.messages import AIMessage, HumanMessage
@@ -93,7 +94,12 @@ class RuntimeCompatibility(unittest.TestCase):
                     else:
                         self.fail("Gateway health check timed out")
                     self.assertIn(httpx.post(origin + "/api/threads/search", json={}, trust_env=False).status_code, [401, 403])
-                    asyncio.run(self.exercise_sdk(origin, token))
+                    try:
+                        asyncio.run(self.exercise_sdk(origin, token))
+                    except Exception:
+                        logs.seek(0)
+                        print("Gateway diagnostic: " + logs.read()[-8000:].replace(token, "[redacted]"))
+                        raise
                 finally:
                     process.terminate()
                     try:

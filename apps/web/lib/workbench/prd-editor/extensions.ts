@@ -8,6 +8,22 @@ import Link from "@tiptap/extension-link";
 import { TableKit } from "@tiptap/extension-table";
 import UniqueID from "@tiptap/extension-unique-id";
 import StarterKit from "@tiptap/starter-kit";
+import { ReactNodeViewRenderer } from "@tiptap/react";
+import { PrdDiagramNodeView } from "./diagram-node-view";
+
+const PrdDiagram = Node.create({
+  name: "prdDiagram",
+  group: "block",
+  atom: true,
+  isolating: true,
+  selectable: false,
+  addAttributes() {
+    return { diagram: { default: null, rendered: false }, sectionIndex: { default: null, rendered: false } };
+  },
+  parseHTML() { return []; },
+  renderHTML() { return ["div", { "data-prd-diagram": "readonly", contenteditable: "false" }]; },
+  addNodeView() { return ReactNodeViewRenderer(PrdDiagramNodeView); },
+});
 
 const PrdFieldAttributes = Extension.create({
   name: "workbenchPrdFieldAttributes",
@@ -270,6 +286,7 @@ export const workbenchPrdExtensions: Extensions = [
   }),
   PrdFieldAttributes,
   PrdFixedBlock,
+  PrdDiagram,
   PrdSection,
   PrdCard,
   PrdLabel,

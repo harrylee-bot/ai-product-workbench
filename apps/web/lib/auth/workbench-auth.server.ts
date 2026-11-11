@@ -188,10 +188,6 @@ export const auth = betterAuth({
         {
           providerId: WORKBENCH_OIDC_PROVIDER_ID,
           discoveryUrl: `${oidcIssuer}/.well-known/openid-configuration`,
-          issuer: oidcIssuer,
-          // Dex 2.42 omits RFC 9207's callback `iss`; state, PKCE, and fixed
-          // discovery/token/userinfo endpoints still bind the authorization flow.
-          requireIssuerValidation: false,
           clientId: requiredEnv("WORKBENCH_OIDC_CLIENT_ID"),
           clientSecret: requiredEnv("WORKBENCH_OIDC_CLIENT_SECRET"),
           scopes: ["openid", "profile", "email"],

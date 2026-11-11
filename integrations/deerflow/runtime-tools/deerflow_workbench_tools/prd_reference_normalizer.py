@@ -10,11 +10,11 @@ def normalize_prd_bidirectional_references(
 ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     """Close valid PRD requirement/criterion links without inventing relations."""
     normalized = copy.deepcopy(candidate)
-    if normalized.get("kind") != "prd" or normalized.get("schemaVersion") != 2:
+    if normalized.get("kind") != "prd" or normalized.get("schemaVersion") not in (2, 3):
         return normalized, []
 
     content = normalized.get("content")
-    if not isinstance(content, dict) or content.get("protocol") != "workbench.prd.v2":
+    if not isinstance(content, dict) or content.get("protocol") != f"workbench.prd.v{normalized['schemaVersion']}":
         return normalized, []
     sections = content.get("sections")
     if not isinstance(sections, dict):
@@ -23,14 +23,17 @@ def normalize_prd_bidirectional_references(
     if not isinstance(business_requirements, dict):
         return normalized, []
 
-    requirements = _typed_blocks(
-        business_requirements.get("coreRules"),
-        "requirement",
-    )
-    criteria = _typed_blocks(
-        business_requirements.get("acceptanceCriteria"),
-        "acceptanceCriterion",
-    )
+    block_sections = _business_block_sections(business_requirements, normalized["schemaVersion"])
+    requirements = [
+        ([*path, "blocks", index], block)
+        for path, section in block_sections
+        for index, block in _typed_blocks(section, "requirement")
+    ]
+    criteria = [
+        ([*path, "blocks", index], block)
+        for path, section in block_sections
+        for index, block in _typed_blocks(section, "acceptanceCriterion")
+    ]
     requirement_counts = Counter(_block_id(block) for _index, block in requirements)
     criterion_counts = Counter(_block_id(block) for _index, block in criteria)
     requirement_by_id = {
@@ -50,9 +53,14 @@ def normalize_prd_bidirectional_references(
     # but those IDs are not typed acceptanceCriterion entities. Keep them out
     # of the typed relationship after a real, already reciprocal criterion is
     # present. Never use a table row to invent a business relationship.
-    acceptance_table_rows = _acceptance_table_rows(
-        business_requirements.get("acceptanceCriteria"),
-    )
+    acceptance_table_rows: dict[str, tuple[int, list[Any] | None, int | None]] = {}
+    for path, section in block_sections:
+        for row_id, (count, table_index, row_index) in _acceptance_table_rows(section).items():
+            previous = acceptance_table_rows.get(row_id)
+            if previous is None:
+                acceptance_table_rows[row_id] = (count, [*path, "blocks", table_index] if table_index is not None else None, row_index)
+            else:
+                acceptance_table_rows[row_id] = (previous[0] + count, None, None)
     initial_reciprocal_criteria: dict[str, set[str]] = {}
     for requirement_id, (_requirement_index, requirement) in requirement_by_id.items():
         criterion_ids = requirement.get("acceptanceCriterionIds")
@@ -92,9 +100,7 @@ def normalize_prd_bidirectional_references(
                     "content",
                     "sections",
                     "businessRequirements",
-                    "acceptanceCriteria",
-                    "blocks",
-                    criterion_index,
+                    *criterion_index,
                     "requirementIds",
                 ],
                 "addedId": requirement_id,
@@ -102,9 +108,7 @@ def normalize_prd_bidirectional_references(
                     "content",
                     "sections",
                     "businessRequirements",
-                    "coreRules",
-                    "blocks",
-                    requirement_index,
+                    *requirement_index,
                     "acceptanceCriterionIds",
                 ],
             })
@@ -128,9 +132,7 @@ def normalize_prd_bidirectional_references(
                     "content",
                     "sections",
                     "businessRequirements",
-                    "coreRules",
-                    "blocks",
-                    requirement_index,
+                    *requirement_index,
                     "acceptanceCriterionIds",
                 ],
                 "addedId": criterion_id,
@@ -138,9 +140,7 @@ def normalize_prd_bidirectional_references(
                     "content",
                     "sections",
                     "businessRequirements",
-                    "acceptanceCriteria",
-                    "blocks",
-                    criterion_index,
+                    *criterion_index,
                     "requirementIds",
                 ],
             })
@@ -163,7 +163,7 @@ def normalize_prd_bidirectional_references(
         row_candidates = [
             criterion_id
             for criterion_id in criterion_ids
-            if criterion_id.startswith("ac-row-v-")
+            if (normalized["schemaVersion"] == 3 or criterion_id.startswith("ac-row-v-"))
             and acceptance_table_rows.get(criterion_id, (0, None, None))[0] == 1
         ]
         if len(row_candidates) != 1:
@@ -180,9 +180,7 @@ def normalize_prd_bidirectional_references(
                 "content",
                 "sections",
                 "businessRequirements",
-                "coreRules",
-                "blocks",
-                requirement_index,
+                *requirement_index,
                 "acceptanceCriterionIds",
             ],
             "removedId": row_id,
@@ -190,9 +188,7 @@ def normalize_prd_bidirectional_references(
                 "content",
                 "sections",
                 "businessRequirements",
-                "acceptanceCriteria",
-                "blocks",
-                table_index,
+                *table_index,
                 "rows",
                 row_index,
                 "id",
@@ -225,6 +221,22 @@ def normalize_runtime_result_prd_references(
             "sourcePath": ["artifacts", artifact_index, *repair["sourcePath"]],
         } for repair in artifact_repairs)
     return normalized, repairs
+
+
+def _business_block_sections(business: dict[str, Any], version: int) -> list[tuple[list[Any], Any]]:
+    if version == 3:
+        sections = business.get("functionSections")
+        if not isinstance(sections, list):
+            return []
+        return [(["pageLinks"], business.get("pageLinks")), *[
+            (["functionSections", index], section) for index, section in enumerate(sections)
+        ]]
+    return [
+        ([key], business.get(key)) for key in ("pageLinks", "coreRules", "flowAndPages", "acceptanceCriteria")
+    ] + [
+        (["additionalSections", index], section)
+        for index, section in enumerate(business.get("additionalSections", []))
+    ] if isinstance(business.get("additionalSections", []), list) else []
 
 
 def _typed_blocks(section: Any, block_type: str) -> list[tuple[int, dict[str, Any]]]:

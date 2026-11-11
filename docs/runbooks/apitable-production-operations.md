@@ -20,13 +20,35 @@
 
 每次操作前解析域名并确认目标主机：
 
+开启 VPN 或代理时，普通 UDP DNS 查询可能被本机接管，即使显式指定公共解析器也不能证明查询到达该解析器。先使用保持 TLS 验证的 HTTPS DoH 交叉核验；不要因为本机返回代理合成地址就改公网 DNS：
+
 ```sh
-getent ahostsv4 requirements.aionbench.com | head
-ssh -i ~/.ssh/id_ed25519 -o IdentitiesOnly=yes root@45.207.206.119 \
+curl --fail --silent --show-error --connect-timeout 8 --max-time 20 \
+  'https://dns.google/resolve?name=requirements.aionbench.com&type=A'
+curl --fail --silent --show-error --connect-timeout 8 --max-time 20 \
+  -H 'accept: application/dns-json' \
+  'https://cloudflare-dns.com/dns-query?name=requirements.aionbench.com&type=A'
+```
+
+需要独立物理出口时，先在 macOS 用 `networksetup -listallhardwareports` 和 `ifconfig` 确认当前有地址且 active 的接口，再对单次连接设置接口。Wi-Fi 和 USB 有线网卡的接口名称可能不同，不能固定假设是 `en0`。可用 `curl --interface <已核验接口> --noproxy '*' --resolve dns.alidns.com:443:223.5.5.5 'https://dns.alidns.com/resolve?name=requirements.aionbench.com&type=A'` 对照阿里公共 DNS，保持证书校验，不改系统路由或关闭 VPN。SSH/SCP 使用同一 `-o BindInterface=<已核验接口>`；接口不可用时停止，不重试默认路由。
+
+```sh
+ssh -i ~/.ssh/id_ed25519 -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
+  -o UserKnownHostsFile="$HOME/.ssh/workbench_known_hosts" root@45.207.206.119 \
   'hostname; test -d /opt/apitable && echo apitable-found'
 ```
 
 只有解析地址为 `45.207.206.119`、主机名为 `C202607221115992` 且 `/opt/apitable` 存在时，才允许继续。任一条件不满足，停止操作并核验部署信息。
+
+## 本机 SSH 身份丢失时
+
+通过实际服务器厂商的已认证管理控制台恢复访问。DNS 托管商不等于服务器厂商，不能仅凭 `hichina.com` 等权威 NS 判断主机属于哪家云。用控制台资产记录中的 IP 与实例身份确认目标，再通过串行控制台、VNC 或厂商命令通道核对 `hostname` 和 `/opt/apitable`。
+
+在控制台读取 `/etc/ssh/ssh_host_ed25519_key.pub` 并计算 `ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub`，将该受控来源的公开主机密钥写入本机专用 `~/.ssh/workbench_known_hosts`。网络扫描得到的密钥只能用于比对，不能自动作为信任来源；恢复本机访问不需要重新生成服务器 host key。
+
+生成新的专用客户端密钥时，私钥仅留在仓库外的本机 `~/.ssh/`，权限 `0600`。通过已认证控制台将公钥追加到正确用户的 `authorized_keys`，保留其他合法条目，不覆盖整份文件、不把私钥上传服务器、不启用密码登录来替代该流程。新的密钥尚未安装时不能宣称已经恢复 SSH 访问；安装后以专用 known_hosts、明确身份文件和严格校验完成只读主机检查。后续部署可通过 `WORKBENCH_SSH_KEY_PATH` 指定恢复身份。
+
+首次只读盘点只提取必要的非秘密字段：当前源码提交、容器镜像摘要与标签、Compose 文件摘要、迁移名称/状态、DeerFlow 版本、知识发布 ID/manifest 摘要和备份索引。禁止打印私有环境文件全文。将生产状态与恢复出的各源码提交逐项对账后，才选择候选及发布方式；GitHub 快照恢复成功不等于生产源码恢复成功。
 
 ## 生产边界
 

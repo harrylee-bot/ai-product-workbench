@@ -1,6 +1,6 @@
 {
   "schema": "workbench.knowledge-asset-closure.v1",
-  "totalBytes": 669249840,
+  "totalBytes": 1126905381,
   "assets": [
     {
       "path": "storage/imports/manuals-prototypes-20260702/assets/2222(1).rp",
@@ -409,17 +409,3503 @@
       "symbolicLink": false
     },
     {
-      "path": "storage/source-assets/prototype-html/html.zip",
-      "mediaType": "application/zip",
-      "byteSize": 113155768,
-      "sha256": "62367d1ef430b73cff4254a812f5625c841abf5e3f5cb75e44d367f8f2f3fba8",
+      "path": "storage/source-assets/cehuabao-local/originals/02d21e6442dd22f0/index.vue",
+      "mediaType": "application/octet-stream",
+      "byteSize": 2441,
+      "sha256": "02d21e6442dd22f00db33afd14af3386bcf41d21495467319a5ffe7625c330e5",
       "symbolicLink": false
     },
     {
-      "path": "storage/source-assets/prototype-html/原型转HTML.zip",
+      "path": "storage/source-assets/cehuabao-local/originals/02e5dc5aa87f7785/全智AI营销活动平台配置手册-安徽派出所.pptx",
+      "mediaType": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+      "byteSize": 9186467,
+      "sha256": "02e5dc5aa87f7785fd156ef43a902ef4f573f5e27903949504b01f5bd9a3c6af",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/07483e2b039a449f/策划宝AI营销助手需求说明书.docx",
+      "mediaType": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "byteSize": 928593,
+      "sha256": "07483e2b039a449f6674cc8166733d39ff322291095e25ff4f95eb73a54414cc",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/09a991f9e27ccfe7/AI策划宝-一线感知调查问卷需求_技术设计说明书.docx",
+      "mediaType": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "byteSize": 1236942,
+      "sha256": "09a991f9e27ccfe79d418c71e6df5dfbde713e05f7a7e2111385196171e508e1",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/0a6969592bbe7598/互联网卡报表导出需求说明书4.docx",
+      "mediaType": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "byteSize": 557132,
+      "sha256": "0a6969592bbe75980d33e95bbaa8def7e6dc2deb08d817faca7889aa38c846f3",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/0acff00401b185d6/券多多跳转需求需求说明书2.docx",
+      "mediaType": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "byteSize": 333434,
+      "sha256": "0acff00401b185d6a5ba23ad96aaec7a4c3ac87bcd10c44dfbc79e90a2d4e78e",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/0c34b6beca14e662/全智·AI策划宝产品应用场景分享.pptx",
+      "mediaType": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+      "byteSize": 15851791,
+      "sha256": "0c34b6beca14e6627f7af3c21d0b54da83b3941ed1a00577bdaa5ed8cc6774dd",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/0e29646d48df7200/index.vue",
+      "mediaType": "application/octet-stream",
+      "byteSize": 17624,
+      "sha256": "0e29646d48df7200b12e7ba83eed477958c231cbc920738ee2c9bee4ff4e752f",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/0ee2de65051c0ae1/全智·AI策划宝产品应用场景分享-云南场景痛点解决方案版.pptx",
+      "mediaType": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+      "byteSize": 15379272,
+      "sha256": "0ee2de65051c0ae1815be42d88ed0c10bd94ab99872acb2c72776b0c22ae48bf",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/0f4426563ce5aea1/策划宝OAO流量包下单前校验需求说明书.docx",
+      "mediaType": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "byteSize": 643955,
+      "sha256": "0f4426563ce5aea13c3bf8912c6668b0433ce3d9f1e0c87a18da045a60e86614",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/1115c59bcd1a6a7a/策划宝-素材库手机版操作手册.docx",
+      "mediaType": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "byteSize": 12709280,
+      "sha256": "1115c59bcd1a6a7a93406688380ce7dd0fdc10483ec21f196c35fd179e0774cd",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/118056866082ffe7/AI策划宝-重庆OAO商机预约加流量包组合活动需求_技术设计说明书.docx",
+      "mediaType": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "byteSize": 3157530,
+      "sha256": "118056866082ffe722610acf55c04cd340654d1e4cbb00bbbd29827c5ad093b7",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/11c55ccd1c8b7a5b/策划宝孵化需求独立奖品支持发奖平台活动奖品技术设计说明书.docx",
+      "mediaType": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "byteSize": 330947,
+      "sha256": "11c55ccd1c8b7a5b9b7108c1738ca7d2c6085dc8d4730876e2dbb803f68fa546",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/1295d9d3fcd6e68a/index.vue",
+      "mediaType": "application/octet-stream",
+      "byteSize": 11475,
+      "sha256": "1295d9d3fcd6e68af7e00f8c6799ef835e5280e0668147ad1c80f99cf8954435",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/175b9239fd3d0340/策划宝-素材库PC版操作手册.docx",
+      "mediaType": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "byteSize": 6940027,
+      "sha256": "175b9239fd3d0340014be981aa079bf086e9458c3c5376fd3941636500e61ae0",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/1977c588f50e0acf/云南问卷活动配置与运营需求说明书_精简版.docx",
+      "mediaType": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "byteSize": 43402,
+      "sha256": "1977c588f50e0acfcdd07e69e1052e0994a58521c93fe7319c1c53131fc9c84d",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/1b19c1bdd3b5118f/策划宝AI营销助手需求说明书.docx",
+      "mediaType": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "byteSize": 928544,
+      "sha256": "1b19c1bdd3b5118f3469db00f8ad4273d6909f5358969b013e577594ca51e3cb",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/1b3dc070d66a8ebb/070_策划宝运营通报9.4.txt",
+      "mediaType": "text/plain",
+      "byteSize": 3953,
+      "sha256": "1b3dc070d66a8ebb1e32321ab3bfe421e846fd3ab7eb64cfb09f2f7899e7dc1e",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/1d75ad6ef4558e64/内蒙推荐发展人编码配置需求测试用例.xlsx",
+      "mediaType": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      "byteSize": 13098,
+      "sha256": "1d75ad6ef4558e641921723f08abbfcdd0753baa39aecf8837a7805840b5da5e",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/1f37cfc988d3ed57/002_云溪平台模板优化需求.txt",
+      "mediaType": "text/plain",
+      "byteSize": 11881,
+      "sha256": "1f37cfc988d3ed57844aaa2a9c662dfb5fd6a2c24ab00fac111d6a64301c09dc",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/207b6056ac4439a3/uni.scss",
+      "mediaType": "application/octet-stream",
+      "byteSize": 79,
+      "sha256": "207b6056ac4439a31cda024a2d37d2582766ca6f4cf3a2c17d7d25c711ccc957",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/21aad13b5c496dd5/AI策划宝素材库替换需求说明书(1).docx",
+      "mediaType": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "byteSize": 1891737,
+      "sha256": "21aad13b5c496dd565871df035ac1ae51a5e0f196a92710b31fba25fc73522b6",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/22104cf4de1f370b/策划宝活动跳转链接拼接参数优化docx.docx",
+      "mediaType": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "byteSize": 43619,
+      "sha256": "22104cf4de1f370b5545bf23de5bc7a96232cff08ff8a994862886df786004f5",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/245c4f8da9f41529/商机单-视频模版优化需求说明书.docx",
+      "mediaType": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "byteSize": 43686,
+      "sha256": "245c4f8da9f41529462b097fb97dbcdfc4e8293960bcda2a66f7de53c025879f",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/2572f496d5c6ab32/策划宝AI营销助手需求说明书1-原始备份-20260519-200733.docx",
+      "mediaType": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "byteSize": 693441,
+      "sha256": "2572f496d5c6ab32f92c993edc8527760bcc4c8d4040fa697188e38bc8ba17e9",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/268fa346fb5234eb/策划宝（云溪AI活动）平台配置手册-签到打卡赢流量(1).pptx",
+      "mediaType": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+      "byteSize": 6360260,
+      "sha256": "268fa346fb5234eb40ffb9a2884dae68b282160beba335f854a624d4b13450bb",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/274068122088953c/index.vue",
+      "mediaType": "application/octet-stream",
+      "byteSize": 20339,
+      "sha256": "274068122088953c17d4d9e5e3e1fb09869ed929001d7f2df3123d5f1dd53a3c",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/27424b0e69a5bf09/云南问卷活动配置与运营需求说明书-商机接派单补充稿.pdf",
+      "mediaType": "application/pdf",
+      "byteSize": 5301419,
+      "sha256": "27424b0e69a5bf0901a2adb988fb90a7690595ea66fad9c90634ad71d915dab9",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/277f637ffcb35b45/index.vue",
+      "mediaType": "application/octet-stream",
+      "byteSize": 137476,
+      "sha256": "277f637ffcb35b4580048b1ef818dfa444a618dd44124d7ec0f13a65dd495ad2",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/295e05a1f87904ca/index 2.vue",
+      "mediaType": "application/octet-stream",
+      "byteSize": 2796,
+      "sha256": "295e05a1f87904ca32c53879f573b662ebc6e46a1a6bc300d0634f5239e01bb3",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/2988e448ed681d62/策划宝华东网络架构图-P228.drawio(1).pdf",
+      "mediaType": "application/pdf",
+      "byteSize": 346448,
+      "sha256": "2988e448ed681d628b9f8f5339c7ebfa9f4455644428a7894160a1c00b788115",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/2b6ee96fa84a2d13/全智·AI策划宝产品应用场景分享-红框样式调整版.pptx",
+      "mediaType": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+      "byteSize": 15850437,
+      "sha256": "2b6ee96fa84a2d13c833ec28cdc55508c8b38348f2b79757aecdef61897694a3",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/2ba4e210f386e2cd/短信弹窗销售品订购短信校验需求说明书.docx",
+      "mediaType": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "byteSize": 91319,
+      "sha256": "2ba4e210f386e2cd8b806ee7dc7c34ae7ac7e9bf33fe443a2f057f2ac638f8b5",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/2bf8d90e87b5111e/074_沃土计划独立奖品配置发奖中台大转盘奖品.txt",
+      "mediaType": "text/plain",
+      "byteSize": 7975,
+      "sha256": "2bf8d90e87b5111e010ad7f717dd813eb3bc068c7691dc069edfd93f8e3ac112",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/2c2e81ac3f96e882/AI策划宝-一线感知调查问卷需求_技术设计说明书(2).docx",
+      "mediaType": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "byteSize": 1237323,
+      "sha256": "2c2e81ac3f96e882ae800137de072191f800812e79d198c88716713281a790e5",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/2ca8faba6e74018a/全智·AI策划宝产品应用场景分享-云南业务流程版.pptx",
+      "mediaType": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+      "byteSize": 15379042,
+      "sha256": "2ca8faba6e74018ae6e3e82e85ca1afbac363ccdaefcd7ce337998887f68380c",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/2fae741fa7e2048b/老板素材库下架需求说明书1.docx",
+      "mediaType": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "byteSize": 398460,
+      "sha256": "2fae741fa7e2048b4482fda9fc459c3f7356985dd55b080ac9e2933dd9d0bc15",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/307cf988b029b2e4/云溪平台号卡模板优化需求说明书.docx",
+      "mediaType": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "byteSize": 1356289,
+      "sha256": "307cf988b029b2e4e77205e4d0181fd142590157382e04fa65e4f85e1eff1da8",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/313a2a3c89e1b68d/一线感知调查问卷需求说明书.docx",
+      "mediaType": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "byteSize": 131123,
+      "sha256": "313a2a3c89e1b68df87d4a33b2be64df25a614cb76a46f76a45e6603feb3a5c7",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/31d3d55d30c76e74/072_策划宝-商机预约场景-省、市、支局三级赋能解决方案.txt",
+      "mediaType": "text/plain",
+      "byteSize": 8361,
+      "sha256": "31d3d55d30c76e7405cae9f6f58ab098a76346af05004535ed7876d7c6c2aa5a",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/31f3efae2afd0375/策划宝（云溪AI活动）平台配置手册-号卡下单模版（互联网卡）.pptx",
+      "mediaType": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+      "byteSize": 4914260,
+      "sha256": "31f3efae2afd0375710bc7ae7f00adfb2ce1cddb4adf84909b76d182c85bc2c0",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/3260136273d91285/index.vue",
+      "mediaType": "application/octet-stream",
+      "byteSize": 8016,
+      "sha256": "3260136273d912854158c09d33dc4ba52452efde06b6cc346675ead240ad75dc",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/32b5e22db3a87916/App.vue",
+      "mediaType": "application/octet-stream",
+      "byteSize": 85,
+      "sha256": "32b5e22db3a87916a1ff6da42d95c3e531a2397bc413bdb21176d6f4b5914a50",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/3315f57616ad1ed4/策划宝同步至券多多小程序.docx",
+      "mediaType": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "byteSize": 333451,
+      "sha256": "3315f57616ad1ed4fd236e3e704c31e057160380f4067a4f1c101b0613515828",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/35084afa7a071519/策划宝（云溪AI活动）操作手册-江西券化.pptx",
+      "mediaType": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+      "byteSize": 7445903,
+      "sha256": "35084afa7a0715190d27c2ac6307d255312a642831dc6c913fc78d4a83064c63",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/35359326542a2796/增加活动规则查看更多默认展开开关需求说明书.docx",
+      "mediaType": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "byteSize": 159625,
+      "sha256": "35359326542a2796b45cfbdd688b0f52192096eafc15c86a5d4fadc5c53151c5",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/36906cb66af69d62/骑士卡 .docx",
+      "mediaType": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "byteSize": 1922277,
+      "sha256": "36906cb66af69d6235adf290bad67f0a9faf98b4c4b6cdecd288d3c7e66bfc68",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/376ede196e48ed60/index.vue",
+      "mediaType": "application/octet-stream",
+      "byteSize": 31829,
+      "sha256": "376ede196e48ed6057db208744f52f97cbf48968545750b3dbc3cda6718f992e",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/37d2a01fb5491a54/AI策划宝-一线感知调查问卷需求_技术设计说明书(5).docx",
+      "mediaType": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "byteSize": 1231118,
+      "sha256": "37d2a01fb5491a54a033dcd7184c8c5c12e402f7d754079d2e0ef9e28b12c604",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/3834b6a6e9b8ed1e/007_策划宝运营通报5.15.txt",
+      "mediaType": "text/plain",
+      "byteSize": 3974,
+      "sha256": "3834b6a6e9b8ed1e3b3594cd605d22205123871e9d6188c9c46c896086d9c793",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/39197f47f030a646/速抢好福利模版增加短信快照需求说明书.docx",
+      "mediaType": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "byteSize": 36951,
+      "sha256": "39197f47f030a646b7c72fd4622054848bcee53b807aad58738725f65c675558",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/3a1b1f99ea7033ca/index.scss",
+      "mediaType": "application/octet-stream",
+      "byteSize": 31865,
+      "sha256": "3a1b1f99ea7033ca641f4aeaa2b759c62841ce9a691e8ba50f13a267acee97ee",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/3b566798deb5af09/index.vue",
+      "mediaType": "application/octet-stream",
+      "byteSize": 5610,
+      "sha256": "3b566798deb5af090d28f94b18931adf287ffcb8084bc5a35c9b3e7182dba653",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/3bb7fbd2b0fc5415/全智AI营销活动平台配置手册-江西券化.pptx",
+      "mediaType": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+      "byteSize": 7425150,
+      "sha256": "3bb7fbd2b0fc541567aa88e90b330a3c14fbbbf4c83bcb2a7e5cd8a42e744df3",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/40abaaff8cb2adbb/PhonePreview.vue",
+      "mediaType": "application/octet-stream",
+      "byteSize": 10557,
+      "sha256": "40abaaff8cb2adbb69e7e752295f3b3af0559cbe2513978cc6cb802034b4e098",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/411a728f0cfd42d6/云溪双清单需求-内蒙古(1).docx",
+      "mediaType": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "byteSize": 326237,
+      "sha256": "411a728f0cfd42d665dd4d54a3a7838cb9290e43c6c0e3cc0245322cab6b09ce",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/41ee8c7bb21c95ac/086_云溪平台新增活动目标及合规化接口改造需求(1).txt",
+      "mediaType": "text/plain",
+      "byteSize": 11665,
+      "sha256": "41ee8c7bb21c95ac9c1b3f584a176ab4fc385c3f8cf9f4f15189f7568247692c",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/42db82e718271ede/云南问卷活动配置与运营需求说明书1.0.docx",
+      "mediaType": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "byteSize": 477244,
+      "sha256": "42db82e718271edea5b9df1e7d84d684c9b7e0571d0658f2e824ee749c1ae2c6",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/460b039c9324b3a1/094_门店宝-策划宝-企微营销日历操作手册(1).txt",
+      "mediaType": "text/plain",
+      "byteSize": 8487,
+      "sha256": "460b039c9324b3a19e75e5c4f7668e9011602742774f5a7a989b19c70a5f8205",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/46fb31e3ca7fd2d6/043_盲盒活动（沃土计划）需求说明书.txt",
+      "mediaType": "text/plain",
+      "byteSize": 23426,
+      "sha256": "46fb31e3ca7fd2d6aa7298ca780a69a30d47758ccd73a7fb58ab0366cf807db8",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/4721c391a146c08f/ReservationAiWizardModal.tsx",
+      "mediaType": "application/octet-stream",
+      "byteSize": 276685,
+      "sha256": "4721c391a146c08f82c34ae70e1640a2932b5d37cb706a41fd5533e204bd3142",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/4a7b1ce3c8da78ca/AgentRunPanel.vue",
+      "mediaType": "application/octet-stream",
+      "byteSize": 8155,
+      "sha256": "4a7b1ce3c8da78ca6dc54607c2d8d6c72d2d4065d514ef290b6fd139a9a3eea5",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/4b74746c4c681350/index.vue",
+      "mediaType": "application/octet-stream",
+      "byteSize": 3732,
+      "sha256": "4b74746c4c68135052aac336683714cce31a8463a9453caed1b1e498a53ece28",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/4ba6b5e81dc66b83/AI策划宝素材库替换需求说明书(2).docx",
+      "mediaType": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "byteSize": 1891744,
+      "sha256": "4ba6b5e81dc66b83153ecbf5aa05f70963736b0562201c57750223af875b3b44",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/4e0a8adce1477636/云南问卷活动配置与运营需求说明书.pdf",
+      "mediaType": "application/pdf",
+      "byteSize": 4780770,
+      "sha256": "4e0a8adce14776367aeaee05a4d00173e085b6095dc91ed74d66a7f23ca001ea",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/4f125a1623143291/全智·AI策划宝产品应用场景分享-云南场景痛点解决方案星播客链接版.pptx",
+      "mediaType": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+      "byteSize": 15852087,
+      "sha256": "4f125a16231432918e03f0bf1a44be66a99e6c643565b2981c9ddff2fac2ddc3",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/515517efc61fdf2e/策划宝孵化需求独立奖品支持发奖平台活动奖品技术设计说明书2.docx",
+      "mediaType": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "byteSize": 334101,
+      "sha256": "515517efc61fdf2ebd76741f835ece32ddcd193a5a761eedd197c55bb575d620",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/551f9e07cc611bd5/全智·AI策划宝产品应用场景分享-云南商机案例替换版.pptx",
+      "mediaType": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+      "byteSize": 15377941,
+      "sha256": "551f9e07cc611bd52900588236c28c1a11fced546f193f5d9424b582e40b5fd7",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/553889360f7ceaec/云南问卷活动配置与运营需求说明书-商机接派单补充稿.pdf",
+      "mediaType": "application/pdf",
+      "byteSize": 5296059,
+      "sha256": "553889360f7ceaec4998481d400c3d33a427b90e641756f6e5ea9b4049e5aa74",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/560c31c529a90497/App.vue",
+      "mediaType": "application/octet-stream",
+      "byteSize": 455,
+      "sha256": "560c31c529a90497c6487b8f82408ef2e6155e3b658202bdac5d86f10cd4a84f",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/5d10b4a8253d146f/贵州盲盒抽奖优化需求说明书.docx",
+      "mediaType": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "byteSize": 1310992,
+      "sha256": "5d10b4a8253d146fc22058659baa285661516472206210b0064ca73ab340170f",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/5ea04a923b3e0a70/index.vue",
+      "mediaType": "application/octet-stream",
+      "byteSize": 5593,
+      "sha256": "5ea04a923b3e0a70ab02e337ca339d5b7d15c6693ca0955087c3ceaeb172c8f0",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/5ee518d0398ac666/云溪平台模板优化需求1009.docx",
+      "mediaType": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "byteSize": 41269,
+      "sha256": "5ee518d0398ac66607f1af4b25ec100c580b0ee179f915a591792ed27bde8b96",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/5f636077330028e1/云南问卷活动配置与运营需求说明书.docx",
+      "mediaType": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "byteSize": 5885911,
+      "sha256": "5f636077330028e108184501a4072fbb127e765a1b53e010d10d13b21beaf0c0",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/5f8615b54702f667/三项优化需求需求说明书.docx",
+      "mediaType": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "byteSize": 918137,
+      "sha256": "5f8615b54702f6670b77662f29605da237ac81137b0a30da694f0bfbdd7a1375",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/6042a66343a78667/云南问卷活动配置与运营需求说明书.docx",
+      "mediaType": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "byteSize": 10731110,
+      "sha256": "6042a66343a786673d9895b6b07f6f978e1ccc5734aef8f6dfb4df4eb63bef2a",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/62aa63a3b2a6c973/京东号卡合规页面第2轮优化需求需求说明书2.docx",
+      "mediaType": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "byteSize": 1461298,
+      "sha256": "62aa63a3b2a6c973d0fd407ca8464678190a2713a07dcdb13b09f629209ff664",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/6334221bc80eaf20/副本全渠道能力开放平台接入申请表-全渠道内部部室模板.docx",
+      "mediaType": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "byteSize": 14233,
+      "sha256": "6334221bc80eaf20085b3fb56c68244bfd05b6565056b4fb81a58675ef9ec6f0",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/635f25c682d5a850/云南问卷单文件交互原型.html",
+      "mediaType": "text/html",
+      "byteSize": 960053,
+      "sha256": "635f25c682d5a8504e8fa7514fbbbef69e79608cec3895f70c682e74434cbc98",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/64903c38970d0702/index.vue",
+      "mediaType": "application/octet-stream",
+      "byteSize": 2321,
+      "sha256": "64903c38970d07028fb2cd0126e1f8e0f86b4b3417d8e98aafdca5448cf523f1",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/64bc706412ce33e1/测试用例和测试报告1.xlsx",
+      "mediaType": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      "byteSize": 11868,
+      "sha256": "64bc706412ce33e197467a6d438e7781beadf514fe904452b7a7908dfd5bc734",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/65104339869f36ad/index.scss",
+      "mediaType": "application/octet-stream",
+      "byteSize": 35658,
+      "sha256": "65104339869f36ad73294e8b69b633625c9ce6332ec4fe3a933ef882a921517a",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/657c555e7c1977ab/AI策划宝-贵州大转盘分享参加抽奖活动需求_技术设计说明书.docx",
+      "mediaType": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "byteSize": 3711454,
+      "sha256": "657c555e7c1977ab47fdda7887152d6f392040ecdc853917d8fb44412ae6146d",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/65978c4e8df52f19/云南问卷活动配置与运营需求说明书.pdf",
+      "mediaType": "application/pdf",
+      "byteSize": 5301779,
+      "sha256": "65978c4e8df52f19247ac09a289b5242f576ce84c8bd870aa6187aae8c06bf8b",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/65dc98b9f09bb420/终端视频星播客链接播放需求说明书-双来源QA.docx",
+      "mediaType": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "byteSize": 321623,
+      "sha256": "65dc98b9f09bb420666e6d68cc965bcd5a3f94ec15589665cba940d89af91df6",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/664e835223876074/策划宝线下核销券增加门店列表需求V1.0.docx",
+      "mediaType": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "byteSize": 697561,
+      "sha256": "664e8352238760745ffebfb8c53da2aa4d60bb3e105c3e01973d172b7026c7b9",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/668ae60a664eeeee/策划宝AI营销助手Dify工作流配置产品说明书-演示版按原格式-20260602.docx",
+      "mediaType": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "byteSize": 231446,
+      "sha256": "668ae60a664eeeeea5c3b0df168391c9893fb14da8f1cc23f4867dd71fd278f4",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/670fc4ee45f330bf/策划宝AI营销助手需求说明书(2).docx",
+      "mediaType": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "byteSize": 1093896,
+      "sha256": "670fc4ee45f330bf078ee74d5be298fff4aaa4e13da2f0f7ac8bf11bc837e4f8",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/690b20bbe5b6b3aa/AI策划宝-贵州签到打卡赢流量活动需求_技术设计说明书4.docx",
+      "mediaType": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "byteSize": 3948823,
+      "sha256": "690b20bbe5b6b3aa14409ec2f761cc30e2b68f9f0374ca5c5077dde252f335fa",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/6b19a0d166021d99/引流来源参数.xlsx",
+      "mediaType": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      "byteSize": 105238,
+      "sha256": "6b19a0d166021d9985bdb81619328497bd63d42276e2a1d379cfa3e3fb2b6e6f",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/6b1b9842b7e5fca1/策划宝取数需求.docx",
+      "mediaType": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "byteSize": 181445,
+      "sha256": "6b1b9842b7e5fca121da4395a2b8035ff60a7610ba3688e2d04c71592724feff",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/6d661ac262e96853/策划宝AI营销助手需求说明书1.docx",
+      "mediaType": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "byteSize": 694752,
+      "sha256": "6d661ac262e96853bf22390693f6e68f0c790e1b9ef0c375fa8feca3373cf238",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/6db2f385edcf4693/云南问卷活动配置与运营需求说明书-商机接派单补充稿.pdf",
+      "mediaType": "application/pdf",
+      "byteSize": 5306055,
+      "sha256": "6db2f385edcf4693cd58ca5076ea05a92f06801b24a1435b17871a9e353e4f41",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/6f36ea166a6c962e/策划宝四川业务支撑活动列表接入需求_V1.0.md",
+      "mediaType": "text/markdown",
+      "byteSize": 7040,
+      "sha256": "6f36ea166a6c962e7274d0125c98d02b87cc8c818997819451068ad0493f9da1",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/7159b0aa357bc95e/080_极速活动发布沃土计划二期需求说明书(1).txt",
+      "mediaType": "text/plain",
+      "byteSize": 14762,
+      "sha256": "7159b0aa357bc95e809043d34c2656b36161afa71632ae34c3883be983df4dd2",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/716f52f60831dddd/策划宝同步至券多多小程序(3).docx",
+      "mediaType": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "byteSize": 333284,
+      "sha256": "716f52f60831dddd8aab24a24df661343e7b5b587f43fa29547dd81b43924737",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/727b204dedf86a57/策划宝数据获取需求说明书(1).docx",
+      "mediaType": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "byteSize": 329577,
+      "sha256": "727b204dedf86a571e844fcacde2fabc4be539c69094051dee76de905abe1710",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/72977a1f704db8ca/策划宝双清单通用能力打通需求说明书(1).docx",
+      "mediaType": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "byteSize": 1956384,
+      "sha256": "72977a1f704db8caabd6c08abe194f7ecec4369bdc8de693cacaf7d846199008",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/73628984685e0074/云南应用场景营销中心需求.docx",
+      "mediaType": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "byteSize": 215286,
+      "sha256": "73628984685e0074b36b8521b50e2555e691926b4c318a562891505a6eb24f48",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/7486f7c3cc1bf940/README.md",
+      "mediaType": "text/markdown",
+      "byteSize": 1308,
+      "sha256": "7486f7c3cc1bf940cb33cddb4f9be82c603c9be6718abfd7c56c20a7f39d5ada",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/76bf6166dedb30fc/PhonePreview 2.vue",
+      "mediaType": "application/octet-stream",
+      "byteSize": 2256,
+      "sha256": "76bf6166dedb30fc3a556563be5f1bf6043093f65cf29523fab600f14e68cbdb",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/76e4ee20824bddf7/AI策划宝-领券后跳转券多多小程序卡包需求_技术设计说明书.docx",
+      "mediaType": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "byteSize": 304059,
+      "sha256": "76e4ee20824bddf7988348624e969739b2f242559ab0648e772db036eaee4b2a",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/79642e65fab5c06d/index.vue",
+      "mediaType": "application/octet-stream",
+      "byteSize": 3706,
+      "sha256": "79642e65fab5c06d4d4def5ab2726da684d0e7ff9776a94ad21372ae2cdc4524",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/7cdca4bf93e448db/064_沃土计划盲盒活动需求说明书(4).txt",
+      "mediaType": "text/plain",
+      "byteSize": 11507,
+      "sha256": "7cdca4bf93e448dbd929c073c5632c48588a75c7afc1f911b5b21e43b8e980ae",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/7d4e7e95ca450924/BeijingStandardEditor.tsx",
+      "mediaType": "application/octet-stream",
+      "byteSize": 26579,
+      "sha256": "7d4e7e95ca450924722cd6cc372874e3c0420344d43c0e349307ea654c7633fc",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/7df4d4982ddaeb05/两项优化需求说明书(1).docx",
+      "mediaType": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "byteSize": 43865,
+      "sha256": "7df4d4982ddaeb052481625113c9bd9bdcfb8bb2a6d4207d1db26e1fe5aa5ff3",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/7eb08695f71dc96d/云南问卷活动配置与运营需求说明书.docx",
+      "mediaType": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "byteSize": 10852864,
+      "sha256": "7eb08695f71dc96d17c1ec0cc91ff59f236a9c51f8be797008cad2d6ea687a60",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/7ef37d150d83bbcf/design-qa.md",
+      "mediaType": "text/markdown",
+      "byteSize": 2920,
+      "sha256": "7ef37d150d83bbcf9b2b963f277b675415b1a99fbbef6742c7f6f90cf8ac0096",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/8183a40ab4f482f0/全智· 策划宝产品应用场景集（最新）.pptx",
+      "mediaType": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+      "byteSize": 90935166,
+      "sha256": "8183a40ab4f482f0cc6d2ea29bd7ac5e9daedbec5d12a6fd47440ab4d1fa5d5f",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/81e557e79553e433/营销平台10月需求汇总需求说明书v1.docx",
+      "mediaType": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "byteSize": 2278880,
+      "sha256": "81e557e79553e433bf44d7952d8cb2ddb881a05001854e3148dd63edf53ec43f",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/850ec237f331abca/云南问卷活动配置与运营需求说明书.pdf",
+      "mediaType": "application/pdf",
+      "byteSize": 5301913,
+      "sha256": "850ec237f331abcabb804e628017cbcf2959b5b9d8e32eebd5b63711e475f057",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/8557e80cad0a4405/index.vue",
+      "mediaType": "application/octet-stream",
+      "byteSize": 29457,
+      "sha256": "8557e80cad0a440545aa3b2c89efae0aa0658a9ae0e1cf3301276a63a07cd2b4",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/892fd28c940aa6c0/测试用例和测试报告.xlsx",
+      "mediaType": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      "byteSize": 11854,
+      "sha256": "892fd28c940aa6c0ee229b3d514f31ab060bf0f9490740e99f70a89b07a39787",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/894f510482f8ce5f/index.vue",
+      "mediaType": "application/octet-stream",
+      "byteSize": 6061,
+      "sha256": "894f510482f8ce5f70c111bee6f37318af34de411fd7880d43ebf7944d430697",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/8b1aa7304966626a/096_策划宝运营通报07.31.txt",
+      "mediaType": "text/plain",
+      "byteSize": 3935,
+      "sha256": "8b1aa7304966626a9991e81a921b947bed50929b7f30ad7148e394db65af8ade",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/8caa5787e60368bb/云南问卷配置后台交互原型.html",
+      "mediaType": "text/html",
+      "byteSize": 960072,
+      "sha256": "8caa5787e60368bb137b0c44bbcd4d1d10643e99eca224ab802c19a105feb7cd",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/8cdf9d0a5e5a9a1a/README.md",
+      "mediaType": "text/markdown",
+      "byteSize": 2065,
+      "sha256": "8cdf9d0a5e5a9a1aa4b191c7690054c4c94d000c09a798f811527ca84d5c7df3",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/8cfea9145a5717b6/AI策划宝-一线感知调查问卷需求_技术设计说明书(1).docx",
+      "mediaType": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "byteSize": 1236898,
+      "sha256": "8cfea9145a5717b61bf281c5d93e022dd299bfbc22d86df211f350a17700e720",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/8d58dba52c7672ab/云溪平台号卡模板优化需求.docx",
+      "mediaType": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "byteSize": 1352976,
+      "sha256": "8d58dba52c7672ab0fabbbfa2168304ae03bd17b0146e090550b45dea40464d5",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/8f9e040557fc875b/二项优化需求说明书1.docx",
+      "mediaType": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "byteSize": 1007796,
+      "sha256": "8f9e040557fc875ba760e1194cd35690795ceb582098e97975b21b972db1fb72",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/906bf54164b14138/策划宝AI营销助手Dify工作流产品配置文档-20260602.docx",
+      "mediaType": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "byteSize": 42996,
+      "sha256": "906bf54164b14138163525409715ce4440cef4d999019140d8a123361b8f94fc",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/90d675db5ec15ff4/026_策划宝运营通报06.12.txt",
+      "mediaType": "text/plain",
+      "byteSize": 3918,
+      "sha256": "90d675db5ec15ff4c44188c9b74966781a2abd5cd81ad5dd7193a6761a3f4ab3",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/9196a62a302163b5/策划宝AI营销助手Dify工作流配置产品说明书.docx",
+      "mediaType": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "byteSize": 231700,
+      "sha256": "9196a62a302163b58e71025e1a7d2fa63f1c95a081a63b252d351f960661503e",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/922bd225ee3ac461/index.vue",
+      "mediaType": "application/octet-stream",
+      "byteSize": 5054,
+      "sha256": "922bd225ee3ac46152ca7d3a0660e11fed211be7a4c8bfc8621cb177f9cb08dd",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/92f79116c6f5990d/策划宝孵化需求沃土计划盲盒活动需求说明书需求说明书1.docx",
+      "mediaType": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "byteSize": 42229,
+      "sha256": "92f79116c6f5990de86c75de0536af1835e9ae8db183161a638b21414a2dd95f",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/93ec8a15ae4bc6fc/策划宝AI营销助手需求说明书1-最新版-产品版重写前备份-20260521-092017.docx",
+      "mediaType": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "byteSize": 1858806,
+      "sha256": "93ec8a15ae4bc6fc275338b31353788eece681208a660da95004ef1257bbed2f",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/962ebb250764a4a4/index.vue",
+      "mediaType": "application/octet-stream",
+      "byteSize": 150143,
+      "sha256": "962ebb250764a4a4b61744a0448486b299cbc1047a8e65eef0197e91db300fb6",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/96336a3fd28d6c22/index.mjs",
+      "mediaType": "application/octet-stream",
+      "byteSize": 60835,
+      "sha256": "96336a3fd28d6c221fdfa73f9eff94b787052e0cf799b1f62f984844c24358d1",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/967c18f8486b1571/index.vue",
+      "mediaType": "application/octet-stream",
+      "byteSize": 29457,
+      "sha256": "967c18f8486b157149aec05a50bf7cd74dc67a97d123512930f888b1c86b8a78",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/96b76e3c154b3036/策划宝华东部署架构图-P228.drawio.pdf",
+      "mediaType": "application/pdf",
+      "byteSize": 293002,
+      "sha256": "96b76e3c154b3036c994da13fc6e65b6f289664b932b7a1e1e31e59fa2ecd771",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/984e1fbd9fe1b247/AI策划宝-互联网卡下单限制需求_技术设计说明书.docx",
+      "mediaType": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "byteSize": 1375928,
+      "sha256": "984e1fbd9fe1b2479a68078b7ce5538231eb459a7cf229240956ea42402acf55",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/9d7208b122ed90a9/云南问卷活动配置与运营需求说明书-商机接派单补充稿.docx",
+      "mediaType": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "byteSize": 10852843,
+      "sha256": "9d7208b122ed90a9211d9a064235d25dbb83492ea2cdd1db4a4ff6513938ca5d",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/9e766e4bef93dbbb/App.vue",
+      "mediaType": "application/octet-stream",
+      "byteSize": 395,
+      "sha256": "9e766e4bef93dbbb80033ef9b2f594546d17254cdc88b6556dda6f957049d118",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/9ee5ebcc32049ea7/券化资源申请路径.pptx",
+      "mediaType": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+      "byteSize": 2024693,
+      "sha256": "9ee5ebcc32049ea70e0bd4bc3f8ffb2e47a78336c16961f35c5ed2d18dd6cb38",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/9ef25b105db90b2e/测试用例和测试报告.xlsx",
+      "mediaType": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      "byteSize": 11509,
+      "sha256": "9ef25b105db90b2ec0170b75e3cd6e103d6818c27879d1aa9331831a94f86080",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/a0c0192029157854/046_沃土计划盲盒活动需求说明书.txt",
+      "mediaType": "text/plain",
+      "byteSize": 21761,
+      "sha256": "a0c01920291578541275e3c7072c6954d5d00a5375426b7495ca93d59dff56f5",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/a103cddabd2621d3/075_商机预约场景_省市支局三级赋能解决方案.txt",
+      "mediaType": "text/plain",
+      "byteSize": 9698,
+      "sha256": "a103cddabd2621d33d82fc7e4190e31d4ea105105c12d4bc43ad323d03faa7e7",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/a13837bcd38668ca/策划宝同步至券多多小程序(2).docx",
+      "mediaType": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "byteSize": 333127,
+      "sha256": "a13837bcd38668caf7fdc4b4d530737b1b67cde0b94c998c349201f5393c3113",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/a2605eff20933013/index.vue",
+      "mediaType": "application/octet-stream",
+      "byteSize": 3634,
+      "sha256": "a2605eff2093301354dc9e7ce190c5fc172da8012125c6738928a1a7b8ae544e",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/a267d087053f1e8c/骑士卡与海报跳转模板配置手册_20261008(2).pptx",
+      "mediaType": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+      "byteSize": 8435793,
+      "sha256": "a267d087053f1e8caf0b9bfc05777467e57060b17f0cf1d551cd2ba45f03d5d8",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/a2f45962e94e7191/策划宝四川业务支撑活动列表接入需求说明书.docx",
+      "mediaType": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "byteSize": 86438,
+      "sha256": "a2f45962e94e7191fcd4bc84d8edc79dfe889f76cf16ab01da432d763100effb",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/a2f8a00599cf1cbe/004_策划宝运营通报5.29.txt",
+      "mediaType": "text/plain",
+      "byteSize": 3991,
+      "sha256": "a2f8a00599cf1cbe08423c5aaae10b4044d5ebebd91435dd99d3191f443497b2",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/a46032b7a4bebf04/【省内需求】两项优化需求-测试报告和测试用例1.xlsx",
+      "mediaType": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      "byteSize": 14680,
+      "sha256": "a46032b7a4bebf04da977e7d4657c858922a0ff920b4014ff19dd420dca2edc7",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/a4f84e3c2e1b9d4c/全智AI营销活动平台配置手册-北京宠粉福利新操作手册(1).pptx",
+      "mediaType": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+      "byteSize": 9216252,
+      "sha256": "a4f84e3c2e1b9d4cde72d277eb528a9dcdfcc446747a2b61ed243d50f8390f6b",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/a5c7f35aa3390531/策划宝AI营销助手Dify工作流产品配置文档-20260602.md",
+      "mediaType": "text/markdown",
+      "byteSize": 23511,
+      "sha256": "a5c7f35aa3390531f9637f224ed067386d55f3c1cf964ec185d84a9837da4141",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/a5d42dc7fa244149/045_极速活动发布沃土计划二期需求说明书.txt",
+      "mediaType": "text/plain",
+      "byteSize": 20910,
+      "sha256": "a5d42dc7fa244149189f08f77e563eb973c283425c89c8b3354825d357a1c27c",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/a7ea63ae3dee1e13/策划宝-模板：全渠中心通行字权限申请表(1).docx",
+      "mediaType": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "byteSize": 16571,
+      "sha256": "a7ea63ae3dee1e13d0cbf780af0eb4a6bf3e09038206efaa9eb17b9cf690960d",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/aa2f817080c9fa51/策划宝AI营销助手需求说明书.docx",
+      "mediaType": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "byteSize": 561829,
+      "sha256": "aa2f817080c9fa51dc62cc446bc9c96ccf8617ae2c5f399a75a407bebb17930e",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/abe1629d2a5ab493/策划宝快照改造需求说明书.docx",
+      "mediaType": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "byteSize": 605884,
+      "sha256": "abe1629d2a5ab493af78407aa7e8902b76ff42d74805722114b5495317118769",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/ac1a1f8d397e0d13/browserActions.ts",
+      "mediaType": "application/octet-stream",
+      "byteSize": 3845,
+      "sha256": "ac1a1f8d397e0d13f014f0a04cd7d29d0cf3543de735771d1af3060a918bea5a",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/ad467dea0d226b9e/云南问卷活动配置与运营需求说明书-商机接派单补充稿.pdf",
+      "mediaType": "application/pdf",
+      "byteSize": 5311237,
+      "sha256": "ad467dea0d226b9e4633adfdb91029a009fb52701df719efc80c6c456b7f23e8",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/aeaffeff1bed763e/广西新增需求docx9.28日(3).txt",
+      "mediaType": "text/plain",
+      "byteSize": 317,
+      "sha256": "aeaffeff1bed763ea3139dd8b591e8c83dc1eab9854e5b7e5e14a04666636886",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/b0273b510cfb626b/dify-terminal-long-image-workflow.md",
+      "mediaType": "text/markdown",
+      "byteSize": 32383,
+      "sha256": "b0273b510cfb626b812e7aec65ea32aaab179fe0506eef726422fe85c6d439ba",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/b228be282191d4cd/策划宝双清单通用能力打通需求说明书.docx",
+      "mediaType": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "byteSize": 2079159,
+      "sha256": "b228be282191d4cd6ee7c921f8af69896922b216c80c7aac0681e7e63c613f6e",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/b48365db6df52e78/策划宝AI营销助手需求说明书-演示版产品逻辑版-20260602.docx",
+      "mediaType": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "byteSize": 857002,
+      "sha256": "b48365db6df52e7846af1d437edabab531666ee762ebb9101cebfb50805cad8d",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/b5df01af56f1e103/营销日历批量审核优化需求说明书.docx",
+      "mediaType": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "byteSize": 389631,
+      "sha256": "b5df01af56f1e103161a0cb686b597128f622090dcd8baa0bb6b5d49982eb1b7",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/b839c3c6c84d791d/067_策划宝运营通报9.11.txt",
+      "mediaType": "text/plain",
+      "byteSize": 3959,
+      "sha256": "b839c3c6c84d791db8ff502010a3f1acee2c42dadd9899f1b3e0a3b8c2ecc841",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/b87f3348fa4ab65e/index.vue",
+      "mediaType": "application/octet-stream",
+      "byteSize": 8016,
+      "sha256": "b87f3348fa4ab65ee31ad17fb602dc5c77d450716dad6d0cc25286aef35a1b09",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/b9cfc63276013a94/057_AI策划宝-营销日历活动页面展示及布局优化_技术设计说明书.txt",
+      "mediaType": "text/plain",
+      "byteSize": 28219,
+      "sha256": "b9cfc63276013a94df1cffcf63c04ee3fa529655f6ec89bee70bf94ad90ad73e",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/ba71e9b7f4883b87/云溪双清单需求-内蒙古V1.1.docx",
+      "mediaType": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "byteSize": 326593,
+      "sha256": "ba71e9b7f4883b8708c00e0ebef7d7e83584eb94b7559c2b1b89a44b94d4619d",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/bace8535b8956785/AgentMascot.vue",
+      "mediaType": "application/octet-stream",
+      "byteSize": 1496,
+      "sha256": "bace8535b89567856f424c73e8356ff3333a27ea059e1c246031a5f2230128f3",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/bc7322d808faffea/全智AI营销活动平台配置手册-抽奖盲盒模版.pptx",
+      "mediaType": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+      "byteSize": 8228243,
+      "sha256": "bc7322d808faffea93953edef24252da448d8d06aea643f0ea1270b6f675c680",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/bc96e380b3fd5098/全智·AI策划宝产品应用场景分享-云南场景痛点解决方案线上触点版.pptx",
+      "mediaType": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+      "byteSize": 15379323,
+      "sha256": "bc96e380b3fd5098841d1dd36b88be49d926223a1a523de0e4183570e7b9562c",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/bd043373dedf1ce4/index.vue",
+      "mediaType": "application/octet-stream",
+      "byteSize": 5610,
+      "sha256": "bd043373dedf1ce4673f01aa6d3d48af90b810d32bf9ce8c04fa656935f5fad0",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/bd68063a0f1a1011/两项优化需求说明书(1).docx",
+      "mediaType": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "byteSize": 1346631,
+      "sha256": "bd68063a0f1a101130d0274386ec217a427d3752f5a872742bd65d8db2750256",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/c19d27800a986a7c/ConfigField.vue",
+      "mediaType": "application/octet-stream",
+      "byteSize": 1226,
+      "sha256": "c19d27800a986a7c004c9805fa4ce35d3feee3738b067094f51c8afb1e053e6f",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/c1fdb01f587b3918/PhonePreview.vue",
+      "mediaType": "application/octet-stream",
+      "byteSize": 9205,
+      "sha256": "c1fdb01f587b3918a72b56e405dbb898d23a81328dc75f7936a65cbe01df5697",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/c2ab8611d092b052/渠道交易快照留存需求-需求设计说明书_v1_2.docx",
+      "mediaType": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "byteSize": 183109,
+      "sha256": "c2ab8611d092b052c9619bbe10580ccedd62e637c6387fa6a1c2e958b3bea91a",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/c4f39daaae574dde/PhonePreview.vue",
+      "mediaType": "application/octet-stream",
+      "byteSize": 13974,
+      "sha256": "c4f39daaae574dde40ddd221b42fef05a289cdb18bde1df21c6981608dcef88e",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/c6169979f92c3ece/两项优化需求说明书.docx",
+      "mediaType": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "byteSize": 1547417,
+      "sha256": "c6169979f92c3ece592c4ecaa6ce95f971482c7333b97dffff303a2b8e2f9fc8",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/c6c9ef470d2b6e0b/策划宝-模板：全渠中心通行字权限申请表(3)(1).docx",
+      "mediaType": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "byteSize": 17197,
+      "sha256": "c6c9ef470d2b6e0b96d78a49df941ba4783b93495422d1beb1abf671e5de9275",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/c70c0c996717aaf1/index.vue",
+      "mediaType": "application/octet-stream",
+      "byteSize": 1908,
+      "sha256": "c70c0c996717aaf1bb9cfa6ffa1fc566ecd42308c6f19a58547a17502792a243",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/cb5396a17cdbb380/策划宝案例库增加AI案例页面(1).docx",
+      "mediaType": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "byteSize": 215503,
+      "sha256": "cb5396a17cdbb380c78c1e6d0d342ade6f286da9d814efd04f6c233d6c32b329",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/cbf3886c811e2ede/策划宝孵化需求独立奖品支持发奖平台活动奖品需求-技术设计说明书(1).docx",
+      "mediaType": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "byteSize": 336186,
+      "sha256": "cbf3886c811e2edebfce54a2b0f25f3cd72685b706d462e73319b788be3c6905",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/cf59dfb01627d972/059_沃土计划盲盒活动需求说明书(2).txt",
+      "mediaType": "text/plain",
+      "byteSize": 21066,
+      "sha256": "cf59dfb01627d97265ef7e9429b9592d2baaa0fa1e087978acc8ad41d36ddf99",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/d13ca376602f69c2/策划宝-江苏省：全渠中心通行字权限申请表(1).docx",
+      "mediaType": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "byteSize": 18373,
+      "sha256": "d13ca376602f69c28ff2c8d63a131d5549ed6f627676b141dd9c93c7e1f45f86",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/d28de269abcc5ea7/三项优化需求说明书1.docx",
+      "mediaType": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "byteSize": 1165413,
+      "sha256": "d28de269abcc5ea757b81e92d0e4fe496130c98b4cc6e2612a618a6fab25f32b",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/d3d4d8161268d69d/078_全智AI营销活动平台配置手册-北京宠粉福利新操作手册(1).txt",
+      "mediaType": "text/plain",
+      "byteSize": 13696,
+      "sha256": "d3d4d8161268d69dd7dbc09ee27eaf3ae2a41a6eec7b4f9cdeb7468139aef80e",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/d44d5bc70dcea09f/内蒙推荐发展人编码配置需求说明书.docx",
+      "mediaType": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "byteSize": 771019,
+      "sha256": "d44d5bc70dcea09fe952425812670c8ab09165ead3122ae0009c544077501c30",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/d57d3ef655ea380a/index.vue",
+      "mediaType": "application/octet-stream",
+      "byteSize": 3006,
+      "sha256": "d57d3ef655ea380ac4d1e6abaa18d2622a6c0d8c5994f94fd1baa0aa7ca23a9f",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/d5de4a986c296965/AI策划宝-领券后跳转券多多小程序卡包需求说明书.docx",
+      "mediaType": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "byteSize": 293481,
+      "sha256": "d5de4a986c296965da47501d7ffd4f0904de162bbbae12adac472e4f0394822d",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/d7beab94a15dfa93/018_策划宝运营通报4.17.txt",
+      "mediaType": "text/plain",
+      "byteSize": 3619,
+      "sha256": "d7beab94a15dfa939e265eb11606ea99f948847b2d00dbfe1e0cdd368cf59e0b",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/d86537e34021cbcd/策划宝AI营销助手需求说明书-演示版按原格式-20260602.docx",
+      "mediaType": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "byteSize": 857181,
+      "sha256": "d86537e34021cbcd43bf8fcbd72167279c8a40a5890fb4061bb4bc09de594f55",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/d873ffcd4f4fdcf7/全智AI营销活动平台配置手册-终端直降.ppt",
+      "mediaType": "application/vnd.ms-powerpoint",
+      "byteSize": 4706304,
+      "sha256": "d873ffcd4f4fdcf738eee1d329ddaf2e296e65c8834ffb839130e3e2599b1a4a",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/d8b5cfe8690d3f33/AI策划宝-领券后跳转券多多小程序卡包-测试用例和测试报告2.xlsx",
+      "mediaType": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      "byteSize": 15922,
+      "sha256": "d8b5cfe8690d3f33d7796b74fbf8dcfc1e776e9d7ee447fe535ed318618724a8",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/d9412f436061f639/策划宝AI营销助手Dify工作流配置需求说明书.docx",
+      "mediaType": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "byteSize": 49064,
+      "sha256": "d9412f436061f6396c55172feb6e6e2c6408310899ac1be40231bdf3086159e1",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/d96204d053d4086a/新增需求10.26(1).txt",
+      "mediaType": "text/plain",
+      "byteSize": 352,
+      "sha256": "d96204d053d4086a8f075a1ce8f13d473eac8879e420cf09e2dd1aa1975c141a",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/d975133b0e555e72/策划宝AI营销助手需求说明书1-最新版-插入总流程图前备份-20260521-093323.docx",
+      "mediaType": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "byteSize": 274515,
+      "sha256": "d975133b0e555e72703e2b49755899a750d852f86401119aa292fed0fac6315b",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/db5898761476ecc5/AI策划宝-贵州签到打卡赢流量活动需求_技术设计说明书.docx",
+      "mediaType": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "byteSize": 3621687,
+      "sha256": "db5898761476ecc5a1f51ff8d9b50d6cb78900d426335e2f0cf842c057743dcc",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/db8925452bcaac3e/MarketingCalendar.tsx",
+      "mediaType": "application/octet-stream",
+      "byteSize": 89876,
+      "sha256": "db8925452bcaac3e209dda01343b5d62e834568270bd92d313a4a01f73fdf517",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/dc144d2d0153f9d8/全智AI营销活动平台配置手册-翼起618活动.ppt",
+      "mediaType": "application/vnd.ms-powerpoint",
+      "byteSize": 6173696,
+      "sha256": "dc144d2d0153f9d8ebf59b242cd1b97363a3747c5c065cf2f0b76684ffe62779",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/dd891283c779f659/沃土计划盲盒活动需求说明书需求说明书.docx",
+      "mediaType": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "byteSize": 41605,
+      "sha256": "dd891283c779f659a96ac6f152be303fe77467f9297a38e04163506cf2ae8cc0",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/de5de7b4f8c1440e/策划宝（云溪AI活动）操作手册（8.5版）.pptx",
+      "mediaType": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+      "byteSize": 32128043,
+      "sha256": "de5de7b4f8c1440e8a63c41d7e5f417070eb603c0a44020ca9aac642d208fefb",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/e197c384a21d9af3/策划宝（云溪AI活动）操作手册260202.pptx",
+      "mediaType": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+      "byteSize": 12944485,
+      "sha256": "e197c384a21d9af3d349a6e86d789a13ccec9336320d11736b9a0a71dce60968",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/e403f76939e1f1d6/策划宝同步至券多多小程序(4).docx",
+      "mediaType": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "byteSize": 333415,
+      "sha256": "e403f76939e1f1d6aba2f447f10908ab1167d702c64b37d0bc8d8b353f171443",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/e48584821f77c0a6/BeijingLongEditor.tsx",
+      "mediaType": "application/octet-stream",
+      "byteSize": 45035,
+      "sha256": "e48584821f77c0a6a411ce923982c70dcce3a23ffb1a3932911b7f20774a6ad5",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/e49090f8e54ed70d/策划宝双清单通用能力打通需求说明书(1).docx",
+      "mediaType": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "byteSize": 1416225,
+      "sha256": "e49090f8e54ed70d60dd1ac17793eabf60171fdf80988c29de8090935e1fb86d",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/e4d712502e64ef80/076_策划宝线上线下协同运营_营优建维_4页职责边界版.txt",
+      "mediaType": "text/plain",
+      "byteSize": 3760,
+      "sha256": "e4d712502e64ef80abb98b185b7f0aaf0f53a7ee557f291bc8a874728b5581a4",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/e57a05972ca00a16/全智AI营销活动平台配置手册-换卡登记.pdf",
+      "mediaType": "application/pdf",
+      "byteSize": 1553997,
+      "sha256": "e57a05972ca00a16f2754f2917ad21b9716f9711b557c7625018becc81673270",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/e6348e5eb619a9d2/策划宝孵化需求独立奖品支持发奖平台活动奖品需求-技术设计说明书.docx",
+      "mediaType": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "byteSize": 336931,
+      "sha256": "e6348e5eb619a9d29cb4ed663301373541c9efae15368df3ade22f29f7a8d1ab",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/eb317e603968b8ca/AI策划宝-一线感知调查问卷需求_技术设计说明书(4).docx",
+      "mediaType": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "byteSize": 1238555,
+      "sha256": "eb317e603968b8ca466651b52e116986c8d3055caef5cf0173e2aaa3f604cee1",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/ed73e8bfd1f3e4aa/050_沃土计划盲盒活动需求说明书(1).txt",
+      "mediaType": "text/plain",
+      "byteSize": 21546,
+      "sha256": "ed73e8bfd1f3e4aa08a134d3484bab4d5c40086bab0140e15b18a3b9331acc6f",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/ee16be7e07edf620/AI策划宝-一线感知调查问卷需求_技术设计说明书(6).docx",
+      "mediaType": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "byteSize": 1231699,
+      "sha256": "ee16be7e07edf6209ae5303f227b9396f943febe3f20bd8aac6fb934a47b257d",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/ee79933981a5b6f7/省内两项优化需求说明书.docx",
+      "mediaType": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "byteSize": 1950708,
+      "sha256": "ee79933981a5b6f7248c6e033775138c6917a9d4a7260d7912cafccedd27465d",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/ef59dbed5818b43c/策划宝AI营销助手Dify工作流配置需求说明书(1)(1).docx",
+      "mediaType": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "byteSize": 50209,
+      "sha256": "ef59dbed5818b43cc0576e3823e1a322b9c5075476fadc7044ef5e63a2b58b43",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/f06fb44c499ed19f/index.vue",
+      "mediaType": "application/octet-stream",
+      "byteSize": 18225,
+      "sha256": "f06fb44c499ed19f19e985912d147bc8a69a5eff01bede701e25d04e9e9d0fda",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/f1a84f7ef45ebecc/券多多跳转需求需求说明书1.docx",
+      "mediaType": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "byteSize": 329865,
+      "sha256": "f1a84f7ef45ebecc9ffccaf4663d370a528a8d3cb7f448f25849bb103500c6cf",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/f2bb4b5dba38e401/京东号卡合规页面第2轮优化需求需求说明书.docx",
+      "mediaType": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "byteSize": 907555,
+      "sha256": "f2bb4b5dba38e40145369efc1bb3d03c5b8a28c4a9e33fc854c91e01b879fa03",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/f2fee83ad3e8bf06/index.vue",
+      "mediaType": "application/octet-stream",
+      "byteSize": 183504,
+      "sha256": "f2fee83ad3e8bf063c70cc9255b9eb742b0a286c3079b94a5dc28c6122c21b43",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/f34cfe0cccada1a4/策划宝AI营销助手需求说明书1-最新版-更新前备份-20260520-110458.docx",
+      "mediaType": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "byteSize": 3136508,
+      "sha256": "f34cfe0cccada1a420fffed1664712b98731d5b5a984813a71b081034d6d8287",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/f3a6d98086a024b6/AgentMascot.vue",
+      "mediaType": "application/octet-stream",
+      "byteSize": 2751,
+      "sha256": "f3a6d98086a024b6e882927a48fad94c3d34d23235667bddaeeffc2aa78cd405",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/f3fe6a0d48d2b398/速抢好福利模版增加短信快照需求说明书3.docx",
+      "mediaType": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "byteSize": 36898,
+      "sha256": "f3fe6a0d48d2b398bf260fe0c64cd961c1754c211ce0c2e45e63bfd7c78d1770",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/f42bea9353a8a343/策划宝-素材库后台操作手册.docx",
+      "mediaType": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "byteSize": 13608685,
+      "sha256": "f42bea9353a8a34346d2272a46ab314d25bee6fc17ca6abbff8983f14b18bdbb",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/f665533da378b9b4/速抢好福利模版增加短信快照需求说明书2.docx",
+      "mediaType": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "byteSize": 36833,
+      "sha256": "f665533da378b9b490aca26af7d2ec7c5b0bc03f9dfd8b6369b302fcb8f1b872",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/f74428dedef21180/云南问卷活动配置与运营需求说明书.docx",
+      "mediaType": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "byteSize": 1548069,
+      "sha256": "f74428dedef21180e4f804d5001ec0660d6dc0ccf25ebb6a61e50f4655bdfa60",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/f74f728764557758/策划宝（云溪AI活动平台）配置手册-抽奖盲盒（新）模版.pptx",
+      "mediaType": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+      "byteSize": 8051383,
+      "sha256": "f74f7287645577584fafa50711c4564aa5019464ef389a34f6e1367eca53e027",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/f7ab054e46d8282b/终端视频星播客链接播放需求说明书1.docx",
+      "mediaType": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "byteSize": 321788,
+      "sha256": "f7ab054e46d8282b2b6382813587f712bd6d2b0dfa0f4f91401ecb455deef9d1",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/f845ea1e1ee6b060/策划宝（云溪AI活动）-模板：全渠中心通行字权限申请表.docx",
+      "mediaType": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "byteSize": 16036,
+      "sha256": "f845ea1e1ee6b06094f7cff7d54389194bcfba50a6bd53439a6658cdfdee1f6a",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/f855fb711c5057cc/CaseLibrary.tsx",
+      "mediaType": "application/octet-stream",
+      "byteSize": 60049,
+      "sha256": "f855fb711c5057ccb0a79cdd7d94132c0dc74dd9b0a0900da7bf5c2a2f477da7",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/fa8e888d9dbe9b15/AI营销助手（督导助手）.html",
+      "mediaType": "text/html",
+      "byteSize": 88130,
+      "sha256": "fa8e888d9dbe9b157ed984ebc876dce9cb355afde1d32c312205c0093dc457d8",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/fb597a61ebbd2bbf/081_沃土计划独立奖品配置发奖中台大转盘奖品(1).txt",
+      "mediaType": "text/plain",
+      "byteSize": 7978,
+      "sha256": "fb597a61ebbd2bbf537883224bba7b98a5d25a705580249f002768b785bd0911",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/fb862cbeb8b49bde/策划宝线下核销券增加门店列表需求V2.0.docx",
+      "mediaType": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "byteSize": 878383,
+      "sha256": "fb862cbeb8b49bde6a6a7d36a166cd735fa59457b70c4916bbb295453121aaec",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/fb8c1a08a943e8d5/全智AI营销活动平台配置手册-问卷抽奖.ppt",
+      "mediaType": "application/vnd.ms-powerpoint",
+      "byteSize": 6062592,
+      "sha256": "fb8c1a08a943e8d5f46c07d040b81dbd7f4e9d52a395d05c88a4818426e6e887",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/fc4a19e22d672253/策划宝AI营销助手Dify工作流配置产品说明书-演示版产品逻辑版-20260602.docx",
+      "mediaType": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "byteSize": 231352,
+      "sha256": "fc4a19e22d67225388fb34009c70be964e09b01de6d809ae51eef4344b7efd60",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/fda51371b43a3ca5/全智·AI策划宝.pptx",
+      "mediaType": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+      "byteSize": 16454235,
+      "sha256": "fda51371b43a3ca5e91943b2671d28694376167320b580df64e82670baa98b17",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/feba34ff07652972/测试用例和测试报告.xlsx",
+      "mediaType": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      "byteSize": 11555,
+      "sha256": "feba34ff076529724d8e4ca2bfef9dec762e9467cb7417f5000e846d6975d451",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/ff06f8b34fa493ff/策划宝双清单通用能力打通需求说明书(2).docx",
+      "mediaType": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "byteSize": 959762,
+      "sha256": "ff06f8b34fa493ff625b5aefb067b6bc41e65a8f46a928a6136c6a73e6915c13",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/originals/ff3094c4f38f9233/策划宝（功能演示）.html",
+      "mediaType": "text/html",
+      "byteSize": 987932,
+      "sha256": "ff3094c4f38f92331fd266085573bbfc02c30c87a9f88036b7f7649a022f424d",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/private-source-index.json",
+      "mediaType": "application/json",
+      "byteSize": 2735,
+      "sha256": "a50fd3bab35727786c9d599f7439521b4d7c1f2ba95235c2267768d3888a3a14",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/prototype-archives/context/manifest.json",
+      "mediaType": "application/json",
+      "byteSize": 86692,
+      "sha256": "6bcea517cebc4a9dfc3ab8547c40408ef4a0aa55df870194123536e77418a42a",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/prototype-archives/coverage-summary.json",
+      "mediaType": "application/json",
+      "byteSize": 166455,
+      "sha256": "3f6602651bf1fbfa70d2e70e9bdf90a44fb54f4569c4982cb65f488c09820c86",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/prototype-archives/image-review/manifest.json",
+      "mediaType": "application/json",
+      "byteSize": 5355106,
+      "sha256": "7835b011d245b198643ad66631e5284c553281b6c1a166eaeefa651e48f93077",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/prototype-archives/interaction-draw/notes/128d29c0fa835854f7d9b1f8557f193239d2fa69696868648cda7999bb9c0845.md",
+      "mediaType": "text/markdown",
+      "byteSize": 1932,
+      "sha256": "7e8cdd6e85dbeb89c8700a80692b958ab8efecdee15fc3423cb994e46b640bb3",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/prototype-archives/interaction-draw/notes/2ceeea145cc011d2ba3cd64c9543c3c0c34f2db4ed0c5fe27788e49bb056d463.md",
+      "mediaType": "text/markdown",
+      "byteSize": 4330,
+      "sha256": "05626d2850b5fe1508b858820770f2b110afdc70ccd9519441b8442f48f7bd9e",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/prototype-archives/interaction-draw/notes/3fb9677a8ad71eaef6b07a8d094032146655ac3a3c5c38223fe2669a709795cb.md",
+      "mediaType": "text/markdown",
+      "byteSize": 2704,
+      "sha256": "7e1dde33971e452195c148ce02c6746bbfff905d0177399f293942e043f859b4",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/prototype-archives/interaction-draw/notes/48688e7e1945552daca238ef9ac2754701faa7f829362aa504412ebe837c1827.md",
+      "mediaType": "text/markdown",
+      "byteSize": 1817,
+      "sha256": "1cb17ccff516d92263a9ca846806f7eadc0d768a3252993d9d968db73f8f1be6",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/prototype-archives/interaction-draw/notes/7986f1f818f6dfacd8215cc216a0d34f5eac7b07471f11ee44a4fcd6a7bce572.md",
+      "mediaType": "text/markdown",
+      "byteSize": 5920,
+      "sha256": "c7d289987bf78f6016b08640c72988dcf0fde5a40e0b5d259b098a51d12adc1b",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/prototype-archives/interaction-draw/notes/d188c5cbb8bf50ac02d8e30a6d0ffea79a71862c7bf5a6469ca0a683da6163af.md",
+      "mediaType": "text/markdown",
+      "byteSize": 5786,
+      "sha256": "dd19d2b9740786ce04a2ef15a27da2e02d85cbdebb6c15758d56f8f12aca3cc9",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/prototype-archives/interaction-guangxi-logs/context-reading-ledger.json",
+      "mediaType": "application/json",
+      "byteSize": 6392,
+      "sha256": "b1f738db97c6a5f8653529829c5307cf73f85cc305cda296f20973bf91c0a8f8",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/prototype-archives/interaction-html-rest-materials/manifest.json",
+      "mediaType": "application/json",
+      "byteSize": 409577,
+      "sha256": "f9998cf03eeb72226c38560248c65840b2299a301920056ec320dfb8e54f8447",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/prototype-archives/interaction-html-rest-materials/page-review-codec-manifest.json",
+      "mediaType": "application/json",
+      "byteSize": 6465,
+      "sha256": "6c4f4f44b3b24bb6ed584fe01f1d9439242e672f6abc9f50b0cea144c508f793",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/prototype-archives/interaction-html-rest-order/manifest.json",
+      "mediaType": "application/json",
+      "byteSize": 459238,
+      "sha256": "770f9e54ea8e1b194be26df62c8cca7ecf0d27397c4d33debf84dc677f51f73b",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/prototype-archives/interaction-html-rest/context-read-ledger.json",
+      "mediaType": "application/json",
+      "byteSize": 269714,
+      "sha256": "f1a0bb1aaf1b3cf0aec418c92149c3d1522c93af3446854818ead6bdec485d2b",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/prototype-archives/interaction-materials-legacy/context-reading-ledger.json",
+      "mediaType": "application/json",
+      "byteSize": 10219,
+      "sha256": "9cb6ef17a7846e562868a29b19ab10de9dea31df5aceb4518e0803240cc2a922",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/prototype-archives/interaction-order-legacy/manifest.json",
+      "mediaType": "application/json",
+      "byteSize": 846524,
+      "sha256": "936b131900666857f245fbb16726d2edc13aac1cc27da9d4dc83894f671d4857",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/prototype-archives/interaction-regional/context-read-ledger.json",
+      "mediaType": "application/json",
+      "byteSize": 32267,
+      "sha256": "a143144496d9dd97422cb621e7f2dd6e718c2fc133d4b38f867d4bf7736891b0",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/prototype-archives/interaction-regional/manifest.json",
+      "mediaType": "application/json",
+      "byteSize": 90566,
+      "sha256": "76831fe5e79bd262fc7d941fd088be16ddf0f463d290ba4c8a32bdb877cb48c7",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/prototype-archives/interaction-template-naming/notes/905af8fe379f3bbc3f6f9246e9ed06c5c3bb960fd5e094e006e21ae6ffb18bdb.md",
+      "mediaType": "text/markdown",
+      "byteSize": 2108,
+      "sha256": "241ed14c6f4392c56f4fbe66774ab5e4ecaedb9df97b4ffc4282df796f114efe",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/prototype-archives/prototype-context-ledger-draw.json",
+      "mediaType": "application/json",
+      "byteSize": 3752,
+      "sha256": "798477d07deff444b825a9f8a8231be5db4ff5162a796eb9b23eb5332cefd361",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/prototype-archives/prototype-interaction-ledger-draw.json",
+      "mediaType": "application/json",
+      "byteSize": 616916,
+      "sha256": "647cb1acccf01629046f468ed3bc46504662abb655f2ed1dbbfec6c3924ca9c0",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/prototype-archives/prototype-interaction-ledger-html-rest.json",
+      "mediaType": "application/json",
+      "byteSize": 1679809,
+      "sha256": "303f09aea50442def827e7a3805bb50d98634fd58388451f94eb924cafc209d0",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/prototype-archives/prototype-interaction-ledger-order-legacy.json",
+      "mediaType": "application/json",
+      "byteSize": 1599212,
+      "sha256": "1dc20156fd4ae03cfeafd0476d20364c8ed7e76ae2b2b8ac6bf95e4c5552a1c5",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/prototype-archives/prototype-interaction-ledger-regional.json",
+      "mediaType": "application/json",
+      "byteSize": 222157,
+      "sha256": "2454c91d9c8a25c34dc10b1fe6908690a0859ac39f368717f41aca42092c2813",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/prototype-archives/prototype-interaction-ledger-template-naming.json",
+      "mediaType": "application/json",
+      "byteSize": 421181,
+      "sha256": "2ce56944baaaa50e284ebbac74c203bbd4c991addfc9d5aa7170d45f43a0e13b",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/prototype-archives/redaction-manifest.json",
+      "mediaType": "application/json",
+      "byteSize": 25550,
+      "sha256": "94d1984165142d62567d32adab86773fce69d5929286b77cae5e92541352950d",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/agent-1-ledger.json",
+      "mediaType": "application/json",
+      "byteSize": 58471,
+      "sha256": "c7d56308b5a6cdaf58e261c70d9274c6f2462df3e162f138f65583e7733b8078",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/agent-1-wechat-ledger.json",
+      "mediaType": "application/json",
+      "byteSize": 82913,
+      "sha256": "fc1550462df7d446f46a86e610138fa28fe8bd9f2b31e84530aa58bee671727a",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/agent-1-wechat/07483e2b039a449f6674cc8166733d39ff322291095e25ff4f95eb73a54414cc.md",
+      "mediaType": "text/markdown",
+      "byteSize": 3208,
+      "sha256": "302bc8ec8316e0bfd72c628e29f393ab3b5b06b7f5ee3bfa4c25ff7fd3c2e762",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/agent-1-wechat/09a991f9e27ccfe79d418c71e6df5dfbde713e05f7a7e2111385196171e508e1.md",
+      "mediaType": "text/markdown",
+      "byteSize": 2622,
+      "sha256": "4a5698210233f57072deb52e13b30cf1fa1156b55ad0648735ba58e45c792e78",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/agent-1-wechat/0e3b97e901cafb74cbf88e4b5a04fe7a8f69fa26872efcc1bb4a18aea20dfd88.md",
+      "mediaType": "text/markdown",
+      "byteSize": 2296,
+      "sha256": "248e6eb12b23e134ecdf0a7f897b0550d16405a95a623460349e65d01efeab14",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/agent-1-wechat/118056866082ffe722610acf55c04cd340654d1e4cbb00bbbd29827c5ad093b7.md",
+      "mediaType": "text/markdown",
+      "byteSize": 2701,
+      "sha256": "0fd9e5eab5e581ba585f679dfb74f2a5a733ba8809a757d305d997ced2e2f2b8",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/agent-1-wechat/11c55ccd1c8b7a5b9b7108c1738ca7d2c6085dc8d4730876e2dbb803f68fa546.md",
+      "mediaType": "text/markdown",
+      "byteSize": 3469,
+      "sha256": "bdfe527a8f8031d6b0f316f1d85d6eef3c290e4153ea9b550ad133a3f382b5d1",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/agent-1-wechat/21aad13b5c496dd565871df035ac1ae51a5e0f196a92710b31fba25fc73522b6.md",
+      "mediaType": "text/markdown",
+      "byteSize": 2334,
+      "sha256": "bd60af1351eb1ce00d81516a3f194b3ad21af270c1f26d925d248fbb9622fc7c",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/agent-1-wechat/268fa346fb5234eb40ffb9a2884dae68b282160beba335f854a624d4b13450bb.md",
+      "mediaType": "text/markdown",
+      "byteSize": 3873,
+      "sha256": "5ce84fad4defc0a05a9610d365dd6ac47c19b8d15e3227510039bbce14dab129",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/agent-1-wechat/2988e448ed681d628b9f8f5339c7ebfa9f4455644428a7894160a1c00b788115.md",
+      "mediaType": "text/markdown",
+      "byteSize": 2092,
+      "sha256": "b122abdc707c97e93e6d0cb23b0b77b37a0b89c9a4abf68f8eab41a44bc30db1",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/agent-1-wechat/2c2e81ac3f96e882ae800137de072191f800812e79d198c88716713281a790e5.md",
+      "mediaType": "text/markdown",
+      "byteSize": 2557,
+      "sha256": "0283c21fd84a7191c6cbbfaf122bc6b9da49a9c321df61a60c1f7036b76f17bd",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/agent-1-wechat/34119c9e518efa2d755215eb21e48e1920e81b60d91261642e8a3126a797b288.md",
+      "mediaType": "text/markdown",
+      "byteSize": 2122,
+      "sha256": "ccd9a85e0f8ef5d7037891d7ef65cf8212b27e8e91d4762137f2c1506169c54f",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/agent-1-wechat/37d2a01fb5491a54a033dcd7184c8c5c12e402f7d754079d2e0ef9e28b12c604.md",
+      "mediaType": "text/markdown",
+      "byteSize": 2545,
+      "sha256": "fe2fc996fb16dccfed455b2cff159a675ea98fbb51bab5ead0186bfdb7aa7a62",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/agent-1-wechat/411a728f0cfd42d665dd4d54a3a7838cb9290e43c6c0e3cc0245322cab6b09ce.md",
+      "mediaType": "text/markdown",
+      "byteSize": 2417,
+      "sha256": "5e6bc68a1bf4cf5019d025465b0bfa7b7bbbab07def90dafe9643cb0627751c6",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/agent-1-wechat/4ba6b5e81dc66b83153ecbf5aa05f70963736b0562201c57750223af875b3b44.md",
+      "mediaType": "text/markdown",
+      "byteSize": 2138,
+      "sha256": "1861ef225bf79a21dd2123305d75629c6548aa44e80786e2a9d178a86d1ad6be",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/agent-1-wechat/657c555e7c1977ab47fdda7887152d6f392040ecdc853917d8fb44412ae6146d.md",
+      "mediaType": "text/markdown",
+      "byteSize": 3339,
+      "sha256": "0a947e2d5dbc53d440794c84b051e56c2282a87d3c67c587b8fdad447f661020",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/agent-1-wechat/664e8352238760745ffebfb8c53da2aa4d60bb3e105c3e01973d172b7026c7b9.md",
+      "mediaType": "text/markdown",
+      "byteSize": 2176,
+      "sha256": "f85c2ac718b7ae76fa61f9521dd5659495a7025cdef786a4d7be9dbe7706d15d",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/agent-1-wechat/670fc4ee45f330bf078ee74d5be298fff4aaa4e13da2f0f7ac8bf11bc837e4f8.md",
+      "mediaType": "text/markdown",
+      "byteSize": 5640,
+      "sha256": "eb98de40dccc2eb637f473708e2910830324f36a450cde29c219098d5cfcc1d6",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/agent-1-wechat/690b20bbe5b6b3aa14409ec2f761cc30e2b68f9f0374ca5c5077dde252f335fa.md",
+      "mediaType": "text/markdown",
+      "byteSize": 3976,
+      "sha256": "f4bc33ffb7366d486a6745625e7d4a8a5bfb137f354436edfd857d69dd7ccfe0",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/agent-1-wechat/6b1b9842b7e5fca121da4395a2b8035ff60a7610ba3688e2d04c71592724feff.md",
+      "mediaType": "text/markdown",
+      "byteSize": 2706,
+      "sha256": "73276ee878abb2fb3c09dd7e1e72bec21a77ad2b2567bf5ef18d607796299c7b",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/agent-1-wechat/716f52f60831dddd8aab24a24df661343e7b5b587f43fa29547dd81b43924737.md",
+      "mediaType": "text/markdown",
+      "byteSize": 2206,
+      "sha256": "5479e29eca8d0ebb268de25673324341b2ed38f2d5da2ab25dde5238969b8657",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/agent-1-wechat/727b204dedf86a571e844fcacde2fabc4be539c69094051dee76de905abe1710.md",
+      "mediaType": "text/markdown",
+      "byteSize": 2765,
+      "sha256": "6fe8db2f9bf81b0953fb354bf0776e160726c043defdeb792d9d0b197f799943",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/agent-1-wechat/72977a1f704db8caabd6c08abe194f7ecec4369bdc8de693cacaf7d846199008.md",
+      "mediaType": "text/markdown",
+      "byteSize": 3273,
+      "sha256": "7a6fac5d956cac5668e9de91c461698abc2e086a8cb8e9583f6ebbb29311e5d7",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/agent-1-wechat/76e4ee20824bddf7988348624e969739b2f242559ab0648e772db036eaee4b2a.md",
+      "mediaType": "text/markdown",
+      "byteSize": 3403,
+      "sha256": "511665dad383a98d0aa627b67517cd6f831a46217beb7d1add5431def897e91e",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/agent-1-wechat/7ef37d150d83bbcf9b2b963f277b675415b1a99fbbef6742c7f6f90cf8ac0096.md",
+      "mediaType": "text/markdown",
+      "byteSize": 1899,
+      "sha256": "98d80cb79471b00c68ef226d294337ffdde207f4ab16888f07eb39c14dc31b80",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/agent-1-wechat/8cdf9d0a5e5a9a1aa4b191c7690054c4c94d000c09a798f811527ca84d5c7df3.md",
+      "mediaType": "text/markdown",
+      "byteSize": 1708,
+      "sha256": "cd822cedcf1a45b8410ace2e22d3237a7a2610daab9c4d0b135daf933a2e0435",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/agent-1-wechat/8cfea9145a5717b61bf281c5d93e022dd299bfbc22d86df211f350a17700e720.md",
+      "mediaType": "text/markdown",
+      "byteSize": 2535,
+      "sha256": "3d3dd7348d5a79e68fd29cbbed5f12fba1825aebd79b0fe3349a9e4c4c605b7b",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/agent-1-wechat/96b76e3c154b3036c994da13fc6e65b6f289664b932b7a1e1e31e59fa2ecd771.md",
+      "mediaType": "text/markdown",
+      "byteSize": 1838,
+      "sha256": "f46491e01b669566881bfebb37f95cab56bc2eca4e959a3f6cceb30f00b39eb4",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/agent-1-wechat/984e1fbd9fe1b2479a68078b7ce5538231eb459a7cf229240956ea42402acf55.md",
+      "mediaType": "text/markdown",
+      "byteSize": 3044,
+      "sha256": "9151d685f5d18922f84a749e88e8f6185a10cd71b7c9d7133b34922f8de2ffd5",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/agent-1-wechat/a13837bcd38668caf7fdc4b4d530737b1b67cde0b94c998c349201f5393c3113.md",
+      "mediaType": "text/markdown",
+      "byteSize": 2395,
+      "sha256": "19ae2e4ba07fb443274ad54ea2fd30d52b54910d5d190bbbb808a2924d509694",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/agent-1-wechat/a7ea63ae3dee1e13d0cbf780af0eb4a6bf3e09038206efaa9eb17b9cf690960d.md",
+      "mediaType": "text/markdown",
+      "byteSize": 2078,
+      "sha256": "98786de50154c2be12ba11616b87fa83a139edb705d59ece63614a3117d3b2a1",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/agent-1-wechat/aa2f817080c9fa51dc62cc446bc9c96ccf8617ae2c5f399a75a407bebb17930e.md",
+      "mediaType": "text/markdown",
+      "byteSize": 2768,
+      "sha256": "7a984056f0d4af339c96322f9e32d03d6b1c37830f048333e9fe22d7cc04ee91",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/agent-1-wechat/b228be282191d4cd6ee7c921f8af69896922b216c80c7aac0681e7e63c613f6e.md",
+      "mediaType": "text/markdown",
+      "byteSize": 2695,
+      "sha256": "9daa8f46ba6da9a985d33d8ccfe864f7ad34a943a64e13184d83134931063b44",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/agent-1-wechat/ba71e9b7f4883b8708c00e0ebef7d7e83584eb94b7559c2b1b89a44b94d4619d.md",
+      "mediaType": "text/markdown",
+      "byteSize": 2137,
+      "sha256": "2404cfc81efa4e45be3927f72f6098a4f3b89759855ee2b716a06c079ecb3e58",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/agent-1-wechat/c6c9ef470d2b6e0b96d78a49df941ba4783b93495422d1beb1abf671e5de9275.md",
+      "mediaType": "text/markdown",
+      "byteSize": 2178,
+      "sha256": "65a6b99926899da47378b9e8b392c2b8e77998ce34f21e0f6c93eacba6d79dff",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/agent-1-wechat/cb5396a17cdbb380c78c1e6d0d342ade6f286da9d814efd04f6c233d6c32b329.md",
+      "mediaType": "text/markdown",
+      "byteSize": 2672,
+      "sha256": "e1718dc5548eb6ff4cf9557d9b9fefb72be6349aaacdfc934eedc88233f10623",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/agent-1-wechat/cbf3886c811e2edebfce54a2b0f25f3cd72685b706d462e73319b788be3c6905.md",
+      "mediaType": "text/markdown",
+      "byteSize": 3483,
+      "sha256": "1f613fdacd9408af35c1b5cf8096e9f8a7964bfb6938a276e3a820e8af0d2b33",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/agent-1-wechat/d13ca376602f69c28ff2c8d63a131d5549ed6f627676b141dd9c93c7e1f45f86.md",
+      "mediaType": "text/markdown",
+      "byteSize": 2251,
+      "sha256": "6c49a49a0a8d5329b54a5fbf6faa6e1ce8a3fa4dfbce7e59bb70132e049b9d78",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/agent-1-wechat/db5898761476ecc5a1f51ff8d9b50d6cb78900d426335e2f0cf842c057743dcc.md",
+      "mediaType": "text/markdown",
+      "byteSize": 3220,
+      "sha256": "7c4e283d3b58be41dfed98dfcae9187bcf0c6610091fb272ad30c41fa0865b14",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/agent-1-wechat/e197c384a21d9af3d349a6e86d789a13ccec9336320d11736b9a0a71dce60968.md",
+      "mediaType": "text/markdown",
+      "byteSize": 5067,
+      "sha256": "a57e6a2706b0a6dc8a3217969a7b4a21b883f575a288abaa86f32eb14c45619a",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/agent-1-wechat/e403f76939e1f1d6aba2f447f10908ab1167d702c64b37d0bc8d8b353f171443.md",
+      "mediaType": "text/markdown",
+      "byteSize": 2431,
+      "sha256": "0b387da1a5909c77953634b30bc3e218a8d924a75ba6fba1b23d6ff441d92627",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/agent-1-wechat/e49090f8e54ed70d60dd1ac17793eabf60171fdf80988c29de8090935e1fb86d.md",
+      "mediaType": "text/markdown",
+      "byteSize": 2539,
+      "sha256": "962c16209f6df2b0c133e4d96d1f5a92a3080023d6f2977bece8e2a6bee417a1",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/agent-1-wechat/e6348e5eb619a9d29cb4ed663301373541c9efae15368df3ade22f29f7a8d1ab.md",
+      "mediaType": "text/markdown",
+      "byteSize": 4052,
+      "sha256": "53d6e1d595d056e4a24a311bc47ad4e9b0aa83a08c4fc7cd2b1deb7a87c44a3b",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/agent-1-wechat/e6d793988e8e4a74381b9997417f7c3700807f3c7295c4178b137fcc9701387f.md",
+      "mediaType": "text/markdown",
+      "byteSize": 2787,
+      "sha256": "528c4ced1a641b279980303e7a3b15a1b6cd8fed070add093355a09b3b2e67f2",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/agent-1-wechat/eb317e603968b8ca466651b52e116986c8d3055caef5cf0173e2aaa3f604cee1.md",
+      "mediaType": "text/markdown",
+      "byteSize": 2984,
+      "sha256": "15c68eb0bd256db74cd24917dbe0bbd4eddbbd1d13ecf5d1c2d64dbdd6f4561f",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/agent-1-wechat/ee16be7e07edf6209ae5303f227b9396f943febe3f20bd8aac6fb934a47b257d.md",
+      "mediaType": "text/markdown",
+      "byteSize": 2848,
+      "sha256": "df681e0b42b5f190d0903ee6b1dffa9717077e9676550fac7621ef085b8021f3",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/agent-1-wechat/ef59dbed5818b43cc0576e3823e1a322b9c5075476fadc7044ef5e63a2b58b43.md",
+      "mediaType": "text/markdown",
+      "byteSize": 3197,
+      "sha256": "1f1d7c450ce14b4e472e2960a0fba9be53ea0d7452da260fb004ef67c410a123",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/agent-1-wechat/embedded-manifest.json",
+      "mediaType": "application/json",
+      "byteSize": 1601,
+      "sha256": "dcd086e1f9c3b2dfd32c73af48cf999f70df116fd43af5d54d6d980583a0f92d",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/agent-1-wechat/embedded/34119c9e518efa2d755215eb21e48e1920e81b60d91261642e8a3126a797b288.docx",
+      "mediaType": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "byteSize": 243649,
+      "sha256": "34119c9e518efa2d755215eb21e48e1920e81b60d91261642e8a3126a797b288",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/agent-1-wechat/fb862cbeb8b49bde6a6a7d36a166cd735fa59457b70c4916bbb295453121aaec.md",
+      "mediaType": "text/markdown",
+      "byteSize": 2634,
+      "sha256": "d3a0131362ba40e354a34835f873afecb1b40eea4efa54ea77b3610dc068613b",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/agent-1-wechat/ff06f8b34fa493ff625b5aefb067b6bc41e65a8f46a928a6136c6a73e6915c13.md",
+      "mediaType": "text/markdown",
+      "byteSize": 2765,
+      "sha256": "8d398923681941a65a71448dd4bf1b31696d4e6716819885e1658b4f2085922c",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/agent-1/0acff00401b185d6a5ba23ad96aaec7a4c3ac87bcd10c44dfbc79e90a2d4e78e.md",
+      "mediaType": "text/markdown",
+      "byteSize": 2834,
+      "sha256": "5e203334c394458fe06f3b81324b471aa11da2f4fd3d60aceb56c59fd02a8684",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/agent-1/0ee2de65051c0ae1815be42d88ed0c10bd94ab99872acb2c72776b0c22ae48bf.md",
+      "mediaType": "text/markdown",
+      "byteSize": 6427,
+      "sha256": "8da65f81b22fd5e50e7710682d4e4887be0d259bdcc421a92c623f20be72f201",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/agent-1/1d75ad6ef4558e641921723f08abbfcdd0753baa39aecf8837a7805840b5da5e.md",
+      "mediaType": "text/markdown",
+      "byteSize": 2543,
+      "sha256": "5163a6e768e6713b7088255442b2bdfbe0f4f89f21d87a268fe603c30a0afa87",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/agent-1/2b6ee96fa84a2d13c833ec28cdc55508c8b38348f2b79757aecdef61897694a3.md",
+      "mediaType": "text/markdown",
+      "byteSize": 5512,
+      "sha256": "49c97f312e238b6b987af2b5ea027cdb3d608d421979b5058b5068c0c1b12ee2",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/agent-1/307cf988b029b2e4e77205e4d0181fd142590157382e04fa65e4f85e1eff1da8.md",
+      "mediaType": "text/markdown",
+      "byteSize": 2291,
+      "sha256": "8c4080655096a04ed7f40aee0a37f16775d4d064063862c8e19cfeb3a19526be",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/agent-1/35359326542a2796b45cfbdd688b0f52192096eafc15c86a5d4fadc5c53151c5.md",
+      "mediaType": "text/markdown",
+      "byteSize": 2345,
+      "sha256": "0ad53dbb3dfd19ff8c79f2fa3cd7df555bfd73882a1b27e2e4ca5bd0e8e18ca5",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/agent-1/3834b6a6e9b8ed1e3b3594cd605d22205123871e9d6188c9c46c896086d9c793.md",
+      "mediaType": "text/markdown",
+      "byteSize": 1710,
+      "sha256": "0404729faa0d6e9a4ce150ec28ea47477318965532c770a15a83ed11448e51e1",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/agent-1/39197f47f030a646b7c72fd4622054848bcee53b807aad58738725f65c675558.md",
+      "mediaType": "text/markdown",
+      "byteSize": 2481,
+      "sha256": "a54b211549b2ceef6a7b683f672a779054a0aa45baeaaf569e39052b599ca930",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/agent-1/46fb31e3ca7fd2d6aa7298ca780a69a30d47758ccd73a7fb58ab0366cf807db8.md",
+      "mediaType": "text/markdown",
+      "byteSize": 2010,
+      "sha256": "1d43707d68f823856d5653d6cdea23e66fc8300a749b90f7a4be5117d8888207",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/agent-1/4721c391a146c08f82c34ae70e1640a2932b5d37cb706a41fd5533e204bd3142.md",
+      "mediaType": "text/markdown",
+      "byteSize": 5166,
+      "sha256": "154121a0e632f57e3eb0da7f8bed49c0573734e9e90f2239a746f683daaab084",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/agent-1/515517efc61fdf2ebd76741f835ece32ddcd193a5a761eedd197c55bb575d620.md",
+      "mediaType": "text/markdown",
+      "byteSize": 4001,
+      "sha256": "0b09c43514527ef2503adb3c12809263b53166d0a94d42e77c3aa822ef7a8ff6",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/agent-1/62aa63a3b2a6c973d0fd407ca8464678190a2713a07dcdb13b09f629209ff664.md",
+      "mediaType": "text/markdown",
+      "byteSize": 2505,
+      "sha256": "8a76177fd5144384de5f12845c88995392007f728f7359c117644e2587831606",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/agent-1/65978c4e8df52f19247ac09a289b5242f576ce84c8bd870aa6187aae8c06bf8b.md",
+      "mediaType": "text/markdown",
+      "byteSize": 3772,
+      "sha256": "b4f85ada970d428d57baa8ac0fcf24a38c376ec7f191cad934afd1f1afd18dcd",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/agent-1/6d661ac262e96853bf22390693f6e68f0c790e1b9ef0c375fa8feca3373cf238.md",
+      "mediaType": "text/markdown",
+      "byteSize": 2467,
+      "sha256": "05197607f69ef28091ec5685aa15b1ad86664e98ff3373c99ebe335f5aa8c6a7",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/agent-1/6f36ea166a6c962e7274d0125c98d02b87cc8c818997819451068ad0493f9da1.md",
+      "mediaType": "text/markdown",
+      "byteSize": 1776,
+      "sha256": "c6c7c0b28108e3f71b3316eee60e1c6afd67e5fec95e833c0c72a152e8ef61b5",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/agent-1/73628984685e0074b36b8521b50e2555e691926b4c318a562891505a6eb24f48.md",
+      "mediaType": "text/markdown",
+      "byteSize": 2289,
+      "sha256": "29dd5ca1e4f3b7c63074e2869d8ec46a037d2567ce7e69d1a95cbc212c1f49ff",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/agent-1/7486f7c3cc1bf940cb33cddb4f9be82c603c9be6718abfd7c56c20a7f39d5ada.md",
+      "mediaType": "text/markdown",
+      "byteSize": 1486,
+      "sha256": "464d3434f3107d8b9b1b2947e1f9a23f3517db4b7604db9877299c21191fdbe3",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/agent-1/7cdca4bf93e448dbd929c073c5632c48588a75c7afc1f911b5b21e43b8e980ae.md",
+      "mediaType": "text/markdown",
+      "byteSize": 2237,
+      "sha256": "0ff40d332d40799e5ec9f7ad91dc339bff779d03e5ea24810615b04c55119999",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/agent-1/81e557e79553e433bf44d7952d8cb2ddb881a05001854e3148dd63edf53ec43f.md",
+      "mediaType": "text/markdown",
+      "byteSize": 2767,
+      "sha256": "531087c9592f2efcbd959bc5770990ae65877cde84c07ab58c0d1e7766fa92f8",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/agent-1/8f9e040557fc875ba760e1194cd35690795ceb582098e97975b21b972db1fb72.md",
+      "mediaType": "text/markdown",
+      "byteSize": 2428,
+      "sha256": "9d558647a711a03defa6bdb410e80914147fe5d58f5bbc4c8d7441935bbdfb18",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/agent-1/9196a62a302163b58e71025e1a7d2fa63f1c95a081a63b252d351f960661503e.md",
+      "mediaType": "text/markdown",
+      "byteSize": 2829,
+      "sha256": "c9166f591e89ba9a43410e965b9d52daf307df47a1d5ef1d78352521cf3341d6",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/agent-1/a2f45962e94e7191fcd4bc84d8edc79dfe889f76cf16ab01da432d763100effb.md",
+      "mediaType": "text/markdown",
+      "byteSize": 2835,
+      "sha256": "aebb9fa4b5f78ff9061c7c92ac724b3d4afc75715a23c613449ff8a5279851ea",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/agent-1/abe1629d2a5ab493af78407aa7e8902b76ff42d74805722114b5495317118769.md",
+      "mediaType": "text/markdown",
+      "byteSize": 2950,
+      "sha256": "da266c5a05d47b64b30b97d70adff07c7a06e6b5de47cd1a9ef951adfe7bb816",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/agent-1/ac1a1f8d397e0d13f014f0a04cd7d29d0cf3543de735771d1af3060a918bea5a.md",
+      "mediaType": "text/markdown",
+      "byteSize": 1378,
+      "sha256": "8aeed5f8f0bffc48ce1ef6c4fab701a14f3aabdee1c272b60892ebfe06c638c6",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/agent-1/b5df01af56f1e103161a0cb686b597128f622090dcd8baa0bb6b5d49982eb1b7.md",
+      "mediaType": "text/markdown",
+      "byteSize": 2393,
+      "sha256": "8c692ddaefebee42cb710e9a93ec19d94d596dd52f2d54d26e87d45608b0462f",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/agent-1/bd68063a0f1a101130d0274386ec217a427d3752f5a872742bd65d8db2750256.md",
+      "mediaType": "text/markdown",
+      "byteSize": 2541,
+      "sha256": "faf264e68879238cdc2eafb3c1bac06ed637f8620c14a25fe32f2ad357ec2b9e",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/agent-1/d28de269abcc5ea757b81e92d0e4fe496130c98b4cc6e2612a618a6fab25f32b.md",
+      "mediaType": "text/markdown",
+      "byteSize": 3096,
+      "sha256": "e4d141cd8a0996e9c9797d919e010551c9656cadce278f4351e4494f85a1ada3",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/agent-1/d3d4d8161268d69dd7dbc09ee27eaf3ae2a41a6eec7b4f9cdeb7468139aef80e.md",
+      "mediaType": "text/markdown",
+      "byteSize": 2518,
+      "sha256": "24f497fc7b8b507bbc621dbe6356ad56fa8c8613b670ac9f597b611bbe751550",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/agent-1/d5de4a986c296965da47501d7ffd4f0904de162bbbae12adac472e4f0394822d.md",
+      "mediaType": "text/markdown",
+      "byteSize": 2775,
+      "sha256": "50ac659e763513471440bf42afcbbd4390b2bf21e4fcdfff15aa908df3d9854a",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/agent-1/d86537e34021cbcd43bf8fcbd72167279c8a40a5890fb4061bb4bc09de594f55.md",
+      "mediaType": "text/markdown",
+      "byteSize": 3366,
+      "sha256": "4628a199fcdd9d4c64613eb8cd290daaabb8edfc8c71ee624d71192334a091ae",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/agent-1/d8b5cfe8690d3f33d7796b74fbf8dcfc1e776e9d7ee447fe535ed318618724a8.md",
+      "mediaType": "text/markdown",
+      "byteSize": 2582,
+      "sha256": "14387327edcd38e0fbd36203aa265e95268115bd2be36aca511c035e3ddb7163",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/agent-1/ed73e8bfd1f3e4aa08a134d3484bab4d5c40086bab0140e15b18a3b9331acc6f.md",
+      "mediaType": "text/markdown",
+      "byteSize": 1873,
+      "sha256": "a34ce58a27f04540d2175ad2e706f2af03497dc67e643e36ec402ef5202c578f",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/agent-1/ee79933981a5b6f7248c6e033775138c6917a9d4a7260d7912cafccedd27465d.md",
+      "mediaType": "text/markdown",
+      "byteSize": 2521,
+      "sha256": "b0a2dac75147c01b7eeb2f02764db75f919e0c6155b58c175059a5e8b47b84e2",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/agent-1/f74428dedef21180e4f804d5001ec0660d6dc0ccf25ebb6a61e50f4655bdfa60.md",
+      "mediaType": "text/markdown",
+      "byteSize": 3611,
+      "sha256": "41c064bf0cc74d8ad1ee2c6ee9c206be879cdda10a270c605f7f8553f138af75",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/agent-1/fa8e888d9dbe9b157ed984ebc876dce9cb355afde1d32c312205c0093dc457d8.md",
+      "mediaType": "text/markdown",
+      "byteSize": 3739,
+      "sha256": "61e6113f7dad22e150b4e70aa2283bd83de041d36fc93c75f3b79fc683fa2440",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/agent-1/fc4a19e22d67225388fb34009c70be964e09b01de6d809ae51eef4344b7efd60.md",
+      "mediaType": "text/markdown",
+      "byteSize": 3029,
+      "sha256": "24143a245683e64eaf6c1ff6ae921451c3524d31dbe299533ab3ee72bc8c5068",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/agent-1/fda51371b43a3ca5e91943b2671d28694376167320b580df64e82670baa98b17.md",
+      "mediaType": "text/markdown",
+      "byteSize": 5538,
+      "sha256": "163958ee4428b54829bfd300f21b2664e72bdeda12fa2ca2b3e3d4886afbe9bf",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/agent-1/feba34ff076529724d8e4ca2bfef9dec762e9467cb7417f5000e846d6975d451.md",
+      "mediaType": "text/markdown",
+      "byteSize": 2255,
+      "sha256": "72d21915adf675227cc4c6752af60f2f18b094494c38ab8bed63bbf6ef9161d8",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/agent-1/ff3094c4f38f92331fd266085573bbfc02c30c87a9f88036b7f7649a022f424d.md",
+      "mediaType": "text/markdown",
+      "byteSize": 8564,
+      "sha256": "f9f6feaf662d0fb0c8009e2e544106180c50dbfc3c50870708a010f91ee08da4",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/agent-2-ledger.json",
+      "mediaType": "application/json",
+      "byteSize": 71291,
+      "sha256": "0a3791260e3bc7b33d0ff4974d4cbbfcc36e7bd6b8a837ece52b3b1fd8b17eb1",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/agent-2-rar-ledger.json",
+      "mediaType": "application/json",
+      "byteSize": 64205,
+      "sha256": "0c6326320af77bdfe2b05e2095b97662259ee4e3aef9622be487805198254f8d",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/agent-2-rar/02e5dc5aa87f7785fd156ef43a902ef4f573f5e27903949504b01f5bd9a3c6af.md",
+      "mediaType": "text/markdown",
+      "byteSize": 3870,
+      "sha256": "8f5e8a4729984685be96347cd9513267dd768eba59530a1369ce32b84f858250",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/agent-2-rar/077799fc7b3e6a97e926e1be50df55b9b19b508a4f52bc9db261430a351ea41a.md",
+      "mediaType": "text/markdown",
+      "byteSize": 4236,
+      "sha256": "9299a19b713e6cb29380acb43ad080adef44ebe2d41ba42e9cc74141d28ec1e6",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/agent-2-rar/0c9fda467fbf42ffe63500a06f16c754f4f1b6ce15037d2d7678326a4d27d8d8.md",
+      "mediaType": "text/markdown",
+      "byteSize": 3821,
+      "sha256": "c9dd383e36d40215149bd577a6fb82ea27ba941d710f44a49d442da9d1584244",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/agent-2-rar/0d49920c4ff2b24ff420a77328261416bc565803e322d3fdfacec42792660182.md",
+      "mediaType": "text/markdown",
+      "byteSize": 3531,
+      "sha256": "e4a4c8b3e074ef792c1cf1bf194c17857ce9431120b273a4434ebc4a4ca770d5",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/agent-2-rar/195d9efabf3856d1f9a3900e60517563b38be2ad206b392c3114750257267261.md",
+      "mediaType": "text/markdown",
+      "byteSize": 4142,
+      "sha256": "bc8410311441b4472d971d4c37f90147e29e1ee7e9f588a96ae6decd518c86a7",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/agent-2-rar/1fdade8854a3dcada58aa5515d3958b4cd77e35f1b819194a52d1c1a6d5d1ff3.md",
+      "mediaType": "text/markdown",
+      "byteSize": 3881,
+      "sha256": "e553b08f75e45cd935b43d6ab2e095515c3f3a893822c774ceac409bd28cf890",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/agent-2-rar/28a3fa106e44c874672a8fbe5101c12800dd9dc85a69a2d1b211392b68066dd5.md",
+      "mediaType": "text/markdown",
+      "byteSize": 3698,
+      "sha256": "0a8acb3c67ea9ce852055d7c6b1f01296c6e0ef6dc11970d4ff80542154a4413",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/agent-2-rar/2d7fd649c7d99041f9099dbfdf3c929b9eecc7dfde56b5272566b4d27c878425.md",
+      "mediaType": "text/markdown",
+      "byteSize": 3791,
+      "sha256": "181c942b7cbadbec7453afaafa4de012d6012144cd9585586d817f48a5f2d891",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/agent-2-rar/31f3efae2afd0375710bc7ae7f00adfb2ce1cddb4adf84909b76d182c85bc2c0.md",
+      "mediaType": "text/markdown",
+      "byteSize": 4450,
+      "sha256": "f0c6af1f1a171cf3079ae1fce5949aca21534cff46eefccda252c370ec450824",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/agent-2-rar/35084afa7a0715190d27c2ac6307d255312a642831dc6c913fc78d4a83064c63.md",
+      "mediaType": "text/markdown",
+      "byteSize": 3634,
+      "sha256": "724b1a97f74d0ca543b0080c141b394952c109358fa4dd7e87caba49b795c96e",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/agent-2-rar/38a108672155864f537327a0f2248dfcc152d84d3ac3a1d046a750b1ea898a57.md",
+      "mediaType": "text/markdown",
+      "byteSize": 4831,
+      "sha256": "0670840d9d5d2bb2b2003103cadf55f841e143e282e3273c51f5acd8f4978f07",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/agent-2-rar/3bb7fbd2b0fc541567aa88e90b330a3c14fbbbf4c83bcb2a7e5cd8a42e744df3.md",
+      "mediaType": "text/markdown",
+      "byteSize": 3853,
+      "sha256": "086836b8d5d917b81c288eb6de36efc56d4d0dceff9cc067843e0d61b9a09a2a",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/agent-2-rar/467d331eb90df85f9c5de346eac3e00c8d219e4125c6da0139abd4330047b285.md",
+      "mediaType": "text/markdown",
+      "byteSize": 5207,
+      "sha256": "ca3e4bd08e15f45246fd092266ea547fa9da094f806b18be019998c22677ae19",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/agent-2-rar/48a7e5234ac88097b464c2f9e5f21b6e60f8d4c7ed465b6c35d1a9a30b5c83dc.md",
+      "mediaType": "text/markdown",
+      "byteSize": 3698,
+      "sha256": "f94a5748877f52dc89657207ba943a71cdc3387da5d334a8c064e035ff735b9c",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/agent-2-rar/491ab82faefa25b3fca0ff937606aef571483fe5b03880977fb1053b50791e51.md",
+      "mediaType": "text/markdown",
+      "byteSize": 3244,
+      "sha256": "278d1f15f94519d99469b6c2ed0757a46061f1db10dd263a7a2aff6d2815ddbc",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/agent-2-rar/58991aa72b161b9e7f52b5b795169a29d3d803d2bddb2e0b369e55199ccb1a27.md",
+      "mediaType": "text/markdown",
+      "byteSize": 3998,
+      "sha256": "d84089b4494c8b80ea759cdfdb71606e0f19a754d2d1813389845becdfe4b0f4",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/agent-2-rar/6302f5ad60452085620cf97fe3f0ad7221589b95e8bae5558f8eeed056e198b2.md",
+      "mediaType": "text/markdown",
+      "byteSize": 4452,
+      "sha256": "0cddeccee924ec216110cb814821c1b3aa3805d66a180bd86e11158e0b6830c3",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/agent-2-rar/67a8dc033a0cb2620e618f9a5f7f93fb70816202f64b8b590ba7dbc3724d961a.md",
+      "mediaType": "text/markdown",
+      "byteSize": 3763,
+      "sha256": "60f0876d626f7d9d32313a8a3d1df77cc900a1071b7145f49ee22298281fedd4",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/agent-2-rar/6b19a0d166021d9985bdb81619328497bd63d42276e2a1d379cfa3e3fb2b6e6f.md",
+      "mediaType": "text/markdown",
+      "byteSize": 3339,
+      "sha256": "43b8d8cbde66653d9c8fb57f399ae83172ef25b2d926534e72384ed6496d340d",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/agent-2-rar/789b1457ac565e8b202d5c723731084a14bedb9bdf944eb1798152e88052cfc7.md",
+      "mediaType": "text/markdown",
+      "byteSize": 4743,
+      "sha256": "96597502a18ab4fb3c82575716d01ca0372b48047000df4b7cf1827c9b4276b5",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/agent-2-rar/7b9534ce2016ebad22d4852e60c604b7de7a53288feecca6946fced5f5869bcf.md",
+      "mediaType": "text/markdown",
+      "byteSize": 4077,
+      "sha256": "d64ec67400a66d66128da317a1f83c833bab2d474769ef7742338e6291df0f3b",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/agent-2-rar/8183a40ab4f482f0cc6d2ea29bd7ac5e9daedbec5d12a6fd47440ab4d1fa5d5f.md",
+      "mediaType": "text/markdown",
+      "byteSize": 5977,
+      "sha256": "cb9cb390234b4a8f97dd537d7801af70098e855f84bc4d14abbc2202ad8e3041",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/agent-2-rar/947c1536217475fe066849ca76415e3d05580d2f092f59f2314c0fd54d8874f3.md",
+      "mediaType": "text/markdown",
+      "byteSize": 3706,
+      "sha256": "c6aa0faf3c938c2a14c6660efe83d0dbb7492b0ba574c314dd04651a1124c540",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/agent-2-rar/9a8c91ed17d7360f158611b9dc00e48754f07f1a1477f309b2279474c73bcc9d.md",
+      "mediaType": "text/markdown",
+      "byteSize": 4218,
+      "sha256": "15b1d54aac2cf35872780705793a68a189dabee942c1e160210b108c430ac57b",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/agent-2-rar/9ee5ebcc32049ea70e0bd4bc3f8ffb2e47a78336c16961f35c5ed2d18dd6cb38.md",
+      "mediaType": "text/markdown",
+      "byteSize": 2570,
+      "sha256": "c936c3eab3212ba286c86af361d5e43cabe81462c2ef1583af1f385765124d0f",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/agent-2-rar/a267d087053f1e8caf0b9bfc05777467e57060b17f0cf1d551cd2ba45f03d5d8.md",
+      "mediaType": "text/markdown",
+      "byteSize": 4739,
+      "sha256": "b8d90f46e63ca66ffaa36f88bdf6bdb95d56780fa623ae83ead30c69a8299468",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/agent-2-rar/a4f84e3c2e1b9d4cde72d277eb528a9dcdfcc446747a2b61ed243d50f8390f6b.md",
+      "mediaType": "text/markdown",
+      "byteSize": 4764,
+      "sha256": "df0fdc7ce037d8f86c884a52ef9be4dbec2c1ea8087b7a815141d716e7c50f76",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/agent-2-rar/a9f63b9b625a650f0597557367c8ac05ee6cea5c14651e34af6a5cdf46bd5c30.md",
+      "mediaType": "text/markdown",
+      "byteSize": 4357,
+      "sha256": "e089067656a36ec02d314e1c1342c431171354b9d0da01876fcd0ccdc117d856",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/agent-2-rar/af0b4dc149592949ae81c37638162d97e6f0db663f8225ef11c0b987763b3748.md",
+      "mediaType": "text/markdown",
+      "byteSize": 4299,
+      "sha256": "25dd9212a855f7332d1d91c0c37758e284f398d4f84ea0f418e38ebfca3fd95f",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/agent-2-rar/bc7322d808faffea93953edef24252da448d8d06aea643f0ea1270b6f675c680.md",
+      "mediaType": "text/markdown",
+      "byteSize": 5243,
+      "sha256": "0d742481a3b883297e9b12aa1e7ed010bea9839d4a5ee6027456cc2072b523cd",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/agent-2-rar/ce45dfc985fff30fdcb64508c25132846945156b347c8715a1ad7a37f85783d4.md",
+      "mediaType": "text/markdown",
+      "byteSize": 4306,
+      "sha256": "a6bb4c461f6c706e3455ab9928df7ea2fa86ede941042bfe7bf5dea7ab67cd83",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/agent-2-rar/d83e2cf0a7d1afc3f73a470dea4c381c7e326cacca6bd7b759dc501c725e7051.md",
+      "mediaType": "text/markdown",
+      "byteSize": 3812,
+      "sha256": "cf2badc4bb9183a3fd85c629baac67ef852a77c094250f7838098e686f7f58b6",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/agent-2-rar/d873ffcd4f4fdcf738eee1d329ddaf2e296e65c8834ffb839130e3e2599b1a4a.md",
+      "mediaType": "text/markdown",
+      "byteSize": 3140,
+      "sha256": "7e06648299e2424f7abb42d4b35058b17a52c191820788b898db4b1f35350ac2",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/agent-2-rar/dc144d2d0153f9d8ebf59b242cd1b97363a3747c5c065cf2f0b76684ffe62779.md",
+      "mediaType": "text/markdown",
+      "byteSize": 3038,
+      "sha256": "c57456e6495d0795817fbcc7d5b0c5c7ded3e9caef70c62c4eedd42d9c9d0aaf",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/agent-2-rar/ddce494ecc93a5b177da3a1f77c8941fcb19a066d34c67f6c03ed8f415ba2540.md",
+      "mediaType": "text/markdown",
+      "byteSize": 3130,
+      "sha256": "a912df42e2b0a9fcf6a1e299e77cc09afde1443247bd9777ef1a5e63c60fd95b",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/agent-2-rar/de5de7b4f8c1440e8a63c41d7e5f417070eb603c0a44020ca9aac642d208fefb.md",
+      "mediaType": "text/markdown",
+      "byteSize": 7427,
+      "sha256": "fa98d332dce7a21717df6e36c7013f3db22a99781d1aea19684f2faa9e5cdd43",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/agent-2-rar/e045da289528d3054b2eaf77d4504dee323759e827e0bd60002e199f35428f1b.md",
+      "mediaType": "text/markdown",
+      "byteSize": 6435,
+      "sha256": "694f790a662fb0052e1cb539ccb0ce846dd80754c801c273be46d16e61568a7d",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/agent-2-rar/e57a05972ca00a16f2754f2917ad21b9716f9711b557c7625018becc81673270.md",
+      "mediaType": "text/markdown",
+      "byteSize": 2605,
+      "sha256": "4dbc80067065d59b9f16f64a45be11ad9292b6e9334f4c7b8399a5d120e93cbd",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/agent-2-rar/ec71d7160ea7deea51bdb4d576dfbc0442181ab55274e1ff0ddb72ee9f497d82.md",
+      "mediaType": "text/markdown",
+      "byteSize": 5103,
+      "sha256": "bbff0946c4759d5205c6c594078f9fb328a963b4e00c2b77f9b0057c1f4fbb8e",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/agent-2-rar/f74f7287645577584fafa50711c4564aa5019464ef389a34f6e1367eca53e027.md",
+      "mediaType": "text/markdown",
+      "byteSize": 4691,
+      "sha256": "b99c1fe6c425cb92d4c75a9c4f70d499bb07f9d0d0042171fbb60dbb7d4fc015",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/agent-2-rar/f845ea1e1ee6b06094f7cff7d54389194bcfba50a6bd53439a6658cdfdee1f6a.md",
+      "mediaType": "text/markdown",
+      "byteSize": 2931,
+      "sha256": "e9fc780db3698aa5536abf6cae0d632f736bd9161156e1e9c4a95b4b58601767",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/agent-2-rar/fb8c1a08a943e8d5f46c07d040b81dbd7f4e9d52a395d05c88a4818426e6e887.md",
+      "mediaType": "text/markdown",
+      "byteSize": 3324,
+      "sha256": "aa529c7210fcc2c96f3e610e8446f7e180549f41cf85a131887305b796ac7f51",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/agent-2-rar/fce373022251239f3739a30f75f28a4cdf82758983d92b28eb6e7d4c585c77e7.md",
+      "mediaType": "text/markdown",
+      "byteSize": 3665,
+      "sha256": "5f6d490452f917fc097ad977e4727787bb0c9b2c4982a8d7ff4c78d0561c9a2d",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/agent-2-rar/fec8be342e505ce61b5d92a2c721228d50456f3b11315f5a5e8f11e9172ea59e.md",
+      "mediaType": "text/markdown",
+      "byteSize": 3524,
+      "sha256": "400ede84d724736061d1d302c9ae7b46824a34a596b0da6e686bf4df5a34d964",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/agent-2-rar/main-media-ledger.json",
+      "mediaType": "application/json",
+      "byteSize": 3703,
+      "sha256": "9fff636719221f55726e34375b9e1f35dba3883c754f7987ec731f9b8a207880",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/agent-2-rar/office-structure.json",
+      "mediaType": "application/json",
+      "byteSize": 296892,
+      "sha256": "a88faf4dc23880caf897e97a4c4986b96ec75acc92d467bea9ea350f9de8786f",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/agent-2-rar/vector-review-ledger.json",
+      "mediaType": "application/json",
+      "byteSize": 8347,
+      "sha256": "215bbb429bfe42325f1984b8153bc75d881543e54b15d48c94f06c8e1e38643d",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/agent-2-vue-ledger.json",
+      "mediaType": "application/json",
+      "byteSize": 28555,
+      "sha256": "4797fa58daa8be83287fcab8ed4cbc80625b5f9f7b9df7ea77d93553cd6eb482",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/agent-2-vue/02d21e6442dd22f00db33afd14af3386bcf41d21495467319a5ffe7625c330e5.md",
+      "mediaType": "text/markdown",
+      "byteSize": 797,
+      "sha256": "8692fec153a1d4e12331d30dde21d2bcb92af39c9a5c55fec25f9c37c9fe97c4",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/agent-2-vue/0e29646d48df7200b12e7ba83eed477958c231cbc920738ee2c9bee4ff4e752f.md",
+      "mediaType": "text/markdown",
+      "byteSize": 955,
+      "sha256": "4e04d48a52e438a33d05f18e12b0c5fee0be42f007cbcb68a5627cb8f06d328e",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/agent-2-vue/1295d9d3fcd6e68af7e00f8c6799ef835e5280e0668147ad1c80f99cf8954435.md",
+      "mediaType": "text/markdown",
+      "byteSize": 1457,
+      "sha256": "533f17fbe5e219afd5ef9db374f4acf4191f5ae80f204212e7a830de9a5c909a",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/agent-2-vue/207b6056ac4439a31cda024a2d37d2582766ca6f4cf3a2c17d7d25c711ccc957.md",
+      "mediaType": "text/markdown",
+      "byteSize": 662,
+      "sha256": "8d89c570e9829934df7463407fa3b4b2922bc3cdc7f756150b1735a9e7a6e8e9",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/agent-2-vue/274068122088953c17d4d9e5e3e1fb09869ed929001d7f2df3123d5f1dd53a3c.md",
+      "mediaType": "text/markdown",
+      "byteSize": 1392,
+      "sha256": "711dd9bb7b68556df200791f73b5daba319b96d264e544f498a4ff3e46a38e7b",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/agent-2-vue/277f637ffcb35b4580048b1ef818dfa444a618dd44124d7ec0f13a65dd495ad2.md",
+      "mediaType": "text/markdown",
+      "byteSize": 3347,
+      "sha256": "c5f945552b604c89eb1f8f6168c30258efc70de41367fcca89969d5075f9da10",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/agent-2-vue/295e05a1f87904ca32c53879f573b662ebc6e46a1a6bc300d0634f5239e01bb3.md",
+      "mediaType": "text/markdown",
+      "byteSize": 939,
+      "sha256": "a8bd07849a76616c11409904ea7d0e9d8b94653881bd08fc6cb3688180dbcf84",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/agent-2-vue/3260136273d912854158c09d33dc4ba52452efde06b6cc346675ead240ad75dc.md",
+      "mediaType": "text/markdown",
+      "byteSize": 891,
+      "sha256": "8c7e67cb346e0636a035b72d2856abd3d92446d8542bd907844904e2feca38cd",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/agent-2-vue/32b5e22db3a87916a1ff6da42d95c3e531a2397bc413bdb21176d6f4b5914a50.md",
+      "mediaType": "text/markdown",
+      "byteSize": 674,
+      "sha256": "ad768d8744ca4ce92d4410e32feab98aacd9293fa9aeb340f2f2ae186cb1b4fe",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/agent-2-vue/376ede196e48ed6057db208744f52f97cbf48968545750b3dbc3cda6718f992e.md",
+      "mediaType": "text/markdown",
+      "byteSize": 1679,
+      "sha256": "4ee05471177ed903ba06a71e77801a40b561eec8537b1e54641e32ca21cda674",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/agent-2-vue/3a1b1f99ea7033ca641f4aeaa2b759c62841ce9a691e8ba50f13a267acee97ee.md",
+      "mediaType": "text/markdown",
+      "byteSize": 1050,
+      "sha256": "4a04114b38a3f61349d0e55fc56b7e524c2a8b0659d69a496705b07c40e422fc",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/agent-2-vue/3b566798deb5af090d28f94b18931adf287ffcb8084bc5a35c9b3e7182dba653.md",
+      "mediaType": "text/markdown",
+      "byteSize": 967,
+      "sha256": "7ad64b93461e7968e55dceeb7f8b36f2aa482b777f5a6d1787d80dfb788b114b",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/agent-2-vue/40abaaff8cb2adbb69e7e752295f3b3af0559cbe2513978cc6cb802034b4e098.md",
+      "mediaType": "text/markdown",
+      "byteSize": 1029,
+      "sha256": "dbaf42a161bba8acb42d0c779feb162ff2608de73d95c4cd908c3c9ee3ea671c",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/agent-2-vue/4a7b1ce3c8da78ca6dc54607c2d8d6c72d2d4065d514ef290b6fd139a9a3eea5.md",
+      "mediaType": "text/markdown",
+      "byteSize": 1178,
+      "sha256": "08734a69464e7350a7625bd57374eda0fbedcd8cf649c44f7864571c195ff823",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/agent-2-vue/4b74746c4c68135052aac336683714cce31a8463a9453caed1b1e498a53ece28.md",
+      "mediaType": "text/markdown",
+      "byteSize": 844,
+      "sha256": "0ba5766e5c509b8a628031e159803963cd12828e915aa016c36f2adca2bb713c",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/agent-2-vue/560c31c529a90497c6487b8f82408ef2e6155e3b658202bdac5d86f10cd4a84f.md",
+      "mediaType": "text/markdown",
+      "byteSize": 733,
+      "sha256": "1a77aa70f5bf492dddc9b183c5cc0cfba156b8c7c918714c392676498227e37c",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/agent-2-vue/5ea04a923b3e0a70ab02e337ca339d5b7d15c6693ca0955087c3ceaeb172c8f0.md",
+      "mediaType": "text/markdown",
+      "byteSize": 795,
+      "sha256": "a0229dad0d23939438710187c1ffeedc6c5ed4878cdf7fd2905d6169f5ab0d93",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/agent-2-vue/64903c38970d07028fb2cd0126e1f8e0f86b4b3417d8e98aafdca5448cf523f1.md",
+      "mediaType": "text/markdown",
+      "byteSize": 865,
+      "sha256": "e4410c320b3abfb703611182e8151a019c34f53e13cdf2759e4ccf87abd2871a",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/agent-2-vue/65104339869f36ad73294e8b69b633625c9ce6332ec4fe3a933ef882a921517a.md",
+      "mediaType": "text/markdown",
+      "byteSize": 1233,
+      "sha256": "1d7579b7a4c5ef6963e017516b5ded544fc797e6e1a8f2feb120d15f09edaa61",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/agent-2-vue/76bf6166dedb30fc3a556563be5f1bf6043093f65cf29523fab600f14e68cbdb.md",
+      "mediaType": "text/markdown",
+      "byteSize": 949,
+      "sha256": "24298d525184b879df32ccf69ea204a974b1e8620592ca3f1cb0957068e37d57",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/agent-2-vue/79642e65fab5c06d4d4def5ab2726da684d0e7ff9776a94ad21372ae2cdc4524.md",
+      "mediaType": "text/markdown",
+      "byteSize": 793,
+      "sha256": "7e207f46074d059fe68c295a57217acc95f46cdaf92137cfae018b5beb10d07f",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/agent-2-vue/8557e80cad0a440545aa3b2c89efae0aa0658a9ae0e1cf3301276a63a07cd2b4.md",
+      "mediaType": "text/markdown",
+      "byteSize": 1719,
+      "sha256": "15f07bc20e6fcee77b6ed74eedbb942c6c00e2842d00e8d74f1b7456460a49c0",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/agent-2-vue/894f510482f8ce5f70c111bee6f37318af34de411fd7880d43ebf7944d430697.md",
+      "mediaType": "text/markdown",
+      "byteSize": 1085,
+      "sha256": "22d2b43e6c09269dd3a8ca4dd470e20597bc4809d860d2e1f62996dfd785ed73",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/agent-2-vue/922bd225ee3ac46152ca7d3a0660e11fed211be7a4c8bfc8621cb177f9cb08dd.md",
+      "mediaType": "text/markdown",
+      "byteSize": 1084,
+      "sha256": "b417309f25aebbf1ffd542ffb1352fde3b4f6a18d7e2c34d9d58f1cbad45245c",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/agent-2-vue/962ebb250764a4a4b61744a0448486b299cbc1047a8e65eef0197e91db300fb6.md",
+      "mediaType": "text/markdown",
+      "byteSize": 3281,
+      "sha256": "0206778cda321d7e6f8d7b0f4d8804910c022865007f4bffdf31d43f58d35cd4",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/agent-2-vue/967c18f8486b157149aec05a50bf7cd74dc67a97d123512930f888b1c86b8a78.md",
+      "mediaType": "text/markdown",
+      "byteSize": 1030,
+      "sha256": "c98710b190d97d8efa41b0f0ec4e713df7fe9b4699726ea8156d59fc5571da41",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/agent-2-vue/9e766e4bef93dbbb80033ef9b2f594546d17254cdc88b6556dda6f957049d118.md",
+      "mediaType": "text/markdown",
+      "byteSize": 635,
+      "sha256": "59df135faf07b82df81a934b9dceb817d94ef10b461d5da698a9662249679872",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/agent-2-vue/a2605eff2093301354dc9e7ce190c5fc172da8012125c6738928a1a7b8ae544e.md",
+      "mediaType": "text/markdown",
+      "byteSize": 871,
+      "sha256": "bf8c220551b4fcd8ed93f0f254bc20d09049983820bf99fc13e325d19589d3d3",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/agent-2-vue/b87f3348fa4ab65ee31ad17fb602dc5c77d450716dad6d0cc25286aef35a1b09.md",
+      "mediaType": "text/markdown",
+      "byteSize": 1172,
+      "sha256": "f792b89861395a1e5be09691c9bdf5d89b3ca6d373bbdb3f5b2a3ca21b8058ed",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/agent-2-vue/bace8535b89567856f424c73e8356ff3333a27ea059e1c246031a5f2230128f3.md",
+      "mediaType": "text/markdown",
+      "byteSize": 717,
+      "sha256": "2f9a76819476526df7b47a078677a042a4ca1526902586f2e59dd9d9c65148e6",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/agent-2-vue/bd043373dedf1ce4673f01aa6d3d48af90b810d32bf9ce8c04fa656935f5fad0.md",
+      "mediaType": "text/markdown",
+      "byteSize": 854,
+      "sha256": "1799320e0829994a62f37e4a50529722f5a85230dcd9a12eb64e1ce1af24bef0",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/agent-2-vue/c19d27800a986a7c004c9805fa4ce35d3feee3738b067094f51c8afb1e053e6f.md",
+      "mediaType": "text/markdown",
+      "byteSize": 787,
+      "sha256": "e8b601218f6d5213e8870a56a83c06327af4ffb0af8b33b117baad0766eb1538",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/agent-2-vue/c1fdb01f587b3918a72b56e405dbb898d23a81328dc75f7936a65cbe01df5697.md",
+      "mediaType": "text/markdown",
+      "byteSize": 1090,
+      "sha256": "dc34e4ba4c90e6c487b4b4811e664d7d89c2dc523df61ce3a84d84da97420f09",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/agent-2-vue/c4f39daaae574dde40ddd221b42fef05a289cdb18bde1df21c6981608dcef88e.md",
+      "mediaType": "text/markdown",
+      "byteSize": 1122,
+      "sha256": "eecd98cf23976512ffbc9696165e9afee634889212d2fff35e209c724bf66582",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/agent-2-vue/c70c0c996717aaf1bb9cfa6ffa1fc566ecd42308c6f19a58547a17502792a243.md",
+      "mediaType": "text/markdown",
+      "byteSize": 820,
+      "sha256": "d90e35b634db724aebe53a44e7a882a84db5db2db5406b1bbb52159896e0c8f5",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/agent-2-vue/d57d3ef655ea380ac4d1e6abaa18d2622a6c0d8c5994f94fd1baa0aa7ca23a9f.md",
+      "mediaType": "text/markdown",
+      "byteSize": 907,
+      "sha256": "0b894939778a2f679522893f8f2f72ae41fade27f8e6ea0af32c458cbe2a48ae",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/agent-2-vue/f06fb44c499ed19f19e985912d147bc8a69a5eff01bede701e25d04e9e9d0fda.md",
+      "mediaType": "text/markdown",
+      "byteSize": 1201,
+      "sha256": "e67a14188f7463b36f2b52ebb569d8d176e32c41799f94ef41fdf24a2680d2f8",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/agent-2-vue/f2fee83ad3e8bf063c70cc9255b9eb742b0a286c3079b94a5dc28c6122c21b43.md",
+      "mediaType": "text/markdown",
+      "byteSize": 6937,
+      "sha256": "03e0aed8d2aae40616beea855b574cf5c268b008b53c58f6ada662ca53e4567f",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/agent-2-vue/f3a6d98086a024b6e882927a48fad94c3d34d23235667bddaeeffc2aa78cd405.md",
+      "mediaType": "text/markdown",
+      "byteSize": 755,
+      "sha256": "23a9050c99cf6240929d70f6c9c697b0b68a5a997bdde700179ee77b24c047ed",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/agent-3-additional-manifest.json",
+      "mediaType": "application/json",
+      "byteSize": 2405,
+      "sha256": "e03d8370b66cb5f0019089de699a8f862d45e6d8d45e8773cbf2576539cb49af",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/agent-3-ledger.json",
+      "mediaType": "application/json",
+      "byteSize": 82146,
+      "sha256": "0b7224da25174d269b5392401ea0ed44241135470520dc6ef9f441251d47f590",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/agent-3-wechat-code/07a93fce1797a0eab1406bd344d0b5df9a6c958c71097435ecfbc07618d22ea7.md",
+      "mediaType": "text/markdown",
+      "byteSize": 1253,
+      "sha256": "1235e879939e7e9e7a2cb855e77c49a48f58a6ed420bba84e780d24facafc903",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/agent-3-wechat-code/62f958e0013aa35faaf1daef48cb030db52721dcaeeb6017c03411aa3f07bb63.md",
+      "mediaType": "text/markdown",
+      "byteSize": 3680,
+      "sha256": "ca745117bb4ccba1be6a01b4a3385bf7e1cf5ed0dfe1f78d6cbba509daea6d61",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/agent-3-wechat-code/7ff3eb006c30bebd2631b6ff2469eb401df2be4620b5f6ed7d087c78cba572a8.md",
+      "mediaType": "text/markdown",
+      "byteSize": 1169,
+      "sha256": "bb9ad69445121c710ec9884686d9346a27f7deb6ffde3f69cc1dfb087fba156b",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/agent-3-wechat-code/8b92bbe349b4a9ceb7ad6edf156a6d2369850a2d43da7ecafdde9d1518955ff2.md",
+      "mediaType": "text/markdown",
+      "byteSize": 6947,
+      "sha256": "aed4f984a15e70cb9fa4f2254779c86cacb3e8baff5e5806f8a963d73683c50c",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/agent-3-wechat-code/8e23504d333caa6a5bf0a7e510a4010a4a768ba0a1372ced987d980641cc03aa.md",
+      "mediaType": "text/markdown",
+      "byteSize": 1332,
+      "sha256": "c3aadeb6c5a9718ae3619baab8c304003b2f44a797b44f28c61bcdd95c42c06f",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/agent-3-wechat-code/asset-380903cddb36e6b600a4ab7a0d7b2de95e32951cc4574ed83f167de713c6491d.md",
+      "mediaType": "text/markdown",
+      "byteSize": 1052,
+      "sha256": "d99c40cf16ccfad1b93ada7d9dbd50ea7d8c5a1942460efba0f778d78fbf30ce",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/agent-3-wechat-code/asset-3e37eed41dc19894d80107b204980fbedf0ec8df44c5aec3716a9b277586134b.md",
+      "mediaType": "text/markdown",
+      "byteSize": 1503,
+      "sha256": "641a5bf1cc54608a86607e00e31d72c8cc47a4504264a53dfaf80eba659076af",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/agent-3-wechat-code/asset-9c26d0a1219e1cb795471bd6374ba579d706f9efba3781db03f40f96d85ff514.md",
+      "mediaType": "text/markdown",
+      "byteSize": 1614,
+      "sha256": "7881c77c34ff137aca8a701c664f32057b90afef8bafad62ae70f829d79d280e",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/agent-3-wechat-code/asset-a333711fdd24112237d7b666dbed4bfe66bd5b74ebc0a33e50305d2ea8b6e54d.md",
+      "mediaType": "text/markdown",
+      "byteSize": 1122,
+      "sha256": "de0667fb6094c26eb28580d812792be5c406bad67fb2852217b23678e810393e",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/agent-3-wechat-code/asset-d88b992587fba6c3583042e429e0a288f75bfecf82f9d51c1f7c96e8ee601cd2.md",
+      "mediaType": "text/markdown",
+      "byteSize": 1741,
+      "sha256": "114dc1ecafc8c061fffa20fc4e101cef07b1cea99b9c829175394312c802a967",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/agent-3-wechat-code/asset-e2e5cb328301d54a06d16f5ccf78724f03f8609d3f9daa496226fffb5405d2e6.md",
+      "mediaType": "text/markdown",
+      "byteSize": 17683,
+      "sha256": "0aa0f5aaacef22b677c72a2e717da01201db90c0acf08f2fc2de001d04ae9e34",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/agent-3-wechat-code/asset-eed78a6d65d08c22f996c7ce1e53293934e4103b288a38a205ad7fdc2bbb9a08.md",
+      "mediaType": "text/markdown",
+      "byteSize": 1285,
+      "sha256": "68586a255877f8c55bcef75685c61d0a3918f4d1c5c7cf4c01728e142fc6ceda",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/agent-3-wechat-code/code-fulltext-coverage.json",
+      "mediaType": "application/json",
+      "byteSize": 5504,
+      "sha256": "adff24015d40ba84ea7ea0fda08c8b87a746fe8ef0e84b656cd46cdb7de161e0",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/agent-3-wechat-code/decoded-assets-ledger.json",
+      "mediaType": "application/json",
+      "byteSize": 24931,
+      "sha256": "27f20466502be01f83d4c2fe70b3bd1b00f67bf0537e8d8058c7751bf490a04c",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/agent-3-wechat-code/e18223bbfa55a515971ae9d0e5f50ffb04b9edd642f153cb8fec46ec6817bcab.md",
+      "mediaType": "text/markdown",
+      "byteSize": 1109,
+      "sha256": "fa94c8e38d1044ab23f3f3751a68f0c1a2ca86ad9085cee7a102d7308ccfbf63",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/agent-3-wechat-code/old-html-css/manifest.json",
+      "mediaType": "application/json",
+      "byteSize": 721289,
+      "sha256": "e32473b8685c923086578f0fb433000e94f5c9901fae5d1983b81e02226a2aa9",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/agent-3-wechat-code/pending-fulltext-manifest.json",
+      "mediaType": "application/json",
+      "byteSize": 167505,
+      "sha256": "d6bc47b751f96c5b94912d4626d21c2bf98eadc94bbf9de7e1c97b2d0028588a",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/agent-3-wechat-code/react-dist-tail-fulltext-ledger.json",
+      "mediaType": "application/json",
+      "byteSize": 17323,
+      "sha256": "327b75f2016c8ec2fc5ef195450dc0623b6423cd5a7a2fd3a99ed1b0e5ecf8a8",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/agent-3/0933d62507b92f02f069fca84d833b6dae99f46235c56b28b11c88132731cbed.md",
+      "mediaType": "text/markdown",
+      "byteSize": 3760,
+      "sha256": "1f5b0cff034e1ee0041320093f17da8c51020fe90718bf64d355effbb4a5ded6",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/agent-3/28ab225539b2c735b7247fe7609e0c03dff07a397f616e1081eeb2bd40902e16.md",
+      "mediaType": "text/markdown",
+      "byteSize": 15211,
+      "sha256": "945c47fab5f954bec0d8f2f548eefefc3397118008b7ed1eeefce3c9593d69ea",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/agent-3/367b6e2baa6936b11d70e5fba80d77f16d83cfb424baec9e6b203dbc3266a2d8.md",
+      "mediaType": "text/markdown",
+      "byteSize": 3313,
+      "sha256": "d5cbb643f003d675bcaaacdf424a793a5881c7c685a17ac16e1b65fbfa5a40d3",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/agent-3/6042a66343a786673d9895b6b07f6f978e1ccc5734aef8f6dfb4df4eb63bef2a.md",
+      "mediaType": "text/markdown",
+      "byteSize": 5459,
+      "sha256": "92b99c61df37202b8d7663d5ccb2b8cc0e38e7820c174a1f0b76a10b5e4ffdc3",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/agent-3/bc96e380b3fd5098841d1dd36b88be49d926223a1a523de0e4183570e7b9562c.md",
+      "mediaType": "text/markdown",
+      "byteSize": 5111,
+      "sha256": "50ce00843053c1c02042d9eaae3cddac9391af1c64b05625f71ab606315c2080",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/agent-3/fe09d43a80023bbfb5d775b46e5119312fc7c834f994ab82ea98c623b8f44cfb.md",
+      "mediaType": "text/markdown",
+      "byteSize": 2417,
+      "sha256": "75debec996e99982834935734ffb7a25eb20e1eb31aad113b9120d8de9a4f580",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/data-ledger.json",
+      "mediaType": "application/json",
+      "byteSize": 13185,
+      "sha256": "a0894a2c39e4f27350396158028ed1d5d8aff6cb60258a6c5d2423e5be02190d",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/data-notes/1b090067e751d8bd3453635c348ab753fb1a0c0948f387094170e5c75c1a81b2.md",
+      "mediaType": "text/markdown",
+      "byteSize": 1011,
+      "sha256": "6cafb5a97a9e6a80d03e43b4392dd384b828b5c0f1d1574d0c992be2afa7fe82",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/data-notes/31d9f3dfa9abf25985c026b4d8074e60c44a04c3e1827aae60f90d1ec91810d1.md",
+      "mediaType": "text/markdown",
+      "byteSize": 1268,
+      "sha256": "a428165d7176e2e7e5e5da6adc69e42770c6da1d18a95ed87c5a6244345d33a9",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/data-notes/35371f4c61e6ba01eb659291cab48650eff852985102086bb6c2f23f56430f87.md",
+      "mediaType": "text/markdown",
+      "byteSize": 1470,
+      "sha256": "9f79aaa319fec89def63ab190bf3e81c08879df23be86192e351caa2528baedd",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/data-notes/3926d27fbf0c5dfd99656345c8a9c7fa87195951986a0b960a6008630dba5a2d.md",
+      "mediaType": "text/markdown",
+      "byteSize": 747,
+      "sha256": "5cd5667db266eb30ef5f61c27485b44c5630ccd8ad0789972398e3259f777305",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/data-notes/475c7a292a712d8faa98fda4e18f852184f00fb1619942dbfd7c25828c5867ee.md",
+      "mediaType": "text/markdown",
+      "byteSize": 1281,
+      "sha256": "bd0105c28b04cb8fa3a9d3642fc19df03895bee824cb0748d9cdec3085a257c3",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/data-notes/493140eb4fad5166b12576002113fc04b0b99eb11068b247b765e37af522fea8.md",
+      "mediaType": "text/markdown",
+      "byteSize": 1065,
+      "sha256": "795b536a2d27fde930ede02904b76aa0c5dae8ed350f5d9bdb2c87dc36bae0a7",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/data-notes/884937428ec8f57a5da737b810e6806bd891ab1e8208ff92a52c544879cc5631.md",
+      "mediaType": "text/markdown",
+      "byteSize": 1106,
+      "sha256": "0e782d77dabcb12ce2e2d583f3b8e99ba36b424447ec7070105eceacc305c309",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/data-notes/9089ac66602981b77ecc69721d27e596b7c53dd221537dc726a113af8c9ce7f7.md",
+      "mediaType": "text/markdown",
+      "byteSize": 1071,
+      "sha256": "6f3773a775aa7cb9e3a9f0ffff0f86293c4f9accad668c4d1df2e8a3daf316fc",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/data-notes/a5207ca1b07a73fb55aa4438819a743f3fc9a7791bf5baa7f1430da3eea15e85.md",
+      "mediaType": "text/markdown",
+      "byteSize": 934,
+      "sha256": "ab1bdc7180f20e55b61a20f9b2934c5d9996ad31f9e82feeddcccd8c791b36a0",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/data-notes/acead6a5203f55fc4f8d304642a6a3c3b06e1a76c193fb9cde8912add6dc9535.md",
+      "mediaType": "text/markdown",
+      "byteSize": 1175,
+      "sha256": "44f4971acff5aa113827e49789775f4e5e1778f9c9f4acc5bf52d5f6addb8132",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/data-notes/ad59b61003242c98b906691461c1ac0ce72946b624a77e6cdbd6f951b2191a4d.md",
+      "mediaType": "text/markdown",
+      "byteSize": 1699,
+      "sha256": "ec2acbfc24d8e1464af2e0dc030d297fc3c73f6d6f7aca24f52003889f727852",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/data-notes/aecbb117d21b72129001d86481816e41ae4043f34bf2364aba1a25a68a762cf2.md",
+      "mediaType": "text/markdown",
+      "byteSize": 1150,
+      "sha256": "7c881b7c84bdb55c47d37baa42c4a65f52dddb8728f726bd406ac9bf2fcff0d3",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/data-notes/dbd06f895e2200a60af381ca5df5b006ac9c1c2c0f0e50cca5ed5ee6a781539d.md",
+      "mediaType": "text/markdown",
+      "byteSize": 1103,
+      "sha256": "5d81bb5945bc0b5f2ecd27864f04e390911ee15d74ef5f1e9d9137fcf1b4f658",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/data-notes/fb2656a13104707ab4ffc9c5c706cc62b22d8b3837c6feab192bd1af2bcb69e5.md",
+      "mediaType": "text/markdown",
+      "byteSize": 902,
+      "sha256": "1f04f29837c0bdb863ca13825e84a83b34c1f6cc890742f029d353e7ca4b25ca",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/data-notes/prototype-remaining-review-plan.json",
+      "mediaType": "application/json",
+      "byteSize": 170002,
+      "sha256": "87d32a877b9b83358c211ef365564df722ff40db16f5900b0669e6de2577ce1b",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/data/manifest.json",
+      "mediaType": "application/json",
+      "byteSize": 21067,
+      "sha256": "3d4f818a253492a953c52c6df5f3f960c1c7ccafd4408a7b4daacf193fea0a8b",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/embedded-manifest.json",
+      "mediaType": "application/json",
+      "byteSize": 122228,
+      "sha256": "5c51e58b13c8ceedefa08934893d52ea04e7c039cc67c7dc59f24473cd9bc9be",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/embedded-reading-ledger.json",
+      "mediaType": "application/json",
+      "byteSize": 20904,
+      "sha256": "727a49f6990ccdfca2481c89b42ec17f546ce661f8f0eee4f47035eeee35199f",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/legacy-ppt-embedded-ledger.json",
+      "mediaType": "application/json",
+      "byteSize": 15563,
+      "sha256": "2a04f10a9db67af4216e56e08076d5357a7c7ae84cce6c58a45052fbad2711f3",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/main-ledger.json",
+      "mediaType": "application/json",
+      "byteSize": 5221,
+      "sha256": "37d68e63deb61211473e07f595c797705a79a4da51b0ae888b595dd10a456faf",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/main/565dc9ba0f4901fc87dd75e0eb5fe6251370f8ecb633e37fc9e9d45dbc7a7293.md",
+      "mediaType": "text/markdown",
+      "byteSize": 2777,
+      "sha256": "6576f0cb9cca27b2567537be1d919a2629be6fd412e567121e1f879c16d20e4c",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/main/902807d30f19eb1d159fee527b5452012f05fcfcc945d76951e963ee5e264f54.md",
+      "mediaType": "text/markdown",
+      "byteSize": 2940,
+      "sha256": "a9842cda6d6209e1e9f16a16bdf17f794a70f389d5a494da8fb2956290c48a3f",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/main/9526d0bfabe6f746922539ef685118f113156a946616419400b69bae611d8c43.md",
+      "mediaType": "text/markdown",
+      "byteSize": 2861,
+      "sha256": "47c5169be0489838b15e7f324cafe99489c5ccfd09ae4857a2671617f2b31e9e",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/main/f57515c1dd26060854128d84d2283f28c35a3ddf4238330b1265697d8a6e2763.md",
+      "mediaType": "text/markdown",
+      "byteSize": 5120,
+      "sha256": "d3d2c9bcb6383d071487289dfb3dd435d9cc002ff6f54f426b39829fc5ca58f3",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/online-knowledge-baseline/manifest.json",
+      "mediaType": "application/json",
+      "byteSize": 123617,
+      "sha256": "f34882e7ab01c50f5c29e3b9f0d3782f8b05dc12db81be576b6ed8d4aed90238",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/partition-2.json",
+      "mediaType": "application/json",
+      "byteSize": 55693,
+      "sha256": "8df20ce613cb903ab6c45aa7fa1bff59ef2e6b614cd4a74d2fb56a4d96d4f07e",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/prototype-interaction-draw-remainder-topic-notes.md",
+      "mediaType": "text/markdown",
+      "byteSize": 6170,
+      "sha256": "c90137b05e70b4a51596df0407b1e6152db49dd7d8a73fc957531cbf523eddc0",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/prototype-interaction-guangxi-logs-topic-notes.md",
+      "mediaType": "text/markdown",
+      "byteSize": 3313,
+      "sha256": "b604456d0fa49a488888828d249b8b8407551bde9d00b7c493e69c0fc0a80106",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/prototype-interaction-ledger-draw-remainder.json",
+      "mediaType": "application/json",
+      "byteSize": 2452160,
+      "sha256": "3c070bb91166962c9cf08892851c80f9be5bf36a3e52dcaadf941e0cb67039aa",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/prototype-interaction-ledger-guangxi-logs.json",
+      "mediaType": "application/json",
+      "byteSize": 1233826,
+      "sha256": "0d4b92cefc80aa25a634b0c54f0247cc8204f9915851ea0d6a25ec6a3b7306ea",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/prototype-interaction-ledger-materials-legacy.json",
+      "mediaType": "application/json",
+      "byteSize": 1240280,
+      "sha256": "3bd7174def90ef9250cb2e3b70cde82b8c1bd7098c639bae174b52b492356ef7",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/prototype-interaction-ledger-materials.json",
+      "mediaType": "application/json",
+      "byteSize": 474903,
+      "sha256": "17b311edf687832eb3ba12c959d678dd173685a9be34e038553a791a04456bbd",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/prototype-interaction-ledger-small.json",
+      "mediaType": "application/json",
+      "byteSize": 80279,
+      "sha256": "8466d96be89621506f0dcd45223d017c12ca28847a88dbc5905b799001fff53c",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/prototype-interaction-small-context-ledger.json",
+      "mediaType": "application/json",
+      "byteSize": 15438,
+      "sha256": "0ec304f33fc1b81df409eefc02416872246f2cb0f5566b8cf1315e8411cbc5b6",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/react-dist-fulltext-notes.md",
+      "mediaType": "text/markdown",
+      "byteSize": 3997,
+      "sha256": "57d5e9a4033ccd8b4bee2af671d7f63a582e5cc5f576e12250b2cb900fab4657",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/review/rp-static/manifest.json",
+      "mediaType": "application/json",
+      "byteSize": 1391108,
+      "sha256": "279fbef0ac0b695a71d93d42c51021a1a1ad122864e0d0fdf9999a989806222e",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/skills/documents-snapshot-manifest.json",
+      "mediaType": "application/json",
+      "byteSize": 13372,
+      "sha256": "c1dd8af6b7184e84fc654292695476be8480d73ea5aef73c1cf9faebb941d317",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/cehuabao-local/source-manifest.json",
+      "mediaType": "application/json",
+      "byteSize": 562089,
+      "sha256": "a20c4725156e9ff0a8669fb7abb36224e71f515ba3bb4527b098fa6df5bfad1c",
+      "symbolicLink": false
+    },
+    {
+      "path": "storage/source-assets/prototype-html/html.zip",
       "mediaType": "application/zip",
-      "byteSize": 109177017,
-      "sha256": "5e1322d9ab4bdafcd58d619f92742736d3f14e59ba8778b7cc72fa28b724453a",
+      "byteSize": 113156166,
+      "sha256": "712790a2dfb02e4fda1f935c155306b2233a191c60d70c28a1b06cf02d9bbf7f",
       "symbolicLink": false
     }
   ]

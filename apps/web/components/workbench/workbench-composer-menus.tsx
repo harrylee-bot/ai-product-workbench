@@ -5,6 +5,7 @@ import {
   CheckCircle2Icon,
   FileTextIcon,
   FrameIcon,
+  Code2Icon,
   Link2Icon,
   ImageIcon,
   MonitorIcon,
@@ -130,9 +131,11 @@ export function ComposerCommandMenu({
 
 export function ComposerAttachmentMenu({
   onSelect,
+  onImportSourcePrototype,
   placement = "project",
 }: {
   onSelect?: (kind: WorkbenchComposerAttachmentKind | "source") => void;
+  onImportSourcePrototype?: () => void;
   placement?: "home" | "project";
 }) {
   const items = [
@@ -175,6 +178,8 @@ export function ComposerAttachmentMenu({
           </button>
         );
       })}
+      {onImportSourcePrototype && <button className="flex h-[38px] w-full items-center gap-[10px] rounded-[9px] px-[10px] text-left text-[13px] font-semibold text-[#f1f3f4] hover:bg-white/[0.06]"
+        onClick={onImportSourcePrototype} role="menuitem" type="button"><Code2Icon className="size-[15px] shrink-0 text-[#d8dce2]" />导入源码原型</button>}
     </motion.div>
   );
 }

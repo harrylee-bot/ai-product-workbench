@@ -4,8 +4,10 @@ import { validationProblem } from "../../common/problem-details.js";
 // Keep the business structure, including ids and cross-references. In particular,
 // nested binding.source and diagram edges are data, not external source metadata.
 const businessFields = {
-  "workbench.prd.v1": ["title", "revision", "assumptions", "sections"],
-  "workbench.prd.v2": ["title", "revision", "cover", "versionHistory", "assumptions", "sections"],
+  "workbench.prd.v1": ["title", "revision", "tableOfContents", "assumptions", "sections"],
+  "workbench.prd.v2": ["title", "revision", "cover", "versionHistory", "tableOfContents", "assumptions", "sections"],
+  "workbench.prd.v3": ["title", "revision", "cover", "versionHistory", "tableOfContents", "assumptions", "sections"],
+  "workbench.prototype-source.v1": ["title", "revision", "summary", "pages"],
   "workbench.prototype.v1": ["title", "revision", "screens", "nodes", "tokens", "variables", "states", "actions", "bindings", "motions"],
 } as const;
 

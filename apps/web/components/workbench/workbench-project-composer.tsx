@@ -1,6 +1,7 @@
 "use client";
 
 import type {
+  ArtifactCreation,
   DesignPresetCatalogItem,
   Run,
   RunArtifactTarget,
@@ -64,6 +65,7 @@ import {
 import type { WorkbenchArtifactOutputKind } from "./workbench-composer-menus";
 import { viewTransition } from "./workbench-motion";
 import { WorkbenchTargetSurfaceControl } from "./workbench-target-surface-control";
+import { WorkbenchSourcePrototypeDialog } from "./workbench-source-prototype-dialog";
 import { WorkbenchImportSourcesDialog } from "./workbench-import-sources-dialog";
 
 type WorkbenchRunSubmitHandler = (
@@ -97,6 +99,7 @@ export type WorkbenchProjectComposerProps = {
   onTargetSurfaceChange: (surface: RunTargetSurface) => void;
   onToggleModel: () => void;
   onSubmitPrompt: WorkbenchRunSubmitHandler;
+  onSourcePrototypeCreated?: (creation: ArtifactCreation) => void | Promise<void>;
   projectMode: WorkbenchProjectMode;
   designPresetItems: DesignPresetCatalogItem[];
   designPresetStatus: "error" | "loading" | "ready";
@@ -128,6 +131,7 @@ export function ProjectComposer({
   onTargetSurfaceChange,
   onToggleModel,
   onSubmitPrompt,
+  onSourcePrototypeCreated,
   designPresetItems,
   designPresetStatus,
   projectMode,
@@ -157,6 +161,7 @@ export function ProjectComposer({
   const [outputKind, setOutputKind] = useWorkbenchProjectState<WorkbenchArtifactOutputKind>(session, () => "both");
   const [customDesignOpen, setCustomDesignOpen] = useWorkbenchProjectState(session, () => false);
   const [importSourcesOpen, setImportSourcesOpen] = useWorkbenchProjectState(session, () => false);
+  const [sourcePrototypeOpen, setSourcePrototypeOpen] = useWorkbenchProjectState(session, () => false);
   const [selectedSourceIds, setSelectedSourceIds] = useWorkbenchProjectState<string[]>(session, () => []);
   const promptInputRef = useRef<HTMLInputElement | null>(null);
   const composerRef = useRef<HTMLDivElement | null>(null);
@@ -544,6 +549,7 @@ export function ProjectComposer({
         )}
             {composerPanel === "attachments" && (
           <ComposerAttachmentMenu
+            onImportSourcePrototype={onSourcePrototypeCreated ? () => { setComposerPanel(null); setSourcePrototypeOpen(true); } : undefined}
             onSelect={(kind) => {
               setComposerPanel(null);
               if (kind === "source") {
@@ -580,6 +586,8 @@ export function ProjectComposer({
         onSubmit={(request) => setSelectedStyle(designStyleSelectionFromCustom(request))}
         open={customDesignOpen}
       />
+      {sourcePrototypeOpen && <WorkbenchSourcePrototypeDialog onCreated={onSourcePrototypeCreated}
+        onOpenChange={setSourcePrototypeOpen} open projectId={projectId} />}
       <WorkbenchImportSourcesDialog
         disabled={disabled}
         onOpenChange={setImportSourcesOpen}

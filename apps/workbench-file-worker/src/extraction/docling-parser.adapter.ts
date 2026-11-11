@@ -34,7 +34,7 @@ const failureSchema = z.object({
   message: z.string().max(4_096),
   retryable: z.boolean(),
   phase: z.enum(["admission", "source_enumeration", "execution", "orchestration"]),
-  details: z.record(z.string()).optional().default({}),
+  details: z.record(z.string(), z.string()).optional().default({}),
 }).strict();
 
 const taskMetaSchema = z.object({
@@ -67,7 +67,7 @@ const resultSchema = z.object({
   document: z.object({
     filename: z.string().min(1).max(1_024),
     md_content: z.string().nullable(),
-    json_content: z.record(z.unknown()).nullable(),
+    json_content: z.record(z.string(), z.unknown()).nullable(),
     html_content: z.string().nullable().optional(),
     text_content: z.string().nullable().optional(),
     doctags_content: z.string().nullable().optional(),
@@ -76,8 +76,8 @@ const resultSchema = z.object({
   status: z.enum(["success", "partial_success"]),
   errors: z.array(errorItemSchema).max(10_000),
   processing_time: z.number().finite().nonnegative(),
-  timings: z.record(z.unknown()),
-  confidence: z.record(z.unknown()).nullable().optional(),
+  timings: z.record(z.string(), z.unknown()),
+  confidence: z.record(z.string(), z.unknown()).nullable().optional(),
 }).strict();
 
 const versionSchema = z.object({

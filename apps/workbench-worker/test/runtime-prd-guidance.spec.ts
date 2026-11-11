@@ -28,7 +28,7 @@ const leadSource = readFileSync(fileURLToPath(new URL(
 )), "utf8");
 
 describe("runtimePrdResultGuidance", () => {
-  it("routes new PRDs to the installed v2 reference without injecting sample business content", () => {
+  it("routes new PRDs to the installed v3 reference without injecting sample business content", () => {
     const guidance = runtimePrdResultGuidance(["prd"], "generate");
 
     expect(runtimePrdResultFixture.artifacts[0]).toMatchObject({
@@ -36,6 +36,7 @@ describe("runtimePrdResultGuidance", () => {
       schemaVersion: 2,
       content: { protocol: "workbench.prd.v2" },
     });
+    expect(guidance).toContain("schemaVersion 3 with protocol workbench.prd.v3");
     expect(guidance).toContain("each required reference exactly once in this order");
     expect(guidance).toContain(
       "/mnt/skills/public/requirement-doc-template/SKILL.md",
@@ -85,15 +86,13 @@ describe("runtimePrdResultGuidance", () => {
     expect(guidance).toContain("端内渠道, 客户端, 消费者端, and 前端 do not prove APP or mini-program loading");
     expect(guidance).toContain("IDs globally unique across the document and every nested IR entity");
     expect(guidance).toContain("requirement/criterion references bidirectional");
-    expect(guidance).toContain("content.sections.businessRequirements.acceptanceCriteria");
-    expect(guidance).toContain("content.sections.businessRequirements.additionalSections");
+    expect(guidance).toContain("content.sections.businessRequirements.functionSections");
+    expect(guidance).toContain("continuous 2.2, 2.3");
+    expect(guidance).toContain("Independently choose neither diagram");
     expect(guidance).toContain("content.sections.degradation");
     expect(guidance).toContain("content.sections.safetyBaseline");
-    expect(guidance).toContain("content.sections.businessRequirements also owns pageLinks, coreRules, and flowAndPages");
-    expect(guidance).toContain("Never put acceptanceCriteria or additionalSections directly under content.sections");
-    expect(guidance).toContain("never put degradation or safetyBaseline directly under content");
-    expect(workbenchSkillSource).toContain("content.sections.businessRequirements.acceptanceCriteria");
-    expect(workbenchSkillSource).toContain("content.sections.businessRequirements.additionalSections");
+    expect(workbenchSkillSource).toContain("content.sections.businessRequirements.functionSections");
+    expect(workbenchSkillSource).toContain("optional");
     expect(workbenchSkillSource).toContain("content.sections.degradation");
     expect(workbenchSkillSource).toContain("content.sections.safetyBaseline");
     expect(workbenchSkillSource).toContain("Never translate or expand `端内` or `端内渠道` into an affirmative APP");

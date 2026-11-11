@@ -4,6 +4,22 @@ import { artifactKnowledgeMarkdown } from "../src/modules/artifacts/artifact-kno
 describe("Finalized artifact business semantics", () => {
   const render = (content: Parameters<typeof artifactKnowledgeMarkdown>[1]) => artifactKnowledgeMarkdown("Confirmed", content);
 
+  it("indexes v3 functional rules and acceptance through the existing knowledge parser", () => {
+    const markdown = render({ protocol: "workbench.prd.v3", title: "功能需求", tableOfContents: {
+      title: "目 录", entries: ["2 业务需求", "2.1 页面链接", "2.2 提交处理"],
+    }, sections: {
+      businessRequirements: { functionSections: [{ id: "submit", title: "2.2 提交处理", diagrams: [], blocks: [
+        { id: "accept", type: "acceptanceCriterion", then: [{ type: "text", text: "重复提交返回同一任务编号" }] },
+      ] }] },
+    }, citations: [{ sourcePath: "private-source-not-for-reindex" }] });
+    const parsed = parseKnowledgeSource({ path: "02-finalized/business.md", content: markdown });
+    expect(parsed.route).toBe("production");
+    expect(markdown).toContain("重复提交返回同一任务编号");
+    expect(markdown).toContain("2.2 提交处理");
+    expect(markdown).toContain('"diagrams": []');
+    expect(markdown).not.toContain("private-source-not-for-reindex");
+  });
+
   it("preserves PRD channel switches, safety decisions, table coordinates and directed edges", () => {
     const original = {
       protocol: "workbench.prd.v2",

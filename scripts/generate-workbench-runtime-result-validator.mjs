@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import { readFile, writeFile } from "node:fs/promises";
+import { fileURLToPath } from "node:url";
 
 import { build } from "esbuild";
 
@@ -16,7 +17,7 @@ const outputPath = new URL(
 const check = process.argv.includes("--check");
 
 const result = await build({
-  entryPoints: [entryPath.pathname],
+  entryPoints: [fileURLToPath(entryPath)],
   bundle: true,
   write: false,
   platform: "node",

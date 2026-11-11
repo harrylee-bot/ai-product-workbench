@@ -20,7 +20,7 @@ export const projectReleaseBoardEdgeSchema = z.object({
   sourceNodeId: opaqueIdSchema,
   targetNodeId: opaqueIdSchema,
   kind: z.string().min(1).max(80),
-  data: z.record(jsonValueSchema),
+  data: z.record(z.string(), jsonValueSchema),
 }).strict();
 
 export const projectReleaseBoardSnapshotSchema = z.object({
@@ -118,7 +118,7 @@ export const projectReleaseArtifactAssetPinSchema = z.object({
   mediaType: z.string().min(1).max(255),
   byteSize: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
   sha256: sha256Schema,
-  metadata: z.record(jsonValueSchema),
+  metadata: z.record(z.string(), jsonValueSchema),
 }).strict();
 
 function refineArtifactAssetPins(

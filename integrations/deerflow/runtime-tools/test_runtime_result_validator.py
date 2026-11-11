@@ -227,7 +227,7 @@ class RuntimeResultValidatorTests(unittest.TestCase):
     def test_keeps_an_ambiguous_union_when_no_schema_version_matches(self) -> None:
         candidate = json.loads(PRD_EXAMPLE_PATH.read_text(encoding="utf-8"))
         draft = candidate["artifacts"][0]
-        draft["schemaVersion"] = 3
+        draft["schemaVersion"] = 4
 
         result = validate_runtime_artifact_draft(draft)
 

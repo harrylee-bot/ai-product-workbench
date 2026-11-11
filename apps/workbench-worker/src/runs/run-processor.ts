@@ -4069,6 +4069,7 @@ function controlledRuntimePublicErrorCode(error: unknown): string | null {
     if (candidate instanceof RuntimeLivenessError) return candidate.code;
     if (candidate instanceof RuntimeCancelledError) return "RUNTIME_CANCELLED";
     if (candidate instanceof RuntimeSubmissionUnknownError) return candidate.code;
+    if (candidate.message === "DEERFLOW_RUN_REQUEST_REJECTED") return candidate.message;
     if (candidate.message === "RUNTIME_PROVIDER_TEMPORARILY_UNAVAILABLE") return candidate.message;
     if (candidate.message === "RUNTIME_RESULT_SUBMISSION_MISSING"
       || candidate.message === "RUNTIME_ARTIFACT_DRAFT_VALIDATION_FAILED") return candidate.message;
@@ -4083,6 +4084,7 @@ export function isRetryableRuntimeError(error: unknown) {
   if (error instanceof RuntimeProviderContentFilterError) return false;
   if (error instanceof RuntimeLivenessError) return error.retryable;
   const controlledCode = controlledRuntimePublicErrorCode(error);
+  if (controlledCode === "DEERFLOW_RUN_REQUEST_REJECTED") return false;
   if (controlledCode === "RUNTIME_RESULT_SUBMISSION_MISSING"
     || controlledCode === "RUNTIME_ARTIFACT_DRAFT_VALIDATION_FAILED") return false;
   if (knownRuntimeProviderStateErrorCode(error)) return false;
@@ -4093,6 +4095,9 @@ export function isRetryableRuntimeError(error: unknown) {
     "ARTIFACT_CONTENT_NOT_JSON",
     "DEERFLOW_RUN_ERROR",
     "DEERFLOW_STREAM_END_INVALID",
+    "DEERFLOW_STREAM_REPLAY_GAP",
+    "DEERFLOW_STREAM_LOCATION_INVALID",
+    "DEERFLOW_STREAM_REQUEST_PATH_INVALID",
     "DEERFLOW_STREAM_MODE_INVALID:",
     "DEERFLOW_STREAM_MODE_MISSING",
     "DEERFLOW_THREAD_BINDING_INVALID",

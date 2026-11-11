@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { writeFile, readFile, rm, mkdir } from "node:fs/promises";
 import { randomBytes } from "node:crypto";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { businessDocumentSchema, prdDocumentV2Schema } from "@workbench/workbench-contracts";
+import { businessDocumentSchema, prdDocumentSchema } from "@workbench/workbench-contracts";
 import { runDocumentExportCommand } from "./document-export-command.js";
 import { fromMarkdown } from "mdast-util-from-markdown";
 import { gfmFromMarkdown } from "mdast-util-gfm";
@@ -35,12 +35,13 @@ export async function docxOutput(request: ExportBuildRequest, execution: ExportB
 
   const businessDocument = artifact.kind === "document" ? businessDocumentSchema.safeParse(artifact.content) : null;
   if (!businessDocument?.success && (!artifact.content || typeof artifact.content !== "object"
-    || !("protocol" in artifact.content) || artifact.content.protocol !== "workbench.prd.v2")) {
-    throw new TerminalExportError("EXPORT_CONTENT_INVALID", "DOCX export only supports PRD v2");
+    || !("protocol" in artifact.content)
+    || !["workbench.prd.v2", "workbench.prd.v3"].includes(String(artifact.content.protocol)))) {
+    throw new TerminalExportError("EXPORT_CONTENT_INVALID", "DOCX export only supports PRD v2 or v3");
   }
-  const parsed = prdDocumentV2Schema.safeParse(artifact.content);
+  const parsed = prdDocumentSchema.safeParse(artifact.content);
   if (!parsed.success && !businessDocument?.success) {
-    throw new TerminalExportError("EXPORT_CONTENT_INVALID", "DOCX export requires a complete valid PRD v2 document");
+    throw new TerminalExportError("EXPORT_CONTENT_INVALID", "DOCX export requires a complete valid PRD v2 or v3 document");
   }
 
   const workDir = join(tmpdir(), `prd-docx-${randomBytes(8).toString("hex")}`);

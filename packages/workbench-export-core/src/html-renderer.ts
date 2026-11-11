@@ -1,3 +1,4 @@
+import { renderSourcePrototype, sourcePrototypeFromArtifact } from "./source-prototype.js";
 import { createHash } from "node:crypto";
 import {
   canonicalJson,
@@ -7,6 +8,7 @@ import {
   orderBoardNodesByHierarchy,
   prdChannelLabels,
   prdDocumentSchema,
+  prdBusinessSections,
   prdSafetyBaselineItems,
   prototypeDocumentSchema,
   resolveExportBoardNodeSelection,
@@ -92,6 +94,15 @@ export function renderExportHtml(request: ExportBuildRequest): RenderedHtml {
     );
   }
   const selected = selectExportArtifacts(request.source.artifacts, request.selection, request.source.boardSnapshot.nodes);
+  if (selected.some((artifact) => artifact.kind === "prototype" && artifact.schemaVersion === 2)) {
+    if (selected.length !== 1 || request.selection.kind !== "artifact") {
+      throw new TerminalExportError("SOURCE_PROTOTYPE_SELECTION_UNSUPPORTED", "Source prototypes must be previewed or exported as one fixed ArtifactVersion");
+    }
+    if (request.selection.screenId !== undefined || request.initialScreenId !== undefined) {
+      throw new TerminalExportError("SOURCE_PROTOTYPE_SCREEN_SELECTION_UNSUPPORTED", "Source prototype navigation belongs to its React application");
+    }
+    return renderSourcePrototype(sourcePrototypeFromArtifact(selected[0]!));
+  }
   const runtimePrototypes: RuntimePrototype[] = [];
   const fontFaces: string[] = [];
   const fontAssets: RenderedFontAsset[] = [];
@@ -367,7 +378,7 @@ function renderPrdArtifact(artifact: ExportArtifactSource) {
 }
 
 function renderPrdDocument(document: PrdDocument) {
-  if (document.protocol === "workbench.prd.v2") {
+  if (document.protocol !== "workbench.prd.v1") {
     const introduction = document.sections.introduction;
     const requirements = document.sections.businessRequirements;
     return `<div class="wb-prd">
@@ -386,12 +397,8 @@ function renderPrdDocument(document: PrdDocument) {
       ${renderPrdChannelTable(introduction.usageScenarios.channelTable)}
       <h2>${escapeHtml(requirements.title)}</h2>
       <div class="wb-prd__block">${renderPrdInlinesHtml(requirements.summary)}</div>
-      ${renderPrdSection(requirements.pageLinks)}
-      ${renderPrdSection(requirements.coreRules)}
-      ${renderPrdSection(requirements.flowAndPages)}
-      ${requirements.flowAndPages.diagrams.map(renderPrdDiagram).join("")}
-      ${renderPrdSection(requirements.acceptanceCriteria)}
-      ${requirements.additionalSections.map((section) => renderPrdSection(section)).join("")}
+      ${prdBusinessSections(document).map((section) => renderPrdSection(section)
+        + ("diagrams" in section ? (section.diagrams ?? []).map(renderPrdDiagram).join("") : "")).join("")}
       <h2>${escapeHtml(document.sections.degradation.title)}</h2>
       <div class="wb-prd__block">${renderPrdInlinesHtml(document.sections.degradation.content)}</div>
       <h2>${escapeHtml(document.sections.safetyBaseline.title)}</h2>
@@ -424,7 +431,7 @@ function renderPrdToc(entries: readonly string[]) {
 }
 
 function renderPrdSection(section: { title: string; blocks: readonly PrdBlock[] }) {
-  return `<section class="wb-prd__section">${section.blocks.map(renderPrdBlock).join("")}</section>`;
+  return `<section class="wb-prd__section"><h3>${escapeHtml(section.title)}</h3>${section.blocks.map(renderPrdBlock).join("")}</section>`;
 }
 
 function renderPrdBlock(block: PrdBlock): string {

@@ -5,6 +5,7 @@ import { createDeterministicZip, type ArchiveEntry } from "./archive.js";
 import { safeFileStem, safeScriptJson } from "./encoding.js";
 import { TerminalExportError } from "./errors.js";
 import { renderExportHtml } from "./html-renderer.js";
+import { exportedReactViteVersion } from "./react-package-toolchain.js";
 import { reactRuntimeModuleSource } from "./runtime-source.js";
 import type { ExportBuildRequest } from "./types.js";
 
@@ -45,7 +46,7 @@ export async function reactOutput(request: ExportBuildRequest) {
     type: "module",
     scripts: { dev: "vite", build: "vite build", preview: "vite preview" },
     dependencies: { react: "19.2.3", "react-dom": "19.2.3" },
-    devDependencies: { vite: "8.0.0" },
+    devDependencies: { vite: exportedReactViteVersion },
   }, null, 2)}\n`;
   const indexHtml = `<!doctype html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escapeForHtml(rendered.title)}</title></head><body><div id="root"></div><script type="module" src="/src/main.jsx"></script></body></html>\n`;
 

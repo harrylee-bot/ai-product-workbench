@@ -84,36 +84,26 @@ for (const sourceHeader of ["X-Workbench-Edge-Client-IP", "X-Workbench-Edge-Auth
     `primary nginx must remove ${sourceHeader} from every upstream request`,
   );
 }
-const caddy = read("deploy/workbench-server-validation.Caddyfile");
 const productionCaddy = read("deploy/workbench-production.Caddyfile");
-assert(
-  caddy.includes("http://{$WORKBENCH_WEB_HOSTNAME}:{$WORKBENCH_ORIGIN_HTTP_PORT} {")
-    && caddy.includes("http://{$WORKBENCH_PREVIEW_HOSTNAME}:{$WORKBENCH_ORIGIN_HTTP_PORT} {")
-    && caddy.includes("{$WORKBENCH_S3_HOSTNAME} {")
-    && caddy.includes("{$WORKBENCH_IDENTITY_HOSTNAME} {")
-    && !caddy.includes("aionbench.com")
-    && !caddy.includes("sslip.io"),
-  "Caddy must derive every public hostname from validated deployment configuration",
-);
 assert(
   productionCaddy.includes("http://{$WORKBENCH_WEB_HOSTNAME}:{$WORKBENCH_ORIGIN_HTTP_PORT}")
     && productionCaddy.includes("http://{$WORKBENCH_PREVIEW_HOSTNAME}:{$WORKBENCH_ORIGIN_HTTP_PORT}")
     && !productionCaddy.includes("127.0.0.1:9100")
     && !productionCaddy.includes("127.0.0.1:5556"),
-  "production Caddy must contain only Web/Preview routes and no validation-only services",
+  "production Caddy must derive Web/Preview hostnames and contain no local services",
 );
-const trustedHandler = caddy.indexOf("handle @trustedEdge");
-const canonicalOverwrite = caddy.indexOf(
+const trustedHandler = productionCaddy.indexOf("handle @trustedEdge");
+const canonicalOverwrite = productionCaddy.indexOf(
   `header_up ${canonicalHeader} {http.request.header.X-Workbench-Edge-Client-IP}`,
 );
-const denyFallback = caddy.lastIndexOf("respond 403");
+const denyFallback = productionCaddy.lastIndexOf("respond 403");
 for (const fragment of [
   "bind {$WORKBENCH_ORIGIN_WIREGUARD_IP}",
   "remote_ip {$WORKBENCH_EDGE_WIREGUARD_IP}",
   "header X-Workbench-Edge-Auth {$WORKBENCH_EDGE_ORIGIN_AUTH_SECRET}",
   "header_up -X-Workbench-Edge-Auth",
 ]) {
-  assert(caddy.includes(fragment), `Caddy auth proxy contract is missing: ${fragment}`);
+  assert(productionCaddy.includes(fragment), `Caddy auth proxy contract is missing: ${fragment}`);
 }
 assert(
   trustedHandler !== -1
@@ -122,10 +112,10 @@ assert(
   "Caddy may derive the canonical IP only inside the authenticated Edge handler and must deny fallback traffic",
 );
 assert(
-  count(caddy, `header_up ${canonicalHeader}`) === 1,
+  count(productionCaddy, `header_up ${canonicalHeader}`) === 1,
   "Caddy must have exactly one canonical client IP writer",
 );
-for (const source of [caddy, productionCaddy]) {
+for (const source of [productionCaddy]) {
   assert(
     count(source, "bind {$WORKBENCH_ORIGIN_WIREGUARD_IP}") === 2
       && count(source, "remote_ip {$WORKBENCH_EDGE_WIREGUARD_IP}") === 2
@@ -173,7 +163,6 @@ assert(
   "the trusted internal JWKS client must use a separate canonical IP bucket",
 );
 
-const preflight = read("deploy/workbench-server-preflight.sh");
 const productionPreflight = read("deploy/workbench-production-preflight.sh");
 for (const fragment of [
   "require_env WORKBENCH_AUTH_CLIENT_IP_HEADER",
@@ -184,7 +173,7 @@ for (const fragment of [
   "WORKBENCH_EDGE_WIREGUARD_IP=\"$edge_wireguard_ip\"",
   "WORKBENCH_EDGE_ORIGIN_AUTH_SECRET=\"$edge_origin_auth_secret\"",
 ]) {
-  assert(preflight.includes(fragment), `server preflight is missing: ${fragment}`);
+  assert(productionPreflight.includes(fragment), `production preflight is missing: ${fragment}`);
 }
 assert(
   productionPreflight.includes("require_env WORKBENCH_ENTERPRISE_SSO_ENABLED")
@@ -193,18 +182,16 @@ assert(
   "production preflight must require the SSO policy without unconditionally requiring OIDC or an identity host",
 );
 assert(
-  preflight.includes("validate_private_ipv4 WORKBENCH_EDGE_WIREGUARD_IP")
-    && preflight.includes("Edge and origin WireGuard IPs must differ")
-    && preflight.includes('sh "$ORIGIN_WIREGUARD_PREFLIGHT_SCRIPT"')
+  productionPreflight.includes("validate_private_ipv4 WORKBENCH_EDGE_WIREGUARD_IP")
+    && productionPreflight.includes("Edge and origin WireGuard IPs must differ")
     && productionPreflight.includes('sh "$ORIGIN_WIREGUARD_PREFLIGHT_SCRIPT"'),
   "origin preflights must require distinct RFC1918 peers and validate the WireGuard route contract",
 );
 const deployScript = read("deploy/server-deploy.sh");
 assert(
-  deployScript.includes('PREFLIGHT_SCRIPT="$WORKBENCH_PREFLIGHT_SCRIPT"')
-    && deployScript.includes('PREFLIGHT_SCRIPT="$APP_DIR/deploy/workbench-server-preflight.sh"')
-    && deployScript.includes('PREFLIGHT_SCRIPT="$APP_DIR/deploy/workbench-production-preflight.sh"'),
-  "the deploy entrypoint must select a fail-closed preflight for validation and production",
+  deployScript.includes('PREFLIGHT_SCRIPT="$APP_DIR/deploy/workbench-production-preflight.sh"')
+    && !deployScript.includes("WORKBENCH_PREFLIGHT_SCRIPT"),
+  "the deploy entrypoint must use the single direct production preflight",
 );
 
 const caddyReload = read("deploy/workbench-caddy-reload.sh");
@@ -224,14 +211,9 @@ assert(
   [
     "WORKBENCH_WEB_HOSTNAME",
     "WORKBENCH_PREVIEW_HOSTNAME",
-    "WORKBENCH_S3_HOSTNAME",
   ].every((name) => caddyReload.includes(name))
     && caddyReload.includes("WORKBENCH_WEB_ORIGIN"),
-  "Caddy reload must derive and persist every application public hostname",
-);
-assert(
-  caddyReload.includes('if [ -n "$identity_hostname" ]'),
-  "Caddy reload must persist the validation-only identity hostname conditionally",
+  "Caddy reload must derive and persist the Web and Preview hostnames",
 );
 for (const fragment of [
   "workbench-origin-edge.env",

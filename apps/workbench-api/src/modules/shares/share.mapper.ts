@@ -6,6 +6,8 @@ import {
   publicArtifactVersionDetailSchema,
   publicDesignSystemDocumentSchema,
   publicPrototypeDocumentSchema,
+  sourcePrototypeDocumentSchema,
+  projectPublicSourcePrototypeDocument,
   shareGrantSchema,
   type ProjectReleaseArtifactPin,
   type PublicArtifactVersionDetail,
@@ -93,7 +95,9 @@ export function mapPublicArtifactVersion(
   if (record.contentBlob === null) {
     if (record.content === null) throw new Error("PUBLIC_SHARE_ARTIFACT_CONTENT_MISSING");
     const content = pin.kind === "prototype"
-      ? publicPrototypeDocumentSchema.parse(sanitizePublicJson(prototypeDocumentSchema.parse(record.content)))
+      ? record.schemaVersion === 2
+        ? projectPublicSourcePrototypeDocument(sourcePrototypeDocumentSchema.parse(record.content))
+        : publicPrototypeDocumentSchema.parse(sanitizePublicJson(prototypeDocumentSchema.parse(record.content)))
       : pin.kind === "design_system"
         ? publicDesignSystemDocumentSchema.parse(sanitizePublicJson(designSystemDocumentSchema.parse(record.content)))
         : sanitizePublicJson(record.content);

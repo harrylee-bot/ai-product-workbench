@@ -18,7 +18,7 @@ import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
 
-import { canonicalJson } from "./verify-workbench-reproducibility.mjs";
+import { canonicalJson } from "./canonical-json.mjs";
 
 export const RECOVERY_DRILL_PLAN_SCHEMA_VERSION = "workbench.postgres-recovery-drill-plan.v1";
 export const RECOVERY_DRILL_RECEIPT_SCHEMA_VERSION = "workbench.postgres-recovery-drill-receipt.v1";

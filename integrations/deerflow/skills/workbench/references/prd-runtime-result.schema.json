@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "产品工作台 PRD Runtime Result",
   "description": "Read x-workbench-authoring-guide: business-neutral transport fragments only; validation constraints are unchanged.",
-  "x-workbench-authoring-guide": {"purpose":"STRUCTURE ONLY, not a complete publishable draft. Replace replace-* IDs and REPLACE_WITH_* text from authorized facts; omit this guide. No business facts, citations, channels, degradation or safety decisions are supplied.","constructionRules":["blocks contains complete objects, never strings, IDs, schema names, $ref or JSON-encoded objects. Put text in typed inline objects with marks: [].","Scope needs a bulletList/orderedList. Each items entry is {id,content}, without type. Never append item IDs or section names as sibling blocks.","Table rows require typed cells; requirement/goal objects belong in sibling blocks. IDs are unique; columnId references a declared column.","sectionFields lists required fields for four sibling objects under content.sections; none belongs inside introduction. Keep every section during repairs.","Copy fixed schema literals verbatim, including all intro characters. JSON \\n decodes to a real newline; never double-escape. TOC punctuation follows the canonical structure reference.","Replace markers and pass all checks. After rejection, use repair:{baseCandidateChecksum,operations:[{op,path,value?,from?}]} with the latest ACK checksum; add/replace/remove/move only erroneous fields, never artifact identity."],"requiredDocumentFields":["protocol","documentId","title","revision","cover","versionHistory","tableOfContents","assumptions","citations","sections"],"sectionFields":{"introduction":["title","background","scope","usageScenarios"],"businessRequirements":["title","summary","pageLinks","coreRules","flowAndPages","acceptanceCriteria"],"degradation":["title","applicable","content"],"safetyBaseline":["title","intro","rows"]},"fixedLiterals":{"content.sections.safetyBaseline.intro":"该部分内容为必填项，请按照如下表格中的内容先进行自查，并按照如下要求完善需求文档：\n1、如选择“是”，代表本项自查内容已符合安全要求，需要提供截图违依据\n2、如选择“否”，代表本项自查内容暂时不符合安全要求，请在需求文档中增加本部分内容安全改造需求，并发送网信安需求评审邮件，附上本需求文档用于安全评审；\n3、如选择“不涉及”，代表本项目各项需求安全基线均不涉及，则无需召开网信安需求评审会。\n建议：该表格请业务人员和开发人员共同参与自查并填写。"},"typedBlockFragments":{"paragraph":{"id":"replace-paragraph-id","type":"paragraph","content":[{"type":"text","text":"REPLACE_WITH_TEXT","marks":[]}]},"bulletList":{"id":"replace-list-id","type":"bulletList","items":[{"id":"replace-item-a","content":[{"type":"text","text":"REPLACE_WITH_SCOPE_A","marks":[]}]},{"id":"replace-item-b","content":[{"type":"text","text":"REPLACE_WITH_SCOPE_B","marks":[]}]}]},"table":{"id":"replace-table-id","type":"table","columns":[{"id":"replace-column-a","label":"REPLACE_WITH_LABEL_A"},{"id":"replace-column-b","label":"REPLACE_WITH_LABEL_B"}],"rows":[{"id":"replace-row-id","cells":[{"columnId":"replace-column-a","content":[{"type":"text","text":"REPLACE_WITH_CELL_A","marks":[]}]},{"columnId":"replace-column-b","content":[{"type":"text","text":"REPLACE_WITH_CELL_B","marks":[]}]}]}]}}},
+  "x-workbench-authoring-guide": {"purpose":"STRUCTURE ONLY, not a complete publishable draft. Replace replace-* IDs and REPLACE_WITH_* text from authorized facts; omit this guide. No business facts, citations, channels, degradation or safety decisions are supplied.","constructionRules":["blocks contains complete objects, never strings, IDs, schema names, $ref or JSON-encoded objects. Put text in typed inline objects with marks: [].","Scope needs a bulletList/orderedList. Each items entry is {id,content}, without type. Never append item IDs or section names as sibling blocks.","Table rows require typed cells; requirement/goal objects belong in sibling blocks. IDs are unique; columnId references a declared column.","sectionFields lists required fields for four sibling objects under content.sections. businessRequirements owns pageLinks and functionSections; each function section has stable id, continuously numbered actual function title from 2.2, blocks, and optional diagrams. Keep authored sections during repairs.","Choose diagrams independently by explanatory value: neither, flow, architecture, or both. Each section allows at most one of each kind; number all figures in reading order. Embed testable acceptance in functional sections or a later numbered section; interface impact is optional and source-bound.","Copy fixed schema literals verbatim, including all intro characters. JSON \\n decodes to a real newline; never double-escape. TOC punctuation follows the canonical structure reference.","Replace markers and pass all checks. After rejection, use repair:{baseCandidateChecksum,operations:[{op,path,value?,from?}]} with the latest ACK checksum; add/replace/remove/move only erroneous fields, never artifact identity."],"requiredDocumentFields":["protocol","documentId","title","revision","cover","versionHistory","tableOfContents","assumptions","citations","sections"],"sectionFields":{"introduction":["title","background","scope","usageScenarios"],"businessRequirements":["title","summary","pageLinks","functionSections"],"degradation":["title","applicable","content"],"safetyBaseline":["title","intro","rows"]},"fixedLiterals":{"content.sections.safetyBaseline.intro":"该部分内容为必填项，请按照如下表格中的内容先进行自查，并按照如下要求完善需求文档：\n1、如选择“是”，代表本项自查内容已符合安全要求，需要提供截图违依据\n2、如选择“否”，代表本项自查内容暂时不符合安全要求，请在需求文档中增加本部分内容安全改造需求，并发送网信安需求评审邮件，附上本需求文档用于安全评审；\n3、如选择“不涉及”，代表本项目各项需求安全基线均不涉及，则无需召开网信安需求评审会。\n建议：该表格请业务人员和开发人员共同参与自查并填写。"},"typedBlockFragments":{"paragraph":{"id":"replace-paragraph-id","type":"paragraph","content":[{"type":"text","text":"REPLACE_WITH_TEXT","marks":[]}]},"bulletList":{"id":"replace-list-id","type":"bulletList","items":[{"id":"replace-item-a","content":[{"type":"text","text":"REPLACE_WITH_SCOPE_A","marks":[]}]},{"id":"replace-item-b","content":[{"type":"text","text":"REPLACE_WITH_SCOPE_B","marks":[]}]}]},"table":{"id":"replace-table-id","type":"table","columns":[{"id":"replace-column-a","label":"REPLACE_WITH_LABEL_A"},{"id":"replace-column-b","label":"REPLACE_WITH_LABEL_B"}],"rows":[{"id":"replace-row-id","cells":[{"columnId":"replace-column-a","content":[{"type":"text","text":"REPLACE_WITH_CELL_A","marks":[]}]},{"columnId":"replace-column-b","content":[{"type":"text","text":"REPLACE_WITH_CELL_B","marks":[]}]}]}]}}},
   "type": "object",
   "properties": {
     "protocol": {
@@ -18,7 +18,7 @@
     "artifacts": {
       "type": "array",
       "items": {
-        "$ref": "#/$defs/RuntimeArtifactDraftPrdV2"
+        "$ref": "#/$defs/RuntimeArtifactDraftPrdV3"
       },
       "minItems": 1,
       "maxItems": 1
@@ -163,30 +163,6 @@
         "given",
         "when",
         "then"
-      ],
-      "additionalProperties": false
-    },
-    "PrdAdditionalBusinessSection": {
-      "type": "object",
-      "properties": {
-        "title": {
-          "type": "string",
-          "minLength": 5,
-          "maxLength": 240,
-          "pattern": "^2\\.(?:[5-9]|[1-9]\\d+)\\s+\\S"
-        },
-        "blocks": {
-          "type": "array",
-          "items": {
-            "$ref": "#/$defs/PrdBlock"
-          },
-          "minItems": 1,
-          "maxItems": 500
-        }
-      },
-      "required": [
-        "title",
-        "blocks"
       ],
       "additionalProperties": false
     },
@@ -445,61 +421,6 @@
       ],
       "additionalProperties": false
     },
-    "PrdDiagram": {
-      "type": "object",
-      "properties": {
-        "id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 96,
-          "pattern": "^[A-Za-z][A-Za-z0-9]*(?:[-_.:][A-Za-z0-9]+)*$"
-        },
-        "kind": {
-          "type": "string",
-          "enum": [
-            "productFlow",
-            "productArchitecture"
-          ]
-        },
-        "title": {
-          "type": "string",
-          "enum": [
-            "图1 产品流程图",
-            "图2 产品架构图"
-          ]
-        },
-        "description": {
-          "type": "string",
-          "minLength": 20,
-          "maxLength": 2000
-        },
-        "nodes": {
-          "type": "array",
-          "items": {
-            "$ref": "#/$defs/PrdDiagramNode"
-          },
-          "minItems": 4,
-          "maxItems": 40
-        },
-        "edges": {
-          "type": "array",
-          "items": {
-            "$ref": "#/$defs/PrdDiagramEdge"
-          },
-          "minItems": 3,
-          "maxItems": 80
-        }
-      },
-      "required": [
-        "id",
-        "kind",
-        "title",
-        "description",
-        "nodes",
-        "edges"
-      ],
-      "additionalProperties": false
-    },
     "PrdDiagramEdge": {
       "type": "object",
       "properties": {
@@ -568,13 +489,13 @@
       ],
       "additionalProperties": false
     },
-    "PrdDocumentV2": {
+    "PrdDocumentV3": {
       "type": "object",
       "properties": {
         "protocol": {
           "type": "string",
           "enum": [
-            "workbench.prd.v2"
+            "workbench.prd.v3"
           ]
         },
         "documentId": {
@@ -635,8 +556,8 @@
                 "minLength": 1,
                 "maxLength": 240
               },
-              "minItems": 11,
-              "maxItems": 61
+              "minItems": 9,
+              "maxItems": 58
             }
           },
           "required": [
@@ -813,103 +734,20 @@
                   ],
                   "additionalProperties": false
                 },
-                "coreRules": {
-                  "type": "object",
-                  "properties": {
-                    "title": {
-                      "type": "string",
-                      "enum": [
-                        "2.2 核心业务规则/功能说明"
-                      ]
-                    },
-                    "blocks": {
-                      "type": "array",
-                      "items": {
-                        "$ref": "#/$defs/PrdBlock"
-                      },
-                      "minItems": 1,
-                      "maxItems": 500
-                    }
-                  },
-                  "required": [
-                    "title",
-                    "blocks"
-                  ],
-                  "additionalProperties": false
-                },
-                "flowAndPages": {
-                  "type": "object",
-                  "properties": {
-                    "title": {
-                      "type": "string",
-                      "enum": [
-                        "2.3 核心流程/状态/页面要求"
-                      ]
-                    },
-                    "blocks": {
-                      "type": "array",
-                      "items": {
-                        "$ref": "#/$defs/PrdBlock"
-                      },
-                      "minItems": 1,
-                      "maxItems": 500
-                    },
-                    "diagrams": {
-                      "type": "array",
-                      "items": {
-                        "$ref": "#/$defs/PrdDiagram"
-                      },
-                      "minItems": 2,
-                      "maxItems": 2
-                    }
-                  },
-                  "required": [
-                    "title",
-                    "blocks",
-                    "diagrams"
-                  ],
-                  "additionalProperties": false
-                },
-                "acceptanceCriteria": {
-                  "type": "object",
-                  "properties": {
-                    "title": {
-                      "type": "string",
-                      "enum": [
-                        "2.4 验收标准"
-                      ]
-                    },
-                    "blocks": {
-                      "type": "array",
-                      "items": {
-                        "$ref": "#/$defs/PrdBlock"
-                      },
-                      "minItems": 1,
-                      "maxItems": 500
-                    }
-                  },
-                  "required": [
-                    "title",
-                    "blocks"
-                  ],
-                  "additionalProperties": false
-                },
-                "additionalSections": {
+                "functionSections": {
                   "type": "array",
                   "items": {
-                    "$ref": "#/$defs/PrdAdditionalBusinessSection"
+                    "$ref": "#/$defs/PrdV3FunctionSection"
                   },
-                  "maxItems": 50,
-                  "default": []
+                  "minItems": 1,
+                  "maxItems": 50
                 }
               },
               "required": [
                 "title",
                 "summary",
                 "pageLinks",
-                "coreRules",
-                "flowAndPages",
-                "acceptanceCriteria"
+                "functionSections"
               ],
               "additionalProperties": false
             },
@@ -990,7 +828,7 @@
         "sections"
       ],
       "additionalProperties": false,
-      "description": "PRD v2 cover, fixed sections, channel table, diagrams, degradation plan, safety baseline, placeholders, tables, and IR references are validated by the runtime Zod contract."
+      "description": "PRD v3 uses contiguous function-specific sections, optional typed diagrams, embedded or later acceptance, and the same complete safety, table, citation and semantic-reference validation."
     },
     "PrdFlowBlock": {
       "type": "object",
@@ -1716,6 +1554,60 @@
       ],
       "additionalProperties": false
     },
+    "PrdTemplateDiagram": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 96,
+          "pattern": "^[A-Za-z][A-Za-z0-9]*(?:[-_.:][A-Za-z0-9]+)*$"
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "productFlow",
+            "productArchitecture"
+          ]
+        },
+        "title": {
+          "type": "string",
+          "minLength": 4,
+          "maxLength": 240,
+          "pattern": "^图[1-9]\\d*\\s+\\S"
+        },
+        "description": {
+          "type": "string",
+          "minLength": 20,
+          "maxLength": 2000
+        },
+        "nodes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/PrdDiagramNode"
+          },
+          "minItems": 2,
+          "maxItems": 40
+        },
+        "edges": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/PrdDiagramEdge"
+          },
+          "minItems": 1,
+          "maxItems": 80
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "title",
+        "description",
+        "nodes",
+        "edges"
+      ],
+      "additionalProperties": false
+    },
     "PrdTextInline": {
       "type": "object",
       "properties": {
@@ -1738,6 +1630,45 @@
         "type",
         "text",
         "marks"
+      ],
+      "additionalProperties": false
+    },
+    "PrdV3FunctionSection": {
+      "type": "object",
+      "properties": {
+        "title": {
+          "type": "string",
+          "minLength": 5,
+          "maxLength": 240,
+          "pattern": "^2\\.(?:[2-9]|[1-9]\\d+)\\s+\\S"
+        },
+        "blocks": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/PrdBlock"
+          },
+          "minItems": 1,
+          "maxItems": 500
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 96,
+          "pattern": "^[A-Za-z][A-Za-z0-9]*(?:[-_.:][A-Za-z0-9]+)*$"
+        },
+        "diagrams": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/PrdTemplateDiagram"
+          },
+          "maxItems": 2,
+          "default": []
+        }
+      },
+      "required": [
+        "title",
+        "blocks",
+        "id"
       ],
       "additionalProperties": false
     },
@@ -1823,7 +1754,7 @@
       ],
       "additionalProperties": false
     },
-    "RuntimeArtifactDraftPrdV2": {
+    "RuntimeArtifactDraftPrdV3": {
       "type": "object",
       "properties": {
         "title": {
@@ -1848,11 +1779,11 @@
         "schemaVersion": {
           "type": "number",
           "enum": [
-            2
+            3
           ]
         },
         "content": {
-          "$ref": "#/$defs/PrdDocumentV2"
+          "$ref": "#/$defs/PrdDocumentV3"
         },
         "operation": {
           "oneOf": [

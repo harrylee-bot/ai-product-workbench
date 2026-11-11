@@ -82,6 +82,7 @@ export class SafeHttpClient {
   ) {}
 
   async get(url: string, options: SafeHttpOptions): Promise<SafeHttpResponse> {
+    if (options.signal?.aborted) throw abortError(options.signal);
     let current = validateUrl(url);
     for (let redirect = 0; ; redirect += 1) {
       const response = await this.getOnce(current, options);
@@ -105,6 +106,7 @@ export class SafeHttpClient {
   }
 
   private async getOnce(url: URL, options: SafeHttpOptions): Promise<SafeHttpResponse> {
+    if (options.signal?.aborted) throw abortError(options.signal);
     const hostname = networkHostname(url.hostname);
     if (options.allowedHosts && !options.allowedHosts.some((host) => host.toLowerCase() === hostname.toLowerCase())) {
       throw new TerminalImportError("IMPORT_HOST_NOT_ALLOWED", "The remote source host is not allowed for this provider");
@@ -114,6 +116,7 @@ export class SafeHttpClient {
     });
     const publicAddresses = addresses.filter(({ address }) => isPublicAddress(address));
     if (publicAddresses.length === 0) throw new TerminalImportError("IMPORT_PRIVATE_ADDRESS", "The source resolves to a private or reserved network address");
+    if (options.signal?.aborted) throw abortError(options.signal);
     const pinned = publicAddresses[0]!;
     const requestImpl = this.transport(url.protocol as "http:" | "https:");
     return new Promise((resolve, reject) => {
@@ -167,9 +170,17 @@ export class SafeHttpClient {
       const abort = () => req.destroy(options.signal?.reason instanceof Error ? options.signal.reason : new Error("IMPORT_ABORTED"));
       options.signal?.addEventListener("abort", abort, { once: true });
       req.once("close", () => options.signal?.removeEventListener("abort", abort));
+      if (options.signal?.aborted) {
+        abort();
+        return;
+      }
       req.end();
     });
   }
+}
+
+function abortError(signal: AbortSignal) {
+  return signal.reason instanceof Error ? signal.reason : new Error("IMPORT_ABORTED");
 }
 
 export function validateUrl(value: string) {

@@ -14,6 +14,7 @@ import {
 } from "@workbench/workbench-contracts";
 import { Prisma } from "@workbench/workbench-db";
 import { hashRequest, validateIdempotencyKey } from "../../common/idempotency.js";
+import { isUniqueConflict } from "../../common/prisma-errors.js";
 import {
   idempotencyConflictProblem,
   notFoundProblem,
@@ -31,7 +32,6 @@ import {
   submissionIntentSelect,
   type SubmissionIntentRecord,
 } from "./submission-intent.mapper.js";
-
 type LockedFile = Readonly<{ id: string; status: FileStatus }>;
 type SubmissionClaim = Readonly<{
   kind: "start";
@@ -543,8 +543,4 @@ function boundedFailure(error: unknown) {
     message: message.slice(0, 2_000),
     retryable,
   };
-}
-
-function isUniqueConflict(error: unknown) {
-  return error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002";
 }

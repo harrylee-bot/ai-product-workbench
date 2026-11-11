@@ -18,6 +18,7 @@ COPY packages/workbench-canvas-tools/package.json packages/workbench-canvas-tool
 COPY packages/workbench-content-security/package.json packages/workbench-content-security/package.json
 COPY packages/workbench-contracts/package.json packages/workbench-contracts/package.json
 COPY packages/workbench-db/package.json packages/workbench-db/package.json
+COPY packages/workbench-export-core/package.json packages/workbench-export-core/package.json
 COPY packages/workbench-knowledge/package.json packages/workbench-knowledge/package.json
 COPY packages/workbench-preview-token/package.json packages/workbench-preview-token/package.json
 COPY packages/workbench-telemetry/package.json packages/workbench-telemetry/package.json
@@ -30,6 +31,7 @@ COPY packages/workbench-canvas-tools packages/workbench-canvas-tools
 COPY packages/workbench-content-security packages/workbench-content-security
 COPY packages/workbench-contracts packages/workbench-contracts
 COPY packages/workbench-db packages/workbench-db
+COPY packages/workbench-export-core packages/workbench-export-core
 COPY packages/workbench-knowledge packages/workbench-knowledge
 COPY packages/workbench-preview-token packages/workbench-preview-token
 COPY packages/workbench-telemetry packages/workbench-telemetry
@@ -39,6 +41,7 @@ RUN rm -rf packages/workbench-db/generated \
   && npm --workspace @workbench/workbench-canvas-tools run build \
   && npm --workspace @workbench/workbench-db run generate \
   && npm --workspace @workbench/workbench-content-security run build \
+  && npm --workspace @workbench/workbench-export-core run build \
   && npm --workspace @workbench/workbench-knowledge run build \
   && npm --workspace @workbench/workbench-preview-token run build \
   && npm --workspace @workbench/workbench-telemetry run build \
@@ -85,6 +88,7 @@ COPY --chown=node:node packages/workbench-canvas-tools/package.json packages/wor
 COPY --chown=node:node packages/workbench-content-security/package.json packages/workbench-content-security/package.json
 COPY --chown=node:node packages/workbench-contracts/package.json packages/workbench-contracts/package.json
 COPY --chown=node:node packages/workbench-db/package.json packages/workbench-db/package.json
+COPY --chown=node:node packages/workbench-export-core/package.json packages/workbench-export-core/package.json
 COPY --chown=node:node packages/workbench-knowledge/package.json packages/workbench-knowledge/package.json
 COPY --chown=node:node packages/workbench-preview-token/package.json packages/workbench-preview-token/package.json
 COPY --chown=node:node packages/workbench-telemetry/package.json packages/workbench-telemetry/package.json
@@ -96,11 +100,13 @@ COPY --from=build --chown=node:node /app/packages/workbench-content-security/dis
 COPY --from=build --chown=node:node /app/packages/workbench-contracts/dist packages/workbench-contracts/dist
 COPY --from=build --chown=node:node /app/packages/workbench-contracts/openapi packages/workbench-contracts/openapi
 COPY --from=build --chown=node:node /app/packages/workbench-db/generated packages/workbench-db/generated
+COPY --from=build --chown=node:node /app/packages/workbench-export-core/dist packages/workbench-export-core/dist
 COPY --from=build --chown=node:node /app/packages/workbench-knowledge/dist packages/workbench-knowledge/dist
 COPY --from=build --chown=node:node /app/packages/workbench-preview-token/dist packages/workbench-preview-token/dist
 COPY --from=build --chown=node:node /app/packages/workbench-telemetry/dist packages/workbench-telemetry/dist
 
 RUN cd /app/apps/workbench-api \
+  && node --input-type=module -e "import { buildSourcePrototype } from '@workbench/workbench-export-core'; const result = await buildSourcePrototype({ protocol: 'workbench.prototype-source-input.v1', documentId: 'image-smoke', title: 'Source smoke', revision: 1, summary: 'Verify the installed source compiler', entryFile: 'src/App.tsx', files: [{ path: 'src/App.tsx', content: 'export default function App(){return <h1>Source smoke</h1>}' }], pages: [{ id: 'home', name: 'Home', route: '/' }] }); if (!result.build.html.includes('workbench-source-root')) throw new Error('SOURCE_PROTOTYPE_RUNTIME_SMOKE_FAILED');" \
   && node --input-type=module -e "import sharp from 'sharp'; const png = await sharp({ create: { width: 2, height: 2, channels: 4, background: '#ff0000' } }).png().toBuffer(); const { data, info } = await sharp(png).resize(1, 1).removeAlpha().raw().toBuffer({ resolveWithObject: true }); if (info.width !== 1 || info.height !== 1 || info.channels !== 3 || !data.equals(Buffer.from([255, 0, 0]))) throw new Error('SHARP_RUNTIME_SMOKE_FAILED');" \
   && install -d -o node -g node -m 0700 /var/lib/workbench-api/ready-object-spool
 

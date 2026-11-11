@@ -380,7 +380,7 @@ test("the real-stack harness prepares every shared package before application bu
   assert.match(source, /warmWorkbenchProtectedRoutes\(webOrigin, web\.exited\)/u);
 });
 
-test("the real-stack visual lane proves early pending surfaces and responsive control separation", async () => {
+test("the real-stack visual lane keeps early process above content-only previews and separates controls", async () => {
   const source = await readFile(new URL("./workbench-postgres-http-e2e.mjs", import.meta.url), "utf8");
 
   assert.match(source, /data-workbench-transient-artifact/u);
@@ -390,5 +390,9 @@ test("the real-stack visual lane proves early pending surfaces and responsive co
   assert.match(source, /\["suggestions", "composer"\]/u);
   assert.match(source, /\["pendingArtifact", "mobileRunStatus"\]/u);
   assert.match(source, /\["pendingArtifact", "rightToolRail"\]/u);
-  assert.match(source, /early \$\{kind\} pending surface was not visible/u);
+  assert.match(source, /assert\.equal\(item\.layout\.pendingArtifact\.visible, false/u);
+  assert.match(source, /assert\.equal\(item\.layout\.processAnchor\.visible, true/u);
+  assert.match(source, /assert\.equal\(item\.hasStatus, false/u);
+  assert.match(source, /assert\.equal\(item\.hasProcess, false/u);
+  assert.match(source, /assert\.equal\(item\.hasUpperProcess, true/u);
 });

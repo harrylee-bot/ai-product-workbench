@@ -460,6 +460,8 @@ model AuthJwk {
   id         String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   publicKey  String    @map("public_key")
   privateKey String    @map("private_key")
+  alg        String?
+  crv        String?
   createdAt  DateTime  @map("created_at") @db.Timestamptz(6)
   expiresAt  DateTime? @map("expires_at") @db.Timestamptz(6)
 
@@ -496,6 +498,7 @@ model Principal {
   boardReplacements               BoardReplaceReceipt[]             @relation("BoardReplaceCreator")
   artifactVersionEdits            ArtifactVersionEditReceipt[]      @relation("ArtifactVersionEditCreator")
   artifactCreations               ArtifactCreationReceipt[]         @relation("ArtifactCreationCreator")
+  sourcePrototypeCreations         SourcePrototypeCreationReceipt[] @relation("SourcePrototypeCreationCreator")
   decidedApprovals                RunApproval[]                     @relation("ApprovalDecider")
   canvasAgentSessions             CanvasAgentSession[]              @relation("CanvasAgentSessionPrincipal")
   artifactVersionPreferences      ArtifactVersionPreference[]
@@ -584,6 +587,7 @@ model Project {
   designSystemCreations DesignSystemCreation[]    @relation("DesignSystemCreationProject")
   boardReplaceReceipts  BoardReplaceReceipt[]
   artifactCreations     ArtifactCreationReceipt[] @relation("ArtifactCreationProject")
+  sourcePrototypeCreations SourcePrototypeCreationReceipt[] @relation("SourcePrototypeCreationProject")
   knowledgeToolGrants   KnowledgeToolGrant[]      @relation("KnowledgeToolGrantProject")
   invitations           ProjectInvitation[]
   previews              ProjectPreview[]
@@ -1638,6 +1642,7 @@ model Artifact {
   designSystemCreations DesignSystemCreation[]       @relation("DesignSystemCreationArtifact")
   versionEditReceipts   ArtifactVersionEditReceipt[]
   creationReceipt       ArtifactCreationReceipt?     @relation("ArtifactCreationArtifact")
+  sourcePrototypeCreation SourcePrototypeCreationReceipt? @relation("SourcePrototypeCreationArtifact")
 
   @@unique([id, projectId])
   @@index([projectId, kind, updatedAt])
@@ -1682,6 +1687,7 @@ model ArtifactVersion {
   editBaseReceipts          ArtifactVersionEditReceipt[]    @relation("ArtifactVersionEditBase")
   editResultReceipts        ArtifactVersionEditReceipt[]    @relation("ArtifactVersionEditResult")
   creationReceipt           ArtifactCreationReceipt?        @relation("ArtifactCreationVersion")
+  sourcePrototypeCreation SourcePrototypeCreationReceipt? @relation("SourcePrototypeCreationVersion")
   preferences               ArtifactVersionPreference[]
   canvasResultInvocations   CanvasToolInvocation[]          @relation("CanvasInvocationResultVersion")
   prototypePatchProjections PrototypePatchProjection[]
@@ -1845,6 +1851,27 @@ model ArtifactCreationReceipt {
   @@index([sourceBlobId])
   @@index([createdById])
   @@map("artifact_creation_receipts")
+}
+
+model SourcePrototypeCreationReceipt {
+  id                String          @id @default(cuid())
+  projectId         String          @map("project_id")
+  artifactId        String          @unique @map("artifact_id")
+  artifactVersionId String          @unique @map("artifact_version_id")
+  createdById       String          @map("created_by_id")
+  idempotencyKey    String          @map("idempotency_key")
+  requestHash       String          @map("request_hash")
+  createdAt         DateTime        @default(now()) @map("created_at")
+  project           Project         @relation("SourcePrototypeCreationProject", fields: [projectId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  artifact          Artifact        @relation("SourcePrototypeCreationArtifact", fields: [artifactId, projectId], references: [id, projectId], onDelete: Restrict, onUpdate: Restrict)
+  artifactVersion   ArtifactVersion @relation("SourcePrototypeCreationVersion", fields: [artifactVersionId, artifactId, projectId], references: [id, artifactId, projectId], onDelete: Restrict, onUpdate: Restrict, map: "source_prototype_creation_receipts_version_fkey")
+  createdBy         Principal       @relation("SourcePrototypeCreationCreator", fields: [createdById], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@unique([projectId, idempotencyKey], map: "source_prototype_creation_receipts_project_idempotency_key")
+  @@unique([artifactId, projectId], map: "source_prototype_creation_receipts_artifact_project_key")
+  @@unique([artifactVersionId, artifactId, projectId], map: "source_prototype_creation_receipts_version_project_key")
+  @@index([createdById])
+  @@map("source_prototype_creation_receipts")
 }
 
 model DesignSystemImport {

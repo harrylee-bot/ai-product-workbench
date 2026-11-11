@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 
 const lifecycles = new WeakMap();
 
@@ -27,7 +27,11 @@ export function stopProcessTree(child, { graceMs = 10_000 } = {}) {
       });
       return;
     }
-    signalGroup(child.pid, "SIGTERM");
+    const groupSignaled = await signalGroup(child, "SIGTERM");
+    if (!groupSignaled) {
+      await lifecycle.closed;
+      return;
+    }
     let timeout;
     try {
       await Promise.race([
@@ -38,17 +42,56 @@ export function stopProcessTree(child, { graceMs = 10_000 } = {}) {
       clearTimeout(timeout);
       // A detached descendant may close its inherited pipes before exiting.
       // Kill the remaining group even when the npm parent/stdio already closed.
-      signalGroup(child.pid, "SIGKILL");
+      await signalGroup(child, "SIGKILL");
     }
     await lifecycle.closed;
   })();
   return lifecycle.stopping;
 }
 
-function signalGroup(pid, signal) {
+async function signalGroup(child, signal) {
+  const pid = child.pid;
   try {
     process.kill(-pid, signal);
+    return true;
   } catch (error) {
+    // Next build workers on macOS briefly remain as same-UID ?E (exiting)
+    // members after the parent exits; signaling that group returns EPERM.
+    // Wait only for this observed terminal transition, then require an empty
+    // group. Never hide an error for live/unowned/unknown group members.
+    if (error?.code === "EPERM" && process.platform === "darwin"
+      && (child.exitCode !== null || child.signalCode !== null)) {
+      try {
+        const deadline = Date.now() + 500;
+        while (Date.now() < deadline) {
+          const snapshot = execFileSync("ps", ["-axo", "pgid=,uid=,stat="], { encoding: "utf8" });
+          const state = processGroupExitState(snapshot, pid, process.getuid());
+          if (state === "gone") return false;
+          if (state !== "exiting") break;
+          await new Promise((resolve) => setTimeout(resolve, 10));
+        }
+      } catch { /* Keep the signal failure below. */ }
+    }
     if (error?.code !== "ESRCH") throw error;
+    return false;
   }
+}
+
+export function processGroupExitState(snapshot, groupId, expectedUid) {
+  if (!Number.isSafeInteger(groupId) || groupId < 1 || !Number.isSafeInteger(expectedUid)
+    || expectedUid < 0 || typeof snapshot !== "string") return "unknown";
+  let found = false;
+  for (const line of snapshot.split("\n")) {
+    if (!line.trim()) continue;
+    // macOS reports the unrelated nobody account as UID -2. Parse that row
+    // without invalidating the entire snapshot; target-group ownership still
+    // has to match the current, non-negative process UID below.
+    const match = /^\s*(\d+)\s+(-?\d+)\s+(\S+)\s*$/u.exec(line);
+    if (!match) return "unknown";
+    if (Number(match[1]) !== groupId) continue;
+    found = true;
+    if (Number(match[2]) !== expectedUid) return "unowned";
+    if (match[3] !== "?E" && !/^Z[A-Za-z+<>-]*$/u.test(match[3])) return "live";
+  }
+  return found ? "exiting" : "gone";
 }

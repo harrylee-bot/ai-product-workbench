@@ -45,8 +45,8 @@ export function WorkbenchAuthProvider({ children }: { children: ReactNode }) {
   const user = session.data?.user ? normalizeUser(session.data.user) : null;
 
   const loginWithOidc = useCallback(async (callbackURL = "/") => {
-    const result = await workbenchAuthClient.signIn.oauth2({
-      providerId: WORKBENCH_OIDC_PROVIDER_ID,
+    const result = await workbenchAuthClient.signIn.social({
+      provider: WORKBENCH_OIDC_PROVIDER_ID,
       callbackURL,
       errorCallbackURL: "/login?error=oidc",
     });

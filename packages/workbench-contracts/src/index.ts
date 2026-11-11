@@ -25,6 +25,7 @@ export * from "./previews.js";
 export * from "./projects.js";
 export * from "./prototype.js";
 export * from "./prototype-sources.js";
+export * from "./source-prototype.js";
 export * from "./prototype-patches.js";
 export * from "./queues.js";
 export * from "./releases.js";

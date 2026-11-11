@@ -14,6 +14,7 @@ import {
 } from "../domain";
 import { workbenchQueryKeys } from "../../../query/keys";
 import type { Versioned } from "../../../transport/contracts";
+import { isWorkbenchApiError } from "../../../api/problem-details";
 import { useWorkbenchBoardApi } from "../api-adapter";
 
 export function useWorkbenchBoardController(projectId: string) {
@@ -46,13 +47,38 @@ export function useWorkbenchBoardController(projectId: string) {
   const getSnapshot = useCallback(() => store?.getState() ?? null, [store]);
   const state = useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
   const persistSnapshot = useCallback(
-    (snapshot: BoardSaveSnapshot) => service.replaceBoard(
-      snapshot.projectId,
-      snapshot.request,
-      snapshot.ifMatch,
-      snapshot.idempotencyKey,
-    ),
-    [service],
+    async (snapshot: BoardSaveSnapshot) => {
+      try {
+        return await service.replaceBoard(
+          snapshot.projectId,
+          snapshot.request,
+          snapshot.ifMatch,
+          snapshot.idempotencyKey,
+        );
+      } catch (error) {
+        if (isWorkbenchApiError(error) && error.status === 412 && error.code === "REVISION_CONFLICT") {
+          // A generated Artifact can advance the Board after the last SSE
+          // refresh. Reuse the store's guarded merge; content edits continue
+          // to require an explicit conflict decision.
+          try {
+            const latest = await service.getBoard(snapshot.projectId);
+            const canonical = queryClient.setQueryData<Versioned<Board>>(
+              workbenchQueryKeys.board(snapshot.projectId),
+              (current) => current && current.value.revision > latest.value.revision ? current : latest,
+            )!;
+            const currentStore = storeRef.current;
+            if (currentStore?.getState().projectId === snapshot.projectId
+              && canonical.value.revision >= currentStore.getState().serverRevision) {
+              currentStore.getState().reconcileFromServer(canonical.value, canonical.etag);
+            }
+          } catch {
+            // Keep the original CAS failure and the unsaved local snapshot.
+          }
+        }
+        throw error;
+      }
+    },
+    [queryClient, service],
   );
   const publishSavedSnapshot = useCallback(async (
     result: BoardAutosaveResult,

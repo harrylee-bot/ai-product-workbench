@@ -16,7 +16,7 @@ const preview: GenerationPreview = { artifactIndex: 0, kind: "prd", title: "采�
 describe("live generation canvas", () => {
   it("updates rendered document prose while generation is still active", () => {
     const { rerender } = render(<WorkbenchGenerationPreview previews={[preview]} />);
-    expect(screen.getByRole("status").textContent).toContain("正在生成");
+    expect(screen.queryByRole("status")).toBeNull();
     expect(screen.getByRole("heading", { name: "业务规则" })).toBeTruthy();
     expect(screen.getByText("提交后进入审批。")).toBeTruthy();
     rerender(<WorkbenchGenerationPreview previews={[{ ...preview, markdown: `${preview.markdown}\n\n## 验收标准\n\n审批人可查看详情。` }]} />);
@@ -36,27 +36,41 @@ describe("live generation canvas", () => {
     expect(Object.keys(tree.elements)).toEqual(["preview-screen"]);
   });
 
-  it("shows an independent dock skeleton before the first preview arrives", () => {
-    render(<WorkbenchGenerationPreview activities={[{ id: "knowledge:1", detail: "已读取需求模板与项目约束", label: "知识库检索", status: "succeeded" }]} motionKind="prototype" previews={[]} generationStage="generating-ui" previewTitle="采购审批" runStatus="running" />);
-
-    expect(screen.getByRole("region", { name: "生成中预览" }).getAttribute("data-workbench-generation-preview-layout"))
-      .toBe("dock");
-    expect(screen.getByText("采购审批")).toBeTruthy();
-    expect(screen.getByText("生成界面，首个内容片段到达后会立即显示。")).toBeTruthy();
-    expect(screen.getByText("生成过程")).toBeTruthy();
-    expect(screen.getByText(/已读取需求模板与项目约束/)).toBeTruthy();
-    expect(screen.queryByRole("progressbar")).toBeNull();
-    expect(screen.getByText("生成界面 · 进行中")).toBeTruthy();
+  it("does not show a preview shell before generated content arrives", () => {
+    render(<WorkbenchGenerationPreview previews={[]} runStatus="running" />);
+    expect(screen.queryByRole("region", { name: "生成中预览" })).toBeNull();
+    expect(screen.queryByText("生成过程")).toBeNull();
   });
-  it("shows actual structure and only knowledge events, with working cancel and collapse controls", () => {
-    const cancel = vi.fn();
-    render(<WorkbenchGenerationPreview previews={[preview]} generationStage="drafting-prd" runStatus="running" canCancel onCancel={cancel} activities={[{ id: "deerflow:model", label: "internal model", detail: "not a source", status: "running" }]} />);
-    expect(screen.getByText("当前文档结构")).toBeTruthy();
-    expect(screen.queryByText("not a source")).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "取消生成" }));
-    expect(cancel).toHaveBeenCalledTimes(1);
-    fireEvent.click(screen.getByRole("button", { name: /生成过程/ }));
+  it("starts prototype screens at the top while keeping document auto-follow", () => {
+    const height = vi.spyOn(Element.prototype, "scrollHeight", "get").mockReturnValue(1200);
+    try {
+      const { container, rerender } = render(<WorkbenchGenerationPreview previews={[preview]} />);
+      const viewport = container.querySelector<HTMLElement>("[data-workbench-generation-preview-scroll]")!;
+      expect(viewport.scrollTop).toBe(1200);
+      const prototype: GenerationPreview = {
+        ...preview, kind: "prototype", markdown: "",
+        screens: [{ id: "screen-1", name: "采购申请", width: 390, height: 844, nodes: [{ id: "heading", parentId: null, kind: "text", text: "已生成内容", x: 0, y: 0, width: 200, height: 40, absolute: false, direction: "column", gap: 0, padding: 0, fill: null, color: null, fontSize: 14, radius: 0 }] },
+          { id: "screen-2", name: "采购审批", width: 390, height: 844, nodes: [{ id: "heading", parentId: null, kind: "text", text: "已生成内容", x: 0, y: 0, width: 200, height: 40, absolute: false, direction: "column", gap: 0, padding: 0, fill: null, color: null, fontSize: 14, radius: 0 }] }],
+      };
+      rerender(<WorkbenchGenerationPreview previews={[prototype]} />);
+      expect(viewport.scrollTop).toBe(0);
+      viewport.scrollTop = 200;
+      rerender(<WorkbenchGenerationPreview previews={[{ ...prototype, title: "增量更新" }]} />);
+      expect(viewport.scrollTop).toBe(200);
+      fireEvent.click(screen.getByRole("button", { name: "采购审批" }));
+      expect(viewport.scrollTop).toBe(0);
+    } finally {
+      height.mockRestore();
+    }
+  });
+  it("keeps process, stages, timing, and cancellation out of generated content", () => {
+    const { container } = render(<WorkbenchGenerationPreview previews={[preview]} runStatus="running" />);
+    expect(screen.getByText("提交后进入审批。")).toBeTruthy();
+    expect(screen.queryByText("生成过程")).toBeNull();
     expect(screen.queryByText("当前文档结构")).toBeNull();
+    expect(screen.queryByText("理解需求")).toBeNull();
+    expect(container.querySelector("[data-generation-step]")).toBeNull();
+    expect(screen.queryByRole("button", { name: /取消/ })).toBeNull();
   });
 
   it("switches the same dock to the final artifact after completion", () => {

@@ -128,6 +128,7 @@ describe("ArtifactsService image creation", () => {
 
 function database() {
   const tx = {
+    sourcePrototypeCreationReceipt: { findUnique: vi.fn().mockResolvedValue(null) },
     $queryRaw: vi.fn().mockResolvedValue([{ id: "project_1", revision: 0 }]),
     projectMember: { findUnique: vi.fn().mockResolvedValue({ role: "editor" }) },
     artifactCreationReceipt: {
@@ -145,6 +146,7 @@ function database() {
     },
   };
   const db = {
+    sourcePrototypeCreationReceipt: { findUnique: vi.fn().mockResolvedValue(null) },
     project: { findFirst: vi.fn().mockResolvedValue({ id: "project_1" }) },
     artifactCreationReceipt: { findUnique: vi.fn().mockResolvedValue(null) },
     $transaction: vi.fn(async (callback: (client: typeof tx) => unknown) => callback(tx)),

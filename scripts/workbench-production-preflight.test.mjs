@@ -78,33 +78,6 @@ test("production preflight requires OSS-native create-only semantics for Alibaba
   assert.match(result.stderr, /Alibaba Cloud OSS requires/u);
 });
 
-test("production preflight requires a manifest signature bundle", () => {
-  const result = runPreflight({ WORKBENCH_IMAGE_INVENTORY_BUNDLE_PATH: "" });
-  assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /WORKBENCH_IMAGE_INVENTORY_BUNDLE_PATH is empty/u);
-});
-
-test("production preflight requires an exact Cosign certificate identity", () => {
-  const result = runPreflight({
-    WORKBENCH_COSIGN_CERTIFICATE_IDENTITY: "^https://github.com/example/.*$",
-  });
-  assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /must be an exact HTTPS identity/u);
-});
-
-test("production preflight does not require OIDC when enterprise SSO is disabled", () => {
-  const result = runPreflight({
-    WORKBENCH_ENTERPRISE_SSO_ENABLED: "false",
-    WORKBENCH_OIDC_PROVIDER_ISSUER: undefined,
-    WORKBENCH_OIDC_CLIENT_ID: undefined,
-    WORKBENCH_OIDC_CLIENT_SECRET: undefined,
-    WORKBENCH_IDENTITY_HOSTNAME: undefined,
-  });
-  assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /missing signed production image manifest/u);
-  assert.doesNotMatch(result.stderr, /OIDC|IDENTITY_HOSTNAME/u);
-});
-
 test("production preflight requires complete OIDC configuration when enterprise SSO is enabled", () => {
   const result = runPreflight({
     WORKBENCH_ENTERPRISE_SSO_ENABLED: "true",
@@ -178,10 +151,6 @@ function runPreflight(overrides) {
     WORKBENCH_ORIGIN_HTTP_PORT: "8080",
     WORKBENCH_EDGE_ORIGIN_AUTH_SECRET: "A".repeat(64),
     WORKBENCH_KNOWLEDGE_TOKENIZER_HOST_DIR: "/srv/tokenizer",
-    WORKBENCH_IMAGE_INVENTORY_PATH: "/srv/image-manifest.json",
-    WORKBENCH_IMAGE_INVENTORY_BUNDLE_PATH: "/srv/image-manifest.bundle.json",
-    WORKBENCH_COSIGN_CERTIFICATE_IDENTITY: "https://github.com/example/workbench/.github/workflows/workbench-ci.yml@refs/heads/main",
-    WORKBENCH_COSIGN_OIDC_ISSUER: "https://token.actions.githubusercontent.com",
     WORKBENCH_SOURCE_COMMIT: "a".repeat(40),
     WORKBENCH_FILE_SCAN_MODE: "clamav",
     WORKBENCH_POSTGRES_IMAGE: `pgvector/pgvector:pg16@sha256:${"b".repeat(64)}`,

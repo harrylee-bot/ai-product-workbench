@@ -88,12 +88,12 @@ describe("DeerFlow PRD Runtime Result reference", () => {
 
   it("vendors the complete canonical requirement-document skill byte for byte", () => {
     const files = [
-      ["SKILL.md", "fe1493653986206aeed4684b46235c41d58e1e49db2b143ec0be5840542446e0"],
-      ["agents/openai.yaml", "f93eee46ee2b76146c7d2b212f6c26da3c16b28d566eac0a3158c92f9425afc0"],
-      ["assets/requirement-template.docx", "3070777f5c624be731bd264f72955ca4d15d5ac68d20867318ce8c0081789ebf"],
-      ["references/quality-standards.md", "32dc990927fbaf126e2d79f291869df8e576454261d4a644e916f3020c70d44e"],
-      ["references/structure.md", "7952eb98fadbbd992f1bdbd227953aacbcbcdea7fdef1f758987750a9ac5bf70"],
-      ["scripts/docx_quality_check.py", "722aa28067ef0d34233191275440285dcee68b0764eb55d65f5bec8e16b8cf21"],
+      ["SKILL.md", "fe668773ece4fb6790a59e8dc9981482def6a959079c280080a8a99600ba97e9"],
+      ["agents/openai.yaml", "f93830939dc43fc1adbb565cc579b0181b8ac291b9c0e9ae8e3d242d73b0a988"],
+      ["assets/requirement-template.docx", "9e1abdd5c63b2ee8224f68d129e4df8d2bb63835c754012e04b73ce053d85aa6"],
+      ["references/quality-standards.md", "16f5019a156bd13648e2c2c7ed929392f1532473a739123a5f4ca1341aa113ee"],
+      ["references/structure.md", "cfd9695845c2ad9bb1449bd912e8f491d008d69eb2ac88dbbe5d97868967299a"],
+      ["scripts/docx_quality_check.py", "aab6a8ac17d53e1ca9de20aa97b17dbe8c811db7bd23bc86ec57563b68169fdb"],
     ] as const;
     for (const [relativePath, expectedDigest] of files) {
       const source = readFileSync(fileURLToPath(new URL(
@@ -146,7 +146,7 @@ describe("DeerFlow PRD Runtime Result reference", () => {
     expect(schema.properties).toEqual({
       protocol: { type: "string", enum: ["workbench.runtime.result.v1"] },
       message: { type: "string", maxLength: 100_000 },
-      artifacts: { type: "array", items: { $ref: "#/$defs/RuntimeArtifactDraftPrdV2" }, minItems: 1, maxItems: 1 },
+      artifacts: { type: "array", items: { $ref: "#/$defs/RuntimeArtifactDraftPrdV3" }, minItems: 1, maxItems: 1 },
     });
     for (const [name, definition] of Object.entries(schema.$defs)) {
       expect(definition, name).toEqual(runtimeSchema.$defs[name]);

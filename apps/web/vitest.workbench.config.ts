@@ -5,7 +5,7 @@ const workspaceRoot = fileURLToPath(new URL(".", import.meta.url));
 
 export default defineConfig({
   resolve: {
-    alias: { "@": workspaceRoot },
+    alias: [{ find: /^@\//u, replacement: `${workspaceRoot}/` }],
   },
   test: {
     environment: "node",

@@ -176,7 +176,7 @@ def _artifact_draft_repair_instruction(candidate: Any, issues: list[Any]) -> str
         )
     if _has_prd_shape_failure(candidate, issues):
         return (
-            "Repair the invalid top-level PRD structure using the workbench.prd.v2 "
+            f"Repair the invalid top-level PRD structure using the workbench.prd.v{candidate['schemaVersion']} "
             "contract: revision, cover, tableOfContents, and sections are objects; "
             "versionHistory and assumptions are arrays of complete objects; "
             "tableOfContents.entries is the directory entries array. "
@@ -210,7 +210,7 @@ def _artifact_draft_repair_hints(candidate: Any, issues: list[Any]) -> list[dict
     if (
         not isinstance(candidate, dict)
         or candidate.get("kind") != "prd"
-        or candidate.get("schemaVersion") != 2
+        or candidate.get("schemaVersion") not in (2, 3)
     ):
         return []
     hints: list[dict[str, Any]] = []
@@ -246,6 +246,20 @@ def _artifact_draft_repair_hints(candidate: Any, issues: list[Any]) -> list[dict
         ("content", "sections", "businessRequirements", "acceptanceCriteria"): '{title:string,blocks:Block[]}',
         ("content", "sections", "businessRequirements", "additionalSections"): '[{title:string,blocks:Block[]}]',
     }
+    is_v3 = candidate["schemaVersion"] == 3
+    if is_v3:
+        section_shapes[("content", "sections")] = (
+            '{introduction:{title,background,scope,usageScenarios},'
+            'businessRequirements:{title,summary,pageLinks,functionSections},'
+            'degradation:{title,applicable,content},safetyBaseline:{title,intro,rows}}'
+        )
+        section_shapes[("content", "sections", "businessRequirements")] = (
+            '{title:string,summary:Inline[],pageLinks:{title,blocks},'
+            'functionSections:[{id:string,title:string,blocks:Block[],diagrams:Diagram[]}]}'
+        )
+        for key in ("acceptanceCriteria", "additionalSections"):
+            section_shapes.pop(("content", "sections", "businessRequirements", key), None)
+        section_shapes[("content", "sections", "businessRequirements", "functionSections")] = '[{id:string,title:string,blocks:Block[],diagrams:Diagram[]}]'
     for name in _misplaced_prd_sections(candidate, issues):
         append({
             "path": ["content", "sections", name],
@@ -263,6 +277,12 @@ def _artifact_draft_repair_hints(candidate: Any, issues: list[Any]) -> list[dict
         (["content", "sections", "acceptanceCriteria"], ["content", "sections", "businessRequirements", "acceptanceCriteria"], dict),
         (["content", "sections", "additionalSections"], ["content", "sections", "businessRequirements", "additionalSections"], list),
     ]
+    if is_v3:
+        relocation_paths = [entry for entry in relocation_paths if not any(key in entry[1] for key in ("flowAndPages", "diagrams", "acceptanceCriteria", "additionalSections"))]
+        relocation_paths += [
+            (source, ["content", "sections", "businessRequirements", "functionSections"], list)
+            for source in (["functionSections"], ["content", "functionSections"], ["content", "sections", "functionSections"])
+        ]
     for source, target, expected_type in relocation_paths:
         parent = _candidate_value(candidate, target[:-1])
         if (
@@ -301,6 +321,11 @@ def _artifact_draft_repair_hints(candidate: Any, issues: list[Any]) -> list[dict
                             "itemColumnIndex": 1,
                             "standardColumnIndex": 2,
                         })
+        if (is_v3 and code == "custom"
+                and path == ["content", "sections", "businessRequirements", "functionSections"]
+                and isinstance(issue.get("message"), str)
+                and issue["message"].startswith(("acceptance criteria must cover ", "acceptance criteria must contain at least "))):
+            append({"path": path, "instruction": "Acceptance coverage combines canonical acceptance-table rows and typed Given/When/Then criteria across all functional sections. Mirrored observable standards count once. Repair only relevant item labels, explicit conditions and observable results from authorized facts; preserve stable IDs and bidirectional requirement references."})
         if (
             code == "custom" and path == ["content", "sections"]
             and isinstance(issue.get("message"), str)
@@ -365,10 +390,14 @@ def _artifact_draft_repair_hints(candidate: Any, issues: list[Any]) -> list[dict
                 "flowAndPages": ["content", "sections", "businessRequirements", "flowAndPages"],
                 "acceptanceCriteria": ["content", "sections", "businessRequirements", "acceptanceCriteria"],
             }
+            if is_v3:
+                for legacy_name in ("coreRules", "flowAndPages", "acceptanceCriteria"):
+                    misplaced_field_paths.pop(legacy_name, None)
+                misplaced_field_paths["functionSections"] = ["content", "sections", "businessRequirements", "functionSections"]
             value = _candidate_value(candidate, path)
             owning_path = misplaced_field_paths.get(value) if isinstance(value, str) else None
             if owning_path is not None:
-                exists = isinstance(_candidate_value(candidate, owning_path), dict)
+                exists = isinstance(_candidate_value(candidate, owning_path), (dict, list))
                 append({
                     "path": path,
                     "owningPath": owning_path,
@@ -426,7 +455,7 @@ def _misplaced_prd_sections(candidate: Any, issues: list[Any]) -> list[str]:
     if (
         not isinstance(candidate, dict)
         or candidate.get("kind") != "prd"
-        or candidate.get("schemaVersion") != 2
+        or candidate.get("schemaVersion") not in (2, 3)
     ):
         return []
     content = candidate.get("content")
@@ -480,7 +509,7 @@ def _has_prd_shape_failure(candidate: Any, issues: list[Any]) -> bool:
     if (
         not isinstance(candidate, dict)
         or candidate.get("kind") != "prd"
-        or candidate.get("schemaVersion") != 2
+        or candidate.get("schemaVersion") not in (2, 3)
     ):
         return False
     shape_roots = {

@@ -34,7 +34,7 @@ const generated = `${JSON.stringify({
   ...rewriteRefs(schemas.RuntimeResult),
   $defs: definitions,
 }, null, 2)}\n`;
-const prdNames = dependencyClosure("RuntimeArtifactDraftPrdV2", schemas);
+const prdNames = dependencyClosure("RuntimeArtifactDraftPrdV3", schemas);
 const prdDefinitions = Object.fromEntries(
   [...prdNames]
     .sort()
@@ -57,7 +57,7 @@ const prdGenerated = `${serializePrdSchema({
     },
     artifacts: {
       type: "array",
-      items: { $ref: "#/$defs/RuntimeArtifactDraftPrdV2" },
+      items: { $ref: "#/$defs/RuntimeArtifactDraftPrdV3" },
       minItems: 1,
       maxItems: 1,
     },
@@ -168,7 +168,7 @@ function prdAuthoringGuide(allSchemas) {
       ],
     }],
   };
-  const document = allSchemas.PrdDocumentV2;
+  const document = allSchemas.PrdDocumentV3;
   const sectionSchemas = document.properties.sections.properties;
   const introEnum = sectionSchemas.safetyBaseline.properties.intro.enum;
   if (!Array.isArray(introEnum) || introEnum.length !== 1) throw new Error("Expected one fixed safety intro literal");
@@ -178,7 +178,8 @@ function prdAuthoringGuide(allSchemas) {
       "blocks contains complete objects, never strings, IDs, schema names, $ref or JSON-encoded objects. Put text in typed inline objects with marks: [].",
       "Scope needs a bulletList/orderedList. Each items entry is {id,content}, without type. Never append item IDs or section names as sibling blocks.",
       "Table rows require typed cells; requirement/goal objects belong in sibling blocks. IDs are unique; columnId references a declared column.",
-      "sectionFields lists required fields for four sibling objects under content.sections; none belongs inside introduction. Keep every section during repairs.",
+      "sectionFields lists required fields for four sibling objects under content.sections. businessRequirements owns pageLinks and functionSections; each function section has stable id, continuously numbered actual function title from 2.2, blocks, and optional diagrams. Keep authored sections during repairs.",
+      "Choose diagrams independently by explanatory value: neither, flow, architecture, or both. Each section allows at most one of each kind; number all figures in reading order. Embed testable acceptance in functional sections or a later numbered section; interface impact is optional and source-bound.",
       "Copy fixed schema literals verbatim, including all intro characters. JSON \\n decodes to a real newline; never double-escape. TOC punctuation follows the canonical structure reference.",
       "Replace markers and pass all checks. After rejection, use repair:{baseCandidateChecksum,operations:[{op,path,value?,from?}]} with the latest ACK checksum; add/replace/remove/move only erroneous fields, never artifact identity.",
     ],

@@ -1,8 +1,8 @@
 "use client";
 
-import type { PrdDocumentV2 } from "@workbench/workbench-contracts";
+import type { PrdTemplateDiagram } from "@workbench/workbench-contracts";
 
-export type PrdDiagram = PrdDocumentV2["sections"]["businessRequirements"]["flowAndPages"]["diagrams"][number];
+export type PrdDiagram = PrdTemplateDiagram;
 
 type DiagramCanvasNode = PrdDiagram["nodes"][number] & {
   x: number;

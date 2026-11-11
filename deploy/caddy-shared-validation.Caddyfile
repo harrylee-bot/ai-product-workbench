@@ -1,4 +1,0 @@
-# Shared validation hosts keep unrelated local Caddy sites in a separate
-# fragment so Workbench reloads cannot overwrite them.
-import /etc/caddy/provider.Caddyfile
-import /etc/caddy/workbench-direct-validation.Caddyfile

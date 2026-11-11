@@ -36,15 +36,25 @@ docker compose --env-file deploy/workbench.env \
   up -d --build
 ```
 
-空数据库须先完成下面的首次知识初始化。Web 可在 API 启动后提供登录，API 的业务就绪检查仍要求有效知识发布和真实检索服务。主页面与预览使用独立访问来源。数据库迁移、事件与产物合同位于 `packages/workbench-db/`、`packages/workbench-contracts/`；机器验收合同位于 `schemas/`。
+空数据库须先完成下面的首次知识初始化。Web 可在 API 启动后提供登录，API 的业务就绪检查仍要求有效知识发布和真实检索服务。主页面与预览使用独立访问来源。数据库迁移、事件与产物合同位于 `packages/workbench-db/`、`packages/workbench-contracts/`；生产预检和部署合同位于 `deploy/` 与 `scripts/`。
 
-代码只维护 `main`。普通推送由 GitHub Actions 调度到专用本机 Linux ARM64 运行器 `workbench-local-build-1-0-0`；发布前应确保该运行器在线。构建环境为独立 Colima 虚拟机，生产主机不得注册此构建标签。镜像逐个构建，每个 BuildKit 限制 2 CPU、4 GiB 内存且内部并行度为 1，显式生成 `linux/amd64` 镜像并实际运行兼容性检查。运行器自托管计算不占 GitHub 托管分钟；工作流不写云端缓存，临时证据保留 1 天、最终签名发布包保留 7 天，仍遵守 GitHub 的存储额度。
+正式发布入口是 `deploy/workbench-direct-release.sh`：本机只从干净 Git 提交生成源码归档，通过受保护 SSH 交给线上 AMD64 主机；线上执行 `npm ci`、合同预检、原生镜像构建、迁移、服务切换和公网健康检查。发布不经过 GitHub Actions、GitHub Artifact、本机 Colima 或 self-hosted Runner。版本固定为 `1.0.0`；发布前比较当前运行版本和变更文件摘要，只更新本次涉及的服务。历史 owner/GitHub 发布入口已删除，不再保留第二套生产发布链。
 
-同一完整提交的推送 CI 成功后，项目所有者在 `main` 手动运行「产品工作台 1.0.0 项目所有者发布」（`workbench-owner-release.yml`），填写提交 SHA 并勾选 `approve`。该工作流构建全部 10 个镜像；真实栈浏览器测试、部署合同、镜像漏洞检查和签名均通过后生成发布包。版本固定为 `1.0.0`，镜像使用不可变 digest，保留构建来源、SBOM 与 Cosign 签名。网站部署后独立运行，本机关闭不影响线上服务。
+直接发布需要本机环境变量 `WORKBENCH_PRODUCTION_HOST`、`WORKBENCH_PRODUCTION_USER`、`WORKBENCH_WEB_ORIGIN`，以及受控提供的 `WORKBENCH_PRODUCTION_KNOWN_HOSTS` 或 `WORKBENCH_PRODUCTION_KNOWN_HOSTS_FILE`；可选 `WORKBENCH_SSH_KEY_PATH`，未提供时使用本机 SSH 配置。`WORKBENCH_SSH_BIND_INTERFACE` 可指定单次 SSH/SCP 使用的本地物理接口，不修改系统路由或关闭 VPN。默认不绑定；先用 `networksetup -listallhardwareports`、`ifconfig` 确认当前有地址的物理接口（如 Wi-Fi `en0` 或 USB 有线网卡 `en6`），不可照抄示例。绑定失败会立即停止，不回退到 VPN 默认路由；SSH 主机校验与身份认证保持不变。线上目录默认为 `/opt/workbench-1.0.0` 和 `/home/data/workbench-private/1.0.0`，可通过对应 `WORKBENCH_PRODUCTION_*_DIR` 覆盖。工作树必须干净；当前线上状态只维护在 `docs/audit/1.0.0.md`，不保留历史发布证据文件。
 
-生产服务器只使用这个发布包中的外部构建镜像。部署端的 Cosign 身份固定为本仓库 `main` 上的 [项目所有者发布工作流](.github/workflows/workbench-owner-release.yml)，精确身份由部署脚本约束。`deploy/workbench-owner-deploy.py --help` 列出部署参数；默认只核验并输出计划，增加 `--execute` 才执行切换。执行时先核验签名、提交、镜像及构建配置，拉取全部镜像并检查资源，再备份私有配置与数据库、校验备份，然后迁移和逐服务启动；整个过程禁止服务器构建。
+示例：
 
-切换失败时恢复原先运行的应用镜像，保留仅管理员可读的恢复材料；数据库迁移不会自动反向执行，数据库恢复按备份和实际故障单独处理。服务健康检查通过后，还须在线验证真实知识检索、文档生成与下载、原型分享和撤销。生产凭据、发布包和备份存放在仓库外的受控目录，不写入项目文件或公开日志。
+```bash
+WORKBENCH_PRODUCTION_HOST=线上主机 \
+WORKBENCH_PRODUCTION_USER=root \
+WORKBENCH_PRODUCTION_KNOWN_HOSTS_FILE="$HOME/.ssh/workbench_known_hosts" \
+WORKBENCH_WEB_ORIGIN=https://aionbench.com \
+bash deploy/workbench-direct-release.sh
+```
+
+需要绕开 VPN 时，在确认接口后将 `WORKBENCH_SSH_BIND_INTERFACE` 加入上述命令。DNS 应按 [生产运行手册](docs/runbooks/apitable-production-operations.md) 使用 HTTPS DoH 交叉核验；绑定接口不能代替 DNS、SSH 主机或用户身份校验。
+
+构建输入只取精确提交归档；现有数据库、对象存储、`knowledge-vault`、`storage` 及服务器私有配置独立保留。切换前校验提交、基础镜像摘要、生产配置和运行资源，部署器使用本次提交生成的本地镜像标签逐服务切换；失败时停止继续切换并保留线上私有恢复材料，数据库不自动逆迁移。切换后脚本检查容器健康、公网健康接口和未登录入口。生产凭据、私有配置和恢复副本不得进入仓库或公开日志。
 
 ## 产品工作台 DeerFlow 部署合同
 
@@ -101,19 +111,11 @@ npm run knowledge:release -- \
 
 已有项目更新知识基线时，先运行 `node scripts/workbench-project-knowledge-refresh.mjs --project=<项目ID> --principal=<项目所有者ID> --baseline=<ready发布ID>` 预览差异，再用相同参数和输出中的 `--expected-plan-sha256=<摘要> --execute` 执行。新版本保留项目定稿知识和可复用向量；已执行 Run 的知识快照保持不变。此入口只接受相同的检索及向量模型配置，模型变更须重新构建知识。
 
-## 执行控制项
+## 线上验证
 
-生产验收以 `schemas/evidence/governance/production-acceptance-control-catalog.v1.json` 为控制目录。先由 `scripts/production-acceptance/plan.mjs` 生成绑定候选、配置、镜像和目录摘要的计划，执行各控制项并保存真实观测值与原始证据；每项通过受保护 runner 生成唯一 observation：
+线上发布完成后，`deploy/workbench-production-preflight.sh` 和 `deploy/server-deploy.sh` 直接核对当前提交、生产配置、镜像摘要、迁移状态和运行资源，再检查公网健康入口。当前公开验证要求 `https://aionbench.com/api/healthz` 返回 `200`，首页未登录请求返回登录跳转，知识嵌入和重排服务的 `/info` 返回已绑定模型。
 
-```sh
-node scripts/production-acceptance/run-control.mjs \
-  --control "$WORKBENCH_CONTROL_ID" \
-  --plan "$WORKBENCH_ACCEPTANCE_PLAN" \
-  --result "$WORKBENCH_CONTROL_RESULT" \
-  --output "$WORKBENCH_OBSERVATION_OUTPUT"
-```
-
-随后使用 `collect.mjs` 重算阈值和证据摘要，将真实观测纳入当前 `1.0.0` 审计；发布包由上述项目所有者发布工作流签名并生成。缺失、失败或不完整的观测不能记为通过；候选、配置或目录变化后重新生成计划。生产凭据和外部验收包保存在受控仓库外。本次本地审计输出仅存于 `output/audit/1.0.0/`。
+线上状态只维护在 `docs/audit/1.0.0.md`。历史测试输出、发布日志、验收包和审计证据不保留在项目目录。
 
 ## 执行演练
 

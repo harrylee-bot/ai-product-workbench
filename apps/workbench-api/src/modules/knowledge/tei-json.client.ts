@@ -20,6 +20,9 @@ export class TeiJsonClient {
   ) {}
 
   async requestJson(path: string, init: RequestInit, signal?: AbortSignal): Promise<unknown> {
+    if (signal?.aborted) {
+      throw new KnowledgeProviderError("KNOWLEDGE_PROVIDER_ABORTED", true, { cause: signal.reason });
+    }
     const body = typeof init.body === "string" ? init.body : undefined;
     if (body && Buffer.byteLength(body, "utf8") > this.config.maximumRequestBytes) {
       throw new KnowledgeProviderError("KNOWLEDGE_PROVIDER_REQUEST_TOO_LARGE", false);
@@ -82,25 +85,29 @@ async function readBoundedText(response: Response, maximumBytes: number): Promis
   const reader = response.body.getReader();
   const chunks: Uint8Array[] = [];
   let total = 0;
-  while (true) {
-    const next = await reader.read();
-    if (next.done) break;
-    total += next.value.byteLength;
-    if (total > maximumBytes) {
-      await reader.cancel().catch(() => undefined);
-      throw new KnowledgeProviderError("KNOWLEDGE_PROVIDER_RESPONSE_TOO_LARGE", false);
-    }
-    chunks.push(next.value);
-  }
-  const bytes = new Uint8Array(total);
-  let offset = 0;
-  for (const chunk of chunks) {
-    bytes.set(chunk, offset);
-    offset += chunk.byteLength;
-  }
   try {
-    return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
-  } catch (cause) {
-    throw new KnowledgeProviderError("KNOWLEDGE_PROVIDER_RESPONSE_ENCODING_INVALID", false, { cause });
+    while (true) {
+      const next = await reader.read();
+      if (next.done) break;
+      total += next.value.byteLength;
+      if (total > maximumBytes) {
+        await reader.cancel().catch(() => undefined);
+        throw new KnowledgeProviderError("KNOWLEDGE_PROVIDER_RESPONSE_TOO_LARGE", false);
+      }
+      chunks.push(next.value);
+    }
+    const bytes = new Uint8Array(total);
+    let offset = 0;
+    for (const chunk of chunks) {
+      bytes.set(chunk, offset);
+      offset += chunk.byteLength;
+    }
+    try {
+      return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+    } catch (cause) {
+      throw new KnowledgeProviderError("KNOWLEDGE_PROVIDER_RESPONSE_ENCODING_INVALID", false, { cause });
+    }
+  } finally {
+    reader.releaseLock();
   }
 }

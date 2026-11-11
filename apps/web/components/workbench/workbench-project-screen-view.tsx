@@ -42,6 +42,7 @@ import type {
   WorkbenchRunMessageItem,
   WorkbenchRunMotionKind,
 } from "@/lib/workbench/features";
+import { WorkbenchGenerationProcess } from "./workbench-generation-process";
 import { ProjectLoadStatus } from "@/lib/workbench/features/projects";
 import {
   PrototypePatchProjectionProvider,
@@ -245,6 +246,7 @@ export type ProjectScreenViewContract = {
   runPanels: {
     finalArtifactReferences: WorkbenchArtifactReference[];
     generationPreviews?: import("@workbench/workbench-contracts").GenerationPreview[];
+    knowledgeReleaseId?: string | null;
     actionBusy: boolean;
     actionError: unknown;
     activities: WorkbenchRunActivityItem[];
@@ -255,6 +257,9 @@ export type ProjectScreenViewContract = {
     generationProgress: number;
     generationStage: RunGenerationStage | null;
     isPrdRun: boolean;
+    runFinishedAt: string | null;
+    runLastEventSequence: number | null;
+    runRetryOfRunId: string | null;
     messages: WorkbenchRunMessageItem[];
     motionKind: WorkbenchRunMotionKind;
     onCancel: () => void;
@@ -263,6 +268,8 @@ export type ProjectScreenViewContract = {
     onSubmitApproval: ComponentProps<typeof WorkbenchRunApprovalDialog>["onSubmit"];
     pendingApproval: RunApproval | null;
     prompt: string;
+    runAttempt: number | null;
+    runStartedAt: string | null;
     runPhaseLabel: string | null;
     runId: string | null;
     runStatus: Run["status"] | null;
@@ -307,14 +314,8 @@ export function ProjectScreenView({
       <ProjectChromeVignette isOverview={root.isGeneratedOverview} />
       {(canvas.activeRun || (runPanels.runStatus === "succeeded" && runPanels.finalArtifactReferences.length > 0)) && (
         <WorkbenchGenerationPreview
-          activities={runPanels.activities}
-          canCancel={runPanels.canCancel}
           finalArtifactReferences={runPanels.finalArtifactReferences}
-          generationStage={runPanels.generationStage}
-          motionKind={runPanels.motionKind}
-          onCancel={runPanels.onCancel}
           previews={runPanels.generationPreviews ?? []}
-          previewTitle={root.projectTitle}
           runId={runPanels.runId}
           runStatus={runPanels.runStatus}
         />
@@ -354,6 +355,25 @@ export function ProjectScreenView({
         zoomLabel={canvas.zoomLabel}
       />
       <ProjectTranscriptPanel
+        canCancel={runPanels.canCancel}
+        onCancel={runPanels.onCancel}
+        generationProcess={<WorkbenchGenerationProcess
+          activities={runPanels.activities}
+          cancellationReason={runPanels.cancellationReason}
+          failure={runPanels.failure}
+          finishedAt={runPanels.runFinishedAt}
+          generationStage={runPanels.generationStage}
+          knowledgeReleaseId={runPanels.knowledgeReleaseId}
+          lastEventSequence={runPanels.runLastEventSequence}
+          motionKind={runPanels.motionKind}
+          previews={runPanels.generationPreviews ?? []}
+          runAttempt={runPanels.runAttempt}
+          runId={runPanels.runId}
+          retryOfRunId={runPanels.runRetryOfRunId}
+          runStartedAt={runPanels.runStartedAt}
+          runStatus={runPanels.runStatus}
+          variant="inline"
+        />}
         actionBusy={runPanels.actionBusy}
         activities={runPanels.activities}
         cancellationReason={runPanels.cancellationReason}
@@ -374,6 +394,23 @@ export function ProjectScreenView({
         submissionError={runPanels.submissionError}
       />
       <MobileRunStatus
+        generationProcess={<WorkbenchGenerationProcess
+          activities={runPanels.activities}
+          cancellationReason={runPanels.cancellationReason}
+          failure={runPanels.failure}
+          finishedAt={runPanels.runFinishedAt}
+          generationStage={runPanels.generationStage}
+          knowledgeReleaseId={runPanels.knowledgeReleaseId}
+          lastEventSequence={runPanels.runLastEventSequence}
+          motionKind={runPanels.motionKind}
+          previews={runPanels.generationPreviews ?? []}
+          runAttempt={runPanels.runAttempt}
+          runId={runPanels.runId}
+          retryOfRunId={runPanels.runRetryOfRunId}
+          runStartedAt={runPanels.runStartedAt}
+          runStatus={runPanels.runStatus}
+          variant="popover"
+        />}
         busy={runPanels.actionBusy}
         canCancel={runPanels.canCancel}
         canRetry={runPanels.canRetry}
@@ -577,6 +614,7 @@ export function ProjectScreenView({
         onRetryDesignPresets={composer.projectComposer.onRetryDesignPresets}
         onRetryModels={composer.projectComposer.onRetryModels}
         onSubmitPrompt={composer.projectComposer.onSubmitPrompt}
+        onSourcePrototypeCreated={composer.projectComposer.onSourcePrototypeCreated}
         onTargetSurfaceChange={composer.projectComposer.onTargetSurfaceChange}
         projectMode={composer.projectComposer.projectMode}
         projectDesignSystemChoices={composer.projectComposer.projectDesignSystemChoices}

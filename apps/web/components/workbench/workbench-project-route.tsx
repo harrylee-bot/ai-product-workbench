@@ -27,11 +27,14 @@ import type {
   ExportSelection,
   PrdDocument,
   PrototypeDocument,
+  SourcePrototypeInput,
+  ArtifactCreation,
   Run,
   RunApproval,
   RunGenerationStage,
   RunTargetSurface,
 } from "@workbench/workbench-contracts";
+import { createArtifactVersionRequestSchema } from "@workbench/workbench-contracts";
 import { cn } from "@/lib/utils";
 import { useWorkbenchAuth } from "@/lib/auth/workbench-auth";
 import { useWorkbenchPrdDraftStore } from "@/lib/workbench/prd-editor/draft-context";
@@ -129,6 +132,10 @@ import {
   documentExportReferences,
   resolveDocumentExportSelection,
 } from "@/lib/workbench/features/document-export-selection";
+import {
+  sourceExportReferences,
+  resolveSourceExportSelection,
+} from "@/lib/workbench/features/source-export-selection";
 import {
   WorkbenchBoardConflictDialog,
   type WorkbenchBoardConflictAction,
@@ -256,6 +263,9 @@ export function createPrdVersionEditRequest(
       baseArtifactVersionId,
       document,
     };
+  }
+  if (document.protocol === "workbench.prd.v3") {
+    return { kind: "prd", baseArtifactVersionId, document };
   }
   return {
     kind: "prd",
@@ -1194,6 +1204,24 @@ function WorkbenchProjectRouteInner() {
       error: query.isError,
     })),
   );
+  const sourceExportReferenceList = sourceExportReferences(
+    workbench.boardController.state?.nodes ?? EMPTY_BOARD_NODES,
+    exportSelection,
+  );
+  const sourceExportVersionQueries = useWorkbenchArtifactVersionBatch(
+    workbench.selectedProjectId,
+    sourceExportReferenceList,
+    exportOpen && workbench.capabilities.canExport,
+  );
+  const sourceExport = resolveSourceExportSelection(
+    exportSelection,
+    sourceExportReferenceList,
+    sourceExportVersionQueries.map((query) => ({
+      value: query.data?.value,
+      pending: query.isPending,
+      error: query.isError,
+    })),
+  );
 
   return (
     <>
@@ -1375,10 +1403,16 @@ function WorkbenchProjectRouteInner() {
               runCanRetry: runActions.canRetry,
               runCancellationReason: workbench.currentRun?.cancellationReason ?? null,
               runFailure: workbench.currentRun?.failure ?? null,
+              runFinishedAt: workbench.currentRun?.finishedAt ?? null,
+              knowledgeReleaseId: workbench.currentRun?.knowledgeReleaseId ?? null,
+              runAttempt: workbench.currentRun?.attempt ?? null,
+              runLastEventSequence: workbench.currentRun?.lastEventSequence ?? null,
               runMessages: workbench.runMessages,
               runPendingApproval: runActions.pendingApproval,
               runPhaseLabel: workbench.runPhaseLabel,
               runId: workbench.currentRun?.id ?? null,
+              runRetryOfRunId: workbench.currentRun?.retryOfRunId ?? null,
+              runStartedAt: workbench.currentRun?.startedAt ?? null,
               runStatus: workbench.runStatus,
               submissionError: workbench.submissionError,
               submitting: workbench.submitting,
@@ -1416,6 +1450,7 @@ function WorkbenchProjectRouteInner() {
         capabilitiesError={publication.exportCapabilitiesError}
         capabilitiesPending={publication.exportCapabilitiesPending}
         documentExport={documentExport}
+        sourceExport={sourceExport}
         error={publication.exportError}
         hasSelection={exportHasSelection}
         onDownload={publication.downloadExport}
@@ -1537,10 +1572,16 @@ type ProjectScreenProps = {
     runCanRetry: boolean;
     runCancellationReason: string | null;
     runFailure: Run["failure"];
+    runFinishedAt: string | null;
+    knowledgeReleaseId: string | null;
+    runAttempt: number | null;
+    runLastEventSequence: number | null;
     runMessages: WorkbenchRunMessageItem[];
     runPendingApproval: RunApproval | null;
     runPhaseLabel: string | null;
     runId: string | null;
+    runRetryOfRunId: string | null;
+    runStartedAt: string | null;
     runStatus: Run["status"] | null;
     submissionError: unknown;
     submitting: boolean;
@@ -1630,10 +1671,16 @@ function ProjectScreen({
     runCanRetry,
     runCancellationReason,
     runFailure,
+    runFinishedAt,
+    knowledgeReleaseId,
+    runAttempt,
+    runLastEventSequence,
     runMessages,
     runPendingApproval,
     runPhaseLabel,
     runId,
+    runRetryOfRunId,
+    runStartedAt,
     runStatus,
     submissionError,
     submitting,
@@ -2009,7 +2056,7 @@ function ProjectScreen({
       && loadedVersion.artifactVersionId === target.reference.artifactVersionId
       ? loadedVersion
       : null;
-    const screen = version?.kind === "prototype" && version.contentMode === "inline"
+    const screen = version?.kind === "prototype" && version.schemaVersion === 1 && version.contentMode === "inline"
       ? version.content.screens.find((candidate) => candidate.id === target.reference.screenId)
       : undefined;
     return [{
@@ -2102,7 +2149,7 @@ function ProjectScreen({
     setActivePanel,
     setActiveTool,
   ]);
-  const editablePrototypeDocument = styleVersion?.kind === "prototype" && styleVersion.contentMode === "inline"
+  const editablePrototypeDocument = styleVersion?.kind === "prototype" && styleVersion.schemaVersion === 1 && styleVersion.contentMode === "inline"
     ? styleVersion.content
     : null;
   const boardNodeBeingRenamed = renameTargetNodeId
@@ -2326,6 +2373,33 @@ function ProjectScreen({
     setNodeSelection,
     writeSelectedNodeUrl,
   ]);
+
+  const placeSourcePrototype = useCallback(async (creation: ArtifactCreation) => {
+    if (!projectSession.isCurrent() || !capabilities.canEdit) return;
+    if (creation.artifact.kind !== "prototype" || creation.artifactVersion.kind !== "prototype"
+      || creation.artifactVersion.schemaVersion !== 2) throw new Error("源码原型创建结果无效");
+    const stage = stageRef.current?.getBoundingClientRect();
+    if (!stage) throw new Error("源码原型已保存，请重新打开项目查看");
+    const center = screenToFlowPosition({ x: stage.left + stage.width / 2, y: stage.top + stage.height / 2 });
+    const existingNode = getCurrentBoardSnapshot()?.nodes.find((node) => (
+      node.workbench.artifactId === creation.artifact.id
+      && node.workbench.artifactVersionId === creation.artifactVersion.artifactVersionId
+    ));
+    const nodeId = existingNode?.id ?? onAddBoardArtifact({
+      artifactId: creation.artifact.id, artifactVersionId: creation.artifactVersion.artifactVersionId,
+      artifactKind: "prototype", title: creation.artifact.title,
+      x: center.x - 240, y: center.y - 320, width: 480, height: 640,
+    });
+    if (!nodeId) throw new Error("源码原型已保存，但未能添加到当前画布");
+    pendingNodeSelectionRef.current = [nodeId];
+    setNodeSelection(nodeId);
+    writeSelectedNodeUrl([nodeId]);
+    setActiveTool("select");
+    setActivePanel(null);
+    await onFlushBoard();
+    if (!projectSession.isCurrent()) return;
+    toast.success("源码原型已保存到画布");
+  }, [capabilities.canEdit, getCurrentBoardSnapshot, onAddBoardArtifact, onFlushBoard, pendingNodeSelectionRef, projectSession, screenToFlowPosition, setActivePanel, setActiveTool, setNodeSelection, writeSelectedNodeUrl]);
 
   const canvasMedia = useWorkbenchCanvasMediaController({
     canEdit: capabilities.canEdit,
@@ -3193,7 +3267,7 @@ function ProjectScreen({
 
   const persistPrototypeDocument = useCallback(async (
     reference: WorkbenchArtifactReference,
-    document: PrototypeDocument,
+    document: PrototypeDocument | SourcePrototypeInput,
   ) => {
     if (
       activeRunRef.current
@@ -3210,11 +3284,11 @@ function ProjectScreen({
     const result = await createPrototypeVersion.mutateAsync({
       ifMatch: selectedArtifactQuery.data.etag,
       idempotencyKey: prototypeDocumentEditIdempotencyKey(baseArtifactVersionId, document),
-      request: {
+      request: createArtifactVersionRequestSchema.parse({
         kind: "prototype",
         baseArtifactVersionId,
         document,
-      },
+      }),
     });
     if (!projectSession.isCurrent() || activeRunRef.current) return false;
     const updatedNodeIds = onReplaceArtifactVersionPins(
@@ -3269,7 +3343,7 @@ function ProjectScreen({
 
   const commitPrototypeTransform = useCallback(async (
     reference: WorkbenchArtifactReference,
-    document: PrototypeDocument,
+    document: PrototypeDocument | SourcePrototypeInput,
   ) => {
     try {
       const saved = await persistPrototypeDocument(reference, document);
@@ -4217,6 +4291,9 @@ function ProjectScreen({
       },
       onShare: () => {
         if (!capabilities.canShare) return;
+        onBoardNodesChange(nodesRef.current
+          .filter((node) => persistedBoardNodeIds.has(node.id))
+          .map((node) => ({ type: "select" as const, id: node.id, selected: Boolean(node.selected) })));
         setProjectMenuOpen(false);
         onShare();
       },
@@ -4303,6 +4380,7 @@ function ProjectScreen({
         onRetryDesignPresets,
         onRetryModels,
         onSubmitPrompt: submitPromptWithCanvasSnapshot,
+        onSourcePrototypeCreated: placeSourcePrototype,
         onTargetSurfaceChange: changeTargetSurface,
         projectMode,
         projectDesignSystemChoices,
@@ -4325,6 +4403,12 @@ function ProjectScreen({
         projectId,
       })),
       generationPreviews,
+      knowledgeReleaseId,
+      runAttempt,
+      runFinishedAt,
+      runLastEventSequence,
+      runRetryOfRunId,
+      runStartedAt,
       actionBusy: runActionBusy,
       actionError: runActionError,
       activities: runActivities,

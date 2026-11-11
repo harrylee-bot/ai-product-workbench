@@ -13,5 +13,6 @@ import { ArtifactFinalizationsService } from "./artifact-finalizations.service.j
   imports: [AccessModule, IdentityModule, ObjectStorageModule],
   controllers: [ArtifactsController, ArtifactVersionPreferencesController, ArtifactFinalizationsController],
   providers: [ArtifactsService, ArtifactVersionPreferencesService, ArtifactFinalizationsService],
+  exports: [ArtifactsService],
 })
 export class ArtifactsModule {}

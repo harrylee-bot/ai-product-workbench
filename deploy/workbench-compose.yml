@@ -6,6 +6,11 @@ x-workbench-logging: &workbench-logging
     max-size: "20m"
     max-file: "5"
 
+x-workbench-build-ulimits: &workbench-build-ulimits
+  core:
+    soft: 0
+    hard: 0
+
 services:
   postgres:
     logging: *workbench-logging
@@ -181,6 +186,7 @@ services:
     logging: *workbench-logging
     image: ${WORKBENCH_API_MIGRATOR_IMAGE_REF:-workbench-api-migrator:local}
     build:
+      ulimits: *workbench-build-ulimits
       context: ..
       dockerfile: apps/workbench-api/Dockerfile
       target: migrator
@@ -209,6 +215,7 @@ services:
     logging: *workbench-logging
     image: ${WORKBENCH_API_IMAGE_REF:-workbench-api:local}
     build:
+      ulimits: *workbench-build-ulimits
       context: ..
       dockerfile: apps/workbench-api/Dockerfile
       target: runner
@@ -293,6 +300,8 @@ services:
       WORKBENCH_FILE_EXTRACTION_SCHEMA_VERSION: ${WORKBENCH_FILE_EXTRACTION_SCHEMA_VERSION:-1}
     read_only: true
     security_opt: [no-new-privileges:true]
+    extra_hosts:
+      - ${WORKBENCH_KNOWLEDGE_ORIGIN_HOSTNAME:-aionbench.com}:${WORKBENCH_KNOWLEDGE_ORIGIN_IP:-172.18.0.1}
     tmpfs: [/tmp]
     volumes:
       - workbench-api-ready-object-spool:/var/lib/workbench-api/ready-object-spool
@@ -313,11 +322,13 @@ services:
     logging: *workbench-logging
     image: ${WORKBENCH_WEB_IMAGE_REF:-workbench-web:local}
     build:
+      ulimits: *workbench-build-ulimits
       context: ..
       dockerfile: apps/web/Dockerfile
       target: runner
       args:
         NODE_IMAGE: ${WORKBENCH_NODE_IMAGE:-node:22-alpine}
+        WORKBENCH_TYPES_PREVALIDATED: ${WORKBENCH_TYPES_PREVALIDATED:-0}
         NEXT_PUBLIC_WORKBENCH_FEEDBACK_URL: ${NEXT_PUBLIC_WORKBENCH_FEEDBACK_URL:-}
         NEXT_PUBLIC_WORKBENCH_FORUM_URL: ${NEXT_PUBLIC_WORKBENCH_FORUM_URL:-}
         NEXT_PUBLIC_WORKBENCH_PRIVACY_URL: ${NEXT_PUBLIC_WORKBENCH_PRIVACY_URL:-}
@@ -376,6 +387,7 @@ services:
     logging: *workbench-logging
     image: ${WORKBENCH_RUNTIME_WORKER_IMAGE_REF:-workbench-runtime-worker:local}
     build:
+      ulimits: *workbench-build-ulimits
       context: ..
       dockerfile: apps/workbench-worker/Dockerfile
       target: runner
@@ -407,11 +419,17 @@ services:
       WORKBENCH_RUNTIME_PROVIDER_STATE_MODE: ${WORKBENCH_RUNTIME_PROVIDER_STATE_MODE:?WORKBENCH_RUNTIME_PROVIDER_STATE_MODE is required}
       WORKBENCH_RUNTIME_EXECUTION_RECONCILE_INTERVAL_MS: ${WORKBENCH_RUNTIME_EXECUTION_RECONCILE_INTERVAL_MS:-5000}
       WORKBENCH_RUNTIME_EXECUTION_RECONCILE_BATCH_SIZE: ${WORKBENCH_RUNTIME_EXECUTION_RECONCILE_BATCH_SIZE:-100}
+      WORKBENCH_ENVIRONMENT_ID: ${WORKBENCH_ENVIRONMENT_ID:?WORKBENCH_ENVIRONMENT_ID is required}
+      WORKBENCH_SOURCE_COMMIT: ${WORKBENCH_SOURCE_COMMIT:?WORKBENCH_SOURCE_COMMIT is required}
+      WORKBENCH_RUNTIME_WORKER_IMAGE_REF: ${WORKBENCH_RUNTIME_WORKER_IMAGE_REF:?WORKBENCH_RUNTIME_WORKER_IMAGE_REF is required}
+      WORKBENCH_RUNTIME_WORKER_EXECUTION_PRIVATE_KEY_PATH: /run/secrets/runtime-worker-execution.key
+      WORKBENCH_RUNTIME_WORKER_EXECUTION_KEY_ID: ${WORKBENCH_RUNTIME_WORKER_EXECUTION_KEY_ID:?WORKBENCH_RUNTIME_WORKER_EXECUTION_KEY_ID is required}
+      WORKBENCH_RUNTIME_WORKER_EXECUTION_SIGNER_ID: ${WORKBENCH_RUNTIME_WORKER_EXECUTION_SIGNER_ID:?WORKBENCH_RUNTIME_WORKER_EXECUTION_SIGNER_ID is required}
       DEERFLOW_LANGGRAPH_URL: ${WORKBENCH_DEERFLOW_LANGGRAPH_URL:?WORKBENCH_DEERFLOW_LANGGRAPH_URL is required}
       DEERFLOW_GATEWAY_URL: ${WORKBENCH_DEERFLOW_GATEWAY_URL:?WORKBENCH_DEERFLOW_GATEWAY_URL is required}
       DEERFLOW_ASSISTANT_ID: ${WORKBENCH_DEERFLOW_ASSISTANT_ID:-lead_agent}
       DEERFLOW_INTERNAL_AUTH_TOKEN: ${WORKBENCH_DEERFLOW_INTERNAL_AUTH_TOKEN:?WORKBENCH_DEERFLOW_INTERNAL_AUTH_TOKEN is required}
-      DEERFLOW_STREAM_MODE: ${WORKBENCH_DEERFLOW_STREAM_MODE:-messages,values}
+      DEERFLOW_STREAM_MODE: ${WORKBENCH_DEERFLOW_STREAM_MODE:-messages-tuple,values}
       DEERFLOW_TIMEOUT_MS: ${WORKBENCH_DEERFLOW_TIMEOUT_MS:-600000}
       DEERFLOW_SUBMISSION_TIMEOUT_MS: ${WORKBENCH_DEERFLOW_SUBMISSION_TIMEOUT_MS:-120000}
       DEERFLOW_IDLE_TIMEOUT_MS: ${WORKBENCH_DEERFLOW_IDLE_TIMEOUT_MS:-120000}
@@ -430,6 +448,10 @@ services:
       WORKBENCH_RUNTIME_READY_BLOB_S3_SECRET_ACCESS_KEY: ${WORKBENCH_RUNTIME_READY_BLOB_S3_SECRET_ACCESS_KEY:?WORKBENCH_RUNTIME_READY_BLOB_S3_SECRET_ACCESS_KEY is required}
     read_only: true
     security_opt: [no-new-privileges:true]
+    extra_hosts:
+      - ${WORKBENCH_KNOWLEDGE_ORIGIN_HOSTNAME:-aionbench.com}:${WORKBENCH_KNOWLEDGE_ORIGIN_IP:-172.18.0.1}
+    volumes:
+      - ${WORKBENCH_RUNTIME_WORKER_EXECUTION_PRIVATE_KEY_HOST_PATH:?WORKBENCH_RUNTIME_WORKER_EXECUTION_PRIVATE_KEY_HOST_PATH is required}:/run/secrets/runtime-worker-execution.key:ro
     tmpfs: [/tmp]
     stop_grace_period: 45s
     healthcheck:
@@ -444,6 +466,7 @@ services:
     logging: *workbench-logging
     image: ${WORKBENCH_FILE_WORKER_IMAGE_REF:-workbench-file-worker:local}
     build:
+      ulimits: *workbench-build-ulimits
       context: ..
       dockerfile: apps/workbench-file-worker/Dockerfile
       target: runner
@@ -516,6 +539,8 @@ services:
       - ../knowledge-vault:/workspace/knowledge-vault:ro
       - ../storage:/workspace/storage:ro
       - ${WORKBENCH_KNOWLEDGE_TOKENIZER_HOST_DIR:?WORKBENCH_KNOWLEDGE_TOKENIZER_HOST_DIR is required}:/models/embedding-tokenizer:ro
+    extra_hosts:
+      - ${WORKBENCH_KNOWLEDGE_ORIGIN_HOSTNAME:-aionbench.com}:${WORKBENCH_KNOWLEDGE_ORIGIN_IP:-172.18.0.1}
     read_only: true
     security_opt: [no-new-privileges:true]
     tmpfs: [/tmp]
@@ -532,6 +557,7 @@ services:
     logging: *workbench-logging
     image: ${WORKBENCH_IMPORT_WORKER_IMAGE_REF:-workbench-import-worker:local}
     build:
+      ulimits: *workbench-build-ulimits
       context: ..
       dockerfile: apps/workbench-import-worker/Dockerfile
       target: runner
@@ -603,6 +629,7 @@ services:
     logging: *workbench-logging
     image: ${WORKBENCH_EXPORT_WORKER_IMAGE_REF:-workbench-export-worker:local}
     build:
+      ulimits: *workbench-build-ulimits
       context: ..
       dockerfile: apps/workbench-export-worker/Dockerfile
       target: runner
@@ -662,6 +689,7 @@ services:
     logging: *workbench-logging
     image: ${WORKBENCH_PREVIEW_IMAGE_REF:-workbench-preview:local}
     build:
+      ulimits: *workbench-build-ulimits
       context: ..
       dockerfile: apps/workbench-preview/Dockerfile
       target: runner
@@ -714,6 +742,7 @@ services:
     logging: *workbench-logging
     image: ${WORKBENCH_KNOWLEDGE_IMAGE_REF:-workbench-quartz:local}
     build:
+      ulimits: *workbench-build-ulimits
       context: ..
       dockerfile: apps/knowledge/Dockerfile
       target: immutable-runner

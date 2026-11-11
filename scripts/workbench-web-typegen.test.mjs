@@ -4,9 +4,10 @@ import { promisify } from "node:util";
 import { access, mkdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
 
 const execFileAsync = promisify(execFile);
-const repoRoot = path.resolve(new URL("..", import.meta.url).pathname);
+const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const staleRouteTypes = path.join(repoRoot, "apps", "web", ".next", "types", "routes.d.ts");
 
 test("clean Web type generation replaces stale route declarations without source drift", async () => {

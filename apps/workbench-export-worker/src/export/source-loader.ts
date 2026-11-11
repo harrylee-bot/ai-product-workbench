@@ -11,6 +11,7 @@ import {
 import {
   TerminalExportError,
   artifactCanonicalChecksum,
+  verifySourcePrototypeDocument,
   type ExportArtifactSource,
   type ExportBinaryAsset,
   type ExportReleaseSource,
@@ -309,6 +310,10 @@ function pinnedAssets(artifact: ExportArtifactSource) {
     } catch (cause) {
       throw new TerminalExportError("EXPORT_ARTIFACT_JSON_INVALID", `Artifact ${artifact.artifactVersionId} is not valid UTF-8 JSON`, { cause });
     }
+  }
+  if (artifact.kind === "prototype" && artifact.schemaVersion === 2) {
+    verifySourcePrototypeDocument(content);
+    return [];
   }
   const parsed = artifact.kind === "prototype"
     ? prototypeDocumentSchema.safeParse(content)

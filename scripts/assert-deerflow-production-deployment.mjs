@@ -25,7 +25,7 @@ const envExample = readText("deploy/workbench.env.example");
 const runtimeAdapter = readText("apps/workbench-worker/src/runtime/deerflow-runtime.adapter.ts");
 const preflight = readText("deploy/deerflow-production-preflight.sh");
 const gateway = runtimeCompose.services?.deerflow;
-const patchCommit = "7a6c4a994a86583d2a3c056ee9d0f157d4f030c2";
+const patchCommit = "345f08be00c8a9495079b732a39b46aa9af1584e";
 const patchRoot = `integrations/deerflow/source-patches/${patchCommit}`;
 const patchManifestSource = readText(`${patchRoot}/manifest.json`);
 const patchManifest = JSON.parse(patchManifestSource);
@@ -86,9 +86,6 @@ for (const variable of [
   "WORKBENCH_DEERFLOW_IMAGE_REF=",
   "WORKBENCH_DEERFLOW_IMAGE_DIGEST=",
   "WORKBENCH_SOURCE_COMMIT=",
-  "WORKBENCH_IMAGE_INVENTORY_BUNDLE_PATH=",
-  "WORKBENCH_COSIGN_CERTIFICATE_IDENTITY=",
-  "WORKBENCH_COSIGN_OIDC_ISSUER=",
 ]) {
   assert(envExample.includes(variable), `deployment env example is missing ${variable}`);
 }
@@ -130,7 +127,9 @@ for (const requiredLine of [
   "ca-certificates-bundle=20260909-r3",
   "io.workbench.deerflow.runtime-base-image",
   "--mount=from=recovered-source,source=/,target=/source-ro",
-  "prepare_source.py",
+  "prepare_release.py",
+  "upstream-2.1.0/",
+  "test_workbench_upgrade.py",
   "uv sync --locked --no-dev --python /usr/bin/python3.12",
   "uv pip check --python /app/backend/.venv/bin/python",
   "io.workbench.deerflow.base-image",
@@ -177,27 +176,27 @@ if (expectedCommit !== undefined) {
   assert(expectedCommit === patchCommit, "deployment expected commit must match the audited DeerFlow patch commit");
 }
 assert(
-  patchManifest.agent?.upstreamSha256 === "9052cfadca31817a927e83ad2dff01bfe5afdf5acdae337cc8f30eb1a8d8469f",
+  patchManifest.agent?.upstreamSha256 === "ac72292feba8d58f59d1ebad6ce7836ee2a5240761452eda60dc8e923d95db48",
   "DeerFlow lead-agent upstream source hash drifted",
 );
 assert(
-  patchManifest.agent?.patchedSha256 === "fed67066e412add45163ff86267b563ec7fb5210e0d14fbb1701d19a8a41167c",
+  patchManifest.agent?.patchedSha256 === "589d668de2390f3c55c444d229eddabfc32d1434fc7601c833ff613193a1415b",
   "DeerFlow lead-agent patched source hash drifted",
 );
 assert(
-  patchManifest.deferredMiddleware?.sha256 === "d0fb92b78bf7d65a3444925a7cef4a1072f464127b75393fdaf5f1fb7d9053f2",
+  patchManifest.deferredMiddleware?.sha256 === "99bcce2c2205d8ac0fcfb60a820997f30568b7d473d77edd8430e26c2fc4cbba",
   "DeerFlow middleware API source hash drifted",
 );
 assert(
   Array.isArray(patchManifest.additionalSources)
-    && patchManifest.additionalSources.length === 1,
+    && patchManifest.additionalSources.length === 3,
   "DeerFlow source patch must declare the audited subagent tool filter",
 );
 const subagentToolPatch = patchManifest.additionalSources[0];
 assert(
   subagentToolPatch.path === "deerflow/tools/builtins/task_tool.py"
-    && subagentToolPatch.upstreamSha256 === "bbbf58869ea4e24a8c230695478fb5d09fd35c2e4dbb2c16bc5052871027ee95"
-    && subagentToolPatch.patchedSha256 === "482292649c09ca8112ab30bd5e96baa9032aeccbfe3e3770000e1fbb41309317",
+    && subagentToolPatch.upstreamSha256 === "b650fa0815fa0be406c2f612670cb71687f4df15aed6c8195545998381ff9e7d"
+    && subagentToolPatch.patchedSha256 === "b46460b3aff7000d66530fd5023026b2427d7aa973bd29061ccd72a46537be30",
   "DeerFlow subagent tool filter must bind the audited upstream and patched hashes",
 );
 assert(
@@ -216,14 +215,14 @@ assert(
 );
 assert(
   Array.isArray(patchManifest.gatewaySources)
-    && patchManifest.gatewaySources.length === 1,
+    && patchManifest.gatewaySources.length === 3,
   "DeerFlow source patch must declare the audited Gateway context patch",
 );
 const gatewayContextPatch = patchManifest.gatewaySources[0];
 assert(
   gatewayContextPatch.path === "app/gateway/services.py"
-    && gatewayContextPatch.upstreamSha256 === "4d445c3ed264b346f419204f88073868db7030b2ae307eb6c496ef6f5755eb34"
-    && gatewayContextPatch.patchedSha256 === "f44b8577193d4e51bd2c9670a3eaf78fe83fce4c6d01ef99dc1e90e2cf940999",
+    && gatewayContextPatch.upstreamSha256 === "8379c34eeb2ddb46270b0e937035d5ee032dab68459b36b10435d28b8e2ab601"
+    && gatewayContextPatch.patchedSha256 === "7dc25649ff92ff42c3a81ca8f23f3ce987f29e7ee00127a84f206ecd3a5cf8dc",
   "DeerFlow Gateway context patch must bind the audited upstream and patched hashes",
 );
 assert(
@@ -288,19 +287,19 @@ assert(
 const prdReferencePins = [
   [
     "/mnt/skills/public/requirement-doc-template/SKILL.md",
-    "fe1493653986206aeed4684b46235c41d58e1e49db2b143ec0be5840542446e0",
+    "fe668773ece4fb6790a59e8dc9981482def6a959079c280080a8a99600ba97e9",
   ],
   [
     "/mnt/skills/public/requirement-doc-template/references/structure.md",
-    "7952eb98fadbbd992f1bdbd227953aacbcbcdea7fdef1f758987750a9ac5bf70",
+    "cfd9695845c2ad9bb1449bd912e8f491d008d69eb2ac88dbbe5d97868967299a",
   ],
   [
     "/mnt/skills/public/requirement-doc-template/references/quality-standards.md",
-    "32dc990927fbaf126e2d79f291869df8e576454261d4a644e916f3020c70d44e",
+    "16f5019a156bd13648e2c2c7ed929392f1532473a739123a5f4ca1341aa113ee",
   ],
   [
     "/mnt/skills/public/workbench/references/prd-runtime-result.schema.json",
-    "3ba722d8aec222c7f4ed01f1f66869adf68cdd00e7b896ed4e89e55fa2700105",
+    "76c1ae2338854cb68133fc242f7efde534278878bbd89e297a4f8ee010479065",
   ],
 ];
 const canonicalPrdReferenceReader = {
@@ -458,9 +457,23 @@ assert(
     && patchRequestContextTestSource.includes("test_non_prd_malformed_untrusted_and_forged_fields_keep_default_budget"),
   "DeerFlow request-context tests must cover trusted linked budgets and reject forged or malformed scope",
 );
+assert(
+  sha256(readText(`${patchRoot}/test_workbench_upgrade.py`)) === patchManifest.upgradeTest?.sha256,
+  "DeerFlow upgrade compatibility tests must match their manifest",
+);
+assertDeepEqual(
+  patchManifest.additionalSources.map((source) => source.path),
+  ["deerflow/tools/builtins/task_tool.py", "deerflow/runtime/checkpoint_state.py", "deerflow/runtime/runs/worker.py"],
+  "DeerFlow must retain subagent isolation, materialized history filtering and fallback rollback",
+);
+assertDeepEqual(
+  patchManifest.gatewaySources.map((source) => source.path),
+  ["app/gateway/services.py", "app/gateway/routers/threads.py", "app/gateway/routers/thread_runs.py"],
+  "DeerFlow must retain authenticated Workbench context, history bindings and offset pagination",
+);
 assertDeepEqual(
   readdirSync(new URL(`${patchRoot}/`, root)).sort(),
-  ["apply.py", "manifest.json", "test_workbench_request_context.py", "test_workbench_tool_scope_middleware.py", "workbench_tool_scope_middleware.py"],
+  ["apply.py", "manifest.json", "test_workbench_request_context.py", "test_workbench_tool_scope_middleware.py", "test_workbench_upgrade.py", "workbench_tool_scope_middleware.py"],
   "DeerFlow source-patch bundle must contain only the audited files",
 );
 assert(
@@ -616,12 +629,12 @@ assertDeepEqual(
   "the production public-skill root must contain only the canonical requirement-document and workbench skills",
 );
 for (const [relativePath, expectedDigest] of [
-  ["SKILL.md", "fe1493653986206aeed4684b46235c41d58e1e49db2b143ec0be5840542446e0"],
-  ["agents/openai.yaml", "f93eee46ee2b76146c7d2b212f6c26da3c16b28d566eac0a3158c92f9425afc0"],
-  ["assets/requirement-template.docx", "3070777f5c624be731bd264f72955ca4d15d5ac68d20867318ce8c0081789ebf"],
-  ["references/quality-standards.md", "32dc990927fbaf126e2d79f291869df8e576454261d4a644e916f3020c70d44e"],
-  ["references/structure.md", "7952eb98fadbbd992f1bdbd227953aacbcbcdea7fdef1f758987750a9ac5bf70"],
-  ["scripts/docx_quality_check.py", "722aa28067ef0d34233191275440285dcee68b0764eb55d65f5bec8e16b8cf21"],
+  ["SKILL.md", "fe668773ece4fb6790a59e8dc9981482def6a959079c280080a8a99600ba97e9"],
+  ["agents/openai.yaml", "f93830939dc43fc1adbb565cc579b0181b8ac291b9c0e9ae8e3d242d73b0a988"],
+  ["assets/requirement-template.docx", "9e1abdd5c63b2ee8224f68d129e4df8d2bb63835c754012e04b73ce053d85aa6"],
+  ["references/quality-standards.md", "16f5019a156bd13648e2c2c7ed929392f1532473a739123a5f4ca1341aa113ee"],
+  ["references/structure.md", "cfd9695845c2ad9bb1449bd912e8f491d008d69eb2ac88dbbe5d97868967299a"],
+  ["scripts/docx_quality_check.py", "aab6a8ac17d53e1ca9de20aa97b17dbe8c811db7bd23bc86ec57563b68169fdb"],
 ]) {
   const source = readFileSync(new URL(
     `integrations/deerflow/skills/requirement-doc-template/${relativePath}`,

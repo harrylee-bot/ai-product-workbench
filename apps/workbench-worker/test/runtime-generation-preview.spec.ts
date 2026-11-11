@@ -37,6 +37,44 @@ describe("generation previews from unfinished tool arguments", () => {
     expect(JSON.stringify(projected)).not.toContain("bindingIds");
   });
 
+  it("includes v3 functional sections and embedded acceptance without leaking structural identifiers", () => {
+    const projected = projectGenerationPreview(0, { kind: "prd", title: "任务需求说明书", content: { protocol: "workbench.prd.v3", sections: { businessRequirements: { title: "2 业务需求", functionSections: [{ id: "private-function-id", title: "2.2 输入校验", blocks: [{ id: "private-criterion-id", type: "acceptanceCriterion", given: [{ type: "text", text: "输入为空" }], when: [{ type: "text", text: "提交任务" }], then: [{ type: "text", text: "禁止创建任务并保留字段内容" }] }], diagrams: [] }] } } } });
+    expect(projected?.markdown).toContain("2.2 输入校验");
+    expect(projected?.markdown).toContain("禁止创建任务并保留字段内容");
+    expect(projected?.markdown).not.toContain("private-function-id");
+    expect(projected?.markdown).not.toContain("private-criterion-id");
+  });
+
+  it("keeps channel and safety semantics visible in the partial PRD preview", () => {
+    const projected = projectGenerationPreview(0, {
+      kind: "prd",
+      title: "任务需求说明书",
+      content: {
+        protocol: "workbench.prd.v3",
+        sections: {
+          introduction: {
+            usageScenarios: {
+              channelTable: {
+                rows: [
+                  { sequence: 1, channel: "inApp", enabled: true },
+                  { sequence: 2, channel: "wap", enabled: false },
+                  { sequence: 3, channel: "miniProgram", enabled: false },
+                ],
+              },
+            },
+          },
+          safetyBaseline: {
+            intro: "安全基线自查",
+            rows: [{ applicability: "是", requirement: "功能变更", remarks: "新增任务校验" }],
+          },
+        },
+      },
+    });
+    expect(projected?.markdown).toContain("端内渠道");
+    expect(projected?.markdown).toContain("安全基线自查");
+    expect(projected?.markdown).toContain("新增任务校验");
+  });
+
   it("redacts capabilities, bounds prose, and rejects an out-of-range artifact index", () => {
     const draft = { kind: "prd", title: "标题 wbkg1.hidden", content: { sections: { introduction: { blocks: [{ type: "paragraph", content: [{ text: "wbct1.secret " + "文".repeat(60_000) }] }] } } } };
     const projected = projectGenerationPreview(0, draft);

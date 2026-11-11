@@ -55,6 +55,19 @@ describe("SafeHttpClient", () => {
     expect(transport).not.toHaveBeenCalled();
   });
 
+  it("honors an already-aborted signal before DNS or transport", async () => {
+    const controller = new AbortController();
+    controller.abort();
+    const lookup = vi.fn();
+    const transport = vi.fn();
+    const client = new SafeHttpClient(lookup, transport as never);
+
+    await expect(client.get("http://public.test/start", { ...options(), signal: controller.signal }))
+      .rejects.toBe(controller.signal.reason);
+    expect(lookup).not.toHaveBeenCalled();
+    expect(transport).not.toHaveBeenCalled();
+  });
+
   it("normalizes bracketed IPv6 URL literals before DNS and SSRF checks", async () => {
     const lookup = vi.fn(async (hostname: string) => [{ address: hostname, family: 6 as const }]);
     const transport = vi.fn();

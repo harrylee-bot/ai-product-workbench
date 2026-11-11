@@ -1,6 +1,7 @@
 import {
   OpenApiGeneratorV31,
   OpenAPIRegistry,
+  zodToOpenAPIRegistry,
   type RouteConfig,
 } from "@asteasolutions/zod-to-openapi";
 import { z, type ZodTypeAny } from "zod";
@@ -40,6 +41,7 @@ import * as runtimeModelSchemas from "./runtime-models.js";
 import * as runtimeSchemas from "./runtime.js";
 import * as systemSchemas from "./system.js";
 import * as shareSchemas from "./shares.js";
+import * as sourcePrototypeSchemas from "./source-prototype.js";
 import * as submissionIntentSchemas from "./submission-intents.js";
 import * as threadSchemas from "./threads.js";
 import * as workspaceSchemas from "./workspaces.js";
@@ -69,12 +71,8 @@ function schemasFrom(module: Record<string, unknown>, filter: (exportName: strin
 }
 
 function unionOptions(schema: ZodTypeAny): ZodTypeAny[] {
-  let current = schema;
-  while (typeName(current) === "ZodEffects") {
-    current = (current as unknown as { _def: { schema: ZodTypeAny } })._def.schema;
-  }
-  const options = (current as unknown as { options?: ZodTypeAny[] }).options;
-  if (!options) throw new Error(`Expected union options for ${typeName(current)}`);
+  const options = (schema as unknown as { options?: ZodTypeAny[] }).options;
+  if (!options) throw new Error(`Expected union options for ${typeName(schema)}`);
   return [...options];
 }
 
@@ -114,6 +112,7 @@ function buildSchemaCatalog() {
     ...schemasFrom(runtimeModelSchemas),
     ...schemasFrom(systemSchemas),
     ...schemasFrom(shareSchemas),
+    ...schemasFrom(sourcePrototypeSchemas),
     ...schemasFrom(submissionIntentSchemas),
     ...schemasFrom(threadSchemas),
     ...schemasFrom(workspaceSchemas),
@@ -131,6 +130,7 @@ function buildSchemaCatalog() {
   catalog.push(
     { name: "RuntimeArtifactDraftPrdV1Revision", schema: runtimeSchemas.runtimeArtifactDraftPrdV1RevisionSchema },
     { name: "RuntimeArtifactDraftPrdV2", schema: runtimeSchemas.runtimeArtifactDraftPrdV2Schema },
+    { name: "RuntimeArtifactDraftPrdV3", schema: runtimeSchemas.runtimeArtifactDraftPrdV3Schema },
     { name: "RuntimeArtifactDraftPrd", schema: runtimeSchemas.runtimeArtifactDraftPrdSchema },
     { name: "RuntimeArtifactDraftPrototype", schema: runtimeSchemas.runtimeArtifactDraftPrototypeSchema },
     { name: "RuntimeArtifactDraftImage", schema: runtimeSchemas.runtimeArtifactDraftImageSchema },
@@ -186,50 +186,47 @@ function buildSchemaCatalog() {
 }
 
 function applyOpenApiMetadata(schema: ZodTypeAny, metadata: OpenApiMetadata) {
-  const tagged = (schema as ZodTypeAny & { openapi(value: OpenApiMetadata): ZodTypeAny }).openapi(metadata);
-  (schema as unknown as { _def: { openapi?: unknown } })._def.openapi =
-    (tagged as unknown as { _def: { openapi?: unknown } })._def.openapi;
+  zodToOpenAPIRegistry.add(schema, { ...zodToOpenAPIRegistry.get(schema), ...metadata });
 }
 
 function typeName(schema: ZodTypeAny) {
-  return (schema as unknown as { _def: { typeName: string } })._def.typeName;
+  // ZodPreprocess is a pipe whose input is a transform in Zod 4.6.
+  return schema._zod.def.type === "pipe" ? "ZodPipe" : schema.constructor.name;
 }
 
-function unwrapToObject(schema: ZodTypeAny): z.AnyZodObject {
+function unwrapToObject(schema: ZodTypeAny): z.ZodObject {
   let current = schema;
-  while (["ZodEffects", "ZodDefault", "ZodOptional", "ZodNullable", "ZodReadonly", "ZodBranded"].includes(typeName(current))) {
+  while (["ZodDefault", "ZodOptional", "ZodNullable", "ZodReadonly"].includes(typeName(current))) {
     const definition = (current as unknown as { _def: Record<string, ZodTypeAny> })._def;
-    current = definition.schema ?? definition.innerType ?? definition.type;
+    current = definition.innerType;
   }
   if (typeName(current) !== "ZodObject") throw new Error(`Expected ZodObject, received ${typeName(current)}`);
-  return current as z.AnyZodObject;
+  return current as z.ZodObject;
 }
 
-function directEffects(schema: ZodTypeAny) {
-  const effects: ZodTypeAny[] = [];
-  let current = schema;
-  for (;;) {
-    const definition = (current as unknown as { _def: Record<string, ZodTypeAny> })._def;
-    if (typeName(current) === "ZodEffects") {
-      effects.push(current);
-      current = definition.schema;
-      continue;
-    }
-    if (["ZodDefault", "ZodOptional", "ZodNullable", "ZodReadonly", "ZodBranded"].includes(typeName(current))) {
-      current = definition.innerType ?? definition.type;
-      continue;
-    }
-    return effects;
+function directCustomChecks(schema: ZodTypeAny): object[] {
+  const definition = schema._zod.def as unknown as {
+    checks?: { _zod: { def: { check: string } } }[];
+    in?: ZodTypeAny;
+    innerType?: ZodTypeAny;
+  };
+  const checks: object[] = (definition.checks ?? []).filter((check) => check._zod.def.check === "custom");
+  if (typeName(schema) === "ZodPipe" && definition.in && typeName(definition.in) === "ZodTransform") {
+    checks.push(definition.in);
   }
+  if (["ZodDefault", "ZodOptional", "ZodNullable", "ZodReadonly"].includes(typeName(schema)) && definition.innerType) {
+    checks.push(...directCustomChecks(definition.innerType));
+  }
+  return checks;
 }
 
-type ReviewedEffect = Readonly<{
+type ReviewedCheck = Readonly<{
   label: string;
   schema: ZodTypeAny;
   description: string;
 }>;
 
-const reviewedEffectSchemas: readonly ReviewedEffect[] = [
+const reviewedCheckSchemas: readonly ReviewedCheck[] = [
   { label: "BusinessDocument.body", schema: documentSchemas.businessDocumentSchema, description: "A business document contains exactly one nonempty text or Markdown body; enforced by the runtime Zod contract." },
   { label: "ApprovalOptions.uniqueIds", schema: approvalSchemas.approvalOptionsSchema, description: "Approval option ids are unique; enforced by the runtime Zod contract." },
   { label: "ArtifactVersionBlobDetail.schemaVersion", schema: artifactSchemas.artifactVersionBlobDetailSchema, description: "PRD and prototype blob details require schemaVersion 1; enforced by the runtime Zod contract." },
@@ -268,6 +265,7 @@ const reviewedEffectSchemas: readonly ReviewedEffect[] = [
   { label: "PrdInlineMarks.unique", schema: prdSchemas.prdInlineMarksSchema, description: "Inline marks are unique; enforced by the runtime Zod contract." },
   { label: "PrdDocumentV1.semanticGraph", schema: prdSchemas.prdDocumentV1Schema, description: "Legacy PRD section whitelists and all IR references form a valid semantic graph; enforced by the runtime Zod contract." },
   { label: "PrdDocumentV2.templateAndSemanticGraph", schema: prdSchemas.prdDocumentV2Schema, description: "PRD v2 cover, fixed sections, channel table, diagrams, degradation plan, safety baseline, placeholders, tables, and IR references are validated by the runtime Zod contract." },
+  { label: "PrdDocumentV3.templateAndSemanticGraph", schema: prdSchemas.prdDocumentV3Schema, description: "PRD v3 uses contiguous function-specific sections, optional typed diagrams, embedded or later acceptance, and the same complete safety, table, citation and semantic-reference validation." },
   { label: "RuntimePrdDocumentV2.strictSafetyEvidence", schema: prdSchemas.runtimePrdDocumentV2Schema, description: "New Runtime PRD v2 output applies the current affirmative safety-evidence semantics without granting compatibility to historically persisted row-12 classifications." },
   { label: "UpdateProject.nonEmpty", schema: projectSchemas.updateProjectRequestSchema, description: "At least one mutable Project field is required; enforced by the runtime Zod contract." },
   { label: "ProjectReleaseBoardNode.artifactReference", schema: releaseSchemas.projectReleaseBoardNodeSchema, description: "A release Board node pins both artifact and version ids or neither; enforced by the runtime Zod contract." },
@@ -323,6 +321,12 @@ const reviewedEffectSchemas: readonly ReviewedEffect[] = [
   { label: "CanvasCommandList.integrity", schema: canvasAgentSchemas.canvasClientCommandListSchema, description: "Pending Canvas command pages contain unique command ids." },
   { label: "CanvasSelection.integrity", schema: canvasAgentSchemas.canvasSelectionSchema, description: "Canvas selection kind matches its item count and screen references are unique." },
   { label: "CanvasSelectScreenInput.targets", schema: canvasAgentSchemas.canvasSelectScreenInputSchema, description: "Canvas selection targets are unique screen references; enforced by the runtime Zod contract." },
+  { label: "SourcePrototype.path", schema: sourcePrototypeSchemas.sourcePrototypePathSchema, description: "Source prototype paths are bounded relative paths with an allowed source extension and no traversal segments." },
+  { label: "SourcePrototype.file.bytes", schema: sourcePrototypeSchemas.sourcePrototypeFileSchema.shape.content, description: "Source prototype files remain within the per-file UTF-8 byte limit." },
+  { label: "SourcePrototype.input.integrity", schema: sourcePrototypeSchemas.sourcePrototypeInputSchema, description: "Source prototype entries, paths, page ids, routes, and aggregate source size form one bounded virtual project." },
+  { label: "SourcePrototype.build.bytes", schema: sourcePrototypeSchemas.sourcePrototypeBuildSchema.shape.html, description: "Compiled source prototype HTML remains within the bounded UTF-8 preview size." },
+  { label: "SourcePrototype.document.integrity", schema: sourcePrototypeSchemas.sourcePrototypeDocumentSchema, description: "Persisted source prototype documents retain the same bounded project integrity as their input." },
+  { label: "CreateSourcePrototypeArtifact.title", schema: artifactSchemas.createSourcePrototypeArtifactRequestSchema, description: "The source prototype artifact title must equal the immutable source document title." },
 ];
 
 function buildAuditRoots(catalog: readonly { name: string; schema: ZodTypeAny }[]) {
@@ -330,7 +334,7 @@ function buildAuditRoots(catalog: readonly { name: string; schema: ZodTypeAny }[
     approvalSchemas, artifactSchemas, boardSchemas, bootstrapSchemas, citationSchemas,
     commonSchemas, designPresetSchemas, designSystemSchemas, exportSchemas, fileSchemas, identitySchemas, importSourceSchemas, invitationSchemas, knowledgeSchemas, prdSchemas, projectSchemas, prototypeSchemas, prototypePatchSchemas,
     queueSchemas, releaseSchemas, remixSchemas, runSchemas, runtimeModelSchemas, runtimeSchemas,
-    shareSchemas, submissionIntentSchemas, systemSchemas, threadSchemas,
+    shareSchemas, sourcePrototypeSchemas, submissionIntentSchemas, systemSchemas, threadSchemas,
   ];
   const roots = [...catalog];
   for (const module of modules) roots.push(...schemasFrom(module));
@@ -341,21 +345,19 @@ function childSchemas(schema: ZodTypeAny): ZodTypeAny[] {
   const definition = (schema as unknown as { _def: Record<string, unknown> })._def;
   switch (typeName(schema)) {
     case "ZodObject":
-      return Object.values((definition.shape as () => Record<string, ZodTypeAny>)());
-    case "ZodArray": return [definition.type as ZodTypeAny];
-    case "ZodUnion": return definition.options as ZodTypeAny[];
-    case "ZodDiscriminatedUnion": return [...(definition.options as Map<unknown, ZodTypeAny>).values()];
+      return Object.values(definition.shape as Record<string, ZodTypeAny>);
+    case "ZodArray": return [definition.element as ZodTypeAny];
+    case "ZodUnion":
+    case "ZodDiscriminatedUnion": return definition.options as ZodTypeAny[];
     case "ZodIntersection": return [definition.left as ZodTypeAny, definition.right as ZodTypeAny];
     case "ZodRecord": return [definition.keyType as ZodTypeAny, definition.valueType as ZodTypeAny];
     case "ZodTuple": return [...(definition.items as ZodTypeAny[]), ...(definition.rest ? [definition.rest as ZodTypeAny] : [])];
     case "ZodLazy": return [(definition.getter as () => ZodTypeAny)()];
-    case "ZodEffects": return [definition.schema as ZodTypeAny];
-    case "ZodPipeline": return [definition.in as ZodTypeAny, definition.out as ZodTypeAny];
+    case "ZodPipe": return [definition.in as ZodTypeAny, definition.out as ZodTypeAny];
     case "ZodDefault":
     case "ZodOptional":
     case "ZodNullable":
     case "ZodReadonly": return [definition.innerType as ZodTypeAny];
-    case "ZodBranded": return [definition.type as ZodTypeAny];
     default: return [];
   }
 }
@@ -463,27 +465,42 @@ function normalizeVersionedPrdUnions(document: unknown) {
     const refs = flattened.map((entry) => (
       entry && typeof entry === "object" ? (entry as Record<string, unknown>).$ref : undefined
     ));
-    if (JSON.stringify(refs) !== JSON.stringify(expectedRefs)) {
+    // Zod 4 flattens nested unions at construction. Check their complete
+    // ordered alternatives before restoring the existing named wire contract.
+    const expandRefs = (values: readonly string[]): string[] => values.flatMap((ref) => {
+      const target = schemas[ref.slice("#/components/schemas/".length)];
+      const branches = target?.oneOf ?? target?.anyOf;
+      if (!Array.isArray(branches)) return [ref];
+      const childRefs = branches.map((item) => (item as { $ref?: string }).$ref);
+      return childRefs.every((child): child is string => typeof child === "string") ? expandRefs(childRefs) : [ref];
+    });
+    if (JSON.stringify(refs) !== JSON.stringify(expectedRefs) && JSON.stringify(refs) !== JSON.stringify(expandRefs(expectedRefs))) {
       throw new Error(`${name} union branches changed: ${JSON.stringify(refs)}`);
     }
-    schema.oneOf = flattened;
+    schema.oneOf = expectedRefs.map(($ref) => ({ $ref }));
     delete schema.anyOf;
   };
 
   normalizeOneOf("ArtifactVersionDetail", [
     "#/components/schemas/ArtifactVersionInlineDetail",
     "#/components/schemas/ArtifactVersionInlinePrdV2Detail",
+    "#/components/schemas/ArtifactVersionInlinePrdV3Detail",
+    "#/components/schemas/ArtifactVersionInlineSourcePrototypeDetail",
     "#/components/schemas/ArtifactVersionBlobDetail",
   ]);
   normalizeOneOf("PublicArtifactVersionDetail", [
     "#/components/schemas/PublicArtifactVersionInlineDetail",
     "#/components/schemas/PublicArtifactVersionInlinePrdV2Detail",
+    "#/components/schemas/PublicArtifactVersionInlinePrdV3Detail",
+    "#/components/schemas/PublicArtifactVersionInlineSourcePrototypeDetail",
     "#/components/schemas/PublicArtifactVersionBlobDetail",
   ]);
   normalizeOneOf("CreateArtifactVersionRequest", [
     "#/components/schemas/CreatePrdArtifactVersionRequest",
     "#/components/schemas/CreatePrototypeArtifactVersionRequest",
     "#/components/schemas/CreatePrdV2ArtifactVersionRequest",
+    "#/components/schemas/CreatePrdV3ArtifactVersionRequest",
+    "#/components/schemas/CreateSourcePrototypeArtifactVersionRequest",
   ]);
 
   const runtimePrdV2 = schemas.RuntimeArtifactDraftPrdV2;
@@ -509,6 +526,12 @@ function normalizeVersionedPrdUnions(document: unknown) {
     runtimePrdV2Properties.content = { $ref: expectedPrdV2Ref };
   }
 
+  const runtimePrdV3 = schemas.RuntimeArtifactDraftPrdV3?.properties as Record<string, unknown> | undefined;
+  const runtimePrdV3Content = runtimePrdV3?.content as Record<string, unknown> | undefined;
+  if (!runtimePrdV3Content || runtimePrdV3Content.$ref !== "#/components/schemas/PrdDocumentV3") {
+    throw new Error("Runtime PRD v3 must reference the complete persisted PrdDocumentV3 contract");
+  }
+
   const runtimeDraft = schemas.RuntimeArtifactDraft;
   const runtimeEntries = Array.isArray(runtimeDraft?.oneOf)
     ? runtimeDraft.oneOf
@@ -518,6 +541,7 @@ function normalizeVersionedPrdUnions(document: unknown) {
   const expectedRuntimeRefs = [
     "#/components/schemas/RuntimeArtifactDraftPrdV1Revision",
     "#/components/schemas/RuntimeArtifactDraftPrdV2",
+    "#/components/schemas/RuntimeArtifactDraftPrdV3",
     "#/components/schemas/RuntimeArtifactDraftPrototype",
     "#/components/schemas/RuntimeArtifactDraftImage",
     "#/components/schemas/RuntimeArtifactDraftCode",
@@ -532,38 +556,38 @@ function normalizeVersionedPrdUnions(document: unknown) {
   }
   runtimeDraft.oneOf = [
     { $ref: "#/components/schemas/RuntimeArtifactDraftPrd" },
-    ...runtimeEntries!.slice(2),
+    ...runtimeEntries!.slice(3),
   ];
   delete runtimeDraft.anyOf;
 }
 
 function auditNonStructuralSchemas(catalog: readonly { name: string; schema: ZodTypeAny }[]) {
-  const reviewedEffects = new Set<ZodTypeAny>();
-  for (const reviewed of reviewedEffectSchemas) {
-    const effects = directEffects(reviewed.schema);
+  const reviewedChecks = new Set<object>();
+  for (const reviewed of reviewedCheckSchemas) {
+    const effects = directCustomChecks(reviewed.schema);
     if (effects.length !== 1) {
-      throw new Error(`${reviewed.label} expected exactly one reviewed ZodEffects layer; found ${effects.length}`);
+      throw new Error(`${reviewed.label} expected exactly one reviewed custom check; found ${effects.length}`);
     }
-    reviewedEffects.add(effects[0]!);
-    applyOpenApiMetadata(effects[0]!, { description: reviewed.description });
+    reviewedChecks.add(effects[0]!);
+    applyOpenApiMetadata(reviewed.schema, { description: reviewed.description });
   }
 
-  const discoveredEffects = new Set<ZodTypeAny>();
+  const discoveredChecks = new Set<object>();
   const discoveredLazy = new Set<ZodTypeAny>();
   const visited = new Set<ZodTypeAny>();
   const visit = (schema: ZodTypeAny) => {
     if (visited.has(schema)) return;
     visited.add(schema);
-    if (typeName(schema) === "ZodEffects") discoveredEffects.add(schema);
+    directCustomChecks(schema).forEach(check => discoveredChecks.add(check));
     if (typeName(schema) === "ZodLazy") discoveredLazy.add(schema);
     childSchemas(schema).forEach(visit);
   };
   catalog.forEach(({ schema }) => visit(schema));
 
-  const unreviewed = [...discoveredEffects].filter((effect) => !reviewedEffects.has(effect));
-  const stale = [...reviewedEffects].filter((effect) => !discoveredEffects.has(effect));
+  const unreviewed = [...discoveredChecks].filter((effect) => !reviewedChecks.has(effect));
+  const stale = [...reviewedChecks].filter((effect) => !discoveredChecks.has(effect));
   if (unreviewed.length || stale.length) {
-    throw new Error(`ZodEffects audit failed: ${unreviewed.length} unreviewed, ${stale.length} stale allowlist entries`);
+    throw new Error(`Custom check audit failed: ${unreviewed.length} unreviewed, ${stale.length} stale allowlist entries`);
   }
   if (discoveredLazy.size !== 1 || !discoveredLazy.has(commonSchemas.jsonValueSchema)) {
     throw new Error(`ZodLazy audit failed: JsonValue must remain the only reviewed recursive schema (found ${discoveredLazy.size})`);
@@ -630,7 +654,7 @@ function annotateOpenApiStructure() {
   applyOpenApiMetadata(prdSchemas.prdInlineMarksSchema, { uniqueItems: true });
   applyOpenApiMetadata(prototypeSchemas.prototypeStateOverrideSchema, { minProperties: 2 });
   applyOpenApiMetadata(prototypeSchemas.prototypeStateSchema.shape.values, { maxProperties: 200 });
-  // zod-to-openapi 7.3.4 recomputes referenced schema metadata recursively.
+  // Describe the bounded expression graph without repeatedly expanding every branch.
   // Describe these finite levels with references so each level is generated once.
   const expressionObject = (kind: string, properties: Record<string, unknown>) => ({
     type: "object",
@@ -669,7 +693,6 @@ function annotateOpenApiStructure() {
   applyOpenApiMetadata(startRunShape.sourceIds, { uniqueItems: true, description: "Unique ready Import Source ids resolved before Run creation" });
   applyOpenApiMetadata(runSchemas.runArtifactTargetSchema.shape.screenIds, {
     uniqueItems: true,
-    description: "Unique Prototype screen ids selected within the immutable target ArtifactVersion",
   });
   applyOpenApiMetadata(startRunShape.artifactTargets, {
     description: "Immutable ready ArtifactVersion selections in runtime target order; Generate Prototype requires one or more explicit screen ids on every source target",
@@ -687,6 +710,29 @@ function annotateOpenApiStructure() {
   });
 }
 
+function annotateStringChecks(catalog: readonly { schema: ZodTypeAny }[]) {
+  const visited = new Set<ZodTypeAny>();
+  const visit = (schema: ZodTypeAny) => {
+    if (visited.has(schema)) return;
+    visited.add(schema);
+    if (typeName(schema) === "ZodString") {
+      const definition = schema._zod.def as unknown as {
+        checks?: { _zod: { def: { format?: string; pattern?: RegExp } } }[];
+      };
+      const checks = (definition.checks ?? []).map((check) => check._zod.def);
+      const regex = checks.find((check) => check.format === "regex")?.pattern;
+      // zod-to-openapi 9.1 serializes /pattern/u as "pattern/u". OpenAPI
+      // patterns use the expression source without JavaScript delimiters.
+      if (regex) applyOpenApiMetadata(schema, { pattern: regex.source });
+      if (checks.some((check) => check.format === "url")) {
+        applyOpenApiMetadata(schema, { format: "uri" });
+      }
+    }
+    childSchemas(schema).forEach(visit);
+  };
+  catalog.forEach(({ schema }) => visit(schema));
+}
+
 function assertJsonValueOverrideMatchesZod() {
   const definition = (commonSchemas.jsonValueSchema as unknown as {
     _def: { getter: () => ZodTypeAny };
@@ -697,7 +743,7 @@ function assertJsonValueOverrideMatchesZod() {
   if (JSON.stringify(actualTypes) !== JSON.stringify(expectedTypes)) {
     throw new Error(`JsonValue OpenAPI override is stale: expected ${expectedTypes.join(", ")}; found ${actualTypes.join(", ")}`);
   }
-  const arrayItem = (options[4] as unknown as { _def: { type: ZodTypeAny } })._def.type;
+  const arrayItem = (options[4] as unknown as { _def: { element: ZodTypeAny } })._def.element;
   const recordValue = (options[5] as unknown as { _def: { valueType: ZodTypeAny } })._def.valueType;
   if (arrayItem !== commonSchemas.jsonValueSchema || recordValue !== commonSchemas.jsonValueSchema) {
     throw new Error("JsonValue array and object branches must recurse through JsonValue");
@@ -749,8 +795,11 @@ function registeredSchema(named: NamedWorkbenchSchema, registeredSchemas: Readon
 
 export function buildWorkbenchOpenApiDocument() {
   const catalog = buildSchemaCatalog();
-  annotateOpenApiStructure();
+  annotateStringChecks(buildAuditRoots(catalog));
+  // Keep reviewed descriptions ahead of structural annotations so unchanged
+  // authoring references retain their pinned bytes across generator upgrades.
   auditNonStructuralSchemas(buildAuditRoots(catalog));
+  annotateOpenApiStructure();
 
   const registry = new OpenAPIRegistry();
   const registeredSchemas = new Map<string, ZodTypeAny>();
@@ -761,8 +810,7 @@ export function buildWorkbenchOpenApiDocument() {
     registeredSchemas.set(name, registered);
     if (!nullableTargets.has(schema) && !taggedOriginals.has(schema)) {
       taggedOriginals.add(schema);
-      (schema as unknown as { _def: { openapi?: unknown } })._def.openapi =
-        (registered as unknown as { _def: { openapi?: unknown } })._def.openapi;
+      zodToOpenAPIRegistry.add(schema, zodToOpenAPIRegistry.get(registered)!);
     }
   }
 

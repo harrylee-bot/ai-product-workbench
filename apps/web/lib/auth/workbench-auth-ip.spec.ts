@@ -1,4 +1,4 @@
-import { getIp, getIPFromHeader } from "@better-auth/core/utils/ip";
+import { getIP, getIPFromHeader } from "@better-auth/core/utils/ip";
 import { execFileSync } from "node:child_process";
 import { describe, expect, it } from "vitest";
 
@@ -39,7 +39,7 @@ describe("Workbench Better Auth client IP trust", () => {
       "x-forwarded-for": "198.51.100.10, 172.24.0.1",
     });
 
-    expect(getIp(headers, {
+    expect(getIP(headers, {
       advanced: { ipAddress: workbenchAuthIpAddressOptions({ NODE_ENV: "test" }) },
     })).toBe("203.0.113.42");
   });
@@ -56,12 +56,12 @@ describe("Workbench Better Auth client IP trust", () => {
       "--input-type=module",
       "--eval",
       [
-        'import { getIp } from "@better-auth/core/utils/ip";',
+        'import { getIP } from "@better-auth/core/utils/ip";',
         "const headers = new Headers({",
         '  "x-workbench-edge-client-ip": "198.51.100.9",',
         '  "x-forwarded-for": "198.51.100.10, 172.24.0.1",',
         "});",
-        "const value = getIp(headers, { advanced: { ipAddress: {",
+        "const value = getIP(headers, { advanced: { ipAddress: {",
         `  ipAddressHeaders: ["${WORKBENCH_CANONICAL_CLIENT_IP_HEADER}"],`,
         "  ipv6Subnet: 64,",
         "} } });",

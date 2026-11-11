@@ -1,4 +1,2 @@
-# The default systemd entrypoint is the production Web/Preview topology. The
-# validation-only Caddy file is installed explicitly by the server-validation
-# command and is never selected by the pinned production deploy.
+# The default systemd entrypoint is the production Web/Preview topology.
 import workbench-production.Caddyfile

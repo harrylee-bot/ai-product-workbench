@@ -5,7 +5,7 @@
   "upstreamCommit": "7a6c4a994a86583d2a3c056ee9d0f157d4f030c2",
   "installedPatchManifestPath": "/opt/workbench/deerflow/source-patch/manifest.json",
   "installedPatchManifestSha256": "f2bcd543acb4db5b4e14138d3f1f9df533b2e2d62b0cf36ac1b39a009bf7e4ea",
-  "candidatePatchManifestSha256": "930396c5e39c5b00f5f01b089c6a3d64f3b921f724718c84070ac4a2e70814e3",
+  "candidatePatchManifestSha256": "90beb1453150bdbfe29d349a7bf29c88fae97d01ef29652ea6fcad4767af2922",
   "sourceFileSha256": {
     "/opt/workbench/deerflow/source-patch/apply.py": "2d18f25f77a489f17771550a32f06efc6e8e780e09ba789f2562d94a4b6bb2fb",
     "/opt/workbench/deerflow/source-patch/manifest.json": "f2bcd543acb4db5b4e14138d3f1f9df533b2e2d62b0cf36ac1b39a009bf7e4ea",
@@ -35,7 +35,7 @@
     "/app/skills/public/requirement-doc-template/agents/openai.yaml": "f93eee46ee2b76146c7d2b212f6c26da3c16b28d566eac0a3158c92f9425afc0",
     "/app/skills/public/requirement-doc-template/assets/requirement-template.docx": "3070777f5c624be731bd264f72955ca4d15d5ac68d20867318ce8c0081789ebf",
     "/app/skills/public/requirement-doc-template/references/quality-standards.md": "ad2206958aee116654a657b1c979e7a0228aee1e080e2a289712bd7ad82b1c76",
-    "/app/skills/public/requirement-doc-template/references/structure.md": "7952eb98fadbbd992f1bdbd227953aacbcbcdea7fdef1f758987750a9ac5bf70",
+    "/app/skills/public/requirement-doc-template/references/structure.md": "cfd9695845c2ad9bb1449bd912e8f491d008d69eb2ac88dbbe5d97868967299a",
     "/app/skills/public/requirement-doc-template/scripts/docx_quality_check.py": "722aa28067ef0d34233191275440285dcee68b0764eb55d65f5bec8e16b8cf21",
     "/opt/workbench/deerflow/config.fragment.yaml": "788a3c91e72f389c4b6124f08ae874a144b2f669f7a410a67dda434cd652ceaf",
     "/app/backend/extensions_config.workbench.json": "a3bf037216949034387e0583aa3eb3e59dc9c36a7c1ac243058f5579ddbd8458",

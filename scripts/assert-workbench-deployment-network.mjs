@@ -6,7 +6,6 @@ import YAML from "yaml";
 
 const root = new URL("../", import.meta.url);
 const base = readYaml("deploy/workbench-compose.yml");
-const validation = readYaml("deploy/workbench-server-validation-compose.yml");
 const ingressName = "workbench-ingress";
 
 assert(base.networks?.["workbench-internal"]?.internal === true, "workbench-internal must stay internal");
@@ -19,14 +18,11 @@ assert(
 );
 
 assertPublishedServicesUseIngress(base.services, "deploy/workbench-compose.yml");
-assertPublishedServicesUseIngress(validation.services, "deploy/workbench-server-validation-compose.yml");
 
 for (const serviceName of ["gateway", "preview-gateway", "object-storage"]) {
   assertUsesIngress(base.services?.[serviceName], serviceName);
 }
-assertUsesIngress(validation.services?.oidc, "oidc");
 assertOnlyExpectedServicesUseIngress(base.services, ["gateway", "preview-gateway", "object-storage"]);
-assertOnlyExpectedServicesUseIngress(validation.services, ["oidc"]);
 assertExactNetworks(
   base.services?.["object-storage-egress"],
   "object-storage-egress",

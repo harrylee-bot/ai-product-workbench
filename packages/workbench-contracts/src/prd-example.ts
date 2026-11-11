@@ -1,5 +1,7 @@
 import {
   prdDocumentV2Schema,
+  prdDocumentV3Schema,
+  prdTableOfContentsEntriesForV3,
   prdSafetyBaselineItems,
   prdTableOfContentsEntries,
 } from "./prd.js";
@@ -310,6 +312,26 @@ export const prdDocumentV2Example = prdDocumentV2Schema.parse({
               ? "提交信息与任务状态需要完整性和一致性校验。"
               : null,
       })),
+    },
+  },
+});
+
+
+// Versioned test fixture only; never an authoring source or a protocol adapter.
+const v3FunctionSections = [
+  { id: "section-task-submit", title: "2.2 任务提交与业务校验", blocks: structuredClone(prdDocumentV2Example.sections.businessRequirements.coreRules.blocks), diagrams: [] },
+  { id: "section-task-state", title: "2.3 任务状态与失败恢复", blocks: structuredClone(prdDocumentV2Example.sections.businessRequirements.flowAndPages.blocks), diagrams: structuredClone(prdDocumentV2Example.sections.businessRequirements.flowAndPages.diagrams) },
+  { id: "section-task-acceptance", title: "2.4 任务处理验收标准", blocks: structuredClone(prdDocumentV2Example.sections.businessRequirements.acceptanceCriteria.blocks), diagrams: [] },
+];
+export const prdDocumentV3Example = prdDocumentV3Schema.parse({
+  ...structuredClone(prdDocumentV2Example),
+  protocol: "workbench.prd.v3",
+  tableOfContents: { title: "目 录", entries: prdTableOfContentsEntriesForV3(v3FunctionSections.map((section) => section.title)) },
+  sections: {
+    ...structuredClone(prdDocumentV2Example.sections),
+    businessRequirements: {
+      title: "2 业务需求", summary: structuredClone(prdDocumentV2Example.sections.businessRequirements.summary),
+      pageLinks: structuredClone(prdDocumentV2Example.sections.businessRequirements.pageLinks), functionSections: v3FunctionSections,
     },
   },
 });

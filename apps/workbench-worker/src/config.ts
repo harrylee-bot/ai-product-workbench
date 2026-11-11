@@ -102,7 +102,7 @@ export function loadWorkerConfig() {
     deerFlowGatewayUrl: trimTrailingSlash(required("DEERFLOW_GATEWAY_URL")),
     deerFlowAssistantId: process.env.DEERFLOW_ASSISTANT_ID || "lead_agent",
     deerFlowInternalToken: process.env.DEERFLOW_INTERNAL_AUTH_TOKEN || "",
-    deerFlowStreamMode: (process.env.DEERFLOW_STREAM_MODE || "messages,values")
+    deerFlowStreamMode: (process.env.DEERFLOW_STREAM_MODE || "messages-tuple,values")
       .split(",")
       .map((item) => item.trim())
       .filter(Boolean),

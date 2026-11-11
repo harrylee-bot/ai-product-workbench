@@ -189,7 +189,7 @@ describe("Word and PDF document selection", () => {
 
     await expect(buildExport(request)).rejects.toMatchObject({
       code: "EXPORT_CONTENT_INVALID",
-      safeDetail: "DOCX export only supports PRD v2",
+      safeDetail: "DOCX export only supports PRD v2 or v3",
     });
   });
 
@@ -247,7 +247,7 @@ describe("Word and PDF document selection", () => {
     request.source.artifacts[0]!.content = content;
     await expect(buildExport(request)).rejects.toMatchObject({
       code: "EXPORT_CONTENT_INVALID",
-      safeDetail: "DOCX export requires a complete valid PRD v2 document",
+      safeDetail: "DOCX export requires a complete valid PRD v2 or v3 document",
     });
   });
 

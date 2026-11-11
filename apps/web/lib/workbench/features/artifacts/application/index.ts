@@ -4,6 +4,7 @@ export * from "./preference-toggle-coordinator";
 
 import type {
   Artifact,
+  ExportSelection,
   ArtifactVersionPreference,
   CreateArtifactRequest,
   CreateArtifactVersionRequest,
@@ -19,6 +20,8 @@ import {
   useQuery,
   useQueryClient,
 } from "@tanstack/react-query";
+
+import { useCallback } from "react";
 
 import { workbenchQueryKeys } from "../../../query/keys";
 import {
@@ -404,4 +407,11 @@ export function useWorkbenchArtifactVersionContent(
     enabled: enabled && Boolean(projectId && artifactId && artifactVersionId),
     staleTime: Number.POSITIVE_INFINITY,
   });
+}
+
+export function useWorkbenchSourcePrototypePreviewCreator(artifactId: string, artifactVersionId: string) {
+  const api = useWorkbenchArtifactsApi();
+  return useCallback((_selection: ExportSelection, signal?: AbortSignal) => (
+    api.createSourcePrototypePreviewToken(artifactId, artifactVersionId, signal)
+  ), [api, artifactId, artifactVersionId]);
 }

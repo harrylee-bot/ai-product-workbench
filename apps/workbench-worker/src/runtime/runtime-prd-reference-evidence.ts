@@ -7,19 +7,19 @@ const PRD_REFERENCE_ROOT = "/mnt/skills/public";
 export const PRD_RUNTIME_REFERENCE_FILES = [
   {
     relativePath: "requirement-doc-template/SKILL.md",
-    sha256: "fe1493653986206aeed4684b46235c41d58e1e49db2b143ec0be5840542446e0",
+    sha256: "fe668773ece4fb6790a59e8dc9981482def6a959079c280080a8a99600ba97e9",
   },
   {
     relativePath: "requirement-doc-template/references/structure.md",
-    sha256: "7952eb98fadbbd992f1bdbd227953aacbcbcdea7fdef1f758987750a9ac5bf70",
+    sha256: "cfd9695845c2ad9bb1449bd912e8f491d008d69eb2ac88dbbe5d97868967299a",
   },
   {
     relativePath: "requirement-doc-template/references/quality-standards.md",
-    sha256: "32dc990927fbaf126e2d79f291869df8e576454261d4a644e916f3020c70d44e",
+    sha256: "16f5019a156bd13648e2c2c7ed929392f1532473a739123a5f4ca1341aa113ee",
   },
   {
     relativePath: "workbench/references/prd-runtime-result.schema.json",
-    sha256: "3ba722d8aec222c7f4ed01f1f66869adf68cdd00e7b896ed4e89e55fa2700105",
+    sha256: "76c1ae2338854cb68133fc242f7efde534278878bbd89e297a4f8ee010479065",
   },
 ] as const;
 

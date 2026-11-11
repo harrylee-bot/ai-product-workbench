@@ -24,7 +24,7 @@ export const jsonValueSchema: z.ZodType<JsonValue> = z.lazy(() => z.union([
   z.boolean(),
   z.null(),
   z.array(jsonValueSchema),
-  z.record(jsonValueSchema),
+  z.record(z.string(), jsonValueSchema),
 ]));
 
 export const problemDetailsSchema = z.object({
@@ -35,7 +35,7 @@ export const problemDetailsSchema = z.object({
   instance: z.string().optional(),
   code: z.string().min(1),
   requestId: z.string().optional(),
-  errors: z.record(z.array(z.string())).optional(),
+  errors: z.record(z.string(), z.array(z.string())).optional(),
 });
 
 export type ProblemDetails = z.infer<typeof problemDetailsSchema>;

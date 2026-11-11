@@ -123,7 +123,7 @@ export function canvasDirectEditAvailability(
     return { enabled: false, reason: "artifact-mismatch" };
   }
   if (version.status !== "ready") return { enabled: false, reason: "artifact-not-ready" };
-  if (version.contentMode !== "inline" || version.kind !== "prototype") {
+  if (version.contentMode !== "inline" || version.kind !== "prototype" || version.schemaVersion !== 1) {
     return { enabled: false, reason: "artifact-not-inline-prototype" };
   }
   if (

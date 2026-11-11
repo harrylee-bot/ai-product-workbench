@@ -5,7 +5,7 @@ import {
   prdChannelLabels,
   prdSafetyBaselineItems,
   type PrdDocument,
-  type PrdDocumentV2,
+  type PrdTemplateDocument,
 } from "@workbench/workbench-contracts";
 import {
   CheckIcon,
@@ -105,8 +105,8 @@ export function WorkbenchPrdArtifactEditor({
   }, [save]);
 
   const busy = saving || editingBusy;
-  const updateV2 = useCallback((update: (document: PrdDocumentV2) => PrdDocumentV2) => {
-    if (draftRef.current.protocol !== "workbench.prd.v2") return;
+  const updateV2 = useCallback((update: (document: PrdTemplateDocument) => PrdTemplateDocument) => {
+    if (draftRef.current.protocol === "workbench.prd.v1") return;
     const next = update(draftRef.current);
     draftRef.current = next;
     store.update(reference, document, next);
@@ -162,16 +162,16 @@ export function WorkbenchPrdArtifactEditor({
         className="workbench-prd-editor-content min-w-0 break-words [overflow-wrap:anywhere]"
         editor={editor}
       />
-      {draftDocument.protocol === "workbench.prd.v2" && (
+      {draftDocument.protocol !== "workbench.prd.v1" && (
         <PrdStructuredFieldsEditor
           document={draftDocument}
           disabled={busy}
           onChange={updateV2}
         />
       )}
-      {document.protocol === "workbench.prd.v2" && (
+      {draftDocument.protocol === "workbench.prd.v2" && (
         <section className="mt-[34px] border-t border-white/[0.12] pt-[34px]" data-prd-editor-diagrams>
-          {document.sections.businessRequirements.flowAndPages.diagrams.map((diagram) => (
+          {draftDocument.sections.businessRequirements.flowAndPages.diagrams.map((diagram) => (
             <figure className="mb-[28px] last:mb-0" key={diagram.id}>
               <figcaption>
                 <h3 className="text-[18px] font-semibold text-[#f1f3f4]">{diagram.title}</h3>
@@ -191,9 +191,9 @@ function PrdStructuredFieldsEditor({
   disabled,
   onChange,
 }: {
-  document: PrdDocumentV2;
+  document: PrdTemplateDocument;
   disabled: boolean;
-  onChange: (update: (document: PrdDocumentV2) => PrdDocumentV2) => void;
+  onChange: (update: (document: PrdTemplateDocument) => PrdTemplateDocument) => void;
 }) {
   return (
     <section className="mt-[34px] border-t border-white/[0.12] pt-[24px]" data-prd-structured-fields>
@@ -331,24 +331,11 @@ function PrdStructuredFieldsEditor({
                     checked={row.enabled}
                     className="size-[16px]"
                     disabled={disabled}
-                    onChange={(event) => onChange((current) => ({
-                      ...current,
-                      sections: {
-                        ...current.sections,
-                        introduction: {
-                          ...current.sections.introduction,
-                          usageScenarios: {
-                            ...current.sections.introduction.usageScenarios,
-                            channelTable: {
-                              ...current.sections.introduction.usageScenarios.channelTable,
-                              rows: current.sections.introduction.usageScenarios.channelTable.rows.map((candidate, candidateIndex) => (
-                                candidateIndex === index ? { ...candidate, enabled: event.target.checked } : candidate
-                              )),
-                            },
-                          },
-                        },
-                      },
-                    }))}
+                    onChange={(event) => onChange((current) => {
+                      const next = structuredClone(current);
+                      next.sections.introduction.usageScenarios.channelTable.rows[index]!.enabled = event.target.checked;
+                      return next;
+                    })}
                     type="checkbox"
                   />
                 </td>
@@ -372,20 +359,13 @@ function PrdStructuredFieldsEditor({
                       aria-label={`${row.sequence}安全基线判定`}
                       className="bg-[#242629] px-[6px] py-[4px]"
                       disabled={disabled}
-                      onChange={(event) => onChange((current) => ({
-                        ...current,
-                        sections: {
-                          ...current.sections,
-                          safetyBaseline: {
-                            ...current.sections.safetyBaseline,
-                            rows: current.sections.safetyBaseline.rows.map((candidate, candidateIndex) => (
-                              candidateIndex === index
-                                ? { ...candidate, applicability: event.target.value as typeof candidate.applicability }
-                                : candidate
-                            )),
-                          },
-                        },
-                      }))}
+                      onChange={(event) => onChange((current) => {
+                        const next = structuredClone(current);
+                        const candidate = next.sections.safetyBaseline.rows[index]!;
+                        candidate.applicability = event.target.value as typeof candidate.applicability;
+                        if (candidate.applicability === "不涉及") candidate.remarks = null;
+                        return next;
+                      })}
                       value={row.applicability}
                     >
                       <option value="是">是</option>
@@ -398,18 +378,11 @@ function PrdStructuredFieldsEditor({
                       aria-label={`${row.sequence}安全基线备注`}
                       className="min-w-[220px] bg-[#242629] px-[6px] py-[4px]"
                       disabled={disabled}
-                      onChange={(event) => onChange((current) => ({
-                        ...current,
-                        sections: {
-                          ...current.sections,
-                          safetyBaseline: {
-                            ...current.sections.safetyBaseline,
-                            rows: current.sections.safetyBaseline.rows.map((candidate, candidateIndex) => (
-                              candidateIndex === index ? { ...candidate, remarks: event.target.value || null } : candidate
-                            )),
-                          },
-                        },
-                      }))}
+                      onChange={(event) => onChange((current) => {
+                        const next = structuredClone(current);
+                        next.sections.safetyBaseline.rows[index]!.remarks = event.target.value || null;
+                        return next;
+                      })}
                       value={row.remarks ?? ""}
                     />
                   </td>

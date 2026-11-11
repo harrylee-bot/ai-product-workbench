@@ -45,6 +45,7 @@ const customDesignSystemFormSchema = z.object({
 });
 
 type CustomDesignSystemForm = z.infer<typeof customDesignSystemFormSchema>;
+type CustomDesignSystemFormInput = z.input<typeof customDesignSystemFormSchema>;
 type DesignSystemProvision = NonNullable<WorkbenchRunSubmission["designSystemProvision"]>;
 
 export type WorkbenchDesignStyleSelection = {
@@ -338,7 +339,7 @@ export function CustomDesignSystemDialog({
   onSubmit: (request: CreateDesignSystemRequest) => void;
   open: boolean;
 }) {
-  const form = useForm<CustomDesignSystemForm>({
+  const form = useForm<CustomDesignSystemFormInput, unknown, CustomDesignSystemForm>({
     resolver: zodResolver(customDesignSystemFormSchema),
     defaultValues: customDesignSystemDefaults,
   });

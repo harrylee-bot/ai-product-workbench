@@ -29,8 +29,8 @@ import {
   notFoundProblem,
   validationProblem,
 } from "../../common/problem-details.js";
+import { isUniqueConflict } from "../../common/prisma-errors.js";
 import { WorkbenchDbService } from "../../platform/database/workbench-db.service.js";
-
 const profileCursorSchema = z.object({
   version: z.literal(1),
   kind: z.enum(["embedding", "retrieval"]),
@@ -482,8 +482,4 @@ function decodeCursor<T>(value: string, schema: z.ZodType<T>, label: string): T 
   } catch {
     throw validationProblem(`The ${label} is invalid`);
   }
-}
-
-function isUniqueConflict(error: unknown) {
-  return error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002";
 }

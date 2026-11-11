@@ -15,7 +15,7 @@ test("the deployment contract binds the fixed DeerFlow source patch commit", () 
   const accepted = spawnSync(process.execPath, [
     scriptPath,
     "--expected-commit",
-    "7a6c4a994a86583d2a3c056ee9d0f157d4f030c2",
+    "345f08be00c8a9495079b732a39b46aa9af1584e",
   ], { encoding: "utf8" });
   assert.equal(accepted.status, 0, accepted.stderr);
 

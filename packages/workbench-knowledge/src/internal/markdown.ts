@@ -8,7 +8,7 @@ import remarkParse from "remark-parse";
 import { unified } from "unified";
 
 import type { KnowledgeBlock, KnowledgeBlockKind } from "../types.js";
-import { isWikiLinkNode, protectWikilinkPipes, remarkWikilinks, type WikiLinkNode } from "./wikilink.js";
+import { protectWikilinkPipes, remarkWikilinks, type WikiLinkNode } from "./wikilink.js";
 
 export interface MarkdownAnalysis {
   readonly tree: Root;

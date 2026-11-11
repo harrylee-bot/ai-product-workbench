@@ -34,7 +34,7 @@ const config = {
   deerFlowGatewayUrl: gatewayUrl,
   deerFlowAssistantId: assistantId,
   deerFlowInternalToken: internalToken,
-  deerFlowStreamMode: ["messages", "values"],
+  deerFlowStreamMode: ["messages-tuple", "values"],
   deerFlowTimeoutMs: numberFromEnv("DEERFLOW_TIMEOUT_MS", 180_000),
   deerFlowSubmissionTimeoutMs: numberFromEnv("DEERFLOW_SUBMISSION_TIMEOUT_MS", 120_000),
   deerFlowIdleTimeoutMs: numberFromEnv("DEERFLOW_IDLE_TIMEOUT_MS", 60_000),
@@ -67,7 +67,7 @@ const result = await runtime.execute({
   attempt: 1,
   projectId,
   threadId,
-  principalId,
+  runtimeTransportOwnerId: principalId,
   externalThreadId: binding.externalThreadId,
   request: {
     prompt: "生成一份简短的产品调研记录，返回 document Artifact。内容只需要说明本次 DeerFlow 运行链路验证成功。",

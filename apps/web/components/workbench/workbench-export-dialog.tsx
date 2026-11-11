@@ -33,6 +33,7 @@ import {
 } from "@/lib/workbench/features";
 import { drawerTransition } from "./workbench-motion";
 import type { DocumentExportSelection } from "@/lib/workbench/features/document-export-selection";
+import type { SourceExportSelection } from "@/lib/workbench/features/source-export-selection";
 
 export function ExportDialog({
   activeExport,
@@ -58,6 +59,7 @@ export function ExportDialog({
   onStartExport,
   open,
   selection,
+  sourceExport,
 }: {
   activeExport: ExportJob | null;
   activeExportSelection: ExportSelection | null;
@@ -82,6 +84,7 @@ export function ExportDialog({
   onStartExport: (target: WorkbenchExportTarget, selection: ExportSelection) => Promise<ExportJob>;
   open: boolean;
   selection: ExportSelection;
+  sourceExport?: SourceExportSelection;
 }) {
   const [selectedTarget, setSelectedTarget] = useState<WorkbenchExportTarget>("Download .zip");
   const exportTargets: Array<{
@@ -148,11 +151,16 @@ export function ExportDialog({
     if (capabilitiesError) return { available: false, reason: "导出能力检查失败" };
     const capability = exportTargetAvailability(capabilities, target);
     if (!capability.available) return capability;
-    const format = exportTargetDescriptor(target).format;
+    const targetDescriptor = exportTargetDescriptor(target);
+    const format = targetDescriptor.format;
     if (format === "docx" || format === "pdf") {
       return documentExport?.selection
         ? { available: true, reason: null }
         : { available: false, reason: documentExport?.reason ?? "请选择一个已完成的 PRD 需求文档" };
+    }
+    if (sourceExport?.reason) return { available: false, reason: sourceExport.reason };
+    if (sourceExport?.source && ((format !== "html" && format !== "react") || targetDescriptor.externalTarget !== null)) {
+      return { available: false, reason: "源码原型支持 HTML 离线包、复制 HTML 和 React 工程" };
     }
     return hasSelection ? capability : { available: false, reason: "请先选择画布上的产物" };
   };

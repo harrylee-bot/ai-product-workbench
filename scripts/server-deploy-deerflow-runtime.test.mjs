@@ -73,9 +73,8 @@ function runDeployment({
   const commandLogPath = join(appDir, "commands.log");
   const envFile = join(deployDir, "workbench.env");
   const composeFile = join(deployDir, "workbench-compose.yml");
-  const composeOverlay = join(deployDir, "workbench-validation-overlay.yml");
   const deerflowComposeFile = join(deployDir, "deerflow-runtime-compose.yml");
-  const workbenchPreflight = join(deployDir, "workbench-preflight.sh");
+  const workbenchPreflight = join(deployDir, "workbench-production-preflight.sh");
   const deerflowPreflight = join(deployDir, "deerflow-preflight.sh");
 
   mkdirSync(deployDir, { recursive: true });
@@ -85,7 +84,6 @@ function runDeployment({
   writeFileSync(join(configDir, "config.base.yaml"), "models: []\n");
   writeFileSync(effectiveConfig, "models: []\n");
   writeFileSync(composeFile, "services: {}\n");
-  writeFileSync(composeOverlay, "services: {}\n");
   writeFileSync(deerflowComposeFile, "services: {}\n");
   writeFileSync(commandLogPath, "");
   writeFileSync(envFile, [
@@ -151,11 +149,8 @@ function runDeployment({
         PATH: `${fakeBinDir}:${process.env.PATH}`,
         WORKBENCH_ENV_FILE: envFile,
         WORKBENCH_COMPOSE_FILE: composeFile,
-        WORKBENCH_COMPOSE_OVERLAY: composeOverlay,
         WORKBENCH_DEERFLOW_COMPOSE_FILE: deerflowComposeFile,
-        WORKBENCH_PREFLIGHT_SCRIPT: workbenchPreflight,
         WORKBENCH_DEERFLOW_PREFLIGHT_SCRIPT: deerflowPreflight,
-        WORKBENCH_DEPLOY_IMAGE_MODE: "build",
         WORKBENCH_MANAGE_DEERFLOW_RUNTIME: "1",
         WORKBENCH_DEPLOY_LOCK_FILE: join(appDir, "deploy.lock"),
         WORKBENCH_DEPLOY_HEALTH_TIMEOUT_SECONDS: "5",

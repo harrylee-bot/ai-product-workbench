@@ -38,6 +38,34 @@ const netlifyCapabilities = {
 afterEach(cleanup);
 
 describe("ExportDialog persisted job state", () => {
+  it("limits source prototypes to the supported local HTML and React outputs", async () => {
+    const props = documentDialogProps();
+    props.onStartExport.mockResolvedValue(exportJob({ format: "react", status: "queued" }));
+    const sourceSelection = { kind: "artifact" as const, artifactId: "source", artifactVersionId: "source-v1" };
+    render(<ExportDialog {...props} selection={sourceSelection} sourceExport={{ source: true, reason: null }}
+      capabilities={{ ...netlifyCapabilities, formats: { ...capabilities.formats, figma: available } }} />);
+    for (const target of ["Figma", "MCP", "Netlify"]) {
+      expect((screen.getByText(target).closest("button") as HTMLButtonElement).disabled).toBe(true);
+    }
+    for (const target of ["Download .zip", "Copy code", "React"]) {
+      expect((screen.getByText(target).closest("button") as HTMLButtonElement).disabled).toBe(false);
+    }
+    fireEvent.click(screen.getByText("React").closest("button")!);
+    fireEvent.click(screen.getByRole("button", { name: "导出 React" }));
+    await waitFor(() => expect(props.onStartExport).toHaveBeenCalledWith("React", sourceSelection));
+  });
+
+  it("blocks source export after a selection changes to a mixed or partial application", () => {
+    const props = documentDialogProps();
+    const rendered = render(<ExportDialog {...props} sourceExport={{ source: true, reason: null }} />);
+    fireEvent.click(screen.getByText("React").closest("button")!);
+    rendered.rerender(<ExportDialog {...props} sourceExport={{ source: true, reason: "源码原型需单独导出，请只选择一个源码原型" }} />);
+    const action = screen.getByRole("button", { name: "导出 React" });
+    expect((action as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(action);
+    expect(props.onStartExport).not.toHaveBeenCalled();
+  });
+
   it("creates a new job for an unavailable output instead of downloading or cancelling it", async () => {
     const props = documentDialogProps();
     props.onStartExport.mockResolvedValue(exportJob({ format: "docx", status: "queued" }));

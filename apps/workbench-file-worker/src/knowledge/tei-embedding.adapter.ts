@@ -140,6 +140,9 @@ export class TeiEmbeddingAdapter implements KnowledgeEmbeddingPort {
   }
 
   private async requestJson(path: string, init: RequestInit, signal?: AbortSignal): Promise<unknown> {
+    if (signal?.aborted) {
+      throw new RetryableKnowledgeBuildError("TEI_REQUEST_ABORTED", "TEI request was interrupted", { cause: signal.reason });
+    }
     const body = typeof init.body === "string" ? init.body : undefined;
     if (body && Buffer.byteLength(body, "utf8") > this.config.maximumRequestBytes) {
       throw new TerminalKnowledgeBuildError("TEI_REQUEST_TOO_LARGE", "TEI request exceeds the configured byte limit");
@@ -252,29 +255,33 @@ async function readBoundedText(response: Response, maximumBytes: number): Promis
   const reader = response.body.getReader();
   const chunks: Uint8Array[] = [];
   let total = 0;
-  while (true) {
-    const next = await reader.read();
-    if (next.done) break;
-    total += next.value.byteLength;
-    if (total > maximumBytes) {
-      await reader.cancel().catch(() => undefined);
-      throw new TerminalKnowledgeBuildError("TEI_RESPONSE_TOO_LARGE", "TEI response exceeds the configured byte limit");
-    }
-    chunks.push(next.value);
-  }
-  const bytes = new Uint8Array(total);
-  let offset = 0;
-  for (const chunk of chunks) {
-    bytes.set(chunk, offset);
-    offset += chunk.byteLength;
-  }
   try {
-    return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
-  } catch (cause) {
-    throw new TerminalKnowledgeBuildError(
-      "TEI_RESPONSE_ENCODING_INVALID",
-      "TEI response is not valid UTF-8",
-      { cause },
-    );
+    while (true) {
+      const next = await reader.read();
+      if (next.done) break;
+      total += next.value.byteLength;
+      if (total > maximumBytes) {
+        await reader.cancel().catch(() => undefined);
+        throw new TerminalKnowledgeBuildError("TEI_RESPONSE_TOO_LARGE", "TEI response exceeds the configured byte limit");
+      }
+      chunks.push(next.value);
+    }
+    const bytes = new Uint8Array(total);
+    let offset = 0;
+    for (const chunk of chunks) {
+      bytes.set(chunk, offset);
+      offset += chunk.byteLength;
+    }
+    try {
+      return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+    } catch (cause) {
+      throw new TerminalKnowledgeBuildError(
+        "TEI_RESPONSE_ENCODING_INVALID",
+        "TEI response is not valid UTF-8",
+        { cause },
+      );
+    }
+  } finally {
+    reader.releaseLock();
   }
 }

@@ -10,7 +10,7 @@ import {
   XIcon,
 } from "lucide-react";
 import { AnimatePresence, motion } from "framer-motion";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { toast } from "sonner";
 
 import { cn } from "@/lib/utils";
@@ -254,6 +254,9 @@ export function LeftInspector({
 
 export function ProjectTranscriptPanel({
   actionBusy,
+  canCancel = false,
+  onCancel,
+  generationProcess,
   activities,
   canRetry,
   cancellationReason,
@@ -273,6 +276,9 @@ export function ProjectTranscriptPanel({
   submissionError,
 }: {
   actionBusy: boolean;
+  canCancel?: boolean;
+  onCancel?: () => void;
+  generationProcess?: ReactNode;
   activities: WorkbenchRunActivityItem[];
   canRetry: boolean;
   cancellationReason: string | null;
@@ -423,12 +429,15 @@ export function ProjectTranscriptPanel({
           <span className="size-[4px] rounded-full bg-[#202124]" />
         </span>
       </button>
+      {isWorking && canCancel && onCancel && <button aria-label="取消当前运行"
+        className="absolute right-3 top-4 z-40 grid size-6 place-items-center rounded-full border border-white/10 text-[#c7cad0] hover:bg-white/10"
+        disabled={actionBusy} onClick={onCancel} type="button"><XIcon className="size-3.5" /></button>}
       <AnimatePresence initial={false}>
       {transcriptOpen && (
       <motion.div
         animate={{ opacity: 1 }}
         className={cn(
-          "relative z-20 flex flex-col text-[#f1f3f4]",
+          "relative z-20 flex max-h-[calc(100dvh_-_400px)] flex-col overflow-y-auto text-[#f1f3f4]",
           "px-[16px] pb-[18px] pt-[70px]",
         )}
         exit={{ opacity: 0 }}
@@ -510,6 +519,7 @@ export function ProjectTranscriptPanel({
           </motion.div>
           </AnimatePresence>
         </div>
+        {generationProcess}
       </motion.div>
       )}
       </AnimatePresence>
@@ -519,6 +529,7 @@ export function ProjectTranscriptPanel({
 
 export function MobileRunStatus({
   busy,
+  generationProcess,
   canCancel,
   canRetry,
   failure,
@@ -531,6 +542,7 @@ export function MobileRunStatus({
   runStatus,
 }: {
   busy: boolean;
+  generationProcess?: ReactNode;
   canCancel: boolean;
   canRetry: boolean;
   failure: Run["failure"];
@@ -570,7 +582,7 @@ export function MobileRunStatus({
     <motion.div
       animate={{ opacity: 1, y: 0 }}
       className={cn(
-        "absolute left-[16px] right-[70px] top-[76px] z-40 flex items-center gap-[9px] rounded-[13px] border border-white/[0.10] bg-[#1c1d20]/94 px-[11px] text-[12px] font-semibold text-[#f1f3f4] shadow-[0_18px_56px_-34px_rgba(0,0,0,0.95)] backdrop-blur-xl md:hidden",
+        "absolute left-[16px] right-[70px] top-[76px] z-[60] flex items-center gap-[9px] rounded-[13px] border border-white/[0.10] bg-[#1c1d20]/94 px-[11px] text-[12px] font-semibold text-[#f1f3f4] shadow-[0_18px_56px_-34px_rgba(0,0,0,0.95)] backdrop-blur-xl md:hidden",
         showPromptContext ? "min-h-[54px] py-[7px]" : "h-[42px]",
       )}
       data-mobile-run-status
@@ -597,6 +609,7 @@ export function MobileRunStatus({
           </span>
         )}
       </span>
+      {generationProcess}
       {working && canCancel && (
         <button
           aria-label="取消当前运行"

@@ -28,6 +28,7 @@ import type {
   BoardNodeData,
   PrdDocument,
   PrototypeDocument,
+  SourcePrototypeInput,
 } from "@workbench/workbench-contracts";
 import { cn } from "@/lib/utils";
 import {
@@ -67,7 +68,7 @@ type WorkbenchPrototypeEditContextValue = {
   enabled: boolean;
   onDocumentCommit: (
     reference: WorkbenchArtifactReference,
-    document: PrototypeDocument,
+    document: PrototypeDocument | SourcePrototypeInput,
   ) => Promise<void>;
 };
 

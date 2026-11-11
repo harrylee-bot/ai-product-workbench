@@ -7,7 +7,7 @@ import {
   type PrdDocument,
   type PrototypeDocument,
 } from "@workbench/workbench-contracts";
-import { prdDocumentV2Example } from "@workbench/workbench-contracts/test-fixtures";
+import { prdDocumentV2Example, prdDocumentV3Example } from "@workbench/workbench-contracts/test-fixtures";
 import { hashRequest } from "../src/common/idempotency.js";
 import { ArtifactsController } from "../src/modules/artifacts/artifacts.controller.js";
 import { ArtifactsService } from "../src/modules/artifacts/artifacts.service.js";
@@ -263,7 +263,7 @@ function createHarness(options: {
 
 function createPrdEditHarness(input: {
   baseDocument: PrdDocument;
-  baseSchemaVersion: 1 | 2;
+  baseSchemaVersion: 1 | 2 | 3;
   document: PrdDocument;
 }) {
   const artifactId = `artifact_prd_v${input.baseSchemaVersion}`;
@@ -275,7 +275,7 @@ function createPrdEditHarness(input: {
     baseArtifactVersionId,
     document: input.document,
   };
-  const savedSchemaVersion = input.document.protocol === "workbench.prd.v2" ? 2 : 1;
+  const savedSchemaVersion = input.document.protocol === "workbench.prd.v3" ? 3 : input.document.protocol === "workbench.prd.v2" ? 2 : 1;
   const ready = {
     id: resultArtifactVersionId,
     artifactId,
@@ -529,7 +529,7 @@ describe("ArtifactVersion user edit command", () => {
   const prdEditFixtures: Array<{
     baseDocument: PrdDocument;
     document: PrdDocument;
-    schemaVersion: 1 | 2;
+    schemaVersion: 1 | 2 | 3;
     staleDocument: PrdDocument;
   }> = [
     {
@@ -543,6 +543,12 @@ describe("ArtifactVersion user edit command", () => {
       document: prdDocumentV2(2),
       schemaVersion: 2,
       staleDocument: prdDocumentV2(1),
+    },
+    {
+      baseDocument: structuredClone(prdDocumentV3Example),
+      document: { ...structuredClone(prdDocumentV3Example), revision: { ...prdDocumentV3Example.revision, number: 2 } },
+      schemaVersion: 3,
+      staleDocument: structuredClone(prdDocumentV3Example),
     },
   ];
 

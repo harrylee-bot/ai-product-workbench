@@ -1,0 +1,30 @@
+{
+  "schema": "workbench.deerflow-runtime-security.v1",
+  "applicationVersion": "1.0.0",
+  "sourcePyprojectSha256": "293f4ce381f8fde321197ca46216a413f684fb8246c3294bf6579e8420977d85",
+  "sourceHarnessPyprojectSha256": "235e642dd628d70cccde5d619dfacd4855b2697f74abffd91b8f6cac10fe2ba8",
+  "sourceLockSha256": "3cc643cd34374384c62de7fd8cef49cc4608df01ea11eff85daeea51f5cf0d5f",
+  "constraints": [
+    "aiohttp==3.14.4",
+    "anyio==4.14.2",
+    "certifi==2026.10.19",
+    "cryptography==50.0.0",
+    "dnspython==2.9.0",
+    "langchain-anthropic==1.4.6",
+    "langgraph-api==0.17.0",
+    "langgraph-cli==0.4.32",
+    "langgraph-sdk==0.4.6",
+    "mcp==1.30.0",
+    "multidict==6.9.1",
+    "oauthlib==4.0.0",
+    "opentelemetry-api==1.45.1",
+    "pillow==13.0.0",
+    "pyasn1==0.6.5",
+    "PyJWT==2.15.0",
+    "setuptools==84.1.0",
+    "soupsieve==2.9.0",
+    "urllib3==2.8.0"
+  ],
+  "upstreamCommit": "345f08be00c8a9495079b732a39b46aa9af1584e",
+  "securedLockSha256": "e68385e32700f09c49977909b6437a291a2b358de0d0c613635bfefb42df60ff"
+}

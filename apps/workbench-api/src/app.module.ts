@@ -1,3 +1,4 @@
+import { SourcePrototypePreviewModule } from "./modules/source-prototype-preview/source-prototype-preview.module.js";
 import { Module } from "@nestjs/common";
 import { ConfigModule } from "@nestjs/config";
 import { WorkbenchDbModule } from "./platform/database/workbench-db.module.js";
@@ -52,6 +53,7 @@ import { ImportSourcesModule } from "./modules/import-sources/import-sources.mod
     RuntimeModule,
     SystemModule,
     SharesModule,
+    SourcePrototypePreviewModule,
     ThreadsModule,
     SubmissionIntentsModule,
     WorkspacesModule,

@@ -74,6 +74,13 @@ export {
   type RetrievalProfileV1,
 } from "./retrieval-profile.js";
 export { buildKnowledgeRelease, type BuildKnowledgeReleaseInput } from "./release.js";
+export {
+  buildKnowledgeRebuildPlan,
+  KnowledgeRebuildPlanError,
+  type KnowledgeRebuildCurrentRelease,
+  type KnowledgeRebuildPlanInput,
+  type KnowledgeRebuildPlanV1,
+} from "./rebuild.js";
 export { isAcceptedKnowledgeStatus, routeKnowledgeDocument } from "./routing.js";
 export {
   canonicalKnowledgeStopwords,

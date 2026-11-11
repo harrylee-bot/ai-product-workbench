@@ -82,6 +82,19 @@ describe("TeiEmbeddingAdapter", () => {
     expect(fetchImplementation).toHaveBeenCalledTimes(1);
   });
 
+  it("does not call the provider when the request is already aborted", async () => {
+    const controller = new AbortController();
+    controller.abort(new Error("cancelled"));
+    const fetchImplementation = vi.fn();
+    const adapter = new TeiEmbeddingAdapter(config(), fetchImplementation as never);
+
+    await expect(adapter.assertProfile(profile, controller.signal)).rejects.toMatchObject({
+      name: "RetryableKnowledgeBuildError",
+      code: "TEI_REQUEST_ABORTED",
+    });
+    expect(fetchImplementation).not.toHaveBeenCalled();
+  });
+
   it.each([
     ["wrong dimension", [[1, 0]], "TEI_VECTOR_DIMENSION_INVALID"],
     ["non-finite value", [[Number.NaN, 0, 0]], "TEI_VECTOR_VALUE_INVALID"],

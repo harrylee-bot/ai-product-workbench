@@ -1,3 +1,4 @@
+import { createSourcePrototypePreviewToken, type SourcePrototypePreviewPayload, type SourcePrototypePreviewIdentity } from "@workbench/workbench-preview-token";
 import { Injectable } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import {
@@ -38,6 +39,21 @@ export class ExportPreviewConfig {
       1,
       3_600,
     );
+  }
+
+  createSourceCapability(
+    identity: SourcePrototypePreviewIdentity,
+    now = new Date(),
+    expiresNoLaterThan?: Date,
+  ) {
+    const configured = Math.floor(now.getTime() / 1_000) + this.maximumTtlSeconds;
+    const expiry = expiresNoLaterThan ? Math.min(configured, Math.floor(expiresNoLaterThan.getTime() / 1_000)) : configured;
+    const expiresAt = new Date(expiry * 1_000);
+    const token = createSourcePrototypePreviewToken(
+      { ...identity, expiresAt } as SourcePrototypePreviewPayload, this.tokenSecret,
+      { now, maximumTtlSeconds: this.maximumTtlSeconds },
+    );
+    return { url: `${this.publicOrigin}/preview/${token}`, expiresAt };
   }
 
   createCapability(

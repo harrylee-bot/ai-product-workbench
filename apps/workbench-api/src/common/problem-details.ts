@@ -17,6 +17,15 @@ export function validationProblem(detail: string, errors?: Record<string, string
   });
 }
 
+export function sourcePrototypeBuildProblem(code: string, detail: string) {
+  return new ProblemException({
+    title: "Source prototype build failed",
+    status: HttpStatus.UNPROCESSABLE_ENTITY,
+    detail,
+    code,
+  });
+}
+
 export function notFoundProblem(resource: string) {
   return new ProblemException({
     title: "Resource not found",

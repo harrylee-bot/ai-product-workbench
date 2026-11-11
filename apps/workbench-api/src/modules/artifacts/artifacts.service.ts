@@ -12,6 +12,9 @@ import {
   prdDocumentSchema,
   prototypeDocumentSchema,
   prototypeImageAssetSchema,
+  sourcePrototypeDocumentSchema,
+  type SourcePrototypeInput,
+  type SourcePrototypeDocument,
   type Artifact,
   type ArtifactCreation,
   type ArtifactList,
@@ -23,6 +26,7 @@ import {
   type PrototypeDocument,
 } from "@workbench/workbench-contracts";
 import { Prisma } from "@workbench/workbench-db";
+import { buildSourcePrototype, TerminalExportError } from "@workbench/workbench-export-core";
 import { hashRequest, validateIdempotencyKey } from "../../common/idempotency.js";
 import {
   artifactCreationConflictProblem,
@@ -30,6 +34,7 @@ import {
   idempotencyConflictProblem,
   notFoundProblem,
   revisionConflictProblem,
+  sourcePrototypeBuildProblem,
   validationProblem,
 } from "../../common/problem-details.js";
 import { WorkbenchDbService } from "../../platform/database/workbench-db.service.js";
@@ -222,7 +227,9 @@ export class ArtifactsService {
     validateIdempotencyKey(idempotencyKey);
     const command = createArtifactRequestSchema.parse(request);
     await this.requireAuthorizedProject(principalId, projectId, "edit");
+    if (command.kind === "prototype") return this.createSourcePrototype(principalId, projectId, idempotencyKey, command);
     const requestHash = hashRequest(command);
+    if (await this.findSourceCreationReceipt(projectId, idempotencyKey)) throw idempotencyConflictProblem();
     const replay = await this.findCreationReceipt(projectId, idempotencyKey);
     if (replay) return resolveCreationReplay(replay, principalId, requestHash);
 
@@ -234,6 +241,7 @@ export class ArtifactsService {
           include: artifactCreationReceiptInclude,
         });
         if (duplicate) return resolveCreationReplay(duplicate, principalId, requestHash);
+        if (await tx.sourcePrototypeCreationReceipt.findUnique({ where: { projectId_idempotencyKey: { projectId, idempotencyKey } } })) throw idempotencyConflictProblem();
 
         const sourceFile = await tx.fileAsset.findFirst({
           where: { id: command.source.fileAssetId, projectId },
@@ -323,6 +331,54 @@ export class ArtifactsService {
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
         const raced = await this.findCreationReceipt(projectId, idempotencyKey);
         if (raced) return resolveCreationReplay(raced, principalId, requestHash);
+        if (await this.findSourceCreationReceipt(projectId, idempotencyKey)) throw idempotencyConflictProblem();
+      }
+      throw error;
+    }
+  }
+
+  private async createSourcePrototype(
+    principalId: string,
+    projectId: string,
+    idempotencyKey: string,
+    command: Extract<CreateArtifactRequest, { kind: "prototype" }>,
+  ): Promise<ArtifactCreation> {
+    const requestHash = hashRequest(command);
+    if (await this.findCreationReceipt(projectId, idempotencyKey)) throw idempotencyConflictProblem();
+    const replay = await this.findSourceCreationReceipt(projectId, idempotencyKey);
+    if (replay) return resolveSourceCreationReplay(replay, principalId, requestHash);
+    const document = await compileSourcePrototype(command.document);
+    const checksum = createHash("sha256").update(canonicalJson(document)).digest("hex");
+    try {
+      return await this.db.$transaction(async (tx) => {
+        await lockActiveProject(tx, projectId, principalId, "edit");
+        if (await tx.artifactCreationReceipt.findUnique({ where: { projectId_idempotencyKey: { projectId, idempotencyKey } } })) throw idempotencyConflictProblem();
+        const duplicate = await tx.sourcePrototypeCreationReceipt.findUnique({
+          where: { projectId_idempotencyKey: { projectId, idempotencyKey } }, include: artifactCreationReceiptInclude,
+        });
+        if (duplicate) return resolveSourceCreationReplay(duplicate, principalId, requestHash);
+        const artifact = await tx.artifact.create({ data: { projectId, kind: "prototype", title: command.title } });
+        const version = await tx.artifactVersion.create({ data: {
+          artifactId: artifact.id, projectId, version: 1, schemaVersion: 2,
+          status: "staging", content: document as Prisma.InputJsonValue, checksum, citations: [],
+        } });
+        const readyVersion = await tx.artifactVersion.update({
+          where: { id: version.id }, data: { status: "ready" }, select: artifactCreationVersionSelect,
+        });
+        const readyArtifact = await tx.artifact.update({
+          where: { id: artifact.id }, data: { currentVersionId: readyVersion.id }, select: artifactCreationArtifactSelect,
+        });
+        await tx.sourcePrototypeCreationReceipt.create({ data: {
+          projectId, artifactId: readyArtifact.id, artifactVersionId: readyVersion.id,
+          createdById: principalId, idempotencyKey, requestHash,
+        } });
+        return mapSourceArtifactCreation(readyArtifact, readyVersion);
+      });
+    } catch (error) {
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+        const raced = await this.findSourceCreationReceipt(projectId, idempotencyKey);
+        if (raced) return resolveSourceCreationReplay(raced, principalId, requestHash);
+        if (await this.findCreationReceipt(projectId, idempotencyKey)) throw idempotencyConflictProblem();
       }
       throw error;
     }
@@ -341,6 +397,8 @@ export class ArtifactsService {
     const requestHash = hashRequest(request);
     const replay = await this.findEditReceipt(artifactId, idempotencyKey);
     if (replay) return resolveEditReplay(replay, principalId, requestHash);
+    const document = request.kind === "prototype" && request.document.protocol === "workbench.prototype-source-input.v1"
+      ? await compileSourcePrototype(request.document) : request.document;
 
     try {
       return await this.db.$transaction(async (tx) => {
@@ -398,8 +456,8 @@ export class ArtifactsService {
           || base.projectId !== artifact.projectId
           || base.status !== "ready"
           || (request.kind === "prototype"
-            ? base.schemaVersion !== 1
-            : base.schemaVersion !== 1 && base.schemaVersion !== 2)
+            ? base.schemaVersion !== documentSchemaVersion
+            : base.schemaVersion !== 1 && base.schemaVersion !== 2 && base.schemaVersion !== 3)
           || base.content === null
           || base.contentBlobId !== null
         ) {
@@ -410,8 +468,14 @@ export class ArtifactsService {
         }
 
         if (request.kind === "prototype") {
-          const baseDocument = prototypeDocumentSchema.parse(base.content);
-          assertPrototypeEditContinuity(baseDocument, request.document, base.assets);
+          if (document.protocol === "workbench.prototype-source.v1") {
+            const baseDocument = sourcePrototypeDocumentSchema.parse(base.content);
+            assertSourcePrototypeEditContinuity(baseDocument, document);
+            if (base.assets.length > 0) throw artifactVersionWriteConflictProblem("ARTIFACT_VERSION_ASSET_CONFLICT", "Source prototypes cannot inherit IR asset pins");
+          } else {
+            const baseDocument = prototypeDocumentSchema.parse(base.content);
+            assertPrototypeEditContinuity(baseDocument, document as PrototypeDocument, base.assets);
+          }
         } else {
           const baseDocument = prdDocumentSchema.parse(base.content);
           if (prdDocumentSchemaVersion(baseDocument) !== base.schemaVersion) {
@@ -440,7 +504,7 @@ export class ArtifactsService {
           orderBy: { version: "desc" },
         });
         const checksum = createHash("sha256")
-          .update(canonicalJson(request.document))
+          .update(canonicalJson(document))
           .digest("hex");
         const created = await tx.artifactVersion.create({
           data: {
@@ -449,7 +513,7 @@ export class ArtifactsService {
             version: (latest?.version ?? 0) + 1,
             schemaVersion: documentSchemaVersion,
             status: "staging",
-            content: request.document as Prisma.InputJsonValue,
+            content: document as Prisma.InputJsonValue,
             checksum,
             citations: base.citations as Prisma.InputJsonValue,
             createdByRunId: null,
@@ -855,6 +919,12 @@ export class ArtifactsService {
     });
   }
 
+  private findSourceCreationReceipt(projectId: string, idempotencyKey: string) {
+    return this.db.sourcePrototypeCreationReceipt.findUnique({
+      where: { projectId_idempotencyKey: { projectId, idempotencyKey } }, include: artifactCreationReceiptInclude,
+    });
+  }
+
   private findEditReceipt(artifactId: string, idempotencyKey: string) {
     return this.db.artifactVersionEditReceipt.findUnique({
       where: { artifactId_idempotencyKey: { artifactId, idempotencyKey } },
@@ -881,6 +951,37 @@ export class ArtifactsService {
     });
     if (!artifact) throw notFoundProblem("Artifact");
   }
+}
+
+async function compileSourcePrototype(input: SourcePrototypeInput): Promise<SourcePrototypeDocument> {
+  try {
+    return await buildSourcePrototype(input);
+  } catch (error) {
+    if (error instanceof TerminalExportError) throw sourcePrototypeBuildProblem(error.code, error.safeDetail);
+    throw error;
+  }
+}
+
+function assertSourcePrototypeEditContinuity(base: SourcePrototypeDocument, next: SourcePrototypeDocument) {
+  if (base.documentId !== next.documentId) throw artifactVersionWriteConflictProblem("ARTIFACT_DOCUMENT_ID_MISMATCH", "Edited source prototype must retain its documentId");
+  if (next.revision <= base.revision) throw artifactVersionWriteConflictProblem("ARTIFACT_DOCUMENT_REVISION_CONFLICT", "Edited source prototype revision must advance");
+}
+
+function resolveSourceCreationReplay(
+  receipt: { createdById: string; requestHash: string; artifact: Parameters<typeof mapArtifact>[0]; artifactVersion: Parameters<typeof mapEditedArtifactVersion>[0] },
+  principalId: string,
+  requestHash: string,
+): ArtifactCreation {
+  if (receipt.createdById !== principalId || receipt.requestHash !== requestHash) throw idempotencyConflictProblem();
+  return mapSourceArtifactCreation(receipt.artifact, receipt.artifactVersion);
+}
+
+function mapSourceArtifactCreation(
+  artifact: Parameters<typeof mapArtifact>[0],
+  version: Parameters<typeof mapEditedArtifactVersion>[0],
+): ArtifactCreation {
+  if (artifact.kind !== "prototype" || version.schemaVersion !== 2) throw new Error("Source prototype creation receipt invariant violated");
+  return artifactCreationSchema.parse({ artifact: mapArtifact(artifact), artifactVersion: mapEditedArtifactVersion(version) });
 }
 
 function resolveCreationReplay(
@@ -1044,12 +1145,13 @@ function assertPrdEditContinuity(base: PrdDocument, next: PrdDocument) {
   }
 }
 
-function editableDocumentSchemaVersion(request: CreateArtifactVersionRequest): 1 | 2 {
-  return request.kind === "prd" ? prdDocumentSchemaVersion(request.document) : 1;
+function editableDocumentSchemaVersion(request: CreateArtifactVersionRequest): 1 | 2 | 3 {
+  return request.kind === "prd" ? prdDocumentSchemaVersion(request.document)
+    : request.document.protocol === "workbench.prototype-source-input.v1" ? 2 : 1;
 }
 
-function prdDocumentSchemaVersion(document: PrdDocument): 1 | 2 {
-  return document.protocol === "workbench.prd.v2" ? 2 : 1;
+function prdDocumentSchemaVersion(document: PrdDocument): 1 | 2 | 3 {
+  return document.protocol === "workbench.prd.v3" ? 3 : document.protocol === "workbench.prd.v2" ? 2 : 1;
 }
 
 function assertPrototypeEditContinuity(

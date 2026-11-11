@@ -881,8 +881,74 @@ const prdDocumentV2BaseSchema = z.object({
   }).strict(),
 }).strict();
 
-function refinePrdDocumentV2(
-  document: z.infer<typeof prdDocumentV2BaseSchema>,
+export const prdV3DiagramSchema = prdDiagramSchema.extend({
+  title: z.string().min(4).max(240).regex(/^图[1-9]\d*\s+\S/u, "diagram title must start with its figure number"),
+  nodes: z.array(prdDiagramNodeSchema).min(2).max(40),
+  edges: z.array(prdDiagramEdgeSchema).min(1).max(80),
+}).strict();
+
+export const prdTemplateDiagramSchema = prdV3DiagramSchema;
+
+export const prdV3FunctionSectionSchema = prdV2SectionSchema.extend({
+  id: artifactIrIdSchema,
+  title: z.string().min(5).max(240).regex(/^2\.(?:[2-9]|[1-9]\d+)\s+\S/u, "business section title must use 2.2+ numbering"),
+  diagrams: z.array(prdV3DiagramSchema).max(2).default([]),
+}).strict();
+
+export function prdTableOfContentsEntriesForV3(functionSectionTitles: readonly string[]): string[] {
+  return [
+    ...prdTableOfContentsEntries.slice(0, 6),
+    ...functionSectionTitles,
+    ...prdTableOfContentsEntries.slice(prdAdditionalSectionTocIndex),
+  ];
+}
+
+const prdDocumentV3BaseSchema = prdDocumentV2BaseSchema.extend({
+  protocol: z.literal("workbench.prd.v3"),
+  tableOfContents: z.object({
+    title: z.literal("目 录"),
+    entries: z.array(z.string().min(1).max(240)).min(9).max(58),
+  }).strict(),
+  sections: prdDocumentV2BaseSchema.shape.sections.extend({
+    businessRequirements: z.object({
+      title: z.literal("2 业务需求"),
+      summary: prdInlineContentSchema,
+      pageLinks: prdV2SectionSchema.extend({ title: z.literal("2.1页面链接") }).strict(),
+      functionSections: z.array(prdV3FunctionSectionSchema).min(1).max(50),
+    }).strict(),
+  }).strict(),
+}).strict();
+
+type PrdTemplateBase = z.infer<typeof prdDocumentV2BaseSchema> | z.infer<typeof prdDocumentV3BaseSchema>;
+export type PrdTemplateDiagram = z.infer<typeof prdV3DiagramSchema>;
+export type PrdTemplateSection = { title: string; blocks: PrdBlock[]; id?: string; diagrams?: PrdTemplateDiagram[] };
+
+/** Actual reading order, without rewriting a v3 document into a legacy layout. */
+export function prdBusinessSections(document: PrdTemplateBase): PrdTemplateSection[] {
+  const business = document.sections.businessRequirements;
+  if ("functionSections" in business) return [business.pageLinks, ...business.functionSections];
+  return [business.pageLinks, business.coreRules, business.flowAndPages, business.acceptanceCriteria, ...business.additionalSections];
+}
+
+export function prdDocumentDiagrams(document: PrdTemplateBase): PrdTemplateDiagram[] {
+  return prdBusinessSections(document).flatMap((section) => section.diagrams ?? []);
+}
+
+function businessSectionEntries(document: PrdTemplateBase): Array<readonly [string, z.infer<typeof prdV2SectionSchema>]> {
+  const business = document.sections.businessRequirements;
+  if ("functionSections" in business) return [
+    ["pageLinks", business.pageLinks],
+    ...business.functionSections.map((section, index) => [`functionSections.${index}`, section] as const),
+  ];
+  return [
+    ["pageLinks", business.pageLinks], ["coreRules", business.coreRules],
+    ["flowAndPages", business.flowAndPages], ["acceptanceCriteria", business.acceptanceCriteria],
+    ...business.additionalSections.map((section, index) => [`additionalSections.${index}`, section] as const),
+  ];
+}
+
+function refinePrdTemplateDocument(
+  document: PrdTemplateBase,
   context: z.RefinementCtx,
   {
     allowLegacyAppSurfaceEvidence,
@@ -897,20 +963,19 @@ function refinePrdDocumentV2(
     addIssue(context, ["cover", "title"], "document title and cover title must equal <workOrderName>需求说明书");
   }
 
-  for (const [index, section] of document.sections.businessRequirements.additionalSections.entries()) {
-    const expectedPrefix = `2.${index + 5} `;
+  const business = document.sections.businessRequirements;
+  const isV3 = document.protocol === "workbench.prd.v3";
+  const numberedSections = "functionSections" in business ? business.functionSections : business.additionalSections;
+  for (const [index, section] of numberedSections.entries()) {
+    const expectedPrefix = `2.${index + (isV3 ? 2 : 5)} `;
     if (!section.title.startsWith(expectedPrefix)) {
-      addIssue(
-        context,
-        ["sections", "businessRequirements", "additionalSections", index, "title"],
-        `additional business section title must start with ${expectedPrefix}`,
-      );
+      addIssue(context, ["sections", "businessRequirements", isV3 ? "functionSections" : "additionalSections", index, "title"],
+        `business section title must start with ${expectedPrefix}`);
     }
   }
-
-  const expectedTableOfContentsEntries = prdTableOfContentsEntriesFor(
-    document.sections.businessRequirements.additionalSections.map((section) => section.title),
-  );
+  const expectedTableOfContentsEntries = isV3
+    ? prdTableOfContentsEntriesForV3(numberedSections.map((section) => section.title))
+    : prdTableOfContentsEntriesFor(numberedSections.map((section) => section.title));
   if (document.tableOfContents.entries.length !== expectedTableOfContentsEntries.length) {
     addIssue(
       context,
@@ -948,30 +1013,46 @@ function refinePrdDocumentV2(
     }
   }
 
-  const diagrams = document.sections.businessRequirements.flowAndPages.diagrams;
+  const diagrams = prdDocumentDiagrams(document);
+  const diagramPaths: (string | number)[][] = "functionSections" in business
+    ? business.functionSections.flatMap((section, sectionIndex) => section.diagrams.map((_, diagramIndex) => ["sections", "businessRequirements", "functionSections", sectionIndex, "diagrams", diagramIndex]))
+    : diagrams.map((_, index) => ["sections", "businessRequirements", "flowAndPages", "diagrams", index]);
+
   const expectedDiagrams = [
     { kind: "productFlow", title: "图1 产品流程图" },
     { kind: "productArchitecture", title: "图2 产品架构图" },
   ] as const;
+  if ("functionSections" in business) {
+    for (const [sectionIndex, section] of business.functionSections.entries()) {
+      for (const kind of duplicateValues(section.diagrams.map((diagram) => diagram.kind))) {
+        addIssue(context, ["sections", "businessRequirements", "functionSections", sectionIndex, "diagrams"], `diagram kind must be unique within a function section: ${kind}`);
+      }
+    }
+    for (const [index, diagram] of diagrams.entries()) {
+      if (!diagram.title.startsWith(`图${index + 1} `)) {
+        addIssue(context, [...(diagramPaths[index] ?? []), "title"], `diagram title must start with 图${index + 1} in reading order`);
+      }
+    }
+  }
   for (const [diagramIndex, diagram] of diagrams.entries()) {
     const expected = expectedDiagrams[diagramIndex];
-    if (!expected || diagram.kind !== expected.kind || diagram.title !== expected.title) {
-      addIssue(context, ["sections", "businessRequirements", "flowAndPages", "diagrams", diagramIndex], "diagrams must contain product flow followed by product architecture");
+    if (!isV3 && (!expected || diagram.kind !== expected.kind || diagram.title !== expected.title)) {
+      addIssue(context, diagramPaths[diagramIndex] ?? [], "diagrams must contain product flow followed by product architecture");
     }
     const nodeIds = new Set(diagram.nodes.map((node) => node.id));
     if (nodeIds.size !== diagram.nodes.length) {
-      addIssue(context, ["sections", "businessRequirements", "flowAndPages", "diagrams", diagramIndex, "nodes"], "diagram node ids must be unique");
+      addIssue(context, [...(diagramPaths[diagramIndex] ?? []), "nodes"], "diagram node ids must be unique");
     }
     const edgeIds = diagram.edges.map((edge) => edge.id);
     for (const duplicate of duplicateValues(edgeIds)) {
-      addIssue(context, ["sections", "businessRequirements", "flowAndPages", "diagrams", diagramIndex, "edges"], `duplicate diagram edge: ${duplicate}`);
+      addIssue(context, [...(diagramPaths[diagramIndex] ?? []), "edges"], `duplicate diagram edge: ${duplicate}`);
     }
     for (const [edgeIndex, edge] of diagram.edges.entries()) {
       if (!nodeIds.has(edge.from) || !nodeIds.has(edge.to)) {
-        addIssue(context, ["sections", "businessRequirements", "flowAndPages", "diagrams", diagramIndex, "edges", edgeIndex], "diagram edges must reference declared nodes");
+        addIssue(context, [...(diagramPaths[diagramIndex] ?? []), "edges", edgeIndex], "diagram edges must reference declared nodes");
       }
       if (edge.from === edge.to) {
-        addIssue(context, ["sections", "businessRequirements", "flowAndPages", "diagrams", diagramIndex, "edges", edgeIndex], "diagram edges cannot be self-referential");
+        addIssue(context, [...(diagramPaths[diagramIndex] ?? []), "edges", edgeIndex], "diagram edges cannot be self-referential");
       }
     }
   }
@@ -983,6 +1064,9 @@ function refinePrdDocumentV2(
   }
   const safetyEvidenceSegments = requirementEvidenceSegments(document);
   for (const [index, row] of document.sections.safetyBaseline.rows.entries()) {
+    if (isV3 && row.applicability === "不涉及" && row.remarks !== null) {
+      addIssue(context, ["sections", "safetyBaseline", "rows", index, "remarks"], "a v3 safety row marked 不涉及 must use null remarks");
+    }
     if (row.applicability !== "不涉及" && !row.remarks) {
       addIssue(context, ["sections", "safetyBaseline", "rows", index, "remarks"], "a safety row marked 是 or 否 must include its requirement evidence or remediation note");
     }
@@ -1048,20 +1132,21 @@ function refinePrdDocumentV2(
     ["background", document.sections.introduction.background],
     ["scope", document.sections.introduction.scope],
     ["usageScenarios", document.sections.introduction.usageScenarios],
-    ["pageLinks", document.sections.businessRequirements.pageLinks],
-    ["coreRules", document.sections.businessRequirements.coreRules],
-    ["flowAndPages", document.sections.businessRequirements.flowAndPages],
-    ["acceptanceCriteria", document.sections.businessRequirements.acceptanceCriteria],
-    ...document.sections.businessRequirements.additionalSections.map((section, index) => (
-      [`additionalSections.${index}`, section] as const
-    )),
+    ...businessSectionEntries(document),
   ];
+  const blockPaths = new Map<z.infer<typeof prdBlockSchema>, (string | number)[]>();
+  for (const [key, section] of sectionEntries) {
+    const suffix: (string | number)[] = key.split(".").map((part) => /^\d+$/u.test(part) ? Number(part) : part);
+    const prefix = ["sections", ["background", "scope", "usageScenarios"].includes(key) ? "introduction" : "businessRequirements", ...suffix];
+    section.blocks.forEach((block, index) => blockPaths.set(block, [...prefix, "blocks", index]));
+  }
   const allBlocks = sectionEntries.flatMap(([, section]) => section.blocks);
   const allIds = [
     document.documentId,
     ...document.assumptions.map((assumption) => assumption.id),
     ...document.citations.map((citation) => citation.id),
   ];
+  if ("functionSections" in business) allIds.push(...business.functionSections.map((section) => section.id));
   for (const block of allBlocks) {
     allIds.push(block.id);
     if (block.type === "bulletList" || block.type === "orderedList") {
@@ -1082,7 +1167,10 @@ function refinePrdDocumentV2(
     addIssue(context, [], `IR id must be globally unique: ${duplicate}`);
   }
 
-  const acceptanceTable = document.sections.businessRequirements.acceptanceCriteria.blocks.find((block): block is z.infer<typeof prdTableBlockSchema> => (
+  if ("functionSections" in business) {
+    refinePrdV3Acceptance(document, context);
+  } else {
+  const acceptanceTable = business.acceptanceCriteria.blocks.find((block): block is z.infer<typeof prdTableBlockSchema> => (
     block.type === "table"
     && block.columns.length === 3
     && block.columns[0]?.label === "序号"
@@ -1141,8 +1229,9 @@ function refinePrdDocumentV2(
       addIssue(context, ["sections", "businessRequirements", "acceptanceCriteria", "blocks"], "acceptance dimensions must be represented by distinct rows");
     }
   }
-  if (!document.sections.businessRequirements.coreRules.blocks.some((block) => block.type === "table" || block.type === "requirement")) {
+  if (!business.coreRules.blocks.some((block) => block.type === "table" || block.type === "requirement")) {
     addIssue(context, ["sections", "businessRequirements", "coreRules", "blocks"], "core rules must contain a rule table or typed requirement");
+  }
   }
   if (!document.sections.introduction.scope.blocks.some((block) => block.type === "bulletList" || block.type === "orderedList")) {
     addIssue(context, ["sections", "introduction", "scope", "blocks"], "document scope must contain an explicit list");
@@ -1154,7 +1243,7 @@ function refinePrdDocumentV2(
   }
 
   if (document.sections.degradation.applicable) {
-    const productFlow = diagrams[0];
+    const productFlow = isV3 ? diagrams.find((diagram) => diagram.kind === "productFlow") : diagrams[0];
     const outgoingCounts = new Map<string, number>();
     for (const edge of productFlow?.edges ?? []) {
       outgoingCounts.set(edge.from, (outgoingCounts.get(edge.from) ?? 0) + 1);
@@ -1169,23 +1258,24 @@ function refinePrdDocumentV2(
     const hasExceptionBranch = [...outgoingCounts.values()].some((count) => count >= 2)
       && /(?:失败|异常|错误|超时|不可用|降级)/u.test(flowText)
       && /(?:重试|恢复|回退|返回|保留|缓存|人工处理)/u.test(flowText);
-    if (!hasExceptionBranch) {
-      addIssue(context, ["sections", "businessRequirements", "flowAndPages", "diagrams", 0], "an applicable degradation plan requires an explicit failure and recovery branch in the product flow");
+    if (!hasExceptionBranch && (!isV3 || productFlow)) {
+      addIssue(context, diagramPaths[productFlow ? diagrams.indexOf(productFlow) : 0] ?? ["sections", "businessRequirements"], "an applicable degradation plan requires an explicit failure and recovery branch in the product flow");
     }
   }
   for (const [blockIndex, block] of allBlocks.entries()) {
     if (block.type === "table") {
+      const tablePath = isV3 ? blockPaths.get(block) ?? [] : ["sections", "blocks", blockIndex];
       if (isSemanticChannelTable(block)) {
-        addIssue(context, ["sections", "blocks", blockIndex], "use the single typed channelTable instead of another channel table");
+        addIssue(context, tablePath, "use the single typed channelTable instead of another channel table");
       }
       const columnIds = block.columns.map((column) => column.id);
       for (const duplicate of duplicateValues(columnIds)) {
-        addIssue(context, ["sections", "blocks", blockIndex, "columns"], `duplicate table column: ${duplicate}`);
+        addIssue(context, [...tablePath, "columns"], `duplicate table column: ${duplicate}`);
       }
       for (const [rowIndex, row] of block.rows.entries()) {
         const cellIds = row.cells.map((cell) => cell.columnId);
         if (duplicateValues(cellIds).length > 0 || cellIds.length !== columnIds.length || cellIds.some((id) => !columnIds.includes(id))) {
-          addIssue(context, ["sections", "blocks", blockIndex, "rows", rowIndex, "cells"], "each table row must contain exactly one cell for every column");
+          addIssue(context, [...tablePath, "rows", rowIndex, "cells"], "each table row must contain exactly one cell for every column");
         }
       }
     }
@@ -1211,19 +1301,19 @@ function refinePrdDocumentV2(
   const flowIds = new Set(flows.map((flow) => flow.id));
   for (const [index, requirement] of requirements.entries()) {
     for (const duplicate of duplicateValues([...requirement.goalIds, ...requirement.acceptanceCriterionIds])) {
-      addIssue(context, ["sections", "businessRequirements", "coreRules", "blocks", index], `duplicate requirement reference: ${duplicate}`);
+      addIssue(context, blockPaths.get(requirement) ?? [], `duplicate requirement reference: ${duplicate}`);
     }
     for (const goalId of requirement.goalIds) {
       if (!goalIds.has(goalId)) {
-        addIssue(context, ["sections", "businessRequirements", "coreRules", "blocks", index, "goalIds"], `unknown goal: ${goalId}`);
+        addIssue(context, [...(blockPaths.get(requirement) ?? []), "goalIds"], `unknown goal: ${goalId}`);
       }
     }
     for (const criterionId of requirement.acceptanceCriterionIds) {
       const criterion = criteria.find((candidate) => candidate.id === criterionId);
       if (!criterion) {
-        addIssue(context, ["sections", "businessRequirements", "coreRules", "blocks", index, "acceptanceCriterionIds"], `unknown acceptance criterion: ${criterionId}`);
+        addIssue(context, [...(blockPaths.get(requirement) ?? []), "acceptanceCriterionIds"], `unknown acceptance criterion: ${criterionId}`);
       } else if (!criterion.requirementIds.includes(requirement.id)) {
-        addIssue(context, ["sections", "businessRequirements", "coreRules", "blocks", index, "acceptanceCriterionIds"], `acceptance criterion ${criterionId} must reference requirement ${requirement.id}`);
+        addIssue(context, [...(blockPaths.get(requirement) ?? []), "acceptanceCriterionIds"], `acceptance criterion ${criterionId} must reference requirement ${requirement.id}`);
       }
     }
   }
@@ -1231,9 +1321,9 @@ function refinePrdDocumentV2(
     for (const requirementId of criterion.requirementIds) {
       const requirement = requirements.find((candidate) => candidate.id === requirementId);
       if (!requirement) {
-        addIssue(context, ["sections", "businessRequirements", "acceptanceCriteria", "blocks", index, "requirementIds"], `unknown requirement: ${requirementId}`);
+        addIssue(context, [...(blockPaths.get(criterion) ?? []), "requirementIds"], `unknown requirement: ${requirementId}`);
       } else if (!requirement.acceptanceCriterionIds.includes(criterion.id)) {
-        addIssue(context, ["sections", "businessRequirements", "acceptanceCriteria", "blocks", index, "requirementIds"], `requirement ${requirementId} must reference acceptance criterion ${criterion.id}`);
+        addIssue(context, [...(blockPaths.get(criterion) ?? []), "requirementIds"], `requirement ${requirementId} must reference acceptance criterion ${criterion.id}`);
       }
     }
   }
@@ -1241,15 +1331,19 @@ function refinePrdDocumentV2(
     for (const [stepIndex, step] of flow.steps.entries()) {
       for (const requirementId of step.requirementIds) {
         if (!requirementIds.has(requirementId)) {
-          addIssue(context, ["sections", "businessRequirements", "flowAndPages", "blocks", flowIndex, "steps", stepIndex, "requirementIds"], `unknown requirement: ${requirementId}`);
+          addIssue(context, [...(blockPaths.get(flow) ?? []), "steps", stepIndex, "requirementIds"], `unknown requirement: ${requirementId}`);
         }
       }
     }
   }
   const sectionIds = new Set([
     "introduction", "background", "scope", "usageScenarios", "businessRequirements",
-    "pageLinks", "coreRules", "flowAndPages", "acceptanceCriteria", "degradation", "safetyBaseline",
+    "pageLinks", "degradation", "safetyBaseline",
+    ...("functionSections" in business ? [] : ["coreRules", "flowAndPages", "acceptanceCriteria"]),
   ]);
+  if ("functionSections" in business) {
+    for (const section of business.functionSections) sectionIds.add(section.id);
+  }
   const referenceSets = {
     section: sectionIds,
     goal: goalIds,
@@ -1265,6 +1359,24 @@ function refinePrdDocumentV2(
           addIssue(context, ["sections"], `unknown citation: ${inline.citationId}`);
         } else if (inline.type === "reference" && !referenceSets[inline.targetType].has(inline.targetId)) {
           addIssue(context, ["sections"], `unknown ${inline.targetType} reference: ${inline.targetId}`);
+        }
+      }
+    }
+  }
+
+  // V3 also permits references in the business summary and degradation prose;
+  // these inline fields live outside blocks but share the same entity graph.
+  if (isV3) {
+    const outerInlines = [
+      { content: business.summary, path: ["sections", "businessRequirements", "summary"] },
+      { content: document.sections.degradation.content, path: ["sections", "degradation", "content"] },
+    ];
+    for (const { content, path } of outerInlines) {
+      for (const [index, inline] of content.entries()) {
+        if (inline.type === "citation" && !citations.has(inline.citationId)) {
+          addIssue(context, [...path, index], `unknown citation: ${inline.citationId}`);
+        } else if (inline.type === "reference" && !referenceSets[inline.targetType].has(inline.targetId)) {
+          addIssue(context, [...path, index], `unknown ${inline.targetType} reference: ${inline.targetId}`);
         }
       }
     }
@@ -1286,25 +1398,102 @@ function refinePrdDocumentV2(
     }
   }
   for (const [blockIndex, block] of allBlocks.entries()) {
-    if (block.type === "heading" && prdV2StandaloneApiHeadingPattern.test(inlinePlainText(block.content).trim())) {
+    if (!isV3 && block.type === "heading" && prdV2StandaloneApiHeadingPattern.test(inlinePlainText(block.content).trim())) {
       addIssue(context, ["sections", "blocks", blockIndex], "PRD must not contain a standalone interface or API chapter");
     }
   }
 }
 
 export const prdDocumentV2Schema = prdDocumentV2BaseSchema.superRefine((document, context) => {
-  refinePrdDocumentV2(document, context, {
+  refinePrdTemplateDocument(document, context, {
     allowLegacyAppSurfaceEvidence: true,
     enforceRuntimeRowOneSemantics: false,
   });
 });
 
 export const runtimePrdDocumentV2Schema = prdDocumentV2BaseSchema.superRefine((document, context) => {
-  refinePrdDocumentV2(document, context, {
+  refinePrdTemplateDocument(document, context, {
     allowLegacyAppSurfaceEvidence: false,
     enforceRuntimeRowOneSemantics: true,
   });
 });
+
+function refinePrdV3Acceptance(document: PrdTemplateBase, context: z.RefinementCtx): void {
+  const business = document.sections.businessRequirements;
+  if (!("functionSections" in business)) return;
+  type AcceptanceUnit = { item: string; standard: string; path: (string | number)[] };
+  const tableUnits: AcceptanceUnit[] = [];
+  const typedUnits: AcceptanceUnit[] = [];
+  for (const [sectionIndex, section] of business.functionSections.entries()) {
+    for (const [blockIndex, block] of section.blocks.entries()) {
+      const blockPath = ["sections", "businessRequirements", "functionSections", sectionIndex, "blocks", blockIndex];
+      if (isAcceptanceTable(block)) {
+        const [sequenceColumn, itemColumn, standardColumn] = block.columns;
+        for (const [rowIndex, row] of block.rows.entries()) {
+          const text = (columnId: string | undefined) => inlinePlainText(row.cells.find((cell) => cell.columnId === columnId)?.content ?? []).replace(/\s+/gu, "").trim();
+          const path = [...blockPath, "rows", rowIndex];
+          if (text(sequenceColumn?.id) !== String(rowIndex + 1)) {
+            addIssue(context, path, "acceptance row sequence must be continuous starting at 1 within its table");
+          }
+          tableUnits.push({ item: text(itemColumn?.id), standard: text(standardColumn?.id), path });
+        }
+      } else if (block.type === "acceptanceCriterion") {
+        const requirementNames = block.requirementIds.flatMap((id) => business.functionSections.flatMap((candidate) => candidate.blocks.filter((entity) => entity.type === "requirement" && entity.id === id).map((entity) => entity.type === "requirement" ? entity.title : "")));
+        typedUnits.push({ item: [inlinePlainText(block.given), inlinePlainText(block.when), ...requirementNames].join(" "), standard: inlinePlainText(block.then), path: blockPath });
+      }
+    }
+  }
+  // Identical observable results mirrored between a table and typed GWT get
+  // one coverage slot. Independently authored typed criteria elsewhere still
+  // participate; repeated standards within the same representation remain errors.
+  const units = tableUnits.map((unit) => ({ ...unit }));
+  for (const typed of typedUnits) {
+    const mirror = tableUnits.findIndex((table) => normalizeSemanticText(table.standard) === normalizeSemanticText(typed.standard));
+    if (mirror >= 0) units[mirror]!.item += ` ${typed.item}`;
+    else units.push(typed);
+  }
+  if (!units.length) {
+    addIssue(context, ["sections", "businessRequirements", "functionSections"], "functional requirements must include testable acceptance criteria, embedded or in a later section");
+    return;
+  }
+  for (const unit of [...tableUnits, ...typedUnits]) {
+    if ([...unit.item].length < 2 || [...unit.standard].length < 10) {
+      addIssue(context, unit.path, "acceptance criteria must name a concrete item and a substantive testable standard");
+    }
+    if (prdV2UntestableAcceptancePattern.test(unit.standard)) {
+      addIssue(context, unit.path, "acceptance standards must state observable results instead of vague quality wording");
+    }
+  }
+  // Check each authored representation before mirror merging as well: merging
+  // must not hide repeated typed criteria or repeated table item labels.
+  const duplicateItems = new Set([tableUnits, typedUnits, units].flatMap((group) =>
+    duplicateValues(group.map((unit) => normalizeSemanticText(unit.item)).filter(Boolean))));
+  const duplicateStandards = new Set([tableUnits, typedUnits, units].flatMap((group) =>
+    duplicateValues(group.map((unit) => normalizeSemanticText(unit.standard)).filter(Boolean))));
+  for (const duplicate of duplicateItems) {
+    addIssue(context, ["sections", "businessRequirements", "functionSections"], `acceptance items must be distinct: ${duplicate}`);
+  }
+  for (const duplicate of duplicateStandards) {
+    addIssue(context, ["sections", "businessRequirements", "functionSections"], `acceptance standards must be distinct: ${duplicate}`);
+  }
+  const evidence = acceptanceRelevanceEvidenceSegments(document);
+  const dimensions = prdV2AcceptanceDimensions.filter((dimension) => hasAffirmativeEvidence(evidence, { positive: dimension.relevancePattern }));
+  if (units.length < dimensions.length) {
+    addIssue(context, ["sections", "businessRequirements", "functionSections"], `acceptance criteria must contain at least ${dimensions.length} independently testable rows for the relevant requirement dimensions`);
+  }
+  const dimensionRows = dimensions.map((dimension) => units.flatMap((unit, index) => dimension.pattern.test(unit.item) ? [index] : []));
+  for (const [index, rows] of dimensionRows.entries()) {
+    if (!rows.length) addIssue(context, ["sections", "businessRequirements", "functionSections"], `acceptance criteria must cover ${dimensions[index]?.label}`);
+  }
+  if (dimensionRows.every((rows) => rows.length > 0) && !hasDistinctAcceptanceCoverage(dimensionRows)) {
+    addIssue(context, ["sections", "businessRequirements", "functionSections"], "acceptance dimensions must be represented by distinct rows");
+  }
+}
+
+export const prdDocumentV3Schema = prdDocumentV3BaseSchema.superRefine((document, context) => {
+  refinePrdTemplateDocument(document, context, { allowLegacyAppSurfaceEvidence: false, enforceRuntimeRowOneSemantics: true });
+});
+export const runtimePrdDocumentV3Schema = prdDocumentV3Schema;
 
 function inlinePlainText(inlines: readonly z.infer<typeof prdInlineSchema>[]) {
   return inlines.map((inline) => {
@@ -1367,37 +1556,32 @@ function prdBlockEvidenceSegments(block: z.infer<typeof prdBlockSchema>): string
   return values.flatMap(splitEvidenceText);
 }
 
-function requirementEvidenceSegments(document: z.infer<typeof prdDocumentV2Schema>): string[] {
-  return prdV2BodyEvidenceSegments(document, true);
+function requirementEvidenceSegments(document: PrdTemplateBase): string[] {
+  return prdTemplateBodyEvidenceSegments(document, true);
 }
 
-function acceptanceRelevanceEvidenceSegments(document: z.infer<typeof prdDocumentV2Schema>): string[] {
-  return prdV2BodyEvidenceSegments(document, false);
+function acceptanceRelevanceEvidenceSegments(document: PrdTemplateBase): string[] {
+  return prdTemplateBodyEvidenceSegments(document, false);
 }
 
-function prdV2BodyEvidenceSegments(
-  document: z.infer<typeof prdDocumentV2Schema>,
-  includeAcceptanceCriteria: boolean,
-): string[] {
-  const blockSections: Array<z.infer<typeof prdV2SectionSchema>> = [
-    document.sections.introduction.background,
-    document.sections.introduction.scope,
-    document.sections.introduction.usageScenarios,
-    document.sections.businessRequirements.pageLinks,
-    document.sections.businessRequirements.coreRules,
-    document.sections.businessRequirements.flowAndPages,
-    ...document.sections.businessRequirements.additionalSections,
-  ];
-  if (includeAcceptanceCriteria) {
-    blockSections.push(document.sections.businessRequirements.acceptanceCriteria);
-  }
-  const diagrams = document.sections.businessRequirements.flowAndPages.diagrams;
+function isAcceptanceTable(block: z.infer<typeof prdBlockSchema>): block is z.infer<typeof prdTableBlockSchema> {
+  return block.type === "table" && block.columns.length === 3
+    && block.columns[0]?.label === "序号" && block.columns[1]?.label === "验收项" && block.columns[2]?.label === "验收标准";
+}
+
+function prdTemplateBodyEvidenceSegments(document: PrdTemplateBase, includeAcceptanceCriteria: boolean): string[] {
+  const business = document.sections.businessRequirements;
+  const blockSections = [document.sections.introduction.background, document.sections.introduction.scope,
+    document.sections.introduction.usageScenarios, ...prdBusinessSections(document).filter((section) => (
+      includeAcceptanceCriteria || !("acceptanceCriteria" in business) || section !== business.acceptanceCriteria
+    ))];
   return [
-    ...splitEvidenceText(inlinePlainText(document.sections.businessRequirements.summary)),
-    ...blockSections.flatMap((section) => section.blocks.flatMap(prdBlockEvidenceSegments)),
-    ...diagrams.flatMap((diagram) => [
-      ...splitEvidenceText(diagram.description),
-      ...diagram.nodes.flatMap((node) => splitEvidenceText(node.label)),
+    ...splitEvidenceText(inlinePlainText(business.summary)),
+    ...blockSections.flatMap((section) => section.blocks.filter((block) => (
+      includeAcceptanceCriteria || document.protocol !== "workbench.prd.v3" || (block.type !== "acceptanceCriterion" && !isAcceptanceTable(block))
+    )).flatMap(prdBlockEvidenceSegments)),
+    ...prdDocumentDiagrams(document).flatMap((diagram) => [
+      ...splitEvidenceText(diagram.description), ...diagram.nodes.flatMap((node) => splitEvidenceText(node.label)),
       ...diagram.edges.flatMap((edge) => edge.label ? splitEvidenceText(edge.label) : []),
     ]),
     ...splitEvidenceText(inlinePlainText(document.sections.degradation.content)),
@@ -1466,15 +1650,19 @@ function isSemanticChannelTable(block: z.infer<typeof prdTableBlockSchema>): boo
 
 export type PrdDocumentV1 = z.infer<typeof prdDocumentV1Schema>;
 export type PrdDocumentV2 = z.infer<typeof prdDocumentV2Schema>;
-export type PrdDocument = PrdDocumentV1 | PrdDocumentV2;
+export type PrdDocumentV3 = z.infer<typeof prdDocumentV3Schema>;
+export type PrdTemplateDocument = PrdDocumentV2 | PrdDocumentV3;
+export type PrdDocument = PrdDocumentV1 | PrdTemplateDocument;
 
-export const prdDocumentSchema: z.ZodType<PrdDocument, z.ZodTypeDef, unknown> = z.union([
+export const prdDocumentSchema: z.ZodType<PrdDocument, unknown> = z.union([
   prdDocumentV1Schema,
   prdDocumentV2Schema,
+  prdDocumentV3Schema,
 ]);
-export const runtimePrdDocumentSchema: z.ZodType<PrdDocument, z.ZodTypeDef, unknown> = z.union([
+export const runtimePrdDocumentSchema: z.ZodType<PrdDocument, unknown> = z.union([
   prdDocumentV1Schema,
   runtimePrdDocumentV2Schema,
+  runtimePrdDocumentV3Schema,
 ]);
 export type PrdBlock = z.infer<typeof prdBlockSchema>;
 export type PrdInline = z.infer<typeof prdInlineSchema>;

@@ -28,8 +28,11 @@ const server = createServer(async (request, response) => {
       });
     }
     if (request.method !== "POST") return json(response, 404, { error: "not_found" });
-    if (request.url === "/knowledge") return handleKnowledge(request, response);
-    if (request.url === "/canvas") return handleCanvas(request, response);
+    if (request.url === "/knowledge") return await handleKnowledge(request, response);
+    if (
+      request.url === "/api/v1/runtime/canvas/tools/execute"
+      || request.url === "/canvas"
+    ) return await handleCanvas(request, response);
     return json(response, 404, { error: "not_found" });
   } catch (error) {
     return json(response, 400, {

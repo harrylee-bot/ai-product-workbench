@@ -15,6 +15,7 @@ import {
   type SignUploadPartResponse,
 } from "@workbench/workbench-contracts";
 import { hashRequest, validateIdempotencyKey } from "../../common/idempotency.js";
+import { isUniqueConflict } from "../../common/prisma-errors.js";
 import {
   idempotencyConflictProblem,
   notFoundProblem,
@@ -785,9 +786,6 @@ function requireProviderUploadId(upload: { providerUploadId: string | null }) {
   return upload.providerUploadId;
 }
 
-function isUniqueConflict(error: unknown) {
-  return error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002";
-}
 
 function isPublicProblem(error: unknown) {
   return typeof error === "object" && error !== null && "status" in error;

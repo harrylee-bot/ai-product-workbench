@@ -77,7 +77,7 @@ export const exportSelectionSchema = z.discriminatedUnion("kind", [
   }).strict(),
 ]);
 
-export const exportOptionsSchema = z.record(jsonValueSchema);
+export const exportOptionsSchema = z.record(z.string(), jsonValueSchema);
 
 export const createExportOptionsSchema = exportOptionsSchema;
 

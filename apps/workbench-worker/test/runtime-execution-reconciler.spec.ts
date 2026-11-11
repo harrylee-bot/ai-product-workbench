@@ -24,6 +24,30 @@ function rawSqlText(query: unknown) {
 describe("RuntimeExecutionReconciler", () => {
   beforeEach(() => recordRuntimeLivenessMetric.mockClear());
 
+  it("waits for an in-flight pass before stop resolves", async () => {
+    const gate = deferred<Array<{ id: string }>>();
+    const db = {
+      $queryRaw: vi.fn(async () => gate.promise),
+      $transaction: vi.fn(),
+    };
+    const reconciler = new RuntimeExecutionReconciler(
+      db as never,
+      { send: vi.fn() } as never,
+      25,
+      5_000,
+    );
+
+    const run = reconciler.runOnce();
+    const stopped = reconciler.stop();
+    let resolved = false;
+    void stopped.then(() => { resolved = true; });
+    await Promise.resolve();
+    expect(resolved).toBe(false);
+    gate.resolve([]);
+    await Promise.all([run, stopped]);
+    expect(resolved).toBe(true);
+  });
+
   it("atomically requeues every unowned or expired running Run with its thread group", async () => {
     const transactionQueries = vi.fn()
       .mockResolvedValueOnce([{ id: "run-1", threadId: "thread-1" }])

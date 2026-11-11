@@ -7,7 +7,8 @@ Use this reference after the skill triggers. The canonical visual example is `..
 - Chinese Word requirement document.
 - A4 page, portrait orientation, top/bottom margins about 2.5 cm, left/right margins about 3.0 cm.
 - Preserve template styles instead of inventing new typography: `Normal0` for the cover title, `Normal` for body text, `Heading 1`, `Heading 2`, `toc 1`, `toc 2`, and existing table formatting.
-- Blue heading hierarchy, compact body copy, and simple business tables.
+- 全文可编辑文字统一为黑色（`#000000`），包括封面、各级标题、正文、超链接、图注、页眉页脚及表格文字；用字号、加粗和间距区分层级。表格统一白底、黑色边框，不使用彩色表头、交替底色、文字高亮或残留主题色。原有截图、标识和参考图片保留原色，除非用户另有要求。
+- 保持正文紧凑易读；检查字符网格、自动间距、空段落、固定行高和跨页设置，修正异常留白或截字，不复制参考文档的排版缺陷。
 - Cover title format: `<工单名称>需求说明书`, matching the final file name and requirement work order name. Do not keep the template reminder line under the title.
 - Include footer text with the document title when practical.
 - Use real Word headings for main content. The TOC is manual in the template and must be kept aligned with the body headings.
@@ -46,23 +47,26 @@ For final deliverables, do not leave `业务大大名字（必填）`.
 
 Heading text: `目 录`. The H5 template contains a reminder next to this heading; delete that reminder in final documents.
 
-Use this fixed outline. Additional business subsections may be added after `2.4`, but the listed entries may not be removed or renamed:
+沿用 H5 示例的主章顺序与层级。业务章从 `2.2` 起按本次实际功能连续展开，不固定为“核心业务规则/功能说明、核心流程/状态/页面要求、验收标准”三个通用标题。
 
 ```text
 1 引言
-1.1项目背景
-1.2文档范围
-1.3使用场景（必填）
+1.1 项目背景
+1.2 文档范围
+1.3 使用场景（必填）
 2 业务需求
-2.1页面链接
-2.2 核心业务规则/功能说明
-2.3 核心流程/状态/页面要求
-2.4 验收标准
-3. 业务降级方案（必填）
-4. 需求安全基线要求（必填）
+2.1 页面链接
+2.2 <本次具体功能或业务规则一>
+2.3 <本次具体功能或业务规则二，按需>
+2.n <后续业务内容，按需>
+3 业务降级方案（必填）
+4 需求安全基线要求（必填）
 ```
 
-If the requirement needs more business sections, insert `2.5` and later sections before the degradation section and update the TOC.
+- 功能数量由需求决定，单项需求可只到 `2.2`，多项需求依次增加。标题直接说明本次改动，复杂功能可再分三级标题；不要复用示例的“电子受理单”等业务名称。
+- 相关流程、状态、页面规则、依赖条件和验收标准可直接放在对应功能节。内容较多或跨功能时，可在功能节之后另设“核心流程及页面要求”“验收标准”等小节，编号随实际顺序变化，不强占 `2.3`、`2.4`。
+- 如本次涉及且有材料支持，可仿照 H5 示例增加“本需求涉及新增/修改的接口”小节，说明接口影响范围、用途和业务变化；地址、字段等仅使用有依据的信息，不为套模板虚构接口，不强制编写技术设计级契约。不涉及接口变化时直接省略该节。
+- 目录根据最终正文生成并更新编号、标题和页码，不保留被删除的小节或模板示例标题。
 
 ## 1 引言
 
@@ -112,7 +116,7 @@ Use concise business language. The first paragraph may be:
 
 `总体目标：<用一句话概括本需求闭环。>`
 
-Recommended subsections:
+Use `2.1 页面链接` followed by function-specific subsections starting at `2.2`:
 
 ### 2.1页面链接
 
@@ -124,6 +128,8 @@ Use bullets for:
 Do not paste a link as a substitute for requirements. Always describe what the linked page/system must do.
 
 ### Core Functional Sections
+
+按具体功能或业务规则命名，如“Banner 自适应优化”“免密登录手机号回显与提交校验”“活动客流指标排序”。在相应功能节中说明场景、操作和触发、数据与界面规则、异常结果、依赖及可验证的验收条件；不适用的内容无需机械增设空标题。
 
 Use a mix of prose, bullets, and tables. Common table patterns:
 
@@ -149,30 +155,32 @@ Operation/response/requirement table:
 
 ### Product Flow And Architecture Diagrams
 
-Always add both diagrams for a full requirement document:
+流程图和产品架构图均为按需内容，不再要求每份需求文档同时添加两张图。分别判断两类图的必要性，可不画、只画流程图、只画产品架构图，或两者都画；由编写者自行决定，无需为常规选图询问用户。用户明确要求添加/省略某类图，或本次交付规范明确要求时，遵循该要求。参考模板中出现过某张图，本身不等于本次必须保留。
 
-- `产品流程图`: cover triggers, validation, user/operator action, system result, failure, retry, no-permission, and empty states.
-- `产品架构图`: cover page, capability, configuration, rule, state/record, exception governance, and acceptance/reporting relationships.
+判断需求大小时，看实际改动范围、参与角色、业务分支、状态变化、模块依赖和理解难度。页数、字数和需求条目数量只作辅助；多项互相独立的小改动，不自动构成需要总流程或总体架构的大需求。
 
-Use product language and do not expose API names, tool logs, knowledge references, or external-research evidence.
+| 图类型 | 适合添加的情况 | 通常可以省略的情况 |
+| --- | --- | --- |
+| 产品流程图 | 存在多步办理、跨角色交接、审批分支、状态流转、异步回调、失败重试等关系，图能帮助评审判断先后顺序或关键路径 | 文案、样式、单字段、局部筛选/排序等简单修改，或少量线性操作已能用步骤和规则表说清 |
+| 产品架构图 | 涉及多模块/多端协作、共享业务能力、配置与展示关系或跨系统业务边界，图能帮助评审理解范围与依赖 | 单页面、单能力的局部调整，或若干独立修改没有需要说明的共同结构 |
 
-The product flow must include relevant paths such as:
-- create/submit/review/publish process
-- approval pass/fail branches
-- copy/jump to another system
-- state transition or permission gate
-- email/file sending or callback process
+- 复杂度优先于数量：单个多角色审批需求可能只需要流程图；多模块能力整理可能只需要产品架构图；局部表头排序或文案调整通常两者都不需要。
+- 只有当图比现有文字或表格更清楚地表达业务关系时才添加。不要为凑齐图的种类，重复正文、堆砌“页面—规则—结果”等通用框架，或为小改动扩写不存在的系统结构。
+- 图放在相关功能节，或按需增设后续的流程/产品结构小节，不固定占用 `2.3`。不画图时，在功能节用相称的步骤、条件/结果表、状态表或页面规则讲清业务。删除未使用的图标题、图注、占位和目录条目，不用空图或空章节代替说明。
+- 判断依据留在编写过程；不必在正文新增选图决策章节。
 
-Caption formats:
+添加图时：
 
-`图1 产品流程图`
-`图2 产品架构图`
-
-Add a short paragraph near the diagram explaining how it maps to this requirement.
+- `产品流程图` 只覆盖本次相关的触发、操作、判断、流转和结果；仅在需求实际涉及权限、无数据、失败、重试等路径时展示，不机械补齐全部分支。复杂需求可按关键流程拆图，不必画一张包含所有条目的总图。
+- `产品架构图` 表达角色、页面、产品模块、业务能力、配置、规则或业务数据之间的实际关系。保持产品视角，不虚构 API、技术组件或基础设施，不展示工具日志和资料检索过程。
+- 在图旁用简短文字说明它对应的需求范围及关键关系，确保图、正文和验收口径一致。
+- 图号按实际出现顺序连续编号，图注可用 `图N 产品流程图`、`图N 产品架构图`，多图时补充业务名称。流程图和架构图不再固定占用图1、图2；增删图后同步更新引用和目录。
 
 ### 验收标准
 
-Use table:
+每项功能都应有可验证的验收条件，可直接写在功能节中；跨功能验收内容较多时再增加独立验收小节，其编号随业务章节实际顺序确定。无需强制保留名为 `2.4 验收标准` 的章节。
+
+Use a table when it makes the criteria easier to review:
 - `序号`
 - `验收项`
 - `验收标准`

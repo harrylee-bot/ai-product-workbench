@@ -5,6 +5,7 @@ import { MotionConfig } from "framer-motion";
 import type { ComponentProps } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { WorkbenchGenerationProcess } from "./workbench-generation-process";
 import { isRetryableRun } from "../../lib/workbench/features/workbench-run-actions";
 import {
   LeftInspector,
@@ -52,6 +53,70 @@ describe("LeftInspector", () => {
 });
 
 describe("ProjectTranscriptPanel", () => {
+  it.each(["desktop", "mobile"] as const)("keeps generation process in the upper %s status area", (device) => {
+    const cancel = vi.fn();
+    const process = <WorkbenchGenerationProcess
+      activities={[
+        { id: "knowledge:1", detail: "已读取项目约束", label: "知识库检索", status: "succeeded" },
+        { id: "document:1", detail: "读取文档规范：需求文档结构规范", label: "文档规范", status: "succeeded" },
+        { id: "deerflow:model", detail: "internal reasoning", label: "internal model", status: "running" },
+      ]}
+      generationStage="drafting-prd" knowledgeReleaseId="release-2026-11" runAttempt={2}
+      runId="run-2026-11-10-abcdef123456" lastEventSequence={7}
+      retryOfRunId="previous-run-123456" runStartedAt="2026-11-10T15:00:00.000Z" runStatus="running"
+      previews={[{ artifactIndex: 0, kind: "prd", title: "采购审批", markdown: "## 业务规则\n提交后审批。", screens: [] }]}
+      variant={device === "mobile" ? "popover" : "inline"}
+    />;
+    const { container } = render(device === "desktop"
+      ? <ProjectTranscriptPanel {...baseProps} canCancel onCancel={cancel} generationProcess={process} />
+      : <MobileRunStatus busy={false} canCancel canRetry={false} failure={null}
+          generationStage="drafting-prd" isPrdRun onCancel={cancel} onRetry={vi.fn()}
+          prompt="采购审批" runPhaseLabel={null} runStatus="running" generationProcess={process} />);
+    const anchor = container.querySelector(device === "desktop" ? '[data-panel-motion="agent-card"]' : "[data-mobile-run-status]")!;
+    fireEvent.click(within(anchor as HTMLElement).getByRole("button", { name: "查看生成过程" }));
+    expect(anchor.contains(screen.getByRole("region", { name: "生成过程" }))).toBe(true);
+    expect(screen.getByText("当前文档结构")).toBeTruthy();
+    expect(screen.getByText("业务规则")).toBeTruthy();
+    expect(screen.getByText(/已读取项目约束/)).toBeTruthy();
+    expect(screen.getByText(/需求文档结构规范/)).toBeTruthy();
+    expect(screen.getByTestId("generation-timeline-progress").getAttribute("style")).toContain("width: 80%");
+    expect(screen.getByText("已绑定知识版本")).toBeTruthy();
+    expect(screen.getByText("release-2026-11")).toBeTruthy();
+    expect(screen.getByText("运行标识")).toBeTruthy();
+    expect(screen.getByText("run-2026…123456")).toBeTruthy();
+    expect(screen.getByText(/第 2 次尝试/)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "查看尝试诊断" }));
+    expect(screen.getByText("运行状态")).toBeTruthy();
+    expect(screen.getByText("运行中")).toBeTruthy();
+    expect(screen.getByText("重试自 previous…123456")).toBeTruthy();
+    expect(screen.getByText(/已接收 7 个有序事件/)).toBeTruthy();
+    expect(screen.getByText(/生命周期/)).toBeTruthy();
+    expect(screen.queryByText("internal reasoning")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "收起生成过程" }));
+    expect(screen.queryByRole("region", { name: "生成过程" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "取消当前运行" }));
+    expect(cancel).toHaveBeenCalledOnce();
+  });
+
+  it("shows cancellation attribution in the active attempt diagnostics", () => {
+    render(
+      <WorkbenchGenerationProcess
+        cancellationReason="用户请求停止当前运行"
+        generationStage="thinking"
+        previews={[]}
+        runAttempt={3}
+        runId="run-cancelled"
+        runStatus="cancelling"
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "查看生成过程" }));
+    fireEvent.click(screen.getByRole("button", { name: "查看尝试诊断" }));
+
+    expect(screen.getByText("正在取消")).toBeTruthy();
+    expect(screen.getByText("用户请求停止当前运行")).toBeTruthy();
+  });
+
   it("keeps a queued PRD contextual before the first stage event", () => {
     const { container } = renderRunSurfaces({
       generationStage: null,

@@ -1,6 +1,7 @@
 import {
   prdChannelLabels,
   prdDocumentSchema,
+  prdBusinessSections,
   prdSafetyBaselineItems,
   prdSectionKeys,
   type ArtifactVersionDetail,
@@ -8,6 +9,7 @@ import {
   type PrdDocument,
   type PrdDocumentV1,
   type PrdDocumentV2,
+  type PrdTemplateDocument,
   type PrdInline,
   type PrototypeDocument,
 } from "@workbench/workbench-contracts";
@@ -66,7 +68,20 @@ export function projectArtifactVersion(
   if (version.kind === "prd") {
     return { note: null, text: projectPrdDocument(version.content) };
   }
-  if (version.kind === "prototype") {
+  if (version.kind === "prototype" && version.schemaVersion === 2) {
+    const document = version.content;
+    return {
+      note: "源码原型比较展示原始文件和构建摘要，不包含编译后的脚本。",
+      text: [
+        `# ${document.title}`, `Revision: ${document.revision}`, document.summary,
+        `Entry: ${document.entryFile}`,
+        ...document.pages.map((page) => `Page: ${page.id} | ${page.name} | ${page.route}`),
+        ...[...document.files].sort((a, b) => a.path.localeCompare(b.path)).flatMap((file) => [`\n## ${file.path}`, file.content]),
+        `Source SHA-256: ${document.build.sourceChecksum}`, `Preview SHA-256: ${document.build.htmlSha256}`,
+      ].join("\n"),
+    };
+  }
+  if (version.kind === "prototype" && version.schemaVersion === 1) {
     return {
       note: "原型比较展示 screens、nodes、states、actions、bindings、motions、tokens 和 assets 的结构摘要，不是像素差异。",
       text: projectPrototypeSummary(version.content),
@@ -96,7 +111,7 @@ export function artifactVersionPinCompatibility(
     return { allowed: false, reason: "只有已就绪版本可以固定到画布" };
   }
   if (!reference.screenId) return { allowed: true, reason: null };
-  if (version.kind !== "prototype" || version.contentMode !== "inline") {
+  if (version.kind !== "prototype" || version.schemaVersion !== 1 || version.contentMode !== "inline") {
     return { allowed: false, reason: "无法验证该版本是否包含当前画布界面" };
   }
   if (!version.content.screens.some((screen) => screen.id === reference.screenId)) {
@@ -115,7 +130,7 @@ function parsePrdBlob(value: string): PrdDocument | null {
 }
 
 function projectPrdDocument(document: PrdDocument): string {
-  return document.protocol === "workbench.prd.v2"
+  return document.protocol !== "workbench.prd.v1"
     ? projectPrdV2Document(document)
     : projectPrdV1Document(document);
 }
@@ -153,7 +168,7 @@ function projectPrdV1Document(document: PrdDocumentV1): string {
   return lines.join("\n").replace(/\n{3,}/gu, "\n\n").trimEnd();
 }
 
-function projectPrdV2Document(document: PrdDocumentV2): string {
+function projectPrdV2Document(document: PrdTemplateDocument): string {
   const { businessRequirements, degradation, introduction, safetyBaseline } = document.sections;
   const lines = [
     `# ${document.cover.title}`,
@@ -203,29 +218,25 @@ function projectPrdV2Document(document: PrdDocumentV2): string {
     "",
     projectPrdInline(businessRequirements.summary),
   );
-  appendPrdV2Section(lines, businessRequirements.pageLinks);
-  appendPrdV2Section(lines, businessRequirements.coreRules);
-  appendPrdV2Section(lines, businessRequirements.flowAndPages);
-  for (const diagram of businessRequirements.flowAndPages.diagrams) {
-    const nodeLabels = new Map(diagram.nodes.map((node) => [node.id, node.label]));
-    lines.push(
-      "",
-      `#### ${diagram.title}`,
-      "",
-      diagram.description,
-      "",
-      "节点：",
-      ...diagram.nodes.map((node) => `- ${node.label}${node.group ? `（${node.group}）` : ""}`),
-      "",
-      "节点关系：",
-      ...diagram.edges.map((edge) => (
-        `- ${nodeLabels.get(edge.from) ?? edge.from} -> ${nodeLabels.get(edge.to) ?? edge.to}${edge.label ? `：${edge.label}` : ""}`
-      )),
-    );
-  }
-  appendPrdV2Section(lines, businessRequirements.acceptanceCriteria);
-  for (const section of businessRequirements.additionalSections) {
+  for (const section of prdBusinessSections(document)) {
     appendPrdV2Section(lines, section);
+    for (const diagram of "diagrams" in section ? section.diagrams ?? [] : []) {
+      const nodeLabels = new Map(diagram.nodes.map((node) => [node.id, node.label]));
+      lines.push(
+        "",
+        `#### ${diagram.title}`,
+        "",
+        diagram.description,
+        "",
+        "节点：",
+        ...diagram.nodes.map((node) => `- ${node.label}${node.group ? `（${node.group}）` : ""}`),
+        "",
+        "节点关系：",
+        ...diagram.edges.map((edge) => (
+          `- ${nodeLabels.get(edge.from) ?? edge.from} -> ${nodeLabels.get(edge.to) ?? edge.to}${edge.label ? `：${edge.label}` : ""}`
+        )),
+      );
+    }
   }
   lines.push(
     "",

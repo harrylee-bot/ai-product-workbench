@@ -126,7 +126,6 @@
         "array",
         "object"
       ],
-      "description": "Recursive JSON value. This is the sole audited ZodLazy OpenAPI override.",
       "oneOf": [
         {
           "type": "string"
@@ -152,7 +151,8 @@
             "$ref": "#/$defs/JsonValue"
           }
         }
-      ]
+      ],
+      "description": "Recursive JSON value. This is the sole audited ZodLazy OpenAPI override."
     },
     "PrdAcceptanceCriterionBlock": {
       "type": "object",
@@ -1079,6 +1079,347 @@
       "additionalProperties": false,
       "description": "PRD v2 cover, fixed sections, channel table, diagrams, degradation plan, safety baseline, placeholders, tables, and IR references are validated by the runtime Zod contract."
     },
+    "PrdDocumentV3": {
+      "type": "object",
+      "properties": {
+        "protocol": {
+          "type": "string",
+          "enum": [
+            "workbench.prd.v3"
+          ]
+        },
+        "documentId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 96,
+          "pattern": "^[A-Za-z][A-Za-z0-9]*(?:[-_.:][A-Za-z0-9]+)*$"
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 240
+        },
+        "revision": {
+          "$ref": "#/$defs/PrdRevision"
+        },
+        "cover": {
+          "type": "object",
+          "properties": {
+            "workOrderName": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            },
+            "title": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 240
+            }
+          },
+          "required": [
+            "workOrderName",
+            "title"
+          ],
+          "additionalProperties": false
+        },
+        "versionHistory": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/PrdVersionHistoryEntry"
+          },
+          "minItems": 1,
+          "maxItems": 100
+        },
+        "tableOfContents": {
+          "type": "object",
+          "properties": {
+            "title": {
+              "type": "string",
+              "enum": [
+                "目 录"
+              ]
+            },
+            "entries": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 240
+              },
+              "minItems": 9,
+              "maxItems": 58
+            }
+          },
+          "required": [
+            "title",
+            "entries"
+          ],
+          "additionalProperties": false
+        },
+        "assumptions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/PrdAssumption"
+          },
+          "maxItems": 500
+        },
+        "citations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ArtifactCitation"
+          },
+          "maxItems": 1000
+        },
+        "sections": {
+          "type": "object",
+          "properties": {
+            "introduction": {
+              "type": "object",
+              "properties": {
+                "title": {
+                  "type": "string",
+                  "enum": [
+                    "1 引言"
+                  ]
+                },
+                "background": {
+                  "type": "object",
+                  "properties": {
+                    "title": {
+                      "type": "string",
+                      "enum": [
+                        "1.1项目背景"
+                      ]
+                    },
+                    "blocks": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/$defs/PrdBlock"
+                      },
+                      "minItems": 1,
+                      "maxItems": 500
+                    }
+                  },
+                  "required": [
+                    "title",
+                    "blocks"
+                  ],
+                  "additionalProperties": false
+                },
+                "scope": {
+                  "type": "object",
+                  "properties": {
+                    "title": {
+                      "type": "string",
+                      "enum": [
+                        "1.2文档范围"
+                      ]
+                    },
+                    "blocks": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/$defs/PrdBlock"
+                      },
+                      "minItems": 1,
+                      "maxItems": 500
+                    }
+                  },
+                  "required": [
+                    "title",
+                    "blocks"
+                  ],
+                  "additionalProperties": false
+                },
+                "usageScenarios": {
+                  "type": "object",
+                  "properties": {
+                    "title": {
+                      "type": "string",
+                      "enum": [
+                        "1.3使用场景（必填）"
+                      ]
+                    },
+                    "blocks": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/$defs/PrdBlock"
+                      },
+                      "minItems": 1,
+                      "maxItems": 500
+                    },
+                    "channelTable": {
+                      "type": "object",
+                      "properties": {
+                        "title": {
+                          "type": "string",
+                          "enum": [
+                            "活动投放渠道"
+                          ]
+                        },
+                        "rows": {
+                          "type": "array",
+                          "items": {
+                            "$ref": "#/$defs/PrdChannelRow"
+                          },
+                          "minItems": 3,
+                          "maxItems": 3
+                        }
+                      },
+                      "required": [
+                        "title",
+                        "rows"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "title",
+                    "blocks",
+                    "channelTable"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "title",
+                "background",
+                "scope",
+                "usageScenarios"
+              ],
+              "additionalProperties": false
+            },
+            "businessRequirements": {
+              "type": "object",
+              "properties": {
+                "title": {
+                  "type": "string",
+                  "enum": [
+                    "2 业务需求"
+                  ]
+                },
+                "summary": {
+                  "$ref": "#/$defs/PrdInlineContent"
+                },
+                "pageLinks": {
+                  "type": "object",
+                  "properties": {
+                    "title": {
+                      "type": "string",
+                      "enum": [
+                        "2.1页面链接"
+                      ]
+                    },
+                    "blocks": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/$defs/PrdBlock"
+                      },
+                      "minItems": 1,
+                      "maxItems": 500
+                    }
+                  },
+                  "required": [
+                    "title",
+                    "blocks"
+                  ],
+                  "additionalProperties": false
+                },
+                "functionSections": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/$defs/PrdV3FunctionSection"
+                  },
+                  "minItems": 1,
+                  "maxItems": 50
+                }
+              },
+              "required": [
+                "title",
+                "summary",
+                "pageLinks",
+                "functionSections"
+              ],
+              "additionalProperties": false
+            },
+            "degradation": {
+              "type": "object",
+              "properties": {
+                "title": {
+                  "type": "string",
+                  "enum": [
+                    "3 业务降级方案（必填）"
+                  ]
+                },
+                "applicable": {
+                  "type": "boolean"
+                },
+                "content": {
+                  "$ref": "#/$defs/PrdInlineContent"
+                }
+              },
+              "required": [
+                "title",
+                "applicable",
+                "content"
+              ],
+              "additionalProperties": false
+            },
+            "safetyBaseline": {
+              "type": "object",
+              "properties": {
+                "title": {
+                  "type": "string",
+                  "enum": [
+                    "4 需求安全基线要求（必填）"
+                  ]
+                },
+                "intro": {
+                  "type": "string",
+                  "enum": [
+                    "该部分内容为必填项，请按照如下表格中的内容先进行自查，并按照如下要求完善需求文档：\n1、如选择“是”，代表本项自查内容已符合安全要求，需要提供截图违依据\n2、如选择“否”，代表本项自查内容暂时不符合安全要求，请在需求文档中增加本部分内容安全改造需求，并发送网信安需求评审邮件，附上本需求文档用于安全评审；\n3、如选择“不涉及”，代表本项目各项需求安全基线均不涉及，则无需召开网信安需求评审会。\n建议：该表格请业务人员和开发人员共同参与自查并填写。"
+                  ]
+                },
+                "rows": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/$defs/PrdSafetyBaselineRow"
+                  },
+                  "minItems": 21,
+                  "maxItems": 21
+                }
+              },
+              "required": [
+                "title",
+                "intro",
+                "rows"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "introduction",
+            "businessRequirements",
+            "degradation",
+            "safetyBaseline"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "protocol",
+        "documentId",
+        "title",
+        "revision",
+        "cover",
+        "versionHistory",
+        "tableOfContents",
+        "assumptions",
+        "citations",
+        "sections"
+      ],
+      "additionalProperties": false,
+      "description": "PRD v3 uses contiguous function-specific sections, optional typed diagrams, embedded or later acceptance, and the same complete safety, table, citation and semantic-reference validation."
+    },
     "PrdFlowBlock": {
       "type": "object",
       "properties": {
@@ -1870,6 +2211,60 @@
       ],
       "additionalProperties": false
     },
+    "PrdTemplateDiagram": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 96,
+          "pattern": "^[A-Za-z][A-Za-z0-9]*(?:[-_.:][A-Za-z0-9]+)*$"
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "productFlow",
+            "productArchitecture"
+          ]
+        },
+        "title": {
+          "type": "string",
+          "minLength": 4,
+          "maxLength": 240,
+          "pattern": "^图[1-9]\\d*\\s+\\S"
+        },
+        "description": {
+          "type": "string",
+          "minLength": 20,
+          "maxLength": 2000
+        },
+        "nodes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/PrdDiagramNode"
+          },
+          "minItems": 2,
+          "maxItems": 40
+        },
+        "edges": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/PrdDiagramEdge"
+          },
+          "minItems": 1,
+          "maxItems": 80
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "title",
+        "description",
+        "nodes",
+        "edges"
+      ],
+      "additionalProperties": false
+    },
     "PrdTextInline": {
       "type": "object",
       "properties": {
@@ -1892,6 +2287,45 @@
         "type",
         "text",
         "marks"
+      ],
+      "additionalProperties": false
+    },
+    "PrdV3FunctionSection": {
+      "type": "object",
+      "properties": {
+        "title": {
+          "type": "string",
+          "minLength": 5,
+          "maxLength": 240,
+          "pattern": "^2\\.(?:[2-9]|[1-9]\\d+)\\s+\\S"
+        },
+        "blocks": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/PrdBlock"
+          },
+          "minItems": 1,
+          "maxItems": 500
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 96,
+          "pattern": "^[A-Za-z][A-Za-z0-9]*(?:[-_.:][A-Za-z0-9]+)*$"
+        },
+        "diagrams": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/PrdTemplateDiagram"
+          },
+          "maxItems": 2,
+          "default": []
+        }
+      },
+      "required": [
+        "title",
+        "blocks",
+        "id"
       ],
       "additionalProperties": false
     },
@@ -2381,6 +2815,161 @@
     },
     "PrototypeExpression": {
       "type": "object",
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "literal"
+              ]
+            },
+            "value": {
+              "$ref": "#/$defs/PrototypeRuntimeValue"
+            }
+          },
+          "required": [
+            "kind",
+            "value"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "variable"
+              ]
+            },
+            "path": {
+              "type": "string",
+              "pattern": "^[A-Za-z][A-Za-z0-9_]*(?:\\.[A-Za-z][A-Za-z0-9_]*)*$",
+              "maxLength": 500
+            }
+          },
+          "required": [
+            "kind",
+            "path"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "contains"
+              ]
+            },
+            "left": {
+              "$ref": "#/$defs/PrototypeExpressionDepth7"
+            },
+            "right": {
+              "$ref": "#/$defs/PrototypeExpressionDepth7"
+            }
+          },
+          "required": [
+            "kind",
+            "left",
+            "right"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "equals"
+              ]
+            },
+            "left": {
+              "$ref": "#/$defs/PrototypeExpressionDepth7"
+            },
+            "right": {
+              "$ref": "#/$defs/PrototypeExpressionDepth7"
+            }
+          },
+          "required": [
+            "kind",
+            "left",
+            "right"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "and"
+              ]
+            },
+            "operands": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/PrototypeExpressionDepth7"
+              },
+              "minItems": 1,
+              "maxItems": 16
+            }
+          },
+          "required": [
+            "kind",
+            "operands"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "or"
+              ]
+            },
+            "operands": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/PrototypeExpressionDepth7"
+              },
+              "minItems": 1,
+              "maxItems": 16
+            }
+          },
+          "required": [
+            "kind",
+            "operands"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "not"
+              ]
+            },
+            "operand": {
+              "$ref": "#/$defs/PrototypeExpressionDepth7"
+            }
+          },
+          "required": [
+            "kind",
+            "operand"
+          ],
+          "additionalProperties": false
+        }
+      ],
       "description": "Prototype expressions use only the declared operators, at most eight levels and 64 total nodes, and one to sixteen operands per and/or. A bounded pre-parse walk enforces tree limits before structural parsing; variable references and operand/result types are checked by the Prototype document contract.",
       "allOf": [
         {
@@ -4937,9 +5526,6 @@
         },
         {
           "type": "null"
-        },
-        {
-          "type": "null"
         }
       ]
     },
@@ -6470,6 +7056,9 @@
         },
         {
           "$ref": "#/$defs/RuntimeArtifactDraftPrdV2"
+        },
+        {
+          "$ref": "#/$defs/RuntimeArtifactDraftPrdV3"
         }
       ]
     },
@@ -6564,6 +7153,86 @@
         },
         "content": {
           "$ref": "#/$defs/PrdDocumentV2"
+        },
+        "operation": {
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "create"
+                  ]
+                }
+              },
+              "required": [
+                "kind"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "revise"
+                  ]
+                },
+                "target": {
+                  "$ref": "#/$defs/RunArtifactTarget"
+                }
+              },
+              "required": [
+                "kind",
+                "target"
+              ],
+              "additionalProperties": false
+            }
+          ]
+        }
+      },
+      "required": [
+        "title",
+        "citations",
+        "kind",
+        "schemaVersion",
+        "content",
+        "operation"
+      ],
+      "additionalProperties": false
+    },
+    "RuntimeArtifactDraftPrdV3": {
+      "type": "object",
+      "properties": {
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 240
+        },
+        "citations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ArtifactCitation"
+          },
+          "minItems": 1,
+          "maxItems": 1000
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "prd"
+          ]
+        },
+        "schemaVersion": {
+          "type": "number",
+          "enum": [
+            3
+          ]
+        },
+        "content": {
+          "$ref": "#/$defs/PrdDocumentV3"
         },
         "operation": {
           "oneOf": [

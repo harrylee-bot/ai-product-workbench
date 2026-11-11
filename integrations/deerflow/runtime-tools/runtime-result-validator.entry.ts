@@ -81,8 +81,29 @@ async function main() {
     ok: false,
     candidateChecksum,
     artifactChecksums,
-    issues: actionableIssues(parsed.error.issues, candidate),
+    issues: actionableIssues(parsed.error.issues.map((issue) => normalizeZodIssue(issue)), candidate),
   });
+}
+
+function normalizeZodIssue(rawIssue: unknown, parentPath: readonly unknown[] = []): unknown {
+  if (!isRecord(rawIssue) || !Array.isArray(rawIssue.path)) return rawIssue;
+  const path = [...parentPath, ...rawIssue.path];
+  const issue = { ...rawIssue, path };
+  // Preserve the runtime.validation.v1 error contract. Zod 4 uses relative
+  // branch paths and `errors`, while the repair planner expects absolute paths
+  // and the legacy literal/enum distinction.
+  if (rawIssue.code === "invalid_union" && Array.isArray(rawIssue.errors)) {
+    return {
+      ...issue,
+      unionErrors: rawIssue.errors.map((branch) => ({
+        issues: Array.isArray(branch) ? branch.map((child) => normalizeZodIssue(child, path)) : [],
+      })),
+    };
+  }
+  if (rawIssue.code === "invalid_value" && Array.isArray(rawIssue.values)) {
+    return { ...issue, code: rawIssue.values.length === 1 ? "invalid_literal" : "invalid_enum_value" };
+  }
+  return issue;
 }
 
 function actionableIssues(rawIssues: readonly unknown[], candidate: unknown): ValidationIssue[] {
@@ -133,9 +154,10 @@ function directDiscriminantMismatchCount(
     ) {
       return false;
     }
-    if (rawIssue.path.length !== unionPath.length + 1) return false;
-    if (!unionPath.every((segment, index) => rawIssue.path?.[index] === segment)) return false;
-    return ["kind", "protocol", "schemaVersion", "type"].includes(String(rawIssue.path.at(-1)));
+    const issuePath = rawIssue.path;
+    if (issuePath.length !== unionPath.length + 1) return false;
+    if (!unionPath.every((segment, index) => issuePath[index] === segment)) return false;
+    return ["kind", "protocol", "schemaVersion", "type"].includes(String(issuePath.at(-1)));
   }).length;
 }
 
@@ -167,7 +189,7 @@ function prdFixedValue(issue: ValidationIssue, candidate: unknown): string | und
   const [root, index, ...path] = issue.path;
   if (root !== "artifacts" || typeof index !== "number" || !Number.isInteger(index)) return undefined;
   const draft = candidateArtifacts(candidate)[index];
-  if (!isRecord(draft) || draft.kind !== "prd" || draft.schemaVersion !== 2 || !isRecord(draft.content)) return undefined;
+  if (!isRecord(draft) || draft.kind !== "prd" || ![2, 3].includes(Number(draft.schemaVersion)) || !isRecord(draft.content)) return undefined;
   if (issue.code === "invalid_literal" && JSON.stringify(path) === '["content","sections","safetyBaseline","intro"]') {
     return prdSafetyBaselineIntro;
   }
@@ -176,12 +198,13 @@ function prdFixedValue(issue: ValidationIssue, candidate: unknown): string | und
   const entryIndex = path[3] as number;
   const sections = draft.content.sections;
   const business = isRecord(sections) ? sections.businessRequirements : undefined;
-  const additional = isRecord(business) ? business.additionalSections : undefined;
+  const isV3 = draft.schemaVersion === 3;
+  const additional = isRecord(business) ? (isV3 ? business.functionSections : business.additionalSections) : undefined;
   if (additional !== undefined && !Array.isArray(additional)) return undefined;
   const additionalCount = Array.isArray(additional) ? additional.length : 0;
   // Additional headings are authored content, never fixed replacement values.
-  const fixedPrefixLength = prdTableOfContentsEntries.length - 2;
-  const canonicalIndex = entryIndex < fixedPrefixLength ? entryIndex : entryIndex - additionalCount;
+  const fixedPrefixLength = isV3 ? 6 : prdTableOfContentsEntries.length - 2;
+  const canonicalIndex = entryIndex < fixedPrefixLength ? entryIndex : entryIndex - additionalCount + (isV3 ? 3 : 0);
   if (entryIndex >= fixedPrefixLength && entryIndex < fixedPrefixLength + additionalCount) return undefined;
   if (canonicalIndex < 0 || canonicalIndex >= prdTableOfContentsEntries.length) return undefined;
   return prdTableOfContentsEntries[canonicalIndex];

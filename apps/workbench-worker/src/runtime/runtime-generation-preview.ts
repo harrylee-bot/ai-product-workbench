@@ -1,14 +1,15 @@
 import {
   generationPreviewSchema,
+  prdChannelLabels,
   type GenerationPreview,
   type GenerationPreviewNode,
 } from "@workbench/workbench-contracts";
 import { parse } from "partial-json";
 
 type RecordValue = Record<string, unknown>;
+const PREVIEW_SAMPLE_INTERVAL_MS = 300;
 const record = (value: unknown): RecordValue => value !== null && typeof value === "object" && !Array.isArray(value)
   ? value as RecordValue : {};
-const PREVIEW_SAMPLE_INTERVAL_MS = 300;
 const array = (value: unknown): unknown[] => Array.isArray(value) ? value : [];
 const text = (value: unknown, limit = 2_000): string => typeof value === "string"
   ? value.replace(/wb(?:kg|ct)1\.[A-Za-z0-9_.-]*/gu, "[已隐藏]").slice(0, limit) : "";
@@ -125,6 +126,9 @@ function prdMarkdown(content: RecordValue): string {
   let visited = 0;
   const visit = (value: unknown, depth = 2): string => {
     if (++visited > 3_000 || depth > 10) return "";
+    if (typeof value === "string") return text(value, 10_000);
+    if (typeof value === "number" || typeof value === "boolean") return String(value);
+    if (value === null || value === undefined) return "";
     if (Array.isArray(value)) return value.map((child) => visit(child, depth)).filter(Boolean).join("\n\n");
     const node = record(value);
     if (node.type === "text" || node.type === "link") return text(node.text, 10_000);
@@ -139,11 +143,27 @@ function prdMarkdown(content: RecordValue): string {
     const parts: string[] = [];
     if (node.title) parts.push(`${"#".repeat(Math.min(depth, 6))} ${text(node.title, 240)}`);
     if (node.content) parts.push(node.type === "heading" ? `### ${inline(node.content)}` : inline(node.content));
-    if (node.description) parts.push(inline(node.description));
+    if (node.description) parts.push(typeof node.description === "string" ? text(node.description, 10_000) : inline(node.description));
     if (node.summary) parts.push(inline(node.summary));
-    // Visit only authoring fields; IDs, revisions, citations and tool metadata stay out of the preview.
-    for (const key of ["blocks", "background", "scope", "usageScenarios", "pageLinks", "coreRules", "flowAndPages", "acceptanceCriteria", "additionalSections", "introduction", "businessRequirements", "degradation", "safetyBaseline"]) {
-      if (node[key]) parts.push(visit(node[key], depth + 1));
+    // Visit authoring and semantic evidence fields so the live preview reflects
+    // the complete PRD model. IDs, checksums, revision metadata and tool
+    // metadata stay out of the preview. Channel and safety rows are part of
+    // the requirement contract, so omitting them makes a partial draft look
+    // complete while hiding acceptance-critical decisions.
+    for (const key of [
+      "blocks", "background", "scope", "usageScenarios", "channelTable", "pageLinks",
+      "coreRules", "flowAndPages", "acceptanceCriteria", "additionalSections", "functionSections",
+      "diagrams", "given", "when", "then", "introduction", "businessRequirements", "degradation",
+      "safetyBaseline", "rows", "cells", "columns", "label", "sequence", "channel", "enabled",
+      "applicability", "requirement", "scope", "remarks", "intro", "cover", "workOrderName",
+      "versionHistory", "participants", "notes", "assumptions", "statement", "status", "impact",
+      "owner", "citations", "quote",
+    ]) {
+      if (key === "channel" && typeof node[key] === "string") {
+        parts.push(prdChannelLabels[node[key] as keyof typeof prdChannelLabels] ?? text(node[key], 120));
+      } else if (node[key]) {
+        parts.push(visit(node[key], depth + 1));
+      }
     }
     return parts.filter(Boolean).join("\n\n");
   };

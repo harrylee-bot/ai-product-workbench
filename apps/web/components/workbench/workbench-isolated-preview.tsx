@@ -18,12 +18,12 @@ import {
 } from "penpal";
 import { useEffect, useRef, type IframeHTMLAttributes } from "react";
 
-import { exportSelectionIdentityKey } from "@/lib/workbench/features/export-selection";
+import { exportSelectionIdentityKey } from "../../lib/workbench/features/export-selection";
 import {
   useWorkbenchProjectRef,
   useWorkbenchProjectSession,
   useWorkbenchProjectState,
-} from "@/lib/workbench/project-session";
+} from "../../lib/workbench/project-session";
 
 export const workbenchPreviewSandbox = [
   "allow-scripts",

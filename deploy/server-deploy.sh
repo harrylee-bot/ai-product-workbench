@@ -5,31 +5,20 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 APP_DIR="${APP_DIR:-$(cd "${SCRIPT_DIR}/.." && pwd)}"
 ENV_FILE="${WORKBENCH_ENV_FILE:-${APP_DIR}/deploy/workbench.env}"
 COMPOSE_FILE="${WORKBENCH_COMPOSE_FILE:-${APP_DIR}/deploy/workbench-compose.yml}"
-COMPOSE_OVERLAY="${WORKBENCH_COMPOSE_OVERLAY:-}"
-COMPOSE_PROFILES="${WORKBENCH_COMPOSE_PROFILES:-}"
 DEERFLOW_COMPOSE_FILE="${WORKBENCH_DEERFLOW_COMPOSE_FILE:-${APP_DIR}/deploy/deerflow-runtime-compose.yml}"
 DEERFLOW_PREFLIGHT_SCRIPT="${WORKBENCH_DEERFLOW_PREFLIGHT_SCRIPT:-${APP_DIR}/deploy/deerflow-production-preflight.sh}"
 DEERFLOW_RUNTIME_UID=65532
 DEERFLOW_RUNTIME_GID=65532
 MANAGE_DEERFLOW_RUNTIME="${WORKBENCH_MANAGE_DEERFLOW_RUNTIME:-1}"
-IMAGE_MODE="${WORKBENCH_DEPLOY_IMAGE_MODE:-pinned}"
-if [ -n "${WORKBENCH_PREFLIGHT_SCRIPT:-}" ]; then
-  PREFLIGHT_SCRIPT="$WORKBENCH_PREFLIGHT_SCRIPT"
-elif [ "$IMAGE_MODE" = "build" ]; then
-  PREFLIGHT_SCRIPT="$APP_DIR/deploy/workbench-server-preflight.sh"
-else
-  PREFLIGHT_SCRIPT="$APP_DIR/deploy/workbench-production-preflight.sh"
-fi
+PREFLIGHT_SCRIPT="$APP_DIR/deploy/workbench-production-preflight.sh"
 DEPLOY_TARGET="${DEPLOY_TARGET:-all}"
 case "$DEPLOY_TARGET" in
-  stop | rollback) SKIP_PREFLIGHT=1 ;;
+  stop) SKIP_PREFLIGHT=1 ;;
   *) SKIP_PREFLIGHT=0 ;;
 esac
 HEALTH_TIMEOUT_SECONDS="${WORKBENCH_DEPLOY_HEALTH_TIMEOUT_SECONDS:-300}"
 LOCK_FILE="${WORKBENCH_DEPLOY_LOCK_FILE:-/tmp/workbench-deploy.lock}"
-ROLLBACK_ON_FAILURE="${WORKBENCH_DEPLOY_ROLLBACK_ON_FAILURE:-1}"
-ROLLBACK_ENV_FILE="${WORKBENCH_ROLLBACK_ENV_FILE:-}"
-ROLLBACK_COMPOSE_FILE="${WORKBENCH_ROLLBACK_COMPOSE_FILE:-$COMPOSE_FILE}"
+CLEANUP_ON_FAILURE="${WORKBENCH_DEPLOY_CLEANUP_ON_FAILURE:-1}"
 ALLOW_RUNTIME_QUEUE_RECREATE="${WORKBENCH_ALLOW_RUNTIME_QUEUE_RECREATE:-0}"
 RUNTIME_QUEUE_STOP_TIMEOUT_SECONDS="${WORKBENCH_RUNTIME_QUEUE_STOP_TIMEOUT_SECONDS:-45}"
 RUNTIME_QUEUE_PARTICIPANTS=(
@@ -124,18 +113,18 @@ wait_for_deerflow() {
   return 1
 }
 
-rollback_clean_host() {
+cleanup_partial_deployment() {
   local status="$1"
-  [ "$ROLLBACK_ON_FAILURE" = "1" ] || return 0
+  [ "$CLEANUP_ON_FAILURE" = "1" ] || return 0
   [ "$deployment_mutated" = "1" ] || return 0
   [ "$clean_host" = "1" ] || {
-    echo "Deployment failed after an existing stack was detected; automatic rollback is disabled. Re-run with WORKBENCH_ROLLBACK_ENV_FILE set to the last signed candidate." >&2
+    echo "Deployment failed after an existing stack was detected; the active stack was left untouched." >&2
     return 0
   }
   echo "Deployment failed on a clean host; removing partially started services." >&2
-  "${COMPOSE[@]}" down --remove-orphans >/dev/null 2>&1 || true
+  "${COMPOSE[@]}" down >/dev/null 2>&1 || true
   if [ "$MANAGE_DEERFLOW_RUNTIME" = "1" ]; then
-    WORKBENCH_APP_DIR="$APP_DIR" "${DEERFLOW_COMPOSE[@]}" down --remove-orphans >/dev/null 2>&1 || true
+    WORKBENCH_APP_DIR="$APP_DIR" "${DEERFLOW_COMPOSE[@]}" down >/dev/null 2>&1 || true
   fi
   return "$status"
 }
@@ -146,7 +135,7 @@ on_deploy_error() {
   if [ "$runtime_queue_cutover_started" = "1" ] && [ "$runtime_queue_reconciled" = "0" ] && [ "$clean_host" = "0" ]; then
     echo "Runtime queue reconciliation failed closed; queue producers and consumers remain stopped." >&2
   fi
-  rollback_clean_host "$status" || true
+  cleanup_partial_deployment "$status" || true
   exit "$status"
 }
 
@@ -166,18 +155,10 @@ env_value() {
   env_file_value "$ENV_FILE" "$1"
 }
 
-rollback_env_value() {
-  env_file_value "$ROLLBACK_ENV_FILE" "$1" | sed -e 's/^"//' -e 's/"$//'
-}
-
-assert_image_mode() {
-  case "$IMAGE_MODE" in
-    pinned | build) ;;
-    *) echo "WORKBENCH_DEPLOY_IMAGE_MODE must be pinned or build" >&2; exit 64 ;;
-  esac
-  case "$ROLLBACK_ON_FAILURE" in
+assert_deployment_contract() {
+  case "$CLEANUP_ON_FAILURE" in
     0 | 1) ;;
-    *) echo "WORKBENCH_DEPLOY_ROLLBACK_ON_FAILURE must be 0 or 1" >&2; exit 64 ;;
+    *) echo "WORKBENCH_DEPLOY_CLEANUP_ON_FAILURE must be 0 or 1" >&2; exit 64 ;;
   esac
   case "$ALLOW_RUNTIME_QUEUE_RECREATE" in
     0 | 1) ;;
@@ -185,9 +166,9 @@ assert_image_mode() {
   esac
   if [ "$ALLOW_RUNTIME_QUEUE_RECREATE" = "1" ]; then
     case "$DEPLOY_TARGET" in
-      all | migrate | rollback) ;;
+      all | migrate) ;;
       *)
-        echo "WORKBENCH_ALLOW_RUNTIME_QUEUE_RECREATE=1 requires DEPLOY_TARGET=all, migrate, or rollback" >&2
+        echo "WORKBENCH_ALLOW_RUNTIME_QUEUE_RECREATE=1 requires DEPLOY_TARGET=all or migrate" >&2
         exit 64
         ;;
     esac
@@ -238,7 +219,7 @@ prepare_deerflow_runtime() {
 }
 
 require_command docker
-assert_image_mode
+assert_deployment_contract
 if ! docker compose version >/dev/null 2>&1; then
   echo "docker compose v2 is required" >&2
   exit 69
@@ -252,10 +233,6 @@ if [ ! -f "$COMPOSE_FILE" ]; then
   echo "Workbench Compose file is missing: $COMPOSE_FILE" >&2
   exit 66
 fi
-if [ -n "$COMPOSE_OVERLAY" ] && [ ! -f "$COMPOSE_OVERLAY" ]; then
-  echo "Workbench Compose overlay is missing: $COMPOSE_OVERLAY" >&2
-  exit 66
-fi
 case "$MANAGE_DEERFLOW_RUNTIME" in
   0 | 1) ;;
   *) echo "WORKBENCH_MANAGE_DEERFLOW_RUNTIME must be 0 or 1" >&2; exit 64 ;;
@@ -263,31 +240,6 @@ esac
 if [ "$MANAGE_DEERFLOW_RUNTIME" = "1" ]; then
   [ -f "$DEERFLOW_COMPOSE_FILE" ] || { echo "DeerFlow Compose file is missing: $DEERFLOW_COMPOSE_FILE" >&2; exit 66; }
   [ -x "$DEERFLOW_PREFLIGHT_SCRIPT" ] || { echo "DeerFlow preflight is missing or not executable: $DEERFLOW_PREFLIGHT_SCRIPT" >&2; exit 66; }
-fi
-if [ "$SKIP_PREFLIGHT" = "0" ] && [ "$IMAGE_MODE" = "pinned" ]; then
-  image_inventory_path="$(env_value WORKBENCH_IMAGE_INVENTORY_PATH)"
-  image_inventory_bundle_path="$(env_value WORKBENCH_IMAGE_INVENTORY_BUNDLE_PATH)"
-  cosign_identity="$(env_value WORKBENCH_COSIGN_CERTIFICATE_IDENTITY)"
-  cosign_issuer="$(env_value WORKBENCH_COSIGN_OIDC_ISSUER)"
-  source_commit="$(env_value WORKBENCH_SOURCE_COMMIT)"
-  [ -f "$image_inventory_path" ] || { echo "Signed production image inventory is missing: $image_inventory_path" >&2; exit 66; }
-  [ -f "$image_inventory_bundle_path" ] || { echo "Production image inventory signature bundle is missing: $image_inventory_bundle_path" >&2; exit 66; }
-  require_command cosign
-  node "$APP_DIR/scripts/production-image-inventory.mjs" \
-    --manifest "$image_inventory_path" \
-    --bundle "$image_inventory_bundle_path" \
-    --certificate-identity "$cosign_identity" \
-    --certificate-oidc-issuer "$cosign_issuer" \
-    --expected-commit "$source_commit" \
-    --env-file "$ENV_FILE"
-fi
-if [ "$SKIP_PREFLIGHT" = "0" ] && [ "$IMAGE_MODE" = "build" ] && [ -z "$COMPOSE_OVERLAY" ]; then
-  echo "Workbench validation build requires WORKBENCH_COMPOSE_OVERLAY" >&2
-  exit 66
-fi
-if [ "$SKIP_PREFLIGHT" = "0" ] && [ "$IMAGE_MODE" = "pinned" ] && [ -n "$COMPOSE_OVERLAY" ]; then
-  echo "Production pinned deployment must use the base greenfield Compose without a validation overlay" >&2
-  exit 66
 fi
 if [ "$SKIP_PREFLIGHT" = "0" ] && [ -n "$PREFLIGHT_SCRIPT" ] && [ ! -x "$PREFLIGHT_SCRIPT" ]; then
   echo "Workbench preflight is missing or not executable: $PREFLIGHT_SCRIPT" >&2
@@ -311,12 +263,6 @@ if command -v flock >/dev/null 2>&1; then
 fi
 
 COMPOSE=(docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE")
-if [ -n "$COMPOSE_OVERLAY" ]; then
-  COMPOSE+=(-f "$COMPOSE_OVERLAY")
-fi
-for profile in $COMPOSE_PROFILES; do
-  COMPOSE+=(--profile "$profile")
-done
 DEERFLOW_COMPOSE=(docker compose --project-directory "$APP_DIR/deploy" --env-file "$ENV_FILE" -f "$DEERFLOW_COMPOSE_FILE")
 
 cd "$APP_DIR"
@@ -327,28 +273,43 @@ if [ -z "$existing_workbench_services" ] && [ -z "$existing_deerflow_services" ]
 fi
 trap on_deploy_error ERR
 
-if [ "$SKIP_PREFLIGHT" = "0" ] && [ "$IMAGE_MODE" = "pinned" ]; then
-  # Pulling an already loaded digest is idempotent; mutable local build tags
-  # are never selected by the production path.
-  "${COMPOSE[@]}" pull --quiet
-fi
-
 compose_up() {
-  "${COMPOSE[@]}" up -d --remove-orphans --no-build "$@"
+  "${COMPOSE[@]}" up -d --no-build "$@"
 }
 
-prepare_validation_images() {
-  [ "$IMAGE_MODE" = "build" ] || return 0
-  # Finish bounded builds before stopping any live queue participants.
+prepare_direct_images() {
+  # Finish bounded native AMD64 builds before stopping any live queue participants.
   source "$SCRIPT_DIR/workbench-build-resources.sh"
-  validation_build_images "$@"
+  direct_build_images "$@"
+  # Locally built images have a stable RepoDigest but no registry tag digest.
+  # Bind the runtime worker to that immutable digest before Compose starts it.
+  local worker_ref worker_digest temp_env
+  worker_ref="$(env_value WORKBENCH_RUNTIME_WORKER_IMAGE_REF)"
+  worker_digest="$(docker image inspect --format '{{index .RepoDigests 0}}' "$worker_ref" 2>/dev/null || true)"
+  [ -n "$worker_digest" ] || {
+    echo "Direct build did not produce a RepoDigest for WORKBENCH_RUNTIME_WORKER_IMAGE_REF=$worker_ref" >&2
+    return 1
+  }
+  temp_env="$(mktemp "${ENV_FILE}.direct.XXXXXX")"
+  awk -v replacement="WORKBENCH_RUNTIME_WORKER_IMAGE_REF=${worker_digest}" '
+    BEGIN { replaced = 0 }
+    /^WORKBENCH_RUNTIME_WORKER_IMAGE_REF=/ {
+      if (!replaced) print replacement
+      replaced = 1
+      next
+    }
+    { print }
+    END { if (!replaced) print replacement }
+  ' "$ENV_FILE" > "$temp_env"
+  chmod 600 "$temp_env"
+  mv "$temp_env" "$ENV_FILE"
 }
 
 compose_up_force_recreate() {
   # Nginx resolves Docker service names when it starts. Recreate the public
   # gateway after an upstream rollout so it cannot retain a removed container
   # IP in its resolved upstream.
-  "${COMPOSE[@]}" up -d --remove-orphans --no-build --force-recreate "$@"
+  "${COMPOSE[@]}" up -d --no-build --force-recreate "$@"
 }
 
 stop_runtime_queue_participants() {
@@ -385,8 +346,6 @@ if [ "$SKIP_PREFLIGHT" = "0" ] && [ -n "$PREFLIGHT_SCRIPT" ]; then
   WORKBENCH_APP_DIR="$APP_DIR" \
     WORKBENCH_ENV_FILE="$ENV_FILE" \
   WORKBENCH_COMPOSE_FILE="$COMPOSE_FILE" \
-  WORKBENCH_OVERLAY_FILE="$COMPOSE_OVERLAY" \
-    WORKBENCH_COMPOSE_PROFILES="$COMPOSE_PROFILES" \
     "$PREFLIGHT_SCRIPT"
 fi
 if [ "$SKIP_PREFLIGHT" = "0" ]; then
@@ -395,7 +354,7 @@ fi
 
 case "$DEPLOY_TARGET" in
   all)
-    prepare_validation_images
+    prepare_direct_images
     ensure_deerflow_image
     deployment_mutated=1
     prepare_runtime_queue_cutover
@@ -403,9 +362,6 @@ case "$DEPLOY_TARGET" in
       prepare_deerflow_runtime
     fi
     compose_up
-    if [ -n "$COMPOSE_OVERLAY" ]; then
-      wait_for_services oidc object-storage clamav docling
-    fi
     wait_for_services \
       object-storage-egress \
       workbench-api \
@@ -422,7 +378,7 @@ case "$DEPLOY_TARGET" in
     wait_for_services preview-gateway gateway
     ;;
   api)
-    prepare_validation_images workbench-api
+    prepare_direct_images workbench-api
     deployment_mutated=1
     compose_up workbench-api
     wait_for_services workbench-api
@@ -430,7 +386,7 @@ case "$DEPLOY_TARGET" in
     wait_for_services gateway
     ;;
   web)
-    prepare_validation_images workbench-web knowledge
+    prepare_direct_images workbench-web knowledge
     deployment_mutated=1
     compose_up workbench-web knowledge
     wait_for_services workbench-web knowledge
@@ -438,7 +394,7 @@ case "$DEPLOY_TARGET" in
     wait_for_services gateway
     ;;
   runtime-worker)
-    prepare_validation_images workbench-worker
+    prepare_direct_images workbench-worker
     ensure_deerflow_image
     deployment_mutated=1
     if [ "$MANAGE_DEERFLOW_RUNTIME" = "1" ]; then
@@ -460,79 +416,31 @@ case "$DEPLOY_TARGET" in
     ;;
   stop)
     trap - ERR
-    "${COMPOSE[@]}" down --remove-orphans
+    "${COMPOSE[@]}" down
     if [ "$MANAGE_DEERFLOW_RUNTIME" = "1" ]; then
-      WORKBENCH_APP_DIR="$APP_DIR" "${DEERFLOW_COMPOSE[@]}" down --remove-orphans
+      WORKBENCH_APP_DIR="$APP_DIR" "${DEERFLOW_COMPOSE[@]}" down
     fi
-    ;;
-  rollback)
-    [ -n "$ROLLBACK_ENV_FILE" ] || { echo "WORKBENCH_ROLLBACK_ENV_FILE is required for rollback" >&2; exit 64; }
-    [ -f "$ROLLBACK_ENV_FILE" ] || { echo "Rollback environment file is missing: $ROLLBACK_ENV_FILE" >&2; exit 66; }
-    [ -f "$ROLLBACK_COMPOSE_FILE" ] || { echo "Rollback Compose file is missing: $ROLLBACK_COMPOSE_FILE" >&2; exit 66; }
-    rollback_source_commit="$(rollback_env_value WORKBENCH_SOURCE_COMMIT)"
-    rollback_inventory="$(rollback_env_value WORKBENCH_IMAGE_INVENTORY_PATH)"
-    rollback_inventory_bundle="$(rollback_env_value WORKBENCH_IMAGE_INVENTORY_BUNDLE_PATH)"
-    rollback_cosign_identity="$(rollback_env_value WORKBENCH_COSIGN_CERTIFICATE_IDENTITY)"
-    rollback_cosign_issuer="$(rollback_env_value WORKBENCH_COSIGN_OIDC_ISSUER)"
-    [ -n "$rollback_source_commit" ] || { echo "Rollback environment is missing WORKBENCH_SOURCE_COMMIT" >&2; exit 65; }
-    [ -f "$rollback_inventory" ] || { echo "Rollback image manifest is missing: $rollback_inventory" >&2; exit 66; }
-    [ -f "$rollback_inventory_bundle" ] || { echo "Rollback image manifest signature bundle is missing: $rollback_inventory_bundle" >&2; exit 66; }
-    require_command cosign
-    node "$APP_DIR/scripts/production-image-inventory.mjs" \
-      --manifest "$rollback_inventory" \
-      --bundle "$rollback_inventory_bundle" \
-      --certificate-identity "$rollback_cosign_identity" \
-      --certificate-oidc-issuer "$rollback_cosign_issuer" \
-      --expected-commit "$rollback_source_commit" \
-      --env-file "$ROLLBACK_ENV_FILE"
-    ROLLBACK_COMPOSE=(docker compose --env-file "$ROLLBACK_ENV_FILE" -f "$ROLLBACK_COMPOSE_FILE")
-    WORKBENCH_ALLOW_RUNTIME_QUEUE_RECREATE=1 "${ROLLBACK_COMPOSE[@]}" config --quiet
-    WORKBENCH_ALLOW_RUNTIME_QUEUE_RECREATE=1 "${ROLLBACK_COMPOSE[@]}" pull --quiet migrate
-    stop_runtime_queue_participants
-    "${COMPOSE[@]}" up -d --no-build postgres
-    wait_for_services postgres
-    echo "Restoring Runtime queue policies with the previous signed candidate migrator."
-    if WORKBENCH_ALLOW_RUNTIME_QUEUE_RECREATE=1 \
-      "${ROLLBACK_COMPOSE[@]}" run --rm --no-deps migrate; then
-      :
-    else
-      rollback_migration_status=$?
-      echo "Rollback queue reconciliation failed closed; queue producers and consumers remain stopped." >&2
-      exit "$rollback_migration_status"
-    fi
-    runtime_queue_reconciled=1
-    "${COMPOSE[@]}" down --remove-orphans
-    if [ "$MANAGE_DEERFLOW_RUNTIME" = "1" ]; then
-      WORKBENCH_APP_DIR="$APP_DIR" "${DEERFLOW_COMPOSE[@]}" down --remove-orphans
-    fi
-    WORKBENCH_ENV_FILE="$ROLLBACK_ENV_FILE" \
-      WORKBENCH_COMPOSE_FILE="$ROLLBACK_COMPOSE_FILE" \
-      WORKBENCH_DEPLOY_IMAGE_MODE=pinned \
-      WORKBENCH_ALLOW_RUNTIME_QUEUE_RECREATE=1 \
-      DEPLOY_TARGET=all \
-      WORKBENCH_DEPLOY_ROLLBACK_ON_FAILURE=0 \
-      exec "$0"
     ;;
   file-worker)
-    prepare_validation_images workbench-file-worker
+    prepare_direct_images workbench-file-worker
     deployment_mutated=1
     compose_up workbench-file-worker
     wait_for_services workbench-file-worker
     ;;
   import-worker)
-    prepare_validation_images workbench-import-worker
+    prepare_direct_images workbench-import-worker
     deployment_mutated=1
     compose_up workbench-import-worker
     wait_for_services workbench-import-worker
     ;;
   export-worker)
-    prepare_validation_images workbench-export-worker
+    prepare_direct_images workbench-export-worker
     deployment_mutated=1
     compose_up workbench-export-worker
     wait_for_services workbench-export-worker
     ;;
   preview)
-    prepare_validation_images workbench-preview preview-gateway
+    prepare_direct_images workbench-preview preview-gateway
     deployment_mutated=1
     compose_up workbench-preview preview-gateway
     wait_for_services workbench-preview preview-gateway
@@ -540,7 +448,7 @@ case "$DEPLOY_TARGET" in
     wait_for_services preview-gateway
     ;;
   knowledge)
-    prepare_validation_images knowledge
+    prepare_direct_images knowledge
     deployment_mutated=1
     compose_up knowledge
     wait_for_services knowledge
@@ -548,11 +456,11 @@ case "$DEPLOY_TARGET" in
     wait_for_services gateway
     ;;
   migrate)
-    prepare_validation_images migrate
+    prepare_direct_images migrate
     prepare_runtime_queue_cutover
     ;;
   *)
-    echo "DEPLOY_TARGET must be one of: all, api, web, runtime-worker, deerflow-runtime, file-worker, import-worker, export-worker, preview, knowledge, migrate, stop, rollback" >&2
+    echo "DEPLOY_TARGET must be one of: all, api, web, runtime-worker, deerflow-runtime, file-worker, import-worker, export-worker, preview, knowledge, migrate, stop" >&2
     exit 64
     ;;
 esac

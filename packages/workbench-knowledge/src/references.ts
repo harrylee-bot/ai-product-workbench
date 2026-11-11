@@ -104,6 +104,19 @@ function resolveReference(
   if (reference.kind === "external") return reference;
   const { path: rawPath, fragment } = splitTarget(reference.rawTarget);
 
+  // Markdown files under storage/ are source evidence assets, even when the
+  // asset itself is Markdown. They are declared and integrity-checked by the
+  // storage closure; they are not Vault documents to resolve through the
+  // current document/alias index.
+  if (rawPath === "storage" || rawPath.startsWith("storage/")) {
+    return {
+      ...reference,
+      kind: "internal_asset",
+      resolution: "resolved",
+      resolvedLocator: `storage://${rawPath}`,
+    };
+  }
+
   if (isAbsoluteOrExternalTarget(rawPath)) {
     issues.push(issue(source, "ABSOLUTE_INTERNAL_REFERENCE", `absolute internal reference is forbidden: ${reference.rawTarget}`, reference.rawTarget));
     return { ...reference, resolution: "unresolved" };

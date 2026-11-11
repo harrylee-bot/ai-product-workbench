@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { boardNodeProtocol, canonicalJson } from "@workbench/workbench-contracts";
 import { describe, expect, it, vi } from "vitest";
+import { buildSourcePrototype } from "@workbench/workbench-export-core";
 import { ExportSourceLoader } from "../src/export/source-loader.js";
 
 function fixture() {
@@ -311,7 +312,52 @@ function designSystemFixture() {
   return { command, imageBytes, fontBytes };
 }
 
+async function sourcePrototypeFixture() {
+  const command: any = fixture();
+  const document = await buildSourcePrototype({
+    protocol: "workbench.prototype-source-input.v1", documentId: "source-document", title: "Source Checkout", revision: 1,
+    summary: "Source prototype checkout flow", entryFile: "src/App.tsx", pages: [{ id: "checkout", name: "Checkout", route: "/" }],
+    files: [{ path: "src/App.tsx", content: 'export default function App(){return <h1>Source checkout</h1>}' }],
+  });
+  const pin = command.release.artifactPins[0];
+  pin.kind = "prototype";
+  pin.title = document.title;
+  pin.artifactVersion.schemaVersion = 2;
+  pin.artifactVersion.content = document;
+  pin.artifactVersion.artifact.kind = "prototype";
+  command.release.boardSnapshot.nodes[0].data.artifactKind = "prototype";
+  command.release.boardChecksum = sha(command.release.boardSnapshot);
+  command.release.manifest.board.checksum = command.release.boardChecksum;
+  command.release.manifest.artifacts[0].kind = "prototype";
+  command.release.manifest.artifacts[0].title = document.title;
+  command.release.manifest.artifacts[0].schemaVersion = 2;
+  refreshPrototypeChecksum(command);
+  command.selection = { kind: "artifact", artifactId: pin.artifactId, artifactVersionId: pin.artifactVersionId };
+  return command;
+}
+
 describe("ExportSourceLoader", () => {
+  it("loads a frozen source prototype without reading any unpinned binary asset", async () => {
+    const command = await sourcePrototypeFixture();
+    const storage = { readVerified: vi.fn() };
+    const loader = new ExportSourceLoader({} as never, storage as never, { maximumInputBytes: 1024 * 1024 });
+    const loaded = await loader.load(command);
+    expect(loaded.artifacts[0]).toMatchObject({ kind: "prototype", schemaVersion: 2, assets: [] });
+    expect(storage.readVerified).not.toHaveBeenCalled();
+  });
+
+  it.each(["source", "html"] as const)("rejects source prototype %s drift even if the enclosing release was rehashed", async (target) => {
+    const command = await sourcePrototypeFixture();
+    const document = command.release.artifactPins[0].artifactVersion.content;
+    if (target === "source") document.files[0].content += "\n// changed";
+    else document.build.html += "<!-- changed -->";
+    refreshPrototypeChecksum(command);
+    const storage = { readVerified: vi.fn() };
+    const loader = new ExportSourceLoader({} as never, storage as never, { maximumInputBytes: 1024 * 1024 });
+    await expect(loader.load(command)).rejects.toMatchObject({ code: target === "source" ? "SOURCE_PROTOTYPE_SOURCE_CHECKSUM_MISMATCH" : "SOURCE_PROTOTYPE_HTML_CHECKSUM_MISMATCH" });
+    expect(storage.readVerified).not.toHaveBeenCalled();
+  });
+
   it("accepts only checksum-verified immutable release and inline ArtifactVersion data", async () => {
     const store = { loadReadyAssetBlobs: vi.fn(async () => []) };
     const storage = { readVerified: vi.fn() };

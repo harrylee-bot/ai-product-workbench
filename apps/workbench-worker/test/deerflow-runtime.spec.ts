@@ -1091,7 +1091,7 @@ describe("DeerFlow runtime adapter", () => {
       },
     }), observer())).rejects.toThrow("RUNTIME_RESULT_SUBMISSION_MISSING");
 
-    expect(streamMode).toEqual(["messages", "values"]);
+    expect(streamMode).toEqual(["messages-tuple", "values"]);
   });
 
   it("verifies raw tool payload checksums before applying PRD schema defaults", async () => {
@@ -2227,7 +2227,8 @@ describe("DeerFlow runtime adapter", () => {
     expect(submittedBody).toMatchObject({
       assistant_id: "lead_agent",
       on_disconnect: "continue",
-      stream_resumable: true,
+      stream_resumable: false,
+      stream_mode: ["messages-tuple", "values"],
       metadata: {
         workbench_runtime_attempt_id: "attempt_1",
         workbench_run_id: "run_1",
@@ -2382,6 +2383,106 @@ describe("DeerFlow runtime adapter", () => {
     expect((submittedBody?.config as {
       configurable: { subagent_enabled: boolean };
     }).configurable.subagent_enabled).toBe(false);
+  });
+
+  it.each([401, 403, 422])("preserves a definite HTTP %s rejection without echoing inputs or reconciling an uncreated run", async (status) => {
+    const requests: string[] = [];
+    const privateInput = "private-provider-validation-input";
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request, init: RequestInit = {}) => {
+      const url = new URL(String(input));
+      requests.push(init.method ?? "GET");
+      if (url.pathname.endsWith("/runs") && (init.method ?? "GET") === "GET") return Response.json([]);
+      if (url.pathname.endsWith("/runs/stream") && init.method === "POST") {
+        return Response.json({ detail: [{ loc: ["body", "stream_mode"], input: privateInput }] }, { status });
+      }
+      throw new Error("UNEXPECTED_TEST_REQUEST");
+    }));
+    const runtimeObserver = observer();
+    const adapter = new DeerFlowRuntimeAdapter(workerConfig(), { getObject: vi.fn() } as never);
+    const failure = await adapter.execute(execution(), runtimeObserver).catch((error: unknown) => error);
+    expect(failure).toMatchObject({ name: "DeerFlowRunHttpError", message: "DEERFLOW_RUN_REQUEST_REJECTED", status });
+    expect(String(failure)).not.toContain(privateInput);
+    expect(JSON.stringify(failure)).not.toContain(privateInput);
+    expect(failure).not.toHaveProperty("cause");
+    expect(requests).toEqual(["GET", "POST"]);
+    expect(runtimeObserver.onExternalRunCreated).not.toHaveBeenCalled();
+    expect(runtimeObserver.onExternalFinalization).not.toHaveBeenCalled();
+  });
+
+  it.each([408, 409, 429, 500, 503])("keeps HTTP %s acceptance uncertain and reconciles without another POST", async (status) => {
+    const methods: string[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request, init: RequestInit = {}) => {
+      const url = new URL(String(input));
+      methods.push(init.method ?? "GET");
+      if (url.pathname.endsWith("/runs") && (init.method ?? "GET") === "GET") return Response.json([]);
+      if (url.pathname.endsWith("/runs/stream") && init.method === "POST") return Response.json({ private: "never-echo-this" }, { status });
+      throw new Error("UNEXPECTED_TEST_REQUEST");
+    }));
+    const adapter = new DeerFlowRuntimeAdapter(workerConfig(), { getObject: vi.fn() } as never);
+    await expect(adapter.execute(execution(), observer())).rejects.toMatchObject({
+      name: "RuntimeSubmissionUnknownError",
+      cause: { message: "DEERFLOW_RUN_REQUEST_FAILED", status },
+    });
+    expect(methods).toEqual(["GET", "POST", "GET"]);
+  });
+
+  it.each([
+    "/api/threads/another_thread/runs/another_run",
+    "https://other-origin.test/threads/deer_thread_1/runs/another_run",
+    "/api/threads/deer_thread_1/runs/another_run/stream",
+    "/api/threads/deer_thread_1/runs/another_run?private=hidden",
+  ])("does not bind an invalid Content-Location as run metadata: %s", async (contentLocation) => {
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request, init: RequestInit = {}) => {
+      if ((init.method ?? "GET") === "GET") return Response.json([]);
+      return new Response("", { headers: { "content-type": "text/event-stream", "content-location": contentLocation } });
+    }));
+    const runtimeObserver = observer();
+    const adapter = new DeerFlowRuntimeAdapter(workerConfig(), { getObject: vi.fn() } as never);
+    await expect(adapter.execute(execution(), runtimeObserver)).rejects.toMatchObject({
+      name: "RuntimeSubmissionUnknownError",
+      cause: { message: "DEERFLOW_STREAM_LOCATION_INVALID" },
+    });
+    expect(runtimeObserver.onExternalRunCreated).not.toHaveBeenCalled();
+  });
+
+  it("does not consume a replay gap as an inherited event id or finalize incomplete history", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request, init: RequestInit = {}) => {
+      if ((init.method ?? "GET") === "GET") return Response.json([]);
+      return runtimeStreamResponse([
+        { id: "before-gap", event: "metadata", data: { run_id: "external_run_gap" } },
+        { event: "gap", data: { code: "stream_replay_gap", recovery: "reload_durable_state" } },
+      ], { runId: "external_run_gap" });
+    }));
+    const runtimeObserver = observer();
+    const adapter = new DeerFlowRuntimeAdapter(workerConfig(), { getObject: vi.fn() } as never);
+    await expect(adapter.execute(execution(), runtimeObserver)).rejects.toThrow("DEERFLOW_STREAM_REPLAY_GAP");
+    expect(runtimeObserver.onExternalEvent).toHaveBeenCalledTimes(1);
+    expect(runtimeObserver.onExternalFinalization).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    "https://other-origin.test/threads/deer_thread_1/runs/expected_run/stream",
+    "/api/threads/deer_thread_1/runs/different_run/stream",
+  ])("rejects a reconnect Location that disagrees with the trusted run resource: %s", async (location) => {
+    const requests: string[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request, init: RequestInit = {}) => {
+      requests.push(String(input));
+      if ((init.method ?? "GET") === "GET") return Response.json([]);
+      return new Response("", { headers: {
+        "content-type": "text/event-stream",
+        "content-location": "/api/threads/deer_thread_1/runs/expected_run",
+        location,
+      } });
+    }));
+    const runtimeObserver = observer();
+    const adapter = new DeerFlowRuntimeAdapter(workerConfig(), { getObject: vi.fn() } as never);
+    await expect(adapter.execute(execution(), runtimeObserver)).rejects.toMatchObject({
+      name: "RuntimeSubmissionUnknownError",
+      cause: { message: "DEERFLOW_STREAM_LOCATION_INVALID" },
+    });
+    expect(runtimeObserver.onExternalRunCreated).not.toHaveBeenCalled();
+    expect(requests).toHaveLength(3);
+    expect(requests.every((url) => new URL(url).origin === "http://deerflow.test")).toBe(true);
   });
 
   it("classifies an unobservable submit response as submission_unknown", async () => {
@@ -4773,7 +4874,7 @@ describe("DeerFlow runtime adapter", () => {
     }
   });
 
-  it("keeps a submitted run alive while the initial stream reconnects after idle", async () => {
+  it.each(["", "/api"])("keeps a submitted run alive while the initial %s stream reconnects after idle", async (apiPrefix) => {
     const requests: Array<{ url: URL; init: RequestInit }> = [];
     let submittedBody: Record<string, unknown> | null = null;
     const random = vi.spyOn(Math, "random").mockReturnValue(0);
@@ -4802,7 +4903,7 @@ describe("DeerFlow runtime adapter", () => {
           status: 200,
           headers: {
             "content-type": "text/event-stream",
-            "content-location": "/threads/deer_thread_1/runs/external_run_idle",
+            "content-location": `${apiPrefix}/threads/deer_thread_1/runs/external_run_idle`,
           },
         });
       }
@@ -4828,7 +4929,9 @@ describe("DeerFlow runtime adapter", () => {
       expect(result).toMatchObject({ protocol: "workbench.runtime.result.v1", message: "done" });
       expect(submittedBody).toMatchObject({
         on_disconnect: "continue",
-        stream_resumable: true,
+        stream_resumable: false,
+        stream_mode: ["messages-tuple", "values"],
+        multitask_strategy: "reject",
       });
       expect(requests.filter((request) => request.init.method === "POST")).toHaveLength(1);
       const reconnect = requests.find((request) => (
@@ -4836,6 +4939,8 @@ describe("DeerFlow runtime adapter", () => {
       ));
       expect(reconnect?.init.method).toBe("GET");
       expect(new Headers(reconnect?.init.headers).get("Last-Event-ID")).toBe("event-before-idle");
+      expect(new Headers(reconnect?.init.headers).get("X-DeerFlow-Owner-User-Id")).toBe("principal_1");
+      expect(new Headers(reconnect?.init.headers).get("Idempotency-Key")).toBe("wbrt:test-attempt-key");
       expect(runtimeObserver.onExternalRunCreated).toHaveBeenCalledWith("external_run_idle");
     } finally {
       random.mockRestore();
@@ -5989,7 +6094,7 @@ function runtimeStreamResponse(
     headers: {
       "content-type": "text/event-stream",
       ...(includeContentLocation
-        ? { "content-location": `/threads/deer_thread_1/runs/${runId}` }
+        ? { "content-location": `/api/threads/deer_thread_1/runs/${runId}` }
         : {}),
     },
   });
@@ -6032,7 +6137,7 @@ function openRuntimeStreamResponse(
     status: 200,
     headers: {
       "content-type": "text/event-stream",
-      "content-location": `/threads/deer_thread_1/runs/${runId}`,
+      "content-location": `/api/threads/deer_thread_1/runs/${runId}`,
     },
   });
 }

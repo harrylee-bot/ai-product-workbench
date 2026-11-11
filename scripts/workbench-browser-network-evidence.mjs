@@ -1,3 +1,31 @@
+import { isDeepStrictEqual } from "node:util";
+
+export function recoveredBoardRevisionConflicts(writes) {
+  return writes.filter((write) => write.status === 412 && write.code === "REVISION_CONFLICT")
+    .flatMap((failed) => {
+      const base = /^"(\d+)"$/u.exec(failed.ifMatch ?? "");
+      if (!base || !Array.isArray(failed.request?.nodes) || !Array.isArray(failed.request?.edges)) return [];
+      const baseRevision = Number(base[1]);
+      const recovered = writes.find((write) => {
+        const fresh = /^"(\d+)"$/u.exec(write.ifMatch ?? "");
+        return write.responseIndex > failed.responseIndex && write.projectPath === failed.projectPath
+          && write.status === 200 && fresh && Number(fresh[1]) > baseRevision
+          && write.board?.revision > Number(fresh[1])
+          && isDeepStrictEqual(write.board?.viewport, write.request?.viewport)
+          && isDeepStrictEqual(write.board?.edges, failed.request.edges)
+          && failed.request.nodes.every((node) => isDeepStrictEqual(
+            node, write.board?.nodes?.find((candidate) => candidate.id === node.id),
+          ));
+      });
+      return recovered ? [{
+        responseIndex: failed.responseIndex,
+        baseRevision, savedRevision: recovered.board.revision,
+        cause: "recovered-board-revision-conflict",
+        existingContentPreserved: true, latestViewportPersisted: true,
+      }] : [];
+    });
+}
+
 export function assertRealStackBrowserMode({ browserOnly, enabled }) {
   if (browserOnly && !enabled) {
     throw new Error("real-stack browser-only mode requires the real-stack browser lane");
@@ -13,6 +41,7 @@ export function clientRoutePrefetchAbortAttribution({
   failure,
   navigationEvidence,
 }) {
+  const route = failure?.routeFetch;
   if (
     failure?.abortAttribution !== null
     || failure?.originClass !== "web"
@@ -21,21 +50,29 @@ export function clientRoutePrefetchAbortAttribution({
     || failure?.errorText !== "net::ERR_ABORTED"
     || failure?.resourceType !== "fetch"
     || currentPathClass !== "/projects/:id"
+    || route?.rsc !== true
+    || route?.prefetch !== true
+    || route?.navigationRequest !== false
+    || !/^[a-f0-9]{64}$/u.test(route?.pathHash ?? "")
+    || (route.responseStatus !== null && (!Number.isInteger(route.responseStatus) || route.responseStatus < 200 || route.responseStatus >= 300))
     || !Array.isArray(navigationEvidence)
     || !navigationEvidence.some((entry) => (
       entry?.actualPathClass === "/projects/:id"
       && entry?.targetPathClass === "/projects/:id"
-      && entry?.status === 200
+      && entry?.pathHash === route.pathHash
+      && ((entry?.kind === "client-route" && entry?.projectShellReady === true)
+        || entry?.status === 200)
     ))
   ) {
     return null;
   }
-  return { cause: "client-route-prefetch" };
+  return { cause: "client-route-prefetch", nextRscPrefetchVerified: true, destinationRendered: true };
 }
 
 const browserSseEventNames = new Set([
   "activity.changed",
   "artifact.draft.created",
+  "artifact.preview.updated",
   "artifact.prototype.patch.created",
   "artifact.prototype.patch.degraded",
   "artifact.version.created",
@@ -83,6 +120,22 @@ export function hasRequiredBrowserSseEvidence(events, reconnectCursor) {
   ))
     && eventNames.has("run.completed")
     && eventNames.has("run.failed");
+}
+
+// A rendered client shell can precede the end of its streamed RSC response.
+// Finish that navigation before a scripted reload tests SSE reconnection.
+// An abort or invalid response is a failure, never a successful settlement.
+export function projectRouteFetchSettlement(records, pathHash) {
+  // Production cached navigation can render entirely from completed prefetch
+  // responses, with no additional non-prefetch request. The caller has already
+  // verified the destination shell; every same-route RSC must still finish.
+  const navigations = records.filter((record) => record.pathHash === pathHash && record.rsc === true);
+  if (navigations.length === 0) return "pending";
+  if (navigations.some((record) => record.state === "failed"
+    || (record.responseStatus !== null && record.responseStatus !== 200)
+    || (record.state === "finished" && record.flight !== true))) return "failed";
+  return navigations.every((record) => record.state === "finished" && record.responseStatus === 200)
+    ? "complete" : "pending";
 }
 
 export function browserSseEventEvidence(value) {

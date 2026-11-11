@@ -226,7 +226,6 @@ components:
         - "null"
         - array
         - object
-      description: Recursive JSON value. This is the sole audited ZodLazy OpenAPI override.
       oneOf:
         - type: string
         - type: number
@@ -238,6 +237,7 @@ components:
         - type: object
           additionalProperties:
             $ref: "#/components/schemas/JsonValue"
+      description: Recursive JSON value. This is the sole audited ZodLazy OpenAPI override.
     ApprovalOption:
       type: object
       properties:
@@ -726,17 +726,321 @@ components:
         - contentMode
         - blob
       additionalProperties: false
-    ArtifactCreation:
+    CreatedSourcePrototypeArtifact:
       type: object
       properties:
-        artifact:
-          $ref: "#/components/schemas/CreatedImageArtifact"
-        artifactVersion:
-          $ref: "#/components/schemas/CreatedImageArtifactVersionDetail"
+        id:
+          type: string
+          minLength: 1
+          maxLength: 128
+        projectId:
+          type: string
+          minLength: 1
+          maxLength: 128
+        kind:
+          type: string
+          enum:
+            - prototype
+        title:
+          type: string
+          minLength: 1
+          maxLength: 240
+        revision:
+          type: integer
+          minimum: 0
+        currentVersion:
+          type: object
+          properties:
+            artifactId:
+              type: string
+              minLength: 1
+              maxLength: 128
+            artifactVersionId:
+              type: string
+              minLength: 1
+              maxLength: 128
+            version:
+              type: integer
+              exclusiveMinimum: 0
+            kind:
+              type: string
+              enum:
+                - prototype
+            schemaVersion:
+              type: number
+              enum:
+                - 2
+            status:
+              type: string
+              enum:
+                - ready
+            checksum:
+              type: string
+              pattern: ^[a-f0-9]{64}$
+            createdByRunId:
+              type:
+                - string
+                - "null"
+              minLength: 1
+              maxLength: 128
+            createdAt:
+              type: string
+              format: date-time
+          required:
+            - artifactId
+            - artifactVersionId
+            - version
+            - kind
+            - schemaVersion
+            - status
+            - checksum
+            - createdByRunId
+            - createdAt
+          additionalProperties: false
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
       required:
-        - artifact
-        - artifactVersion
+        - id
+        - projectId
+        - kind
+        - title
+        - revision
+        - currentVersion
+        - createdAt
+        - updatedAt
       additionalProperties: false
+    SourcePrototypeBuild:
+      type: object
+      properties:
+        renderer:
+          type: string
+          enum:
+            - workbench.react-source.v1
+        reactVersion:
+          type: string
+          enum:
+            - 19.2.3
+        bundlerVersion:
+          type: string
+          enum:
+            - 0.28.1
+        sourceChecksum:
+          type: string
+          pattern: ^[a-f0-9]{64}$
+        html:
+          type: string
+          minLength: 1
+          maxLength: 2097152
+          description: Compiled source prototype HTML remains within the bounded UTF-8 preview size.
+        htmlSha256:
+          type: string
+          pattern: ^[a-f0-9]{64}$
+      required:
+        - renderer
+        - reactVersion
+        - bundlerVersion
+        - sourceChecksum
+        - html
+        - htmlSha256
+      additionalProperties: false
+    SourcePrototypePath:
+      type: string
+      minLength: 1
+      maxLength: 240
+      pattern: ^[A-Za-z0-9_][A-Za-z0-9._/-]*\.(?:tsx|jsx|ts|js|css|json)$
+      description: Source prototype paths are bounded relative paths with an allowed source extension and no traversal segments.
+    SourcePrototypeFile:
+      type: object
+      properties:
+        path:
+          $ref: "#/components/schemas/SourcePrototypePath"
+        content:
+          type: string
+          maxLength: 131072
+          description: Source prototype files remain within the per-file UTF-8 byte limit.
+      required:
+        - path
+        - content
+      additionalProperties: false
+    SourcePrototypePage:
+      type: object
+      properties:
+        id:
+          type: string
+          minLength: 1
+          maxLength: 128
+        name:
+          type: string
+          minLength: 1
+          maxLength: 240
+        route:
+          type: string
+          minLength: 1
+          maxLength: 240
+          pattern: ^\/(?:[A-Za-z0-9_-]+\/)*[A-Za-z0-9_-]*$
+      required:
+        - id
+        - name
+        - route
+      additionalProperties: false
+    SourcePrototypeDocument:
+      type: object
+      properties:
+        protocol:
+          type: string
+          enum:
+            - workbench.prototype-source.v1
+        documentId:
+          type: string
+          minLength: 1
+          maxLength: 128
+        title:
+          type: string
+          minLength: 1
+          maxLength: 240
+        revision:
+          type: integer
+          exclusiveMinimum: 0
+        summary:
+          type: string
+          minLength: 1
+          maxLength: 12000
+        entryFile:
+          $ref: "#/components/schemas/SourcePrototypePath"
+        files:
+          type: array
+          items:
+            $ref: "#/components/schemas/SourcePrototypeFile"
+          minItems: 1
+          maxItems: 32
+        pages:
+          type: array
+          items:
+            $ref: "#/components/schemas/SourcePrototypePage"
+          minItems: 1
+          maxItems: 12
+        assets:
+          type: array
+          items:
+            type: string
+          maxItems: 0
+          default: []
+        build:
+          $ref: "#/components/schemas/SourcePrototypeBuild"
+      required:
+        - protocol
+        - documentId
+        - title
+        - revision
+        - summary
+        - entryFile
+        - files
+        - pages
+        - build
+      additionalProperties: false
+      description: Persisted source prototype documents retain the same bounded project integrity as their input.
+    CreatedSourcePrototypeArtifactVersionDetail:
+      type: object
+      properties:
+        artifactId:
+          type: string
+          minLength: 1
+          maxLength: 128
+        artifactVersionId:
+          type: string
+          minLength: 1
+          maxLength: 128
+        version:
+          type: integer
+          exclusiveMinimum: 0
+        status:
+          type: string
+          enum:
+            - ready
+        checksum:
+          type: string
+          pattern: ^[a-f0-9]{64}$
+        citations:
+          type: array
+          items:
+            $ref: "#/components/schemas/ArtifactCitation"
+          maxItems: 1000
+        createdByRunId:
+          type:
+            - string
+            - "null"
+          minLength: 1
+          maxLength: 128
+        knowledgeReleaseId:
+          type:
+            - string
+            - "null"
+          minLength: 1
+          maxLength: 128
+        sourcePrdVersionId:
+          type:
+            - string
+            - "null"
+          minLength: 1
+          maxLength: 128
+        createdAt:
+          type: string
+          format: date-time
+        contentMode:
+          type: string
+          enum:
+            - inline
+        kind:
+          type: string
+          enum:
+            - prototype
+        schemaVersion:
+          type: number
+          enum:
+            - 2
+        content:
+          $ref: "#/components/schemas/SourcePrototypeDocument"
+      required:
+        - artifactId
+        - artifactVersionId
+        - version
+        - status
+        - checksum
+        - citations
+        - createdByRunId
+        - knowledgeReleaseId
+        - createdAt
+        - contentMode
+        - kind
+        - schemaVersion
+        - content
+      additionalProperties: false
+    ArtifactCreation:
+      anyOf:
+        - type: object
+          properties:
+            artifact:
+              $ref: "#/components/schemas/CreatedImageArtifact"
+            artifactVersion:
+              $ref: "#/components/schemas/CreatedImageArtifactVersionDetail"
+          required:
+            - artifact
+            - artifactVersion
+          additionalProperties: false
+        - type: object
+          properties:
+            artifact:
+              $ref: "#/components/schemas/CreatedSourcePrototypeArtifact"
+            artifactVersion:
+              $ref: "#/components/schemas/CreatedSourcePrototypeArtifactVersionDetail"
+          required:
+            - artifact
+            - artifactVersion
+          additionalProperties: false
       description: The created image Artifact current pointer and returned ready blob-backed ArtifactVersion are the same immutable version; enforced by the runtime Zod contract.
     PrototypePatchChecksum:
       type: string
@@ -3237,7 +3541,6 @@ components:
         - type: number
         - type: boolean
         - type: "null"
-        - type: "null"
     PrototypeExpressionDepth1:
       type: object
       oneOf:
@@ -3990,6 +4293,107 @@ components:
           additionalProperties: false
     PrototypeExpression:
       type: object
+      oneOf:
+        - type: object
+          properties:
+            kind:
+              type: string
+              enum:
+                - literal
+            value:
+              $ref: "#/components/schemas/PrototypeRuntimeValue"
+          required:
+            - kind
+            - value
+          additionalProperties: false
+        - type: object
+          properties:
+            kind:
+              type: string
+              enum:
+                - variable
+            path:
+              type: string
+              pattern: ^[A-Za-z][A-Za-z0-9_]*(?:\.[A-Za-z][A-Za-z0-9_]*)*$
+              maxLength: 500
+          required:
+            - kind
+            - path
+          additionalProperties: false
+        - type: object
+          properties:
+            kind:
+              type: string
+              enum:
+                - contains
+            left:
+              $ref: "#/components/schemas/PrototypeExpressionDepth7"
+            right:
+              $ref: "#/components/schemas/PrototypeExpressionDepth7"
+          required:
+            - kind
+            - left
+            - right
+          additionalProperties: false
+        - type: object
+          properties:
+            kind:
+              type: string
+              enum:
+                - equals
+            left:
+              $ref: "#/components/schemas/PrototypeExpressionDepth7"
+            right:
+              $ref: "#/components/schemas/PrototypeExpressionDepth7"
+          required:
+            - kind
+            - left
+            - right
+          additionalProperties: false
+        - type: object
+          properties:
+            kind:
+              type: string
+              enum:
+                - and
+            operands:
+              type: array
+              items:
+                $ref: "#/components/schemas/PrototypeExpressionDepth7"
+              minItems: 1
+              maxItems: 16
+          required:
+            - kind
+            - operands
+          additionalProperties: false
+        - type: object
+          properties:
+            kind:
+              type: string
+              enum:
+                - or
+            operands:
+              type: array
+              items:
+                $ref: "#/components/schemas/PrototypeExpressionDepth7"
+              minItems: 1
+              maxItems: 16
+          required:
+            - kind
+            - operands
+          additionalProperties: false
+        - type: object
+          properties:
+            kind:
+              type: string
+              enum:
+                - not
+            operand:
+              $ref: "#/components/schemas/PrototypeExpressionDepth7"
+          required:
+            - kind
+            - operand
+          additionalProperties: false
       description: Prototype expressions use only the declared operators, at most eight levels and 64 total nodes, and one to sixteen operands per and/or. A bounded pre-parse walk enforces tree limits before structural parsing; variable references and operand/result types are checked by the Prototype document contract.
       allOf:
         - $ref: "#/components/schemas/PrototypeExpressionDepth8"
@@ -6649,10 +7053,485 @@ components:
         - schemaVersion
         - content
       additionalProperties: false
+    PrdTemplateDiagram:
+      type: object
+      properties:
+        id:
+          type: string
+          minLength: 1
+          maxLength: 96
+          pattern: ^[A-Za-z][A-Za-z0-9]*(?:[-_.:][A-Za-z0-9]+)*$
+        kind:
+          type: string
+          enum:
+            - productFlow
+            - productArchitecture
+        title:
+          type: string
+          minLength: 4
+          maxLength: 240
+          pattern: ^图[1-9]\d*\s+\S
+        description:
+          type: string
+          minLength: 20
+          maxLength: 2000
+        nodes:
+          type: array
+          items:
+            $ref: "#/components/schemas/PrdDiagramNode"
+          minItems: 2
+          maxItems: 40
+        edges:
+          type: array
+          items:
+            $ref: "#/components/schemas/PrdDiagramEdge"
+          minItems: 1
+          maxItems: 80
+      required:
+        - id
+        - kind
+        - title
+        - description
+        - nodes
+        - edges
+      additionalProperties: false
+    PrdV3FunctionSection:
+      type: object
+      properties:
+        title:
+          type: string
+          minLength: 5
+          maxLength: 240
+          pattern: ^2\.(?:[2-9]|[1-9]\d+)\s+\S
+        blocks:
+          type: array
+          items:
+            $ref: "#/components/schemas/PrdBlock"
+          minItems: 1
+          maxItems: 500
+        id:
+          type: string
+          minLength: 1
+          maxLength: 96
+          pattern: ^[A-Za-z][A-Za-z0-9]*(?:[-_.:][A-Za-z0-9]+)*$
+        diagrams:
+          type: array
+          items:
+            $ref: "#/components/schemas/PrdTemplateDiagram"
+          maxItems: 2
+          default: []
+      required:
+        - title
+        - blocks
+        - id
+      additionalProperties: false
+    PrdDocumentV3:
+      type: object
+      properties:
+        protocol:
+          type: string
+          enum:
+            - workbench.prd.v3
+        documentId:
+          type: string
+          minLength: 1
+          maxLength: 96
+          pattern: ^[A-Za-z][A-Za-z0-9]*(?:[-_.:][A-Za-z0-9]+)*$
+        title:
+          type: string
+          minLength: 1
+          maxLength: 240
+        revision:
+          $ref: "#/components/schemas/PrdRevision"
+        cover:
+          type: object
+          properties:
+            workOrderName:
+              type: string
+              minLength: 1
+              maxLength: 200
+            title:
+              type: string
+              minLength: 1
+              maxLength: 240
+          required:
+            - workOrderName
+            - title
+          additionalProperties: false
+        versionHistory:
+          type: array
+          items:
+            $ref: "#/components/schemas/PrdVersionHistoryEntry"
+          minItems: 1
+          maxItems: 100
+        tableOfContents:
+          type: object
+          properties:
+            title:
+              type: string
+              enum:
+                - 目 录
+            entries:
+              type: array
+              items:
+                type: string
+                minLength: 1
+                maxLength: 240
+              minItems: 9
+              maxItems: 58
+          required:
+            - title
+            - entries
+          additionalProperties: false
+        assumptions:
+          type: array
+          items:
+            $ref: "#/components/schemas/PrdAssumption"
+          maxItems: 500
+        citations:
+          type: array
+          items:
+            $ref: "#/components/schemas/ArtifactCitation"
+          maxItems: 1000
+        sections:
+          type: object
+          properties:
+            introduction:
+              type: object
+              properties:
+                title:
+                  type: string
+                  enum:
+                    - 1 引言
+                background:
+                  type: object
+                  properties:
+                    title:
+                      type: string
+                      enum:
+                        - 1.1项目背景
+                    blocks:
+                      type: array
+                      items:
+                        $ref: "#/components/schemas/PrdBlock"
+                      minItems: 1
+                      maxItems: 500
+                  required:
+                    - title
+                    - blocks
+                  additionalProperties: false
+                scope:
+                  type: object
+                  properties:
+                    title:
+                      type: string
+                      enum:
+                        - 1.2文档范围
+                    blocks:
+                      type: array
+                      items:
+                        $ref: "#/components/schemas/PrdBlock"
+                      minItems: 1
+                      maxItems: 500
+                  required:
+                    - title
+                    - blocks
+                  additionalProperties: false
+                usageScenarios:
+                  type: object
+                  properties:
+                    title:
+                      type: string
+                      enum:
+                        - 1.3使用场景（必填）
+                    blocks:
+                      type: array
+                      items:
+                        $ref: "#/components/schemas/PrdBlock"
+                      minItems: 1
+                      maxItems: 500
+                    channelTable:
+                      type: object
+                      properties:
+                        title:
+                          type: string
+                          enum:
+                            - 活动投放渠道
+                        rows:
+                          type: array
+                          items:
+                            $ref: "#/components/schemas/PrdChannelRow"
+                          minItems: 3
+                          maxItems: 3
+                      required:
+                        - title
+                        - rows
+                      additionalProperties: false
+                  required:
+                    - title
+                    - blocks
+                    - channelTable
+                  additionalProperties: false
+              required:
+                - title
+                - background
+                - scope
+                - usageScenarios
+              additionalProperties: false
+            businessRequirements:
+              type: object
+              properties:
+                title:
+                  type: string
+                  enum:
+                    - 2 业务需求
+                summary:
+                  $ref: "#/components/schemas/PrdInlineContent"
+                pageLinks:
+                  type: object
+                  properties:
+                    title:
+                      type: string
+                      enum:
+                        - 2.1页面链接
+                    blocks:
+                      type: array
+                      items:
+                        $ref: "#/components/schemas/PrdBlock"
+                      minItems: 1
+                      maxItems: 500
+                  required:
+                    - title
+                    - blocks
+                  additionalProperties: false
+                functionSections:
+                  type: array
+                  items:
+                    $ref: "#/components/schemas/PrdV3FunctionSection"
+                  minItems: 1
+                  maxItems: 50
+              required:
+                - title
+                - summary
+                - pageLinks
+                - functionSections
+              additionalProperties: false
+            degradation:
+              type: object
+              properties:
+                title:
+                  type: string
+                  enum:
+                    - 3 业务降级方案（必填）
+                applicable:
+                  type: boolean
+                content:
+                  $ref: "#/components/schemas/PrdInlineContent"
+              required:
+                - title
+                - applicable
+                - content
+              additionalProperties: false
+            safetyBaseline:
+              type: object
+              properties:
+                title:
+                  type: string
+                  enum:
+                    - 4 需求安全基线要求（必填）
+                intro:
+                  type: string
+                  enum:
+                    - |-
+                      该部分内容为必填项，请按照如下表格中的内容先进行自查，并按照如下要求完善需求文档：
+                      1、如选择“是”，代表本项自查内容已符合安全要求，需要提供截图违依据
+                      2、如选择“否”，代表本项自查内容暂时不符合安全要求，请在需求文档中增加本部分内容安全改造需求，并发送网信安需求评审邮件，附上本需求文档用于安全评审；
+                      3、如选择“不涉及”，代表本项目各项需求安全基线均不涉及，则无需召开网信安需求评审会。
+                      建议：该表格请业务人员和开发人员共同参与自查并填写。
+                rows:
+                  type: array
+                  items:
+                    $ref: "#/components/schemas/PrdSafetyBaselineRow"
+                  minItems: 21
+                  maxItems: 21
+              required:
+                - title
+                - intro
+                - rows
+              additionalProperties: false
+          required:
+            - introduction
+            - businessRequirements
+            - degradation
+            - safetyBaseline
+          additionalProperties: false
+      required:
+        - protocol
+        - documentId
+        - title
+        - revision
+        - cover
+        - versionHistory
+        - tableOfContents
+        - assumptions
+        - citations
+        - sections
+      additionalProperties: false
+      description: PRD v3 uses contiguous function-specific sections, optional typed diagrams, embedded or later acceptance, and the same complete safety, table, citation and semantic-reference validation.
+    ArtifactVersionInlinePrdV3Detail:
+      type: object
+      properties:
+        artifactId:
+          type: string
+          minLength: 1
+          maxLength: 128
+        artifactVersionId:
+          type: string
+          minLength: 1
+          maxLength: 128
+        version:
+          type: integer
+          exclusiveMinimum: 0
+        status:
+          $ref: "#/components/schemas/ArtifactVersionStatus"
+        checksum:
+          type: string
+          pattern: ^[a-f0-9]{64}$
+        citations:
+          type: array
+          items:
+            $ref: "#/components/schemas/ArtifactCitation"
+          maxItems: 1000
+        createdByRunId:
+          type:
+            - string
+            - "null"
+          minLength: 1
+          maxLength: 128
+        knowledgeReleaseId:
+          type:
+            - string
+            - "null"
+          minLength: 1
+          maxLength: 128
+        sourcePrdVersionId:
+          type:
+            - string
+            - "null"
+          minLength: 1
+          maxLength: 128
+        createdAt:
+          type: string
+          format: date-time
+        contentMode:
+          type: string
+          enum:
+            - inline
+        kind:
+          type: string
+          enum:
+            - prd
+        schemaVersion:
+          type: number
+          enum:
+            - 3
+        content:
+          $ref: "#/components/schemas/PrdDocumentV3"
+      required:
+        - artifactId
+        - artifactVersionId
+        - version
+        - status
+        - checksum
+        - citations
+        - createdByRunId
+        - knowledgeReleaseId
+        - createdAt
+        - contentMode
+        - kind
+        - schemaVersion
+        - content
+      additionalProperties: false
+    ArtifactVersionInlineSourcePrototypeDetail:
+      type: object
+      properties:
+        artifactId:
+          type: string
+          minLength: 1
+          maxLength: 128
+        artifactVersionId:
+          type: string
+          minLength: 1
+          maxLength: 128
+        version:
+          type: integer
+          exclusiveMinimum: 0
+        status:
+          $ref: "#/components/schemas/ArtifactVersionStatus"
+        checksum:
+          type: string
+          pattern: ^[a-f0-9]{64}$
+        citations:
+          type: array
+          items:
+            $ref: "#/components/schemas/ArtifactCitation"
+          maxItems: 1000
+        createdByRunId:
+          type:
+            - string
+            - "null"
+          minLength: 1
+          maxLength: 128
+        knowledgeReleaseId:
+          type:
+            - string
+            - "null"
+          minLength: 1
+          maxLength: 128
+        sourcePrdVersionId:
+          type:
+            - string
+            - "null"
+          minLength: 1
+          maxLength: 128
+        createdAt:
+          type: string
+          format: date-time
+        contentMode:
+          type: string
+          enum:
+            - inline
+        kind:
+          type: string
+          enum:
+            - prototype
+        schemaVersion:
+          type: number
+          enum:
+            - 2
+        content:
+          $ref: "#/components/schemas/SourcePrototypeDocument"
+      required:
+        - artifactId
+        - artifactVersionId
+        - version
+        - status
+        - checksum
+        - citations
+        - createdByRunId
+        - knowledgeReleaseId
+        - createdAt
+        - contentMode
+        - kind
+        - schemaVersion
+        - content
+      additionalProperties: false
     ArtifactVersionDetail:
       oneOf:
         - $ref: "#/components/schemas/ArtifactVersionInlineDetail"
         - $ref: "#/components/schemas/ArtifactVersionInlinePrdV2Detail"
+        - $ref: "#/components/schemas/ArtifactVersionInlinePrdV3Detail"
+        - $ref: "#/components/schemas/ArtifactVersionInlineSourcePrototypeDetail"
         - $ref: "#/components/schemas/ArtifactVersionBlobDetail"
     ArtifactVersionFavoriteListItem:
       type: object
@@ -6813,6 +7692,7 @@ components:
           enum:
             - like
             - dislike
+            - null
         revision:
           type: integer
           minimum: 0
@@ -6891,6 +7771,7 @@ components:
             - EXPORT_FIGMA_UNAVAILABLE
             - EXPORT_EXTERNAL_AI_STUDIO_UNAVAILABLE
             - EXPORT_EXTERNAL_AUTHENTICATION_REQUIRED
+            - null
       required:
         - available
         - authentication
@@ -7429,6 +8310,7 @@ components:
               minLength: 1
               maxLength: 128
               pattern: ^[A-Za-z0-9][A-Za-z0-9._:-]*$
+              description: Canvas entity ids are bounded opaque identifiers and cannot be URI schemes; enforced by the runtime Zod contract.
             boardId:
               type: string
               minLength: 1
@@ -7570,6 +8452,7 @@ components:
               minLength: 1
               maxLength: 128
               pattern: ^[A-Za-z0-9][A-Za-z0-9._:-]*$
+              description: Canvas entity ids are bounded opaque identifiers and cannot be URI schemes; enforced by the runtime Zod contract.
             boardId:
               type: string
               minLength: 1
@@ -7676,6 +8559,7 @@ components:
               minLength: 1
               maxLength: 128
               pattern: ^[A-Za-z0-9][A-Za-z0-9._:-]*$
+              description: Canvas entity ids are bounded opaque identifiers and cannot be URI schemes; enforced by the runtime Zod contract.
             boardId:
               type: string
               minLength: 1
@@ -7809,6 +8693,7 @@ components:
               minLength: 1
               maxLength: 128
               pattern: ^[A-Za-z0-9][A-Za-z0-9._:-]*$
+              description: Canvas entity ids are bounded opaque identifiers and cannot be URI schemes; enforced by the runtime Zod contract.
             boardId:
               type: string
               minLength: 1
@@ -7909,6 +8794,7 @@ components:
               minLength: 1
               maxLength: 128
               pattern: ^[A-Za-z0-9][A-Za-z0-9._:-]*$
+              description: Canvas entity ids are bounded opaque identifiers and cannot be URI schemes; enforced by the runtime Zod contract.
             boardId:
               type: string
               minLength: 1
@@ -8062,6 +8948,7 @@ components:
               minLength: 1
               maxLength: 128
               pattern: ^[A-Za-z0-9][A-Za-z0-9._:-]*$
+              description: Canvas entity ids are bounded opaque identifiers and cannot be URI schemes; enforced by the runtime Zod contract.
             boardId:
               type: string
               minLength: 1
@@ -8212,6 +9099,7 @@ components:
               minLength: 1
               maxLength: 128
               pattern: ^[A-Za-z0-9][A-Za-z0-9._:-]*$
+              description: Canvas entity ids are bounded opaque identifiers and cannot be URI schemes; enforced by the runtime Zod contract.
             boardId:
               type: string
               minLength: 1
@@ -8353,6 +9241,7 @@ components:
           minLength: 1
           maxLength: 128
           pattern: ^[A-Za-z0-9][A-Za-z0-9._:-]*$
+          description: Canvas entity ids are bounded opaque identifiers and cannot be URI schemes; enforced by the runtime Zod contract.
       required:
         - screen
         - structure
@@ -8404,6 +9293,7 @@ components:
           minLength: 1
           maxLength: 128
           pattern: ^[A-Za-z0-9][A-Za-z0-9._:-]*$
+          description: Canvas entity ids are bounded opaque identifiers and cannot be URI schemes; enforced by the runtime Zod contract.
         boardId:
           type: string
           minLength: 1
@@ -8495,6 +9385,7 @@ components:
           minLength: 1
           maxLength: 128
           pattern: ^[A-Za-z0-9][A-Za-z0-9._:-]*$
+          description: Canvas entity ids are bounded opaque identifiers and cannot be URI schemes; enforced by the runtime Zod contract.
         runtimeAttemptId:
           type:
             - string
@@ -8502,6 +9393,7 @@ components:
           minLength: 1
           maxLength: 128
           pattern: ^[A-Za-z0-9][A-Za-z0-9._:-]*$
+          description: Canvas entity ids are bounded opaque identifiers and cannot be URI schemes; enforced by the runtime Zod contract.
         agentSessionId:
           type: string
           minLength: 1
@@ -8529,6 +9421,7 @@ components:
           minLength: 8
           maxLength: 128
           pattern: ^[A-Za-z0-9][A-Za-z0-9._:-]*$
+          description: Canvas browser session ids are bounded opaque identifiers and cannot be URI schemes; enforced by the runtime Zod contract.
         projectSessionGeneration:
           $ref: "#/components/schemas/Revision"
         boardId:
@@ -9038,6 +9931,7 @@ components:
               minLength: 1
               maxLength: 128
               pattern: ^[A-Za-z0-9][A-Za-z0-9._:-]*$
+              description: Canvas entity ids are bounded opaque identifiers and cannot be URI schemes; enforced by the runtime Zod contract.
             clientCommandId:
               type:
                 - string
@@ -9045,6 +9939,7 @@ components:
               minLength: 1
               maxLength: 128
               pattern: ^[A-Za-z0-9][A-Za-z0-9._:-]*$
+              description: Canvas entity ids are bounded opaque identifiers and cannot be URI schemes; enforced by the runtime Zod contract.
           required:
             - protocol
             - agentSessionId
@@ -9315,6 +10210,7 @@ components:
               minLength: 1
               maxLength: 128
               pattern: ^[A-Za-z0-9][A-Za-z0-9._:-]*$
+              description: Canvas entity ids are bounded opaque identifiers and cannot be URI schemes; enforced by the runtime Zod contract.
             boardId:
               type: string
               minLength: 1
@@ -9456,6 +10352,7 @@ components:
               minLength: 1
               maxLength: 128
               pattern: ^[A-Za-z0-9][A-Za-z0-9._:-]*$
+              description: Canvas entity ids are bounded opaque identifiers and cannot be URI schemes; enforced by the runtime Zod contract.
             boardId:
               type: string
               minLength: 1
@@ -9562,6 +10459,7 @@ components:
               minLength: 1
               maxLength: 128
               pattern: ^[A-Za-z0-9][A-Za-z0-9._:-]*$
+              description: Canvas entity ids are bounded opaque identifiers and cannot be URI schemes; enforced by the runtime Zod contract.
             boardId:
               type: string
               minLength: 1
@@ -9676,6 +10574,7 @@ components:
               minLength: 1
               maxLength: 128
               pattern: ^[A-Za-z0-9][A-Za-z0-9._:-]*$
+              description: Canvas entity ids are bounded opaque identifiers and cannot be URI schemes; enforced by the runtime Zod contract.
             boardId:
               type: string
               minLength: 1
@@ -9776,6 +10675,7 @@ components:
               minLength: 1
               maxLength: 128
               pattern: ^[A-Za-z0-9][A-Za-z0-9._:-]*$
+              description: Canvas entity ids are bounded opaque identifiers and cannot be URI schemes; enforced by the runtime Zod contract.
             boardId:
               type: string
               minLength: 1
@@ -9878,6 +10778,7 @@ components:
               minLength: 1
               maxLength: 128
               pattern: ^[A-Za-z0-9][A-Za-z0-9._:-]*$
+              description: Canvas entity ids are bounded opaque identifiers and cannot be URI schemes; enforced by the runtime Zod contract.
             boardId:
               type: string
               minLength: 1
@@ -10028,6 +10929,7 @@ components:
               minLength: 1
               maxLength: 128
               pattern: ^[A-Za-z0-9][A-Za-z0-9._:-]*$
+              description: Canvas entity ids are bounded opaque identifiers and cannot be URI schemes; enforced by the runtime Zod contract.
             boardId:
               type: string
               minLength: 1
@@ -10155,6 +11057,7 @@ components:
           minLength: 1
           maxLength: 128
           pattern: ^[A-Za-z0-9][A-Za-z0-9._:-]*$
+          description: Canvas entity ids are bounded opaque identifiers and cannot be URI schemes; enforced by the runtime Zod contract.
       required:
         - protocol
         - clientSessionId
@@ -10373,6 +11276,7 @@ components:
           minLength: 1
           maxLength: 128
           pattern: ^[A-Za-z0-9][A-Za-z0-9._:-]*$
+          description: Canvas entity ids are bounded opaque identifiers and cannot be URI schemes; enforced by the runtime Zod contract.
       required:
         - screen
         - structure
@@ -10434,6 +11338,7 @@ components:
           minLength: 1
           maxLength: 128
           pattern: ^[A-Za-z0-9][A-Za-z0-9._:-]*$
+          description: Canvas entity ids are bounded opaque identifiers and cannot be URI schemes; enforced by the runtime Zod contract.
         boardId:
           type: string
           minLength: 1
@@ -10560,8 +11465,8 @@ components:
             $ref: "#/components/schemas/CompletedPart"
           minItems: 1
           maxItems: 10000
-          description: Provider ETags keyed by unique, strictly ascending partNumber values
           uniqueItems: true
+          description: Provider ETags keyed by unique, strictly ascending partNumber values
         sha256:
           type: string
           pattern: ^[a-f0-9]{64}$
@@ -10845,6 +11750,7 @@ components:
             - createdAt
             - updatedAt
           additionalProperties: false
+          description: Extraction status, timestamps, digest, and failure obey the lifecycle invariant; enforced by the runtime Zod contract.
         latestExtraction:
           type:
             - object
@@ -10927,6 +11833,7 @@ components:
             - createdAt
             - updatedAt
           additionalProperties: false
+          description: Extraction status, timestamps, digest, and failure obey the lifecycle invariant; enforced by the runtime Zod contract.
         verifiedAt:
           type:
             - string
@@ -11051,13 +11958,76 @@ components:
         - title
         - source
       additionalProperties: false
+    SourcePrototypeInput:
+      type: object
+      properties:
+        protocol:
+          type: string
+          enum:
+            - workbench.prototype-source-input.v1
+        documentId:
+          type: string
+          minLength: 1
+          maxLength: 128
+        title:
+          type: string
+          minLength: 1
+          maxLength: 240
+        revision:
+          type: integer
+          exclusiveMinimum: 0
+        summary:
+          type: string
+          minLength: 1
+          maxLength: 12000
+        entryFile:
+          $ref: "#/components/schemas/SourcePrototypePath"
+        files:
+          type: array
+          items:
+            $ref: "#/components/schemas/SourcePrototypeFile"
+          minItems: 1
+          maxItems: 32
+        pages:
+          type: array
+          items:
+            $ref: "#/components/schemas/SourcePrototypePage"
+          minItems: 1
+          maxItems: 12
+      required:
+        - protocol
+        - documentId
+        - title
+        - revision
+        - summary
+        - entryFile
+        - files
+        - pages
+      additionalProperties: false
+      description: Source prototype entries, paths, page ids, routes, and aggregate source size form one bounded virtual project.
+    CreateSourcePrototypeArtifactRequest:
+      type: object
+      properties:
+        kind:
+          type: string
+          enum:
+            - prototype
+        title:
+          type: string
+          minLength: 1
+          maxLength: 240
+        document:
+          $ref: "#/components/schemas/SourcePrototypeInput"
+      required:
+        - kind
+        - title
+        - document
+      additionalProperties: false
+      description: The source prototype artifact title must equal the immutable source document title.
     CreateArtifactRequest:
-      oneOf:
+      anyOf:
         - $ref: "#/components/schemas/CreateImageArtifactRequest"
-      discriminator:
-        propertyName: kind
-        mapping:
-          image: "#/components/schemas/CreateImageArtifactRequest"
+        - $ref: "#/components/schemas/CreateSourcePrototypeArtifactRequest"
     CreatePrdArtifactVersionRequest:
       type: object
       properties:
@@ -11094,6 +12064,24 @@ components:
         - kind
         - document
       additionalProperties: false
+    CreatePrdV3ArtifactVersionRequest:
+      type: object
+      properties:
+        baseArtifactVersionId:
+          type: string
+          minLength: 1
+          maxLength: 128
+        kind:
+          type: string
+          enum:
+            - prd
+        document:
+          $ref: "#/components/schemas/PrdDocumentV3"
+      required:
+        - baseArtifactVersionId
+        - kind
+        - document
+      additionalProperties: false
     CreatePrototypeArtifactVersionRequest:
       type: object
       properties:
@@ -11112,11 +12100,31 @@ components:
         - kind
         - document
       additionalProperties: false
+    CreateSourcePrototypeArtifactVersionRequest:
+      type: object
+      properties:
+        baseArtifactVersionId:
+          type: string
+          minLength: 1
+          maxLength: 128
+        kind:
+          type: string
+          enum:
+            - prototype
+        document:
+          $ref: "#/components/schemas/SourcePrototypeInput"
+      required:
+        - baseArtifactVersionId
+        - kind
+        - document
+      additionalProperties: false
     CreateArtifactVersionRequest:
       oneOf:
         - $ref: "#/components/schemas/CreatePrdArtifactVersionRequest"
         - $ref: "#/components/schemas/CreatePrototypeArtifactVersionRequest"
         - $ref: "#/components/schemas/CreatePrdV2ArtifactVersionRequest"
+        - $ref: "#/components/schemas/CreatePrdV3ArtifactVersionRequest"
+        - $ref: "#/components/schemas/CreateSourcePrototypeArtifactVersionRequest"
     CreateDesignSystemRequest:
       type: object
       properties:
@@ -11156,7 +12164,7 @@ components:
         maxLength: 128
       minItems: 1
       maxItems: 512
-      description: Board node ids are unique and in canonical ascending order; enforced by the runtime Zod contract and database constraint.
+      description: Unique Board node ids in canonical ascending identifier order
       uniqueItems: true
     ExportSelection:
       oneOf:
@@ -11227,9 +12235,7 @@ components:
         selection:
           $ref: "#/components/schemas/ExportSelection"
         options:
-          allOf:
-            - $ref: "#/components/schemas/CreateExportOptions"
-            - default: {}
+          $ref: "#/components/schemas/CreateExportOptions"
       required:
         - releaseId
         - format
@@ -11710,7 +12716,7 @@ components:
       items:
         $ref: "#/components/schemas/RunArtifactTarget"
       maxItems: 12
-      description: Artifact targets preserve original request order, contain one immutable selection per Artifact and ArtifactVersion, and select at most twelve versions or screens; enforced by the runtime Zod contract.
+      description: Immutable ready ArtifactVersion selections in original request order, including explicit Generate Prototype source screens
     RunDesignStyleArtifact:
       type: object
       properties:
@@ -11788,7 +12794,7 @@ components:
         maxLength: 128
       maxItems: 50
       default: []
-      description: A Run references each immutable Import Source at most once.
+      description: Unique ready Import Source ids resolved before Run creation
       uniqueItems: true
     RunTargetSurface:
       type: string
@@ -11831,6 +12837,7 @@ components:
           enum:
             - followup-design
             - interactive-prototype
+            - null
           default: null
         targetSurface:
           $ref: "#/components/schemas/RunTargetSurface"
@@ -11879,6 +12886,7 @@ components:
               minLength: 1
               maxLength: 128
               pattern: ^[A-Za-z0-9][A-Za-z0-9._:-]*$
+              description: Canvas entity ids are bounded opaque identifiers and cannot be URI schemes; enforced by the runtime Zod contract.
             boardId:
               type: string
               minLength: 1
@@ -11938,6 +12946,7 @@ components:
             - visibleScreens
             - selectedScreens
           additionalProperties: false
+          description: Canvas snapshots use unique screen references and only expose references declared by the snapshot; enforced by the runtime Zod contract.
       required:
         - prompt
         - modelId
@@ -12007,6 +13016,7 @@ components:
                 - failed
                 - quarantined
                 - deleted
+                - null
             kind:
               type: string
               enum:
@@ -12038,6 +13048,7 @@ components:
                 - failed
                 - quarantined
                 - deleted
+                - null
             kind:
               type: string
               enum:
@@ -12251,6 +13262,7 @@ components:
             - createdAt
             - updatedAt
           additionalProperties: false
+          description: SubmissionIntent request target semantics, attachment positions, and submitted/cancelled lifecycle fields agree; enforced by runtime contracts and database constraints.
       required:
         - item
       additionalProperties: false
@@ -12862,6 +13874,7 @@ components:
             - EXPORT_FIGMA_UNAVAILABLE
             - EXPORT_EXTERNAL_AI_STUDIO_UNAVAILABLE
             - EXPORT_EXTERNAL_AUTHENTICATION_REQUIRED
+            - null
       required:
         - available
         - authentication
@@ -13244,6 +14257,7 @@ components:
             - EXPORT_FIGMA_UNAVAILABLE
             - EXPORT_EXTERNAL_AI_STUDIO_UNAVAILABLE
             - EXPORT_EXTERNAL_AUTHENTICATION_REQUIRED
+            - null
       required:
         - available
         - authentication
@@ -13355,6 +14369,7 @@ components:
                 - "null"
               maxLength: 2048
               format: uri
+              description: Import source locators use HTTP(S); DNS, redirect and private-network checks are enforced by the Import Worker before fetching.
           required:
             - kind
             - sourceUrl
@@ -13518,6 +14533,7 @@ components:
                     - "null"
                   maxLength: 2048
                   format: uri
+                  description: Import source locators use HTTP(S); DNS, redirect and private-network checks are enforced by the Import Worker before fetching.
               required:
                 - kind
                 - sourceUrl
@@ -14388,8 +15404,8 @@ components:
           items:
             $ref: "#/components/schemas/UploadedPart"
           maxItems: 10000
-          description: Unique partNumber values in strictly ascending order
           uniqueItems: true
+          description: Unique partNumber values in strictly ascending order
       required:
         - parts
       additionalProperties: false
@@ -14398,6 +15414,7 @@ components:
       anyOf:
         - $ref: "#/components/schemas/PrdDocumentV1"
         - $ref: "#/components/schemas/PrdDocumentV2"
+        - $ref: "#/components/schemas/PrdDocumentV3"
     PrdSectionKey:
       type: string
       enum:
@@ -14410,6 +15427,48 @@ components:
         - userFlows
         - acceptanceCriteria
         - risksAndDependencies
+    PrdV3Diagram:
+      type: object
+      properties:
+        id:
+          type: string
+          minLength: 1
+          maxLength: 96
+          pattern: ^[A-Za-z][A-Za-z0-9]*(?:[-_.:][A-Za-z0-9]+)*$
+        kind:
+          type: string
+          enum:
+            - productFlow
+            - productArchitecture
+        title:
+          type: string
+          minLength: 4
+          maxLength: 240
+          pattern: ^图[1-9]\d*\s+\S
+        description:
+          type: string
+          minLength: 20
+          maxLength: 2000
+        nodes:
+          type: array
+          items:
+            $ref: "#/components/schemas/PrdDiagramNode"
+          minItems: 2
+          maxItems: 40
+        edges:
+          type: array
+          items:
+            $ref: "#/components/schemas/PrdDiagramEdge"
+          minItems: 1
+          maxItems: 80
+      required:
+        - id
+        - kind
+        - title
+        - description
+        - nodes
+        - edges
+      additionalProperties: false
     PreviewStatus:
       type: string
       enum:
@@ -14663,6 +15722,7 @@ components:
                     - "null"
                   maxLength: 2048
                   format: uri
+                  description: Import source locators use HTTP(S); DNS, redirect and private-network checks are enforced by the Import Worker before fetching.
               required:
                 - kind
                 - sourceUrl
@@ -14777,6 +15837,7 @@ components:
           enum:
             - followup-design
             - interactive-prototype
+            - null
         targetSurface:
           $ref: "#/components/schemas/RunTargetSurface"
         designStyle:
@@ -14811,6 +15872,7 @@ components:
             - generating
             - validating
             - publishing
+            - null
         phaseLabel:
           type:
             - string
@@ -15201,6 +16263,7 @@ components:
               enum:
                 - followup-design
                 - interactive-prototype
+                - null
             targetSurface:
               $ref: "#/components/schemas/RunTargetSurface"
             designStyle:
@@ -15235,6 +16298,7 @@ components:
                 - generating
                 - validating
                 - publishing
+                - null
             phaseLabel:
               type:
                 - string
@@ -15324,6 +16388,7 @@ components:
             - startedAt
             - finishedAt
           additionalProperties: false
+          description: Run Import Source snapshots belong to the Run and Project, preserve immutable manifests, and use contiguous request positions; enforced by the runtime Zod contract.
       required:
         - project
         - access
@@ -17460,10 +18525,172 @@ components:
         - schemaVersion
         - content
       additionalProperties: false
+    PublicArtifactVersionInlinePrdV3Detail:
+      type: object
+      properties:
+        artifactId:
+          type: string
+          minLength: 1
+          maxLength: 128
+        artifactVersionId:
+          type: string
+          minLength: 1
+          maxLength: 128
+        version:
+          type: integer
+          exclusiveMinimum: 0
+        status:
+          type: string
+          enum:
+            - ready
+        checksum:
+          type: string
+          pattern: ^[a-f0-9]{64}$
+        citations:
+          type: array
+          items:
+            $ref: "#/components/schemas/ArtifactCitation"
+          maxItems: 1000
+        createdAt:
+          type: string
+          format: date-time
+        contentMode:
+          type: string
+          enum:
+            - inline
+        kind:
+          type: string
+          enum:
+            - prd
+        schemaVersion:
+          type: number
+          enum:
+            - 3
+        content:
+          $ref: "#/components/schemas/PrdDocumentV3"
+      required:
+        - artifactId
+        - artifactVersionId
+        - version
+        - status
+        - checksum
+        - citations
+        - createdAt
+        - contentMode
+        - kind
+        - schemaVersion
+        - content
+      additionalProperties: false
+    PublicSourcePrototypeDocument:
+      type: object
+      properties:
+        protocol:
+          type: string
+          enum:
+            - workbench.prototype-source.v1
+        documentId:
+          type: string
+          minLength: 1
+          maxLength: 128
+        title:
+          type: string
+          minLength: 1
+          maxLength: 240
+        revision:
+          type: integer
+          exclusiveMinimum: 0
+        summary:
+          type: string
+          minLength: 1
+          maxLength: 12000
+        entryFile:
+          $ref: "#/components/schemas/SourcePrototypePath"
+        pages:
+          type: array
+          items:
+            $ref: "#/components/schemas/SourcePrototypePage"
+          minItems: 1
+          maxItems: 12
+        assets:
+          type: array
+          items:
+            type: string
+          maxItems: 0
+          default: []
+        build:
+          $ref: "#/components/schemas/SourcePrototypeBuild"
+      required:
+        - protocol
+        - documentId
+        - title
+        - revision
+        - summary
+        - entryFile
+        - pages
+        - build
+      additionalProperties: false
+    PublicArtifactVersionInlineSourcePrototypeDetail:
+      type: object
+      properties:
+        artifactId:
+          type: string
+          minLength: 1
+          maxLength: 128
+        artifactVersionId:
+          type: string
+          minLength: 1
+          maxLength: 128
+        version:
+          type: integer
+          exclusiveMinimum: 0
+        status:
+          type: string
+          enum:
+            - ready
+        checksum:
+          type: string
+          pattern: ^[a-f0-9]{64}$
+        citations:
+          type: array
+          items:
+            $ref: "#/components/schemas/ArtifactCitation"
+          maxItems: 1000
+        createdAt:
+          type: string
+          format: date-time
+        contentMode:
+          type: string
+          enum:
+            - inline
+        kind:
+          type: string
+          enum:
+            - prototype
+        schemaVersion:
+          type: number
+          enum:
+            - 2
+        content:
+          $ref: "#/components/schemas/PublicSourcePrototypeDocument"
+      required:
+        - artifactId
+        - artifactVersionId
+        - version
+        - status
+        - checksum
+        - citations
+        - createdAt
+        - contentMode
+        - kind
+        - schemaVersion
+        - content
+      additionalProperties: false
     PublicArtifactVersionDetail:
       oneOf:
         - $ref: "#/components/schemas/PublicArtifactVersionInlineDetail"
         - $ref: "#/components/schemas/PublicArtifactVersionInlinePrdV2Detail"
+        - $ref: "#/components/schemas/PublicArtifactVersionInlinePrdV3Detail"
+        - $ref: "#/components/schemas/PublicArtifactVersionInlineSourcePrototypeDetail"
         - $ref: "#/components/schemas/PublicArtifactVersionBlobDetail"
     PublicProjectReleaseArtifactPin:
       type: object
@@ -17710,9 +18937,7 @@ components:
           minLength: 1
           maxLength: 128
         scope:
-          allOf:
-            - $ref: "#/components/schemas/ShareScope"
-            - default: view
+          $ref: "#/components/schemas/ShareScope"
         expiresAt:
           type:
             - string
@@ -17935,6 +19160,7 @@ components:
                 enum:
                   - followup-design
                   - interactive-prototype
+                  - null
               targetSurface:
                 $ref: "#/components/schemas/RunTargetSurface"
               designStyle:
@@ -17969,6 +19195,7 @@ components:
                   - generating
                   - validating
                   - publishing
+                  - null
               phaseLabel:
                 type:
                   - string
@@ -18473,10 +19700,65 @@ components:
         - content
         - operation
       additionalProperties: false
+    RuntimeArtifactDraftPrdV3:
+      type: object
+      properties:
+        title:
+          type: string
+          minLength: 1
+          maxLength: 240
+        citations:
+          type: array
+          items:
+            $ref: "#/components/schemas/ArtifactCitation"
+          minItems: 1
+          maxItems: 1000
+        kind:
+          type: string
+          enum:
+            - prd
+        schemaVersion:
+          type: number
+          enum:
+            - 3
+        content:
+          $ref: "#/components/schemas/PrdDocumentV3"
+        operation:
+          oneOf:
+            - type: object
+              properties:
+                kind:
+                  type: string
+                  enum:
+                    - create
+              required:
+                - kind
+              additionalProperties: false
+            - type: object
+              properties:
+                kind:
+                  type: string
+                  enum:
+                    - revise
+                target:
+                  $ref: "#/components/schemas/RunArtifactTarget"
+              required:
+                - kind
+                - target
+              additionalProperties: false
+      required:
+        - title
+        - citations
+        - kind
+        - schemaVersion
+        - content
+        - operation
+      additionalProperties: false
     RuntimeArtifactDraftPrd:
       anyOf:
         - $ref: "#/components/schemas/RuntimeArtifactDraftPrdV1Revision"
         - $ref: "#/components/schemas/RuntimeArtifactDraftPrdV2"
+        - $ref: "#/components/schemas/RuntimeArtifactDraftPrdV3"
     RuntimeArtifactDraftPrototype:
       type: object
       properties:
@@ -18739,7 +20021,7 @@ components:
         $ref: "#/components/schemas/RunWorkflow"
       minItems: 1
       maxItems: 4
-      description: Each runtime model declares a non-empty set of unique Workbench workflows; enforced by the runtime Zod contract and Run admission policy.
+      description: Unique Workbench workflows accepted for this runtime model
       uniqueItems: true
     RuntimeModel:
       type: object
@@ -18929,140 +20211,6 @@ components:
         - headers
         - expiresAt
       additionalProperties: false
-    StartRunRequestObject:
-      type: object
-      properties:
-        prompt:
-          type: string
-          minLength: 1
-          maxLength: 50000
-        modelId:
-          type: string
-          minLength: 1
-          maxLength: 128
-        workflow:
-          $ref: "#/components/schemas/RunWorkflow"
-        generationIntent:
-          type:
-            - string
-            - "null"
-          enum:
-            - followup-design
-            - interactive-prototype
-          default: null
-        targetSurface:
-          $ref: "#/components/schemas/RunTargetSurface"
-        designStyle:
-          $ref: "#/components/schemas/RunDesignStyle"
-        sourceIds:
-          $ref: "#/components/schemas/RunSourceIds"
-        artifactTargets:
-          type: array
-          items:
-            $ref: "#/components/schemas/RunArtifactTarget"
-          maxItems: 12
-          default: []
-          description: Immutable ready ArtifactVersion selections in runtime target order; Generate Prototype requires one or more explicit screen ids on every source target
-        requestedArtifactKinds:
-          type: array
-          items:
-            $ref: "#/components/schemas/RuntimeRequestedArtifactKind"
-          maxItems: 12
-          default: []
-        canvasSnapshot:
-          type:
-            - object
-            - "null"
-          properties:
-            protocol:
-              type: string
-              enum:
-                - workbench.canvas-snapshot.v1
-            projectId:
-              type: string
-              minLength: 1
-              maxLength: 128
-              pattern: ^[A-Za-z0-9][A-Za-z0-9._:-]*$
-              description: Canvas entity ids are bounded opaque identifiers and cannot be URI schemes; enforced by the runtime Zod contract.
-            threadId:
-              type: string
-              minLength: 1
-              maxLength: 128
-              pattern: ^[A-Za-z0-9][A-Za-z0-9._:-]*$
-              description: Canvas entity ids are bounded opaque identifiers and cannot be URI schemes; enforced by the runtime Zod contract.
-            runId:
-              type:
-                - string
-                - "null"
-              minLength: 1
-              maxLength: 128
-              pattern: ^[A-Za-z0-9][A-Za-z0-9._:-]*$
-            boardId:
-              type: string
-              minLength: 1
-              maxLength: 128
-              pattern: ^[A-Za-z0-9][A-Za-z0-9._:-]*$
-              description: Canvas entity ids are bounded opaque identifiers and cannot be URI schemes; enforced by the runtime Zod contract.
-            clientSessionId:
-              type: string
-              minLength: 8
-              maxLength: 128
-              pattern: ^[A-Za-z0-9][A-Za-z0-9._:-]*$
-              description: Canvas browser session ids are bounded opaque identifiers and cannot be URI schemes; enforced by the runtime Zod contract.
-            projectSessionGeneration:
-              $ref: "#/components/schemas/Revision"
-            boardRevision:
-              $ref: "#/components/schemas/Revision"
-            canvasStateRevision:
-              $ref: "#/components/schemas/Revision"
-            capturedAt:
-              type: string
-              format: date-time
-            expiresAt:
-              type: string
-              format: date-time
-            viewport:
-              $ref: "#/components/schemas/CanvasViewport"
-            screens:
-              type: array
-              items:
-                $ref: "#/components/schemas/CanvasScreenSummary"
-              maxItems: 512
-            visibleScreens:
-              type: array
-              items:
-                $ref: "#/components/schemas/CanvasAgentScreenReference"
-              maxItems: 512
-            selectedScreens:
-              type: array
-              items:
-                $ref: "#/components/schemas/CanvasAgentScreenReference"
-              maxItems: 512
-          default: null
-          required:
-            - protocol
-            - projectId
-            - threadId
-            - runId
-            - boardId
-            - clientSessionId
-            - projectSessionGeneration
-            - boardRevision
-            - canvasStateRevision
-            - capturedAt
-            - expiresAt
-            - viewport
-            - screens
-            - visibleScreens
-            - selectedScreens
-          additionalProperties: false
-      required:
-        - prompt
-        - modelId
-        - workflow
-        - targetSurface
-        - designStyle
-      additionalProperties: false
     StartRunRequest:
       type: object
       properties:
@@ -19083,6 +20231,7 @@ components:
           enum:
             - followup-design
             - interactive-prototype
+            - null
           default: null
         targetSurface:
           $ref: "#/components/schemas/RunTargetSurface"
@@ -19131,6 +20280,7 @@ components:
               minLength: 1
               maxLength: 128
               pattern: ^[A-Za-z0-9][A-Za-z0-9._:-]*$
+              description: Canvas entity ids are bounded opaque identifiers and cannot be URI schemes; enforced by the runtime Zod contract.
             boardId:
               type: string
               minLength: 1
@@ -19190,6 +20340,7 @@ components:
             - visibleScreens
             - selectedScreens
           additionalProperties: false
+          description: Canvas snapshots use unique screen references and only expose references declared by the snapshot; enforced by the runtime Zod contract.
       required:
         - prompt
         - modelId
@@ -19198,6 +20349,143 @@ components:
         - designStyle
       additionalProperties: false
       description: Redesign requires a ready Import Source; Edit requires an Artifact target; Generate accepts explicit non-empty screen targets only when prototype is requested; Redesign and Ideate forbid targets. Enforced by the runtime Zod contract.
+    StartRunRequestObject:
+      type: object
+      properties:
+        prompt:
+          type: string
+          minLength: 1
+          maxLength: 50000
+        modelId:
+          type: string
+          minLength: 1
+          maxLength: 128
+        workflow:
+          $ref: "#/components/schemas/RunWorkflow"
+        generationIntent:
+          type:
+            - string
+            - "null"
+          enum:
+            - followup-design
+            - interactive-prototype
+            - null
+          default: null
+        targetSurface:
+          $ref: "#/components/schemas/RunTargetSurface"
+        designStyle:
+          $ref: "#/components/schemas/RunDesignStyle"
+        sourceIds:
+          $ref: "#/components/schemas/RunSourceIds"
+        artifactTargets:
+          type: array
+          items:
+            $ref: "#/components/schemas/RunArtifactTarget"
+          maxItems: 12
+          default: []
+          description: Immutable ready ArtifactVersion selections in runtime target order; Generate Prototype requires one or more explicit screen ids on every source target
+        requestedArtifactKinds:
+          type: array
+          items:
+            $ref: "#/components/schemas/RuntimeRequestedArtifactKind"
+          maxItems: 12
+          default: []
+        canvasSnapshot:
+          type:
+            - object
+            - "null"
+          properties:
+            protocol:
+              type: string
+              enum:
+                - workbench.canvas-snapshot.v1
+            projectId:
+              type: string
+              minLength: 1
+              maxLength: 128
+              pattern: ^[A-Za-z0-9][A-Za-z0-9._:-]*$
+              description: Canvas entity ids are bounded opaque identifiers and cannot be URI schemes; enforced by the runtime Zod contract.
+            threadId:
+              type: string
+              minLength: 1
+              maxLength: 128
+              pattern: ^[A-Za-z0-9][A-Za-z0-9._:-]*$
+              description: Canvas entity ids are bounded opaque identifiers and cannot be URI schemes; enforced by the runtime Zod contract.
+            runId:
+              type:
+                - string
+                - "null"
+              minLength: 1
+              maxLength: 128
+              pattern: ^[A-Za-z0-9][A-Za-z0-9._:-]*$
+              description: Canvas entity ids are bounded opaque identifiers and cannot be URI schemes; enforced by the runtime Zod contract.
+            boardId:
+              type: string
+              minLength: 1
+              maxLength: 128
+              pattern: ^[A-Za-z0-9][A-Za-z0-9._:-]*$
+              description: Canvas entity ids are bounded opaque identifiers and cannot be URI schemes; enforced by the runtime Zod contract.
+            clientSessionId:
+              type: string
+              minLength: 8
+              maxLength: 128
+              pattern: ^[A-Za-z0-9][A-Za-z0-9._:-]*$
+              description: Canvas browser session ids are bounded opaque identifiers and cannot be URI schemes; enforced by the runtime Zod contract.
+            projectSessionGeneration:
+              $ref: "#/components/schemas/Revision"
+            boardRevision:
+              $ref: "#/components/schemas/Revision"
+            canvasStateRevision:
+              $ref: "#/components/schemas/Revision"
+            capturedAt:
+              type: string
+              format: date-time
+            expiresAt:
+              type: string
+              format: date-time
+            viewport:
+              $ref: "#/components/schemas/CanvasViewport"
+            screens:
+              type: array
+              items:
+                $ref: "#/components/schemas/CanvasScreenSummary"
+              maxItems: 512
+            visibleScreens:
+              type: array
+              items:
+                $ref: "#/components/schemas/CanvasAgentScreenReference"
+              maxItems: 512
+            selectedScreens:
+              type: array
+              items:
+                $ref: "#/components/schemas/CanvasAgentScreenReference"
+              maxItems: 512
+          default: null
+          required:
+            - protocol
+            - projectId
+            - threadId
+            - runId
+            - boardId
+            - clientSessionId
+            - projectSessionGeneration
+            - boardRevision
+            - canvasStateRevision
+            - capturedAt
+            - expiresAt
+            - viewport
+            - screens
+            - visibleScreens
+            - selectedScreens
+          additionalProperties: false
+          description: Canvas snapshots use unique screen references and only expose references declared by the snapshot; enforced by the runtime Zod contract.
+      required:
+        - prompt
+        - modelId
+        - workflow
+        - targetSurface
+        - designStyle
+      additionalProperties: false
     SubmitApprovalRequest:
       type: object
       properties:
@@ -19254,6 +20542,7 @@ components:
               enum:
                 - followup-design
                 - interactive-prototype
+                - null
             targetSurface:
               $ref: "#/components/schemas/RunTargetSurface"
             designStyle:
@@ -19288,6 +20577,7 @@ components:
                 - generating
                 - validating
                 - publishing
+                - null
             phaseLabel:
               type:
                 - string
@@ -19508,6 +20798,7 @@ components:
               enum:
                 - followup-design
                 - interactive-prototype
+                - null
             targetSurface:
               $ref: "#/components/schemas/RunTargetSurface"
             designStyle:
@@ -19542,6 +20833,7 @@ components:
                 - generating
                 - validating
                 - publishing
+                - null
             phaseLabel:
               type:
                 - string
@@ -19677,6 +20969,7 @@ components:
           enum:
             - like
             - dislike
+            - null
       required:
         - favorite
         - reaction
@@ -19977,12 +21270,14 @@ components:
       schema:
         $ref: "#/components/schemas/CommandId"
       required: true
+      description: Canvas entity ids are bounded opaque identifiers and cannot be URI schemes; enforced by the runtime Zod contract.
       name: commandId
       in: path
     VisualCapabilityId:
       schema:
         $ref: "#/components/schemas/VisualCapabilityId"
       required: true
+      description: Canvas entity ids are bounded opaque identifiers and cannot be URI schemes; enforced by the runtime Zod contract.
       name: visualCapabilityId
       in: path
     ReleaseId:
@@ -20031,9 +21326,9 @@ components:
       schema:
         $ref: "#/components/schemas/ByteRange"
       required: false
-      description: A single RFC 9110 byte range; multipart ranges are deliberately unsupported
       name: Range
       in: header
+      description: A single RFC 9110 byte range; multipart ranges are deliberately unsupported
     IfMatch:
       schema:
         $ref: "#/components/schemas/IfMatch"
@@ -20197,12 +21492,7 @@ paths:
           name: kind
           in: query
         - schema:
-            type: string
-            enum:
-              - candidate
-              - poc
-              - adopted
-              - retired
+            $ref: "#/components/schemas/KnowledgeProfileStatus"
           required: false
           name: status
           in: query
@@ -20348,10 +21638,7 @@ paths:
           name: limit
           in: query
         - schema:
-            type: string
-            enum:
-              - embedding
-              - retrieval
+            $ref: "#/components/schemas/KnowledgeProfileKind"
           required: false
           name: kind
           in: query
@@ -20535,7 +21822,7 @@ paths:
             type: string
             minLength: 1
             maxLength: 512
-            pattern: ^[A-Za-z0-9_-]+$
+            pattern: ^[A-Za-z0-9_-]+$/u
           required: false
           name: after
           in: query
@@ -21482,6 +22769,44 @@ paths:
           description: Public release manifest digest matches If-None-Match
         "404":
           $ref: "#/components/responses/Problem"
+  /artifacts/{artifactId}/versions/{artifactVersionId}/preview-token:
+    post:
+      operationId: createSourcePrototypePreviewToken
+      summary: Short-lived isolated preview for an authorized frozen source prototype
+      parameters:
+        - $ref: "#/components/parameters/ArtifactId"
+        - $ref: "#/components/parameters/ArtifactVersionId"
+      responses:
+        "200":
+          description: Short-lived isolated preview for an authorized frozen source prototype
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ExportPreviewTokenResponse"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+  /public/shares/{shareToken}/artifacts/{artifactId}/versions/{artifactVersionId}/preview-token:
+    post:
+      operationId: createPublicSourcePrototypePreviewToken
+      summary: Short-lived share-bound isolated preview, rechecked for revocation on every access
+      security: []
+      parameters:
+        - $ref: "#/components/parameters/ShareToken"
+        - $ref: "#/components/parameters/ArtifactId"
+        - $ref: "#/components/parameters/ArtifactVersionId"
+      responses:
+        "200":
+          description: Short-lived share-bound isolated preview, rechecked for revocation on every access
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ExportPreviewTokenResponse"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
   /public/shares/{shareToken}/artifacts/{artifactId}/versions/{artifactVersionId}:
     get:
       operationId: getPublicSharedArtifactVersion
@@ -22178,15 +23503,7 @@ paths:
           name: limit
           in: query
         - schema:
-            type: string
-            enum:
-              - prd
-              - prototype
-              - image
-              - code
-              - document
-              - data
-              - design_system
+            $ref: "#/components/schemas/ArtifactKind"
           required: false
           name: kind
           in: query

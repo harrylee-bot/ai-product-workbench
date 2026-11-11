@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Render a validated PRD v2 into the retained requirement-document template.
+"""Render a validated PRD v2/v3 into the retained requirement-document template.
 
 The TypeScript entry point validates the complete source contract. This renderer
 preserves the template's page/style/header/footer definitions, replaces its sample
@@ -11,6 +11,7 @@ import argparse
 from collections import defaultdict, deque
 from copy import deepcopy
 import json
+from io import BytesIO
 from hashlib import sha256
 import math
 import os
@@ -57,6 +58,7 @@ def choose_font():
 
 def set_font(run, family, size=None):
     run.font.name = family
+    run.font.color.rgb = RGBColor(0, 0, 0)
     if size is not None:
         run.font.size = Pt(size)
     fonts = run._element.get_or_add_rPr().get_or_add_rFonts()
@@ -118,7 +120,7 @@ def append_link(p, text, family, href=None, anchor=None):
         fonts.set(qn(f"w:{key}"), family)
     props.append(fonts)
     color = OxmlElement("w:color")
-    color.set(qn("w:val"), "174A7E")
+    color.set(qn("w:val"), "000000")
     props.append(color)
     run.append(props)
     node = OxmlElement("w:t")
@@ -152,6 +154,7 @@ def export_link_target(href):
 class Renderer:
     def __init__(self, source, template, output):
         self.source = source
+        self.template = template
         self.output = output
         self.doc = Document(template)
         self.font_path, self.font = choose_font()
@@ -213,7 +216,7 @@ class Renderer:
                 if "code" in marks:
                     run.font.name = "DejaVu Sans Mono"
                     shade = OxmlElement("w:shd")
-                    shade.set(qn("w:fill"), "F2F2F2")
+                    shade.set(qn("w:fill"), "FFFFFF")
                     run._element.get_or_add_rPr().append(shade)
             elif kind == "citation":
                 label = item.get("label")
@@ -272,6 +275,12 @@ class Renderer:
         for col, size in zip(table.columns, sizes):
             col.width = Twips(size)
         props = table._tbl.tblPr
+        # The retained channel sample is a floating table. Reusing its page
+        # anchor can detach a new table from its caption or surrounding text.
+        # Generated tables must participate in the normal document flow.
+        for child in list(props):
+            if child.tag in (qn("w:tblpPr"), qn("w:tblOverlap")):
+                props.remove(child)
         old_borders = props.find(qn("w:tblBorders"))
         if old_borders is not None:
             props.remove(old_borders)
@@ -280,7 +289,7 @@ class Renderer:
             border = OxmlElement(f"w:{side}")
             border.set(qn("w:val"), "single")
             border.set(qn("w:sz"), "4")
-            border.set(qn("w:color"), "AAB6C2")
+            border.set(qn("w:color"), "000000")
             borders.append(border)
         props.append(borders)
         tbl_width = props.find(qn("w:tblW"))
@@ -309,7 +318,7 @@ class Renderer:
                             run.bold = True
                 if index == 0:
                     shade = OxmlElement("w:shd")
-                    shade.set(qn("w:fill"), "E9EEF3")
+                    shade.set(qn("w:fill"), "FFFFFF")
                     cell._tc.get_or_add_tcPr().append(shade)
         self.p()
         return table
@@ -328,6 +337,8 @@ class Renderer:
 
     def table(self, headers, rows, widths=None):
         # Use the template channel-table properties for all additional tables.
+        if widths is None and headers == ["序号", "验收项", "验收标准"]:
+            widths = [0.45, 1.3, 4.35]
         table = self.doc.add_table(rows=1, cols=len(headers))
         inherited = deepcopy(self.table_templates[1].tblPr)
         table._tbl.remove(table._tbl.tblPr)
@@ -496,7 +507,7 @@ class Renderer:
         if current:
             panels.append(current)
 
-        def arrow(draw, points, color="#456078"):
+        def arrow(draw, points, color="#000000"):
             draw.line(points, fill=color, width=4, joint="curve")
             a, b = points[-2], points[-1]
             angle = math.atan2(b[1] - a[1], b[0] - a[0])
@@ -551,14 +562,14 @@ class Renderer:
                 lx, ly = midpoint[0] + 9, midpoint[1] - 29
                 lx = min(max(4, lx), 1490 - (box[2] - box[0]))
                 draw.rectangle((lx - 3, ly, lx + box[2] - box[0] + 5, ly + 32), fill="white")
-                draw.text((lx, ly), label, font=small, fill="#32485C")
+                draw.text((lx, ly), label, font=small, fill="#000000")
             for node_id, (x1, y1, x2, y2) in positions.items():
-                draw.rounded_rectangle((x1, y1, x2, y2), radius=14, fill="#F2F6F9", outline="#40647F", width=3)
+                draw.rounded_rectangle((x1, y1, x2, y2), radius=14, fill="#FFFFFF", outline="#000000", width=3)
                 lines = contents[node_id]
                 ty = y1 + (y2 - y1 - len(lines) * line_height) / 2
                 for line in lines:
                     length = draw.textlength(line, font=font)
-                    draw.text(((x1 + x2 - length) / 2, ty), line, font=font, fill="#183549")
+                    draw.text(((x1 + x2 - length) / 2, ty), line, font=font, fill="#000000")
                     ty += line_height
             image_key = sha256(diagram["id"].encode("utf-8")).hexdigest()[:20]
             path = self.output.parent / f"diagram-{image_key}-{panel_index + 1}.png"
@@ -615,15 +626,17 @@ class Renderer:
                                 for row in channels["rows"]], [0.6, 3, 1.5])
         self.heading(biz["title"], 1, anchor_for(biz["title"]))
         self.inlines(self.p(), biz["summary"])
-        for key in ("pageLinks", "coreRules", "flowAndPages", "acceptanceCriteria"):
-            self.section(biz[key], anchor_for(biz[key]["title"]))
-            if key == "flowAndPages":
-                for diagram in biz[key]["diagrams"]:
-                    self.p(diagram["title"], bold=True, size=12, keep=True)
-                    self.p(diagram["description"], keep=True)
-                    self.draw_diagram(diagram)
-        for section in biz["additionalSections"]:
+        if s["protocol"] == "workbench.prd.v3":
+            business_sections = [biz["pageLinks"], *biz["functionSections"]]
+        else:
+            business_sections = [biz[key] for key in ("pageLinks", "coreRules", "flowAndPages", "acceptanceCriteria")]
+            business_sections.extend(biz["additionalSections"])
+        for section in business_sections:
             self.section(section, anchor_for(section["title"]))
+            for diagram in section.get("diagrams", []):
+                self.p(diagram["title"], bold=True, size=12, keep=True)
+                self.p(diagram["description"], keep=True)
+                self.draw_diagram(diagram)
         degradation = s["sections"]["degradation"]
         self.heading(degradation["title"], 1, anchor_for(degradation["title"]))
         self.inlines(self.p(), degradation["content"])
@@ -674,8 +687,56 @@ class Renderer:
         for rel_id, relation in list(self.doc.part.rels.items()):
             if relation.reltype.endswith("/image") and rel_id not in used_images:
                 self.doc.part.drop_rel(rel_id)
+        self.normalize_black_white()
         self.doc.save(self.output)
+        self.preserve_opaque_parts()
         self.verify_coverage()
+
+    def preserve_opaque_parts(self):
+        # python-docx may only change an untouched XML declaration. Retain exact
+        # template bytes for opaque parts rather than rewriting their package.
+        from lxml import etree
+        editable = {"[Content_Types].xml", "word/document.xml", "word/_rels/document.xml.rels",
+                    "word/styles.xml", "word/numbering.xml", "word/settings.xml", "docProps/core.xml"}
+        with zipfile.ZipFile(self.template) as original, zipfile.ZipFile(self.output) as generated:
+            entries = [(item, generated.read(item.filename)) for item in generated.infolist()]
+            restored = []
+            for item, data in entries:
+                name = item.filename
+                if name not in editable and name in original.namelist():
+                    source = original.read(name)
+                    if source != data:
+                        if not name.endswith((".xml", ".rels")) or etree.tostring(etree.fromstring(source), method="c14n") != etree.tostring(etree.fromstring(data), method="c14n"):
+                            raise RuntimeError(f"Unexpected change to preserved template part: {name}")
+                        data = source
+                restored.append((item, data))
+        output = BytesIO()
+        with zipfile.ZipFile(output, "w") as archive:
+            for item, data in restored:
+                archive.writestr(item, data)
+        self.output.write_bytes(output.getvalue())
+
+    def normalize_black_white(self):
+        # Normalize inherited template/theme/table styles as well as direct runs.
+        # Embedded reference images retain their original pixels.
+        for part in self.doc.part.package.parts:
+            root = getattr(part, "_element", None)
+            if root is None:
+                continue
+            for element in root.iter():
+                if element.tag == qn("w:color"):
+                    element.attrib.clear()
+                    element.set(qn("w:val"), "000000")
+                elif element.tag == qn("w:shd"):
+                    element.attrib.clear()
+                    element.set(qn("w:val"), "clear")
+                    element.set(qn("w:fill"), "FFFFFF")
+                elif element.tag == qn("w:highlight"):
+                    element.getparent().remove(element)
+                elif element.get(qn("w:color")) is not None:
+                    element.set(qn("w:color"), "000000")
+                    for key in ("themeColor", "themeTint", "themeShade"):
+                        element.attrib.pop(qn(f"w:{key}"), None)
 
     def verify_coverage(self):
         # Independent recursive coverage walk; adding a block type without a

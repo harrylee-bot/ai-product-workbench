@@ -101,16 +101,27 @@ const CANVAS_GRANT_TOKEN = /wbct1\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]{43}/u;
 const TERMINAL_EXTERNAL_RUN_STATUSES = new Set<Run["status"]>(["error", "success", "timeout", "interrupted"]);
 const STREAM_MODES = new Set<StreamMode>([
   "values",
-  "messages",
   "updates",
-  "events",
   "debug",
   "tasks",
   "checkpoints",
   "custom",
   "messages-tuple",
-  "tools",
 ]);
+
+class DeerFlowRunHttpError extends Error {
+  readonly requestRejected: boolean;
+
+  constructor(readonly status: number) {
+    // Authentication/authorization and Pydantic validation run before admission.
+    // In particular, 409 can describe an already accepted idempotent run; 408,
+    // 429 and server failures do not prove that submission was rejected.
+    const rejected = status === 401 || status === 403 || status === 422;
+    super(rejected ? "DEERFLOW_RUN_REQUEST_REJECTED" : "DEERFLOW_RUN_REQUEST_FAILED");
+    this.name = "DeerFlowRunHttpError";
+    this.requestRejected = rejected;
+  }
+}
 
 type DeerFlowContentHandle = {
   virtualPath: string;
@@ -929,6 +940,10 @@ export class DeerFlowRuntimeAdapter implements RuntimePort {
             // durable cursor.
             break;
           }
+          // DeerFlow 2.1 explicitly reports a retained-history gap without an
+          // SSE id. Do not persist the SDK's inherited cursor or claim that
+          // the missing events were replayed successfully.
+          if (part.event === "gap") throw new Error("DEERFLOW_STREAM_REPLAY_GAP");
           partEffects = [];
           const metadataRunId = externalRunIdFromEvent(part.event, part.data);
           if (metadataRunId) registerExternalRun(metadataRunId);
@@ -1021,7 +1036,10 @@ export class DeerFlowRuntimeAdapter implements RuntimePort {
 
         if (signal.aborted) throw abortError(signal);
         if (terminalProviderStatus) break;
-        if (!externalRunId) throw new Error("RUNTIME_EXTERNAL_RUN_ID_MISSING");
+        if (!externalRunId) {
+          if (streamReadFailed) throw streamReadFailure;
+          throw new Error("RUNTIME_EXTERNAL_RUN_ID_MISSING");
+        }
         if (resultToolCallId || inputRequired) break;
 
         // A few DeerFlow deployments close an otherwise healthy SSE response
@@ -1065,6 +1083,7 @@ export class DeerFlowRuntimeAdapter implements RuntimePort {
         }
       }
       if (submissionMayHaveBeenAccepted && !externalRunId) {
+        if (error instanceof DeerFlowRunHttpError && error.requestRejected) throw error;
         let accepted = null;
         try {
           accepted = await this.findExternalRun(
@@ -1435,7 +1454,9 @@ export class DeerFlowRuntimeAdapter implements RuntimePort {
       },
       ...(execution.resume ? { command: { resume: runtimeResumeValue(execution.resume) } } : {}),
       streamMode: this.streamMode(execution.request.requestedArtifactKinds),
-      streamResumable: true,
+      // 2.1 rejects the LangGraph Platform resumable option. Its own retained
+      // stream still supports GET join + Last-Event-ID, independently of this.
+      streamResumable: false,
       multitaskStrategy: "reject" as const,
       metadata: {
         workbench_runtime_attempt_id: execution.runtimeAttemptId,
@@ -1483,10 +1504,13 @@ export class DeerFlowRuntimeAdapter implements RuntimePort {
   }
 
   private streamMode(requestedArtifactKinds: readonly string[]): StreamMode | StreamMode[] {
-    const modes = this.config.deerFlowStreamMode.map((mode) => {
+    const modes = [...new Set(this.config.deerFlowStreamMode.map((configuredMode) => {
+      // Preserve existing deployments' configuration while sending the public
+      // DeerFlow 2.1 mode name. Returned SSE token events are still "messages".
+      const mode = configuredMode === "messages" ? "messages-tuple" : configuredMode;
       if (!STREAM_MODES.has(mode as StreamMode)) throw new Error(`DEERFLOW_STREAM_MODE_INVALID:${mode}`);
       return mode as StreamMode;
-    });
+    }))];
     if (modes.length === 0) throw new Error("DEERFLOW_STREAM_MODE_MISSING");
     // Values remain the authority for stages, drafts and results. Messages are
     // drained in memory to build sampled, inert previews before the first draft.
@@ -1739,9 +1763,22 @@ export class DeerFlowRuntimeAdapter implements RuntimePort {
       timeoutMs: this.config.deerFlowTimeoutMs,
       callerOptions: {
         maxRetries: 0,
-        fetch: async (input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => (
-          withLangGraphStreamReconnectLocation(await tracedFetch(input, init))
-        ),
+        fetch: async (input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
+          const response = await tracedFetch(input, init);
+          const requestUrl = new URL(input instanceof Request ? input.url : String(input));
+          if (init?.method === "POST" && requestUrl.pathname.endsWith("/runs/stream") && !response.ok) {
+            // SDK HTTPError includes the full response body. A validation body
+            // may echo private inputs or context, so keep only its safe status.
+            await response.body?.cancel().catch(() => undefined);
+            throw new DeerFlowRunHttpError(response.status);
+          }
+          try {
+            return withLangGraphStreamReconnectLocation(response, requestUrl, this.config.deerFlowLangGraphUrl);
+          } catch (error) {
+            await response.body?.cancel().catch(() => undefined);
+            throw error;
+          }
+        },
       },
       defaultHeaders: {
         ...this.jsonHeaders(runtimeTransportOwnerId),
@@ -1796,20 +1833,32 @@ export class DeerFlowRuntimeAdapter implements RuntimePort {
   }
 }
 
-function withLangGraphStreamReconnectLocation(response: Response): Response {
-  if (
-    response.headers.has("location")
-    || !response.headers.get("content-type")?.toLowerCase().startsWith("text/event-stream")
-  ) return response;
-
+function withLangGraphStreamReconnectLocation(response: Response, requestUrl: URL, apiUrl: string): Response {
+  if (!response.headers.get("content-type")?.toLowerCase().startsWith("text/event-stream")) return response;
+  const apiPath = new URL(apiUrl).pathname.replace(/\/$/u, "");
+  const requestPath = requestUrl.pathname.slice(apiPath.length);
+  const requestMatch = /^\/threads\/([A-Za-z0-9_-]+)\/runs(?:\/([A-Za-z0-9_-]+))?\/stream$/u.exec(requestPath);
+  if (!requestMatch) throw new Error("DEERFLOW_STREAM_REQUEST_PATH_INVALID");
+  const normalize = (value: string, isStream: boolean) => {
+    // SDK concatenates its API URL and Location. Strip exactly that API prefix
+    // rather than generating /api/api; never accept another origin or thread.
+    const path = apiPath && value.startsWith(`${apiPath}/`) ? value.slice(apiPath.length) : value;
+    const match = /^\/threads\/([A-Za-z0-9_-]+)\/runs\/([A-Za-z0-9_-]+)(\/stream)?\/?$/u.exec(path);
+    if (!match || match[1] !== requestMatch[1] || Boolean(match[3]) !== isStream
+      || (requestMatch[2] && match[2] !== requestMatch[2])) {
+      throw new Error("DEERFLOW_STREAM_LOCATION_INVALID");
+    }
+    return `/threads/${match[1]}/runs/${match[2]}${isStream ? "/stream" : ""}`;
+  };
   const contentLocation = response.headers.get("content-location");
-  if (
-    !contentLocation
-    || !/^\/(?:threads\/[^/?#]+\/)?runs\/[^/?#]+\/?$/u.test(contentLocation)
-  ) return response;
-
+  const location = response.headers.get("location");
+  if (!contentLocation && !location) return response;
+  const resourcePath = contentLocation ? normalize(contentLocation, false) : null;
+  const streamPath = location ? normalize(location, true) : `${resourcePath}/stream`;
+  if (resourcePath && streamPath !== `${resourcePath}/stream`) throw new Error("DEERFLOW_STREAM_LOCATION_INVALID");
   const headers = new Headers(response.headers);
-  headers.set("location", `${contentLocation.replace(/\/$/u, "")}/stream`);
+  if (resourcePath) headers.set("content-location", resourcePath);
+  headers.set("location", streamPath);
   return new Response(response.body, {
     headers,
     status: response.status,
@@ -2916,19 +2965,6 @@ function messageValue(message: Record<string, unknown>, field: string) {
     if (container && container[field] !== undefined) return container[field];
   }
   return undefined;
-}
-
-function contentText(value: unknown): string {
-  if (typeof value === "string") return value.replace(/<think>[\s\S]*?<\/think>/gi, "");
-  if (!Array.isArray(value)) return "";
-  return value.flatMap((part) => {
-    if (typeof part === "string") return [part];
-    const record = asRecord(part);
-    const type = stringValue(record?.type)?.toLowerCase();
-    if (type === "thinking" || type === "reasoning") return [];
-    const text = stringValue(record?.text) ?? stringValue(record?.content);
-    return text ? [text] : [];
-  }).join("");
 }
 
 function requestActivityEvent(

@@ -16,7 +16,6 @@ import type { Response } from "express";
 import {
   canvasAgentToolInvocationSchema,
   canvasClientCommandAckRequestSchema,
-  canvasClientCommandAckSchema,
   canvasClientStateSyncRequestSchema,
   type CanvasAgentToolInvocation,
   type CanvasClientCommandAckRequest,

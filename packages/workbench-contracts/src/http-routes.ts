@@ -183,7 +183,7 @@ export type WorkbenchHttpRoute = Readonly<{
   operationId: string;
   public?: boolean;
   capability?: "knowledgeGrant" | "canvasGrant";
-  query?: z.AnyZodObject;
+  query?: z.ZodObject;
   requestHeaders?: readonly WorkbenchRequestHeader[];
   requestBody?: NamedWorkbenchSchema;
   response: WorkbenchRouteResponse;
@@ -549,6 +549,16 @@ export const workbenchHttpRoutes = [
     response: response(200, "Public projection of an active immutable release", named("PublicShare", publicShareSchema), ["etag"]),
     additionalResponses: [response(304, "Public release manifest digest matches If-None-Match")],
     problemStatuses: problems(404),
+  },
+  {
+    method: "post", path: "/artifacts/{artifactId}/versions/{artifactVersionId}/preview-token", operationId: "createSourcePrototypePreviewToken",
+    response: response(200, "Short-lived isolated preview for an authorized frozen source prototype", named("ExportPreviewTokenResponse", exportPreviewTokenResponseSchema)),
+    problemStatuses: problems(400, 404),
+  },
+  {
+    method: "post", path: "/public/shares/{shareToken}/artifacts/{artifactId}/versions/{artifactVersionId}/preview-token", operationId: "createPublicSourcePrototypePreviewToken", public: true,
+    response: response(200, "Short-lived share-bound isolated preview, rechecked for revocation on every access", named("ExportPreviewTokenResponse", exportPreviewTokenResponseSchema)),
+    problemStatuses: problems(400, 404),
   },
   {
     method: "get", path: "/public/shares/{shareToken}/artifacts/{artifactId}/versions/{artifactVersionId}", operationId: "getPublicSharedArtifactVersion", public: true,

@@ -9,9 +9,12 @@ import {
   type PrdDocument,
   type PrdDocumentV1,
   type PrdDocumentV2,
+  type PrdTemplateDocument,
+  prdBusinessSections,
   type PrdInline,
   type PrototypeAction,
   type PrototypeDocument,
+  type SourcePrototypeInput,
   type PublicPrototypeDocument,
   type PrototypeNode,
   type PrototypeState,
@@ -42,6 +45,7 @@ import {
   useWorkbenchPublicSharedArtifactVersion,
 } from "../../lib/workbench/features/public-shares";
 import { workbenchQueryKeys } from "../../lib/workbench/query/keys";
+import { WorkbenchSourcePrototype } from "./workbench-source-prototype";
 import { WorkbenchPrdArtifactEditor } from "./workbench-prd-editor";
 import { WorkbenchBusinessDocument } from "./workbench-business-document";
 import { WorkbenchPrdDiagramCanvas, type PrdDiagram } from "./workbench-prd-diagram-canvas";
@@ -120,7 +124,7 @@ export function WorkbenchArtifactContent({
   onArtifactVersionStateChange?: (state: "error" | "pending" | "ready") => void;
   onDocumentCommit?: (
     reference: WorkbenchArtifactReference,
-    document: PrototypeDocument,
+    document: PrototypeDocument | SourcePrototypeInput,
   ) => Promise<void>;
   onPrdDocumentCommit?: (
     reference: WorkbenchArtifactReference,
@@ -136,7 +140,6 @@ export function WorkbenchArtifactContent({
     reference.artifactVersionId,
     reference.screenId,
   );
-  const activePrototypeProjection = isPublic ? null : prototypeProjection;
   const privateQuery = useWorkbenchArtifactVersion(
     reference.projectId,
     reference.artifactId,
@@ -151,14 +154,17 @@ export function WorkbenchArtifactContent({
   );
   const query = isPublic ? publicQuery : privateQuery;
   const version = query.data?.value;
+  const activePrototypeProjection = isPublic || (version?.kind === "prototype" && version.schemaVersion === 2) ? null : prototypeProjection;
   const artifactVersionState = query.isPending
     ? "pending"
     : query.isError || !version
       ? "error"
       : "ready";
   const readyQueryOwnsProjection = activePrototypeProjection !== null
-    && version?.status === "ready"
+    && version !== undefined
+    && (version.status === "ready" || (version.status === undefined && Boolean(activePrototypeProjection.document)))
     && version.kind === "prototype"
+    && (version.schemaVersion === 1 || version.schemaVersion === undefined)
     && version.contentMode === "inline"
     && (
       activePrototypeProjection.phase !== "finalized"
@@ -259,11 +265,17 @@ export function WorkbenchArtifactContent({
       </ArtifactStatus>
     );
   }
+  if (version.kind === "prototype" && version.schemaVersion === 2 && version.contentMode === "inline") {
+    if (reference.screenId !== undefined) return <ArtifactStatus>请打开完整源码原型进行预览</ArtifactStatus>;
+    return <WorkbenchSourcePrototype document={version.content} editable={editable && !isPublic}
+      editingBusy={editingBusy} onCommit={onDocumentCommit} reference={reference} />;
+  }
   if (
     reference.screenId !== undefined
     && (
       version.contentMode !== "inline"
       || version.kind !== "prototype"
+      || (version.schemaVersion !== 1 && version.schemaVersion !== undefined)
       || !version.content.screens.some((screen) => screen.id === reference.screenId)
     )
   ) {
@@ -301,7 +313,7 @@ export function WorkbenchArtifactContent({
     }
     return isPublic ? <PrdArtifact document={version.content} /> : <PrdDraftArtifact document={version.content} reference={reference} />;
   }
-  if (version.kind === "prototype") {
+  if (version.kind === "prototype" && (version.schemaVersion === 1 || version.schemaVersion === undefined)) {
     return (
       <PrototypeArtifact
         document={version.content}
@@ -486,7 +498,7 @@ function PrdDraftArtifact({ document, reference }: { document: PrdDocument; refe
 }
 
 function PrdArtifact({ document }: { document: PrdDocument }) {
-  return document.protocol === "workbench.prd.v2"
+  return document.protocol !== "workbench.prd.v1"
     ? <PrdArtifactV2 document={document} />
     : <PrdArtifactV1 document={document} />;
 }
@@ -514,7 +526,7 @@ function PrdArtifactV1({ document }: { document: PrdDocumentV1 }) {
   );
 }
 
-function PrdArtifactV2({ document }: { document: PrdDocumentV2 }) {
+function PrdArtifactV2({ document }: { document: PrdTemplateDocument }) {
   const { businessRequirements, degradation, introduction, safetyBaseline } = document.sections;
   return (
     <article
@@ -587,18 +599,14 @@ function PrdArtifactV2({ document }: { document: PrdDocumentV2 }) {
         <section className="border-b border-white/[0.12] py-[46px]" aria-labelledby="prd-v2-business-requirements">
           <h2 className="text-[30px] font-semibold text-[#f1f3f4]" id="prd-v2-business-requirements">{businessRequirements.title}</h2>
           <p className="mt-[16px] max-w-[900px] text-[#d8dce2]">{renderPrdInlines(businessRequirements.summary)}</p>
-          <PrdV2BlockSection section={businessRequirements.pageLinks} />
-          <PrdV2BlockSection section={businessRequirements.coreRules} />
-          <PrdV2BlockSection section={businessRequirements.flowAndPages}>
-            <div className="mt-[26px] space-y-[34px]">
-              {businessRequirements.flowAndPages.diagrams.map((diagram) => (
-                <PrdDiagramView diagram={diagram} key={diagram.id} />
-              ))}
-            </div>
-          </PrdV2BlockSection>
-          <PrdV2BlockSection section={businessRequirements.acceptanceCriteria} />
-          {businessRequirements.additionalSections.map((section) => (
-            <PrdV2BlockSection section={section} key={section.title} />
+          {prdBusinessSections(document).map((section) => (
+            <PrdV2BlockSection section={section} key={section.title}>
+              {"diagrams" in section && (section.diagrams?.length ?? 0) > 0 && (
+                <div className="mt-[26px] space-y-[34px]">
+                  {section.diagrams?.map((diagram) => <PrdDiagramView diagram={diagram} key={diagram.id} />)}
+                </div>
+              )}
+            </PrdV2BlockSection>
           ))}
         </section>
 

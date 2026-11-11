@@ -4,7 +4,7 @@ import {
 } from "@workbench/workbench-knowledge";
 import { TeiQueryEmbeddingAdapter } from "../src/modules/knowledge/tei-query-embedding.adapter.js";
 import { TeiRerankerAdapter } from "../src/modules/knowledge/tei-reranker.adapter.js";
-import { KnowledgeProviderError } from "../src/modules/knowledge/tei-json.client.js";
+import { KnowledgeProviderError, TeiJsonClient } from "../src/modules/knowledge/tei-json.client.js";
 
 const profile = parseEmbeddingProfileV1(embeddingSpec());
 
@@ -84,6 +84,17 @@ describe("Knowledge TEI adapters", () => {
     expect(error).toMatchObject({ code: "KNOWLEDGE_PROVIDER_HTTP_503", retryable: true });
     expect(JSON.stringify(error)).not.toContain("provider-secret");
     expect(String(error)).not.toContain("raw failure");
+  });
+
+  it("does not call the provider when the request is already aborted", async () => {
+    const controller = new AbortController();
+    controller.abort(new Error("cancelled"));
+    const request = vi.fn();
+    const client = new TeiJsonClient(serviceConfig("https://embedding.test"), request);
+
+    await expect(client.requestJson("/info", { method: "GET" }, controller.signal))
+      .rejects.toMatchObject({ code: "KNOWLEDGE_PROVIDER_ABORTED", retryable: true });
+    expect(request).not.toHaveBeenCalled();
   });
 });
 

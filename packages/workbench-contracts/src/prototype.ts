@@ -432,7 +432,7 @@ export const prototypeExpressionSchema = z.preprocess((input, context) => {
   return input;
 // The guard never transforms accepted input. Preserve that input type for the
 // explicitly typed Artifact/Run envelope schemas that contain this expression.
-}, prototypeExpressionDepth8Schema) as z.ZodEffects<z.ZodType<PrototypeExpression>, PrototypeExpression, PrototypeExpression>;
+}, prototypeExpressionDepth8Schema) as z.ZodType<PrototypeExpression, PrototypeExpression>;
 
 /** Self-contained so the same bounded evaluator can be embedded in exports. */
 export function evaluatePrototypeExpression(
@@ -608,9 +608,10 @@ export function isSafePrototypeOpenUrl(value: string): boolean {
   return parsed.hash.length === 0;
 }
 
-export const prototypeOpenUrlSchema = z.string().url().max(2_048)
+export const prototypeOpenUrlSchema = z.string().max(2_048)
   .regex(prototypeOpenUrlPrefix, "only HTTP(S), mailto, and tel URLs are allowed")
-  .refine(isSafePrototypeOpenUrl, "URL is not safe for Prototype navigation");
+  .refine(isSafePrototypeOpenUrl, "URL is not safe for Prototype navigation")
+  .url();
 
 export const prototypeOpenUrlActionSchema = z.object({
   ...actionBaseShape,

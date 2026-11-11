@@ -16,7 +16,7 @@ const knowledgeProfileBaseShape = {
   specSha256: z.string().regex(/^[0-9a-f]{64}$/u),
   status: knowledgeProfileStatusSchema,
   scope: knowledgeProfileScopeSchema,
-  spec: z.record(jsonValueSchema),
+  spec: z.record(z.string(), jsonValueSchema),
   createdAt: isoDateTimeSchema,
   updatedAt: isoDateTimeSchema,
 };
@@ -43,8 +43,8 @@ export const knowledgeProfileSchema = z.discriminatedUnion("kind", [
 ]);
 
 export const createKnowledgeProfileRequestSchema = z.discriminatedUnion("kind", [
-  z.object({ kind: z.literal("embedding"), spec: z.record(jsonValueSchema) }).strict(),
-  z.object({ kind: z.literal("retrieval"), spec: z.record(jsonValueSchema) }).strict(),
+  z.object({ kind: z.literal("embedding"), spec: z.record(z.string(), jsonValueSchema) }).strict(),
+  z.object({ kind: z.literal("retrieval"), spec: z.record(z.string(), jsonValueSchema) }).strict(),
 ]);
 
 export const promoteKnowledgeProfileRequestSchema = z.discriminatedUnion("targetStatus", [

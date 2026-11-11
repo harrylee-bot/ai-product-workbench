@@ -1,8 +1,10 @@
 import { createHash } from "node:crypto";
+import { Readable } from "node:stream";
+import { canonicalJson, sourcePrototypeDocumentSchema } from "@workbench/workbench-contracts";
 import type { PrismaClient } from "@workbench/workbench-db";
-import { verifyPreviewToken } from "@workbench/workbench-preview-token";
+import { verifySourcePrototypePreviewToken, verifyPreviewToken } from "@workbench/workbench-preview-token";
 import type { PreviewConfig } from "./config.js";
-import { previewContentSecurityPolicyFromHashes } from "./csp.js";
+import { previewContentSecurityPolicy, previewContentSecurityPolicyFromHashes } from "./csp.js";
 import { createWorkbenchPreviewBridgeInjection } from "./preview-bridge.js";
 import type { PreviewStorage } from "./storage.js";
 
@@ -14,6 +16,7 @@ export class PreviewService {
   ) {}
 
   async resolve(token: string) {
+    if (token.startsWith("wbsp1.")) return this.resolveSourcePrototype(token);
     const payload = verifyPreviewToken(token, this.config.tokenSecret, {
       maximumTtlSeconds: this.config.tokenMaximumTtlSeconds,
     });
@@ -91,10 +94,64 @@ export class PreviewService {
     };
   }
 
+  private async resolveSourcePrototype(token: string) {
+    const payload = verifySourcePrototypePreviewToken(token, this.config.tokenSecret, {
+      maximumTtlSeconds: this.config.tokenMaximumTtlSeconds,
+    });
+    const now = new Date();
+    const version = await this.db.artifactVersion.findFirst({
+      where: {
+        id: payload.artifactVersionId, artifactId: payload.artifactId, checksum: payload.checksum,
+        status: "ready", schemaVersion: 2, contentBlobId: null,
+        artifact: { kind: "prototype", project: { status: "active" } },
+      },
+      select: { projectId: true, content: true, checksum: true },
+    });
+    if (!version) throw new Error("PREVIEW_NOT_FOUND");
+    const authorization = payload.principalId
+      ? await this.db.projectMember.findFirst({
+          where: { projectId: version.projectId, principalId: payload.principalId, principal: { status: "active" } },
+          select: { projectId: true },
+        })
+      : await this.db.shareGrant.findFirst({
+          where: {
+            id: payload.shareId, revision: payload.shareRevision, projectId: version.projectId,
+            artifactVersionId: payload.artifactVersionId, scope: "view", status: "active",
+            OR: [{ expiresAt: null }, { expiresAt: { gt: now } }],
+            release: { status: "ready", project: { status: "active" }, artifactPins: {
+              some: { artifactId: payload.artifactId, artifactVersionId: payload.artifactVersionId },
+            } },
+          },
+          select: { id: true },
+        });
+    if (!authorization) throw new Error("PREVIEW_NOT_FOUND");
+    const parsed = sourcePrototypeDocumentSchema.safeParse(version.content);
+    if (!parsed.success || digest(canonicalJson(parsed.data)) !== payload.checksum) throw new Error("PREVIEW_NOT_FOUND");
+    const html = parsed.data.build.html;
+    if (Buffer.byteLength(html) > this.config.maximumHtmlBytes || digest(html) !== parsed.data.build.htmlSha256) {
+      throw new Error("PREVIEW_NOT_FOUND");
+    }
+    return { capabilityToken: token, sourceHtml: html, etag: previewRepresentationEtag(parsed.data.build.htmlSha256, this.config.webOrigin, token) };
+  }
+
   async render(
     resolved: Awaited<ReturnType<PreviewService["resolve"]>>,
     signal?: AbortSignal,
   ) {
+    if ("sourceHtml" in resolved) {
+      signal?.throwIfAborted();
+      const bridge = createWorkbenchPreviewBridgeInjection(this.config.webOrigin, resolved.capabilityToken);
+      const closing = resolved.sourceHtml.toLowerCase().lastIndexOf("</body>");
+      const html = closing >= 0
+        ? resolved.sourceHtml.slice(0, closing) + bridge.markup + resolved.sourceHtml.slice(closing)
+        : resolved.sourceHtml + bridge.markup;
+      const bytes = Buffer.from(html, "utf8");
+      return {
+        body: Readable.from([bytes]), byteSize: bytes.byteLength, etag: resolved.etag,
+        contentSecurityPolicy: previewContentSecurityPolicy(html, this.config.webOrigin),
+        dispose: async () => undefined,
+      };
+    }
     const staged = await this.storage.stageHtml(
       resolved.identity,
       this.config.maximumHtmlBytes,
@@ -138,3 +195,5 @@ function previewRepresentationEtag(blobSha256: string, webOrigin: string, capabi
     .digest("hex");
   return `"${digest}"`;
 }
+
+function digest(value: string) { return createHash("sha256").update(value, "utf8").digest("hex"); }

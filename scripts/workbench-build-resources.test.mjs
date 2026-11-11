@@ -7,9 +7,9 @@ import test from "node:test";
 
 const script = resolve("deploy/workbench-build-resources.sh");
 const policy = resolve("deploy/workbench-buildkitd.toml");
-const builderName = "workbench-validation-bounded";
+const builderName = "workbench-direct-bounded";
 
-test("new validation builder enforces a single bounded build, loads images, and stops without deleting its cache", () => {
+test("new direct builder enforces a single bounded build, loads images, and stops without deleting its cache", () => {
   const result = runBuild({ services: ["workbench-web", "knowledge"] });
   assert.equal(result.status, 0, result.stderr);
   const create = find(result, "buildx", "create");
@@ -54,14 +54,14 @@ test("bounded custom budgets and builder names are applied together", () => {
     WORKBENCH_BUILD_MEMORY_MIB: "3072",
     WORKBENCH_BUILD_RESERVE_MIB: "1024",
     WORKBENCH_BUILD_CPUS: "1",
-    WORKBENCH_BUILD_BUILDER: "workbench-validation-small",
+    WORKBENCH_BUILD_BUILDER: "workbench-direct-small",
   } });
   assert.equal(result.status, 0, result.stderr);
   const create = find(result, "buildx", "create");
   assert.ok(create.args.includes("memory=3221225472"));
   assert.ok(create.args.includes("memory-swap=3221225472"));
   assert.ok(create.args.includes("cpu-quota=100000"));
-  assert.ok(builds(result)[0].args.includes("workbench-validation-small"));
+  assert.ok(builds(result)[0].args.includes("workbench-direct-small"));
 });
 
 test("invalid budgets or an unowned builder namespace fail before Docker is called", () => {
@@ -98,6 +98,14 @@ test("the Linux guard and resource policy cannot be omitted", () => {
     assert.notEqual(result.status, 0, JSON.stringify(options));
     assert.equal(builds(result).length, 0);
   }
+});
+
+test("low disk space prevents any Docker action", () => {
+  const result = runBuild({ diskFailure: true });
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /disk reserves/);
+  assert.deepEqual(result.commands, []);
+  assert.deepEqual(result.remainingTempFiles, []);
 });
 
 test("remote Docker contexts and mismatched daemon hostnames are refused", () => {
@@ -182,11 +190,11 @@ test("inventory and creation errors fail closed", () => {
 });
 
 test("a fixed host-wide flock serializes different builder names before any Docker operation", () => {
-  const result = runBuild({ lockBusy: true, env: { WORKBENCH_BUILD_BUILDER: "workbench-validation-other" } });
+  const result = runBuild({ lockBusy: true, env: { WORKBENCH_BUILD_BUILDER: "workbench-direct-other" } });
   assert.equal(result.status, 75);
   assert.match(result.stderr, /host-wide lock/u);
   assert.deepEqual(result.commands, []);
-  assert.deepEqual(result.lockCommands[0].slice(0, 4), ["--nonblock", "--conflict-exit-code", "75", "/run/lock/workbench-validation-build.lock"]);
+  assert.deepEqual(result.lockCommands[0].slice(0, 4), ["--nonblock", "--conflict-exit-code", "75", "/run/lock/workbench-direct-build.lock"]);
 });
 
 test("flock execution failure cannot fall back to an unbounded build", () => {
@@ -215,6 +223,9 @@ function runBuild(options = {}) {
   writeFileSync(log, "");
   writeFileSync(join(fixture, "lock.jsonl"), "");
   copyFileSync(script, join(deploy, "build.sh"));
+  // Disk-space behavior is tested against the real helper separately. Here the
+  // host fixture controls whether that mandatory gate accepts this build.
+  writeFileSync(join(deploy, "workbench-disk-preflight.mjs"), `process.exit(${options.diskFailure ? 65 : 0});\n`);
   if (!options.missingPolicy) copyFileSync(policy, join(deploy, "workbench-buildkitd.toml"));
   if (options.malformedPolicy) appendFileSync(join(deploy, "workbench-buildkitd.toml"), "[worker.containerd]\nmax-parallelism = 8\n");
   const config = {
@@ -239,7 +250,7 @@ function runBuild(options = {}) {
       'source "$1"',
       options.noCompose ? "unset COMPOSE" : 'COMPOSE=(docker compose --env-file /private/env -f /candidate/compose.yml)',
       'shift',
-      'validation_build_images "$@"',
+      'direct_build_images "$@"',
     ].join("\n"), "test", join(deploy, "build.sh"), ...(options.services ?? [])], {
       encoding: "utf8",
       env: {
@@ -273,7 +284,7 @@ const options = JSON.parse(fs.readFileSync(path.join(root, "options.json"), "utf
 const args = process.argv.slice(2);
 fs.appendFileSync(path.join(root, "commands.jsonl"), JSON.stringify({ args, bake: process.env.COMPOSE_BAKE, buildkit: process.env.DOCKER_BUILDKIT }) + "\n");
 const is = (...prefix) => prefix.every((value, index) => args[index] === value);
-const name = process.env.WORKBENCH_BUILD_BUILDER || "workbench-validation-bounded";
+const name = process.env.WORKBENCH_BUILD_BUILDER || "workbench-direct-bounded";
 const memory = Number(process.env.WORKBENCH_BUILD_MEMORY_MIB || 6144) * 1024 * 1024;
 const quota = Number(process.env.WORKBENCH_BUILD_CPUS || 2) * 100000;
 const stateFile = path.join(root, "created");
@@ -348,7 +359,7 @@ const root = process.env.MOCK_FIXTURE;
 const options = JSON.parse(fs.readFileSync(path.join(root, "options.json"), "utf8"));
 const args = process.argv.slice(2);
 fs.appendFileSync(path.join(root, "lock.jsonl"), JSON.stringify(args) + "\n");
-if (JSON.stringify(args.slice(0, 4)) !== JSON.stringify(["--nonblock", "--conflict-exit-code", "75", "/run/lock/workbench-validation-build.lock"])) process.exit(98);
+if (JSON.stringify(args.slice(0, 4)) !== JSON.stringify(["--nonblock", "--conflict-exit-code", "75", "/run/lock/workbench-direct-build.lock"])) process.exit(98);
 if (options.lockBusy) process.exit(75);
 if (options.lockFailure) process.exit(69);
 const result = spawnSync(args[4], args.slice(5), { stdio: "inherit", env: process.env });

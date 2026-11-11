@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import { createHash, randomUUID } from "node:crypto";
+import { loadStablePersistedSurfaces, assertMalformedScopeRefusal, cleanupOwnedRuns } from "./workbench-deerflow-secret-channel-validation.mjs";
 import { createRequire } from "node:module";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -18,7 +19,11 @@ const langGraphUrl = trimTrailingSlash(required("DEERFLOW_LANGGRAPH_URL"));
 const internalToken = required("DEERFLOW_INTERNAL_AUTH_TOKEN");
 const modelId = process.env.DEERFLOW_SMOKE_MODEL_ID?.trim() || "gemini-3.6-flash";
 const mockOrigin = trimTrailingSlash(required("WORKBENCH_SECRET_CHANNEL_MOCK_ORIGIN"));
-const publicOrigin = new URL(mockOrigin).origin;
+const mockUrl = new URL(mockOrigin);
+if (mockUrl.protocol !== "https:" || mockUrl.username || mockUrl.password || mockUrl.search || mockUrl.hash) {
+  throw new Error("SECRET_CHANNEL_MOCK_HTTPS_REQUIRED");
+}
+const publicOrigin = mockUrl.origin;
 const evidenceUrl = required("WORKBENCH_SECRET_CHANNEL_EVIDENCE_URL");
 const evidenceSecret = required("WORKBENCH_SECRET_CHANNEL_EVIDENCE_SECRET");
 const knowledgeToken = capabilityToken("WORKBENCH_SECRET_CHANNEL_KNOWLEDGE_TOKEN", "wbkg1");
@@ -46,7 +51,7 @@ const config = {
   deerFlowGatewayUrl: gatewayUrl,
   deerFlowAssistantId: "lead_agent",
   deerFlowInternalToken: internalToken,
-  deerFlowStreamMode: ["messages", "values"],
+  deerFlowStreamMode: ["messages-tuple", "values"],
   deerFlowTimeoutMs: numberFromEnv("DEERFLOW_TIMEOUT_MS", 300_000),
   deerFlowSubmissionTimeoutMs: numberFromEnv("DEERFLOW_SUBMISSION_TIMEOUT_MS", 120_000),
   deerFlowIdleTimeoutMs: numberFromEnv("DEERFLOW_IDLE_TIMEOUT_MS", 120_000),
@@ -87,30 +92,42 @@ const canvasTool = {
   },
 };
 
-const positive = await executePositive();
-const evidenceAfterPositive = await readEvidence();
-assertPositiveEvidence(evidenceAfterPositive);
-const persisted = await loadPersistedSurfaces(positive.externalThreadId, positive.externalRunId);
-const scannedNodes = assertNoCapabilityLeak(persisted);
-const malformedScope = await executeMalformedScopeProbe(evidenceAfterPositive);
-const ordinaryCallerStatus = await executeOrdinaryCallerProbe(
-  positive.externalThreadId,
-  evidenceAfterPositive,
-);
+const ownedRuns = [];
+let historyEvidence = null;
+let cleanupEvidence = null;
+try {
+  const report = await runSmoke();
+  process.stdout.write(`${JSON.stringify({ ...report, cleanupEvidence }, null, 2)}\n`);
+} catch (error) {
+  const code = error instanceof Error ? /^(?:SECRET_CHANNEL|RUNTIME|DEERFLOW)_[A-Z_]+/u.exec(error.message)?.[0] : null;
+  process.stderr.write(`${JSON.stringify({ ok: false, errorCode: code ?? "SECRET_CHANNEL_EXECUTION_FAILED", errorType: error instanceof Error ? error.name : "UnknownError", cleanupEvidence })}\n`);
+  process.exitCode = 1;
+}
 
-process.stdout.write(`${JSON.stringify({
-  ok: true,
-  modelId,
-  externalThreadId: positive.externalThreadId,
-  externalRunId: positive.externalRunId,
-  artifactKind: positive.result.artifacts[0]?.kind,
-  operation: positive.result.artifacts[0]?.operation.kind,
-  knowledgeCalls: evidenceAfterPositive.knowledgeCalls.length,
-  canvasCalls: evidenceAfterPositive.canvasCalls.length,
-  persistedNodesScanned: scannedNodes,
-  malformedScope,
-  ordinaryCallerStatus,
-}, null, 2)}\n`);
+async function runSmoke() {
+  try {
+    const positive = await executePositive();
+    const evidenceAfterPositive = await readEvidence();
+    assertPositiveEvidence(evidenceAfterPositive);
+    const persisted = await loadPersistedSurfaces(positive.externalThreadId, positive.externalRunId);
+    const scannedNodes = assertNoCapabilityLeak(persisted);
+    const malformedScope = await executeMalformedScopeProbe(evidenceAfterPositive);
+    const ordinaryCallerStatus = await executeOrdinaryCallerProbe(positive.externalThreadId, evidenceAfterPositive);
+    return { ok: true, modelId, externalThreadId: positive.externalThreadId, externalRunId: positive.externalRunId,
+      artifactKind: positive.result.artifacts[0]?.kind, operation: positive.result.artifacts[0]?.operation.kind,
+      knowledgeCalls: evidenceAfterPositive.knowledgeCalls.length, canvasCalls: evidenceAfterPositive.canvasCalls.length,
+      persistedNodesScanned: scannedNodes, historyEvidence, malformedScope, ordinaryCallerStatus };
+  } finally {
+    cleanupEvidence = await cleanupOwnedRuns(internalClient(), ownedRuns);
+  }
+}
+
+function registerOwnedRun(externalThreadId, externalRunId) {
+  if (ownedRuns.some((item) => item.externalThreadId === externalThreadId && item.externalRunId === externalRunId)) return;
+  ownedRuns.push({ externalThreadId, externalRunId });
+  // Safe synthetic identity lets an outer harness clean up after a hard kill.
+  process.stderr.write(`${JSON.stringify({ diagnostic: "run-identity", externalThreadId, externalRunId, principalId })}\n`);
+}
 
 async function executePositive() {
   const projectId = `secret-channel-project-${suffix}`;
@@ -130,7 +147,7 @@ async function executePositive() {
     attempt: 1,
     projectId,
     threadId,
-    principalId,
+    runtimeTransportOwnerId: principalId,
     externalThreadId: binding.externalThreadId,
     request: {
       prompt: [
@@ -164,6 +181,7 @@ async function executePositive() {
     onSubmissionStarted: async () => undefined,
     onExternalRunCreated: async (id) => {
       externalRunId = id;
+      registerOwnedRun(binding.externalThreadId, id);
     },
     isExternalEventProcessed: async () => false,
     onExternalEvent: async (_part, effects) => events.push(...effects),
@@ -189,22 +207,9 @@ async function executePositive() {
 }
 
 async function loadPersistedSurfaces(externalThreadId, externalRunId) {
-  const client = internalClient();
-  const [run, runs, thread, state, history] = await Promise.all([
-    client.runs.get(externalThreadId, externalRunId),
-    client.runs.list(externalThreadId, { limit: 100 }),
-    client.threads.get(externalThreadId, { include: ["values", "config", "context"] }),
-    client.threads.getState(externalThreadId, undefined, { subgraphs: true }),
-    client.threads.getHistory(externalThreadId, { limit: 100 }),
-  ]);
-  if (history.length >= 100) throw new Error("SECRET_CHANNEL_HISTORY_TRUNCATED");
-  return [
-    { label: "run", value: run },
-    { label: "run-list", value: runs },
-    { label: "thread", value: thread },
-    { label: "state", value: state },
-    { label: "history", value: history },
-  ];
+  const stable = await loadStablePersistedSurfaces(internalClient(), externalThreadId, externalRunId, `secret-channel-attempt-${suffix}`);
+  historyEvidence = stable.evidence;
+  return stable.surfaces;
 }
 
 async function executeMalformedScopeProbe(evidenceBefore) {
@@ -214,10 +219,8 @@ async function executeMalformedScopeProbe(evidenceBefore) {
     threadId,
     metadata: { workbenchThreadId: threadId },
   });
-  const events = [];
-  let streamError = null;
-  try {
-    for await (const part of client.runs.stream(threadId, "lead_agent", {
+  for await (const part of client.runs.stream(threadId, "lead_agent", {
+      onRunCreated: ({ run_id }) => registerOwnedRun(threadId, run_id),
       input: {
         messages: [{
           role: "user",
@@ -230,7 +233,7 @@ async function executeMalformedScopeProbe(evidenceBefore) {
           ].join("\n"),
         }],
       },
-      streamMode: ["messages", "values"],
+      streamMode: ["messages-tuple", "values"],
       context: {
         workbench: { runId: "negative-run" },
         secrets: { WORKBENCH_KNOWLEDGE_CAPABILITY: JSON.stringify(knowledgeTool) },
@@ -238,17 +241,12 @@ async function executeMalformedScopeProbe(evidenceBefore) {
       config: { configurable: { model_name: modelId, is_plan_mode: true, thinking_enabled: true } },
       multitaskStrategy: "reject",
     })) {
-      if (events.length < 10_000) events.push(part);
+      // Drain the actual run stream; authoritative refusal is checked below.
     }
-  } catch (error) {
-    streamError = error instanceof Error ? error.message : String(error);
-  }
   const state = await client.threads.getState(threadId, undefined, { subgraphs: true });
-  const missingObserved = JSON.stringify([events, state, streamError])
-    .includes("WORKBENCH_KNOWLEDGE_CAPABILITY_MISSING");
-  if (!missingObserved) throw new Error("SECRET_CHANNEL_MALFORMED_SCOPE_NOT_FAIL_CLOSED");
+  const refusal = assertMalformedScopeRefusal(state);
   await assertEvidenceUnchanged(evidenceBefore, "malformed-scope");
-  return { failClosed: true, missingCapabilityObserved: true };
+  return refusal;
 }
 
 function negativePromptContext(threadId) {

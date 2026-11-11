@@ -20,6 +20,12 @@ describe("worker database configuration", () => {
       .toBe("postgresql://user:pass@localhost:5432/db?sslmode=require");
   });
 
+  it("defaults to DeerFlow 2.1 public stream modes", () => {
+    stubMinimumWorkerConfig();
+    vi.stubEnv("DEERFLOW_STREAM_MODE", "");
+    expect(loadWorkerConfig().deerFlowStreamMode).toEqual(["messages-tuple", "values"]);
+  });
+
   it("requires separate DeerFlow Gateway and S3 runtime content configuration", () => {
     vi.stubEnv("WORKBENCH_DATABASE_URL", "postgresql://localhost/workbench?schema=workbench");
     vi.stubEnv("DEERFLOW_LANGGRAPH_URL", "https://deerflow.test/api/");

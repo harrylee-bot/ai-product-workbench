@@ -37,8 +37,8 @@ export class KnowledgeToolService {
 
   constructor(
     private readonly config: KnowledgeRetrievalConfig,
-    private readonly access: AccessService,
-    private readonly db: WorkbenchDbService,
+    access: AccessService,
+    db: WorkbenchDbService,
     private readonly ledger: KnowledgeToolLedgerService,
   ) {
     this.retrieval = config.providers

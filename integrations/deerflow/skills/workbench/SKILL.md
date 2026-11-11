@@ -47,7 +47,7 @@ Classify the turn before doing work:
 - Completely new system or standalone page with no existing architecture to inherit: use `brand_new_system`.
 - Short or one-sentence product request with ordinary missing details: use `one_sentence_completion` and infer conventional details from product architecture, business-domain knowledge, and historical cases.
 - Missing high-risk or blocking facts for a non-PRD product change: use DeerFlow's clarification interrupt before producing a result. A PRD-only Canvas Run is non-interruptible and follows the PRD rules below instead.
-- PRD drafting: whenever `requestedArtifactKinds` contains `prd`, produce a complete fixed-template `workbench.prd.v2` Artifact document. When revising an existing PRD, preserve the target Artifact's current v1 or v2 protocol.
+- PRD drafting: whenever `requestedArtifactKinds` contains `prd`, produce a complete function-specific `workbench.prd.v3` Artifact document. When revising an existing PRD, preserve the target Artifact's current v1, v2, or v3 protocol.
 - Prototype/code generation: create or refine specs first, then use DeerFlow's coding/prototype execution capability and return the requested Artifact kinds.
 - Export request: use the dedicated 产品工作台 export workflow; do not invent an export Artifact in a generation Run.
 
@@ -192,7 +192,7 @@ Every artifact requires nonempty citations copied exactly from successful
 Knowledge retrieval in the current attempt. Missing knowledge is a blocker,
 not permission to generate from memory or fabricate sources.
 
-Output is the user's fixed requirement-document template, not a freeform lightweight PRD. A newly created PRD must use Artifact `schemaVersion: 2` with content protocol `workbench.prd.v2`. Protocol v1 remains read-only/revision compatible for existing Artifacts and is never the shape for a new PRD. Every PRD Artifact in this Runtime uses the following exact structure; a request for an incompatible format is not permission to submit schema-invalid content:
+Output is the user's fixed requirement-document template, not a freeform lightweight PRD. A newly authored PRD uses Artifact `schemaVersion: 3` with content protocol `workbench.prd.v3`. Existing v1 and v2 documents retain their original protocols when revised; valid v2 drafts remain accepted for transport and causal-history compatibility. Protocol v1 is never the shape for a new PRD. Every PRD Artifact in this Runtime uses the following exact structure; a request for an incompatible format is not permission to submit schema-invalid content:
 
 In this Canvas Runtime, apply the canonical skill's content, section, table,
 diagram, degradation, safety, and quality rules through typed IR. Its DOCX copy,
@@ -207,9 +207,9 @@ ran during this PRD Run.
 1.3使用场景（必填）
 2 业务需求
 2.1页面链接
-2.2 核心业务规则/功能说明
-2.3 核心流程/状态/页面要求（必须包含产品流程图和产品架构图）
-2.4 验收标准
+2.2 本次具体功能或业务规则一
+2.3 本次具体功能或业务规则二（按需）
+2.n 后续功能、验收或有依据的接口影响（按需）
 3 业务降级方案（必填）
 4 需求安全基线要求（必填）
 ```
@@ -218,13 +218,13 @@ Writing requirements:
 
 - Include the cover, a non-placeholder version-history row, and the complete manual table of contents before the numbered body.
 - Use `<工单名称>需求说明书` for the Artifact title, document title, and cover title. Do not shorten one of those three titles independently.
-- Include concrete page entry, channel, object, field, state, exception, degradation, safety baseline, acceptance details, a product flow diagram, and a product architecture diagram.
-- Do not include a section named `本需求涉及新增/修改的接口` or any standalone interface/API section. Express cross-system behavior only as business state, trigger, result, and exception handling when needed.
+- Include source-backed page entry, channels, objects, fields, relevant states, exceptions, degradation, safety baseline and testable acceptance details. Number concrete functional sections continuously from 2.2. Do not force generic fixed business headings.
+- Interface impact may be embedded or placed in a later `本需求涉及新增/修改的接口` section only when authorized facts support it. Explain business scope and purpose; do not invent routes, fields, dependencies or a technical contract to fill the template.
 - `3 业务降级方案（必填）` cannot be empty. Use `不涉及` only when no meaningful degradation exists; otherwise provide a concrete fallback plan.
 - Keep exactly one typed channel table with the canonical `端内渠道`, `WAP/H5端外渠道`, and `小程序` rows. Select a channel only from explicit requirement facts.
 - Preserve generic delivery-channel labels literally. Never translate or expand `端内` or `端内渠道` into an affirmative APP, app, native app, `APP端内Web`, `客户端`, or mini-program loading, publication, operation, or enabled-surface claim. Add such an affirmative claim only when the current request or an authorized source explicitly supplies it; preserve explicit negative or excluded APP/mini-program facts verbatim. Candidate-authored prose and `channel:inApp` are not source evidence; every Runtime `targetSurface` value, including `app` and `web`, is not source evidence and cannot activate safety row 12. Without affirmative authorized input, row 12 must be `不涉及` with `remarks: null`.
-- `2.3` must contain exactly one `productFlow` followed by exactly one `productArchitecture`; each diagram needs explanatory text and product-language nodes and relations.
-- `2.4` must contain a testable `序号 / 验收项 / 验收标准` table covering visibility, rules, permissions, state flow, result, empty state, and error recovery when relevant.
+- Independently choose neither diagram, only `productFlow`, only `productArchitecture`, or both based on scope, branches, actors and explanatory value. Each functional section may hold at most one of each kind. Different sections may repeat a kind for distinct business modules. Use actual global figure order and explanatory product-language text; no diagram kind owns a fixed section or figure number.
+- Acceptance may be embedded within the related functional section or a later continuously numbered section. Use a testable `序号 / 验收项 / 验收标准` table with continuous rows from 1 or substantive typed Given/When/Then acceptance criteria. Cover only dimensions relevant to this requirement; typed requirement links must target typed criteria rather than table-row IDs.
 - `4 需求安全基线要求（必填）` must contain all 21 canonical rows. Values in `是否涉及` may only be `是`, `否`, or `不涉及`; put explanations in `remarks`. Derive each value from requirement facts outside the safety table.
 - `不涉及` is valid only when no affirmative fact for that safety topic exists anywhere else in the PRD. Use `是` when the topic applies and the stated requirement satisfies it; use `否` only when the topic applies and the PRD also contains a concrete remediation for that same topic.
 - Any requested construction, development, implementation, modification, or upgrade of a function, page, control, flow, state behavior, or business capability makes safety row 1 `是`. Row 1 never uses `否`; when it is `是`, its remarks must name the concrete changed function, page, interface, or logic. Use `不涉及` only when the requirement body explicitly states there is no function, page, interface, or logic change. Reusing or not adding a default, setting, field, status, or category only narrows scope and is not global no-change evidence.
@@ -234,7 +234,7 @@ Writing requirements:
 - Read its `x-workbench-authoring-guide` before assembling Typed IR. It supplies business-neutral paragraph, list, and table structure fragments plus fixed literals derived from the contract. These fragments are not a complete publishable draft: replace all structure markers with request-specific content and IDs, and derive citations, channel choices, degradation applicability, and all safety values from authorized facts. No extra reference read is needed.
 - Every `blocks` entry is a complete typed object, never a block ID, schema name, `$ref`, plain string, or serialized JSON string. A `bulletList` contains complete `{id, content}` objects inside `items`; list items have no `type` field and their IDs never become sibling blocks. A paragraph, list item, or table cell contains inline text objects with `type`, `text`, and `marks` (`[]` for ordinary text). Keep all table cells bound to declared column IDs.
 - Copy fixed literals character for character from the schema, including the complete safety intro and its real newlines. Do not paraphrase fixed text during a repair. Preserve every unrelated field while correcting the reported paths with the draft tool's checksum-bound repair mode.
-- Preserve the exact PRD v2 transport paths: `content.sections.introduction`, `content.sections.businessRequirements.acceptanceCriteria`, `content.sections.businessRequirements.additionalSections`, `content.sections.degradation`, and `content.sections.safetyBaseline`. `content.sections.businessRequirements` also owns `pageLinks`, `coreRules`, and `flowAndPages`. Never put `acceptanceCriteria` or `additionalSections` directly under `content.sections`, and never put `degradation` or `safetyBaseline` directly under `content`.
+- Preserve the exact PRD v3 transport paths: `content.sections.introduction`, `content.sections.businessRequirements.pageLinks`, `content.sections.businessRequirements.functionSections`, `content.sections.degradation`, and `content.sections.safetyBaseline`. Each function section has stable `id`, a concrete `title` numbered continuously from `2.2`, typed `blocks`, and `diagrams: []` when no diagram is needed. Never move business sections outside `content.sections` or convert old target protocols during an edit.
 - Keep IDs globally unique across the document and every nested IR entity. Resolve every table, diagram, citation, assumption, goal, requirement, criterion, and flow reference, and keep requirement/criterion references bidirectional.
 - Never use a filled PRD example as an authoring source. A business example can silently inject unrelated pages, roles, permissions, states, retry behavior, or acceptance rules into a short request.
 - When a complete schema-valid PRD candidate exists, call `workbench_artifact_draft_publish` at `artifact_index: 0`. For an exact PRD-only Run, the trusted Runtime submits the normalized Draft once. For a linked PRD and Prototype Run, continue with the Prototype and submit both accepted ACKs' `finalSubmissionArtifact` references together. If validation fails, repair only the reported paths. A placeholder, prose outline, partial section, or progress estimate is not a publishable draft.

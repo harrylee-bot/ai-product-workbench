@@ -1,4 +1,4 @@
-import { readdir, readFile } from "node:fs/promises";
+import { readdir, readFile, stat } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -81,12 +81,18 @@ const appEntries = await readdir(path.join(repoRoot, "apps"), { withFileTypes: t
 const packageEntries = await readdir(path.join(repoRoot, "packages"), { withFileTypes: true });
 const scriptEntries = await readdir(path.join(repoRoot, "scripts"), { withFileTypes: true });
 const deployEntries = await readdir(path.join(repoRoot, "deploy"), { withFileTypes: true });
+const hasGitHubDirectory = await stat(path.join(repoRoot, ".github"))
+  .then((entry) => entry.isDirectory())
+  .catch((error) => {
+    if (error.code === "ENOENT") return false;
+    throw error;
+  });
 const roots = [
   "README.md",
   "package.json",
   "package-lock.json",
   "docs",
-  ".github",
+  ...(hasGitHubDirectory ? [".github"] : []),
   "apps/knowledge",
   "apps/web",
   ...appEntries

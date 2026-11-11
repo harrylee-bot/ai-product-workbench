@@ -11,10 +11,19 @@ import tarfile
 
 def verify(archive, manifest, destination=None):
     policy = json.loads(manifest.read_text())
-    if (policy.get("schema") != "workbench.deerflow-runtime-source.v1"
-            or policy.get("applicationVersion") != "1.0.0"
-            or not re.fullmatch(r"sha256:[a-f0-9]{64}", policy.get("sourceImageId", ""))
-            or policy.get("upstreamCommit") != "7a6c4a994a86583d2a3c056ee9d0f157d4f030c2"):
+    legacy = (
+        policy.get("schema") == "workbench.deerflow-runtime-source.v1"
+        and re.fullmatch(r"sha256:[a-f0-9]{64}", policy.get("sourceImageId", ""))
+        and policy.get("upstreamCommit") == "7a6c4a994a86583d2a3c056ee9d0f157d4f030c2"
+    )
+    release = (
+        policy.get("schema") == "workbench.deerflow-runtime-source.v2"
+        and policy.get("upstreamRepository") == "https://github.com/bytedance/deer-flow"
+        and policy.get("upstreamVersion") == "2.1.0"
+        and policy.get("upstreamCommit") == "345f08be00c8a9495079b732a39b46aa9af1584e"
+        and all(name.startswith("/app/backend/") for name in policy.get("fileSha256", {}))
+    )
+    if policy.get("applicationVersion") != "1.0.0" or not (legacy or release):
         raise ValueError("SOURCE_ARCHIVE_IDENTITY_MISMATCH")
     archive_sha = hashlib.sha256(archive.read_bytes()).hexdigest()
     if archive_sha != policy.get("archiveSha256"):
@@ -48,13 +57,13 @@ def verify(archive, manifest, destination=None):
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_bytes(content)
     return {"applicationVersion": "1.0.0", "archiveSha256": archive_sha,
-            "sourceImageId": policy["sourceImageId"], "verifiedFiles": len(files)}
+            "upstreamCommit": policy["upstreamCommit"], "sourceImageId": policy.get("sourceImageId"), "verifiedFiles": len(files)}
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--archive", type=Path, default=Path(__file__).with_name("source.tar.gz"))
-    parser.add_argument("--manifest", type=Path, default=Path(__file__).with_name("source-snapshot.json"))
+    parser.add_argument("--archive", type=Path, default=Path(__file__).with_name("upstream-2.1.0") / "source.tar.gz")
+    parser.add_argument("--manifest", type=Path, default=Path(__file__).with_name("upstream-2.1.0") / "source-snapshot.json")
     parser.add_argument("--extract-to", type=Path)
     args = parser.parse_args()
     print(json.dumps(verify(args.archive, args.manifest, args.extract_to)))

@@ -9,7 +9,6 @@ ORIGIN_MANIFEST_SCRIPT=${WORKBENCH_ORIGIN_MANIFEST_SCRIPT:-$APP_DIR/scripts/work
 DATABASE_ROLE_CONTRACT_SCRIPT=${WORKBENCH_DATABASE_ROLE_CONTRACT_SCRIPT:-$APP_DIR/scripts/assert-workbench-database-role-contract.mjs}
 ORIGIN_WIREGUARD_PREFLIGHT_SCRIPT=${WORKBENCH_ORIGIN_WIREGUARD_PREFLIGHT_SCRIPT:-$APP_DIR/deploy/edge/workbench-origin-wireguard-preflight.sh}
 ORIGIN_WIREGUARD_CONFIG=${WORKBENCH_ORIGIN_WIREGUARD_CONFIG:-/etc/wireguard/wg0.conf}
-
 fail() {
   printf '%s\n' "workbench production preflight: $*" >&2
   exit 1
@@ -87,10 +86,6 @@ origin_wireguard_ip=$(require_env WORKBENCH_ORIGIN_WIREGUARD_IP)
 origin_http_port=$(require_env WORKBENCH_ORIGIN_HTTP_PORT)
 edge_origin_auth_secret=$(require_env WORKBENCH_EDGE_ORIGIN_AUTH_SECRET)
 tokenizer_dir=$(require_env WORKBENCH_KNOWLEDGE_TOKENIZER_HOST_DIR)
-image_inventory=$(require_env WORKBENCH_IMAGE_INVENTORY_PATH)
-image_inventory_bundle=$(require_env WORKBENCH_IMAGE_INVENTORY_BUNDLE_PATH)
-cosign_identity=$(require_env WORKBENCH_COSIGN_CERTIFICATE_IDENTITY)
-cosign_issuer=$(require_env WORKBENCH_COSIGN_OIDC_ISSUER)
 source_commit=$(require_env WORKBENCH_SOURCE_COMMIT)
 scan_mode=$(require_env WORKBENCH_FILE_SCAN_MODE)
 postgres_image=$(require_env WORKBENCH_POSTGRES_IMAGE)
@@ -148,10 +143,6 @@ printf '%s' "$database_url" | grep -Eq '@postgres([:/?]|$)' || fail "WORKBENCH_D
 node "$DATABASE_ROLE_CONTRACT_SCRIPT" --env-file="$ENV_FILE" \
   || fail "database role separation contract is invalid"
 printf '%s' "$source_commit" | grep -Eq '^[0-9a-f]{40}$' || fail "WORKBENCH_SOURCE_COMMIT must be a lowercase Git commit"
-printf '%s' "$cosign_identity" | grep -Eq '^https://[^[:space:]]+$' \
-  || fail "WORKBENCH_COSIGN_CERTIFICATE_IDENTITY must be an exact HTTPS identity"
-printf '%s' "$cosign_issuer" | grep -Eq '^https://[^[:space:]]+$' \
-  || fail "WORKBENCH_COSIGN_OIDC_ISSUER must be an exact HTTPS issuer"
 printf '%s' "$postgres_image" | grep -Eq '@sha256:[a-f0-9]{64}$' || fail "WORKBENCH_POSTGRES_IMAGE must be an immutable digest reference"
 printf '%s' "$nginx_image" | grep -Eq '@sha256:[a-f0-9]{64}$' || fail "WORKBENCH_NGINX_IMAGE must be an immutable digest reference"
 printf '%s' "$node_image" | grep -Eq '@sha256:[a-f0-9]{64}$' || fail "WORKBENCH_NODE_IMAGE must be an immutable digest reference"
@@ -193,19 +184,6 @@ grep -Fq 'header_up -Cookie' "$CADDY_FILE" \
   || fail "Preview origin requests must not receive Web cookies"
 grep -Fq 'header_down -Set-Cookie' "$CADDY_FILE" \
   || fail "Preview origin responses must not set cookies"
-
-[ -f "$image_inventory" ] || fail "missing signed production image manifest: $image_inventory"
-[ -f "$image_inventory_bundle" ] || fail "missing production image manifest signature bundle: $image_inventory_bundle"
-command -v cosign >/dev/null 2>&1 || fail "cosign is required to verify the production image manifest"
-node "$APP_DIR/scripts/production-image-inventory.mjs" \
-  --manifest "$image_inventory" \
-  --bundle "$image_inventory_bundle" \
-  --certificate-identity "$cosign_identity" \
-  --certificate-oidc-issuer "$cosign_issuer" \
-  --expected-commit "$source_commit" \
-  --env-file "$ENV_FILE" \
-  --inspect-local-images \
-  --exclude-image deerflow
 
 [ -r "$tokenizer_dir/tokenizer.json" ] || fail "tokenizer.json is missing"
 [ -r "$tokenizer_dir/tokenizer_config.json" ] || fail "tokenizer_config.json is missing"

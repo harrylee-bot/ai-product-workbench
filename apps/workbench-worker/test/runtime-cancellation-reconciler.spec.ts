@@ -9,6 +9,28 @@ import { RuntimeCancellationReconciler } from "../src/runs/runtime-cancellation-
 describe("RuntimeCancellationReconciler", () => {
   beforeEach(() => recordRuntimeLivenessMetric.mockClear());
 
+  it("waits for an in-flight pass before stop resolves", async () => {
+    let release!: (value: []) => void;
+    const findMany = vi.fn(() => new Promise<[]>(resolve => { release = resolve; }));
+    const reconciler = new RuntimeCancellationReconciler(
+      { run: { findMany } } as never,
+      { send: vi.fn() } as never,
+      1,
+      10,
+      60_000,
+    );
+
+    const run = reconciler.runOnce();
+    const stopped = reconciler.stop();
+    let resolved = false;
+    void stopped.then(() => { resolved = true; });
+    await Promise.resolve();
+    expect(resolved).toBe(false);
+    release([]);
+    await Promise.all([run, stopped]);
+    expect(resolved).toBe(true);
+  });
+
   it("requeues stale cancelling Runs with a singleton key", async () => {
     const findMany = vi.fn(async () => [{ id: "run-2" }, { id: "run-1" }]);
     const updateMany = vi.fn(async () => ({ count: 1 }));

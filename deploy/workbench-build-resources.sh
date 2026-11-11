@@ -2,34 +2,34 @@
 
 # Source from server-deploy.sh. The fixed host-wide lock also covers builders
 # with different names and is held until cleanup has stopped the builder.
-validation_build_images() (
+direct_build_images() (
   set -Eeuo pipefail
   trap - ERR
   command -v flock >/dev/null || { printf 'Workbench bounded build: flock is required\n' >&2; exit 69; }
   local compose_declaration status
   compose_declaration="$(declare -p COMPOSE 2>/dev/null)" \
     || { printf 'Workbench bounded build: COMPOSE must be a Bash array\n' >&2; exit 65; }
-  if WORKBENCH_BUILD_BUILDER="${WORKBENCH_BUILD_BUILDER:-workbench-validation-bounded}" \
+  if WORKBENCH_BUILD_BUILDER="${WORKBENCH_BUILD_BUILDER:-workbench-direct-bounded}" \
     WORKBENCH_BUILD_MEMORY_MIB="${WORKBENCH_BUILD_MEMORY_MIB:-6144}" \
     WORKBENCH_BUILD_RESERVE_MIB="${WORKBENCH_BUILD_RESERVE_MIB:-2048}" \
     WORKBENCH_BUILD_CPUS="${WORKBENCH_BUILD_CPUS:-2}" \
-    flock --nonblock --conflict-exit-code 75 /run/lock/workbench-validation-build.lock \
-      bash -c 'source "$1"; eval "$2"; shift 2; _validation_build_images_locked "$@"' \
+    flock --nonblock --conflict-exit-code 75 /run/lock/workbench-direct-build.lock \
+      bash -c 'source "$1"; eval "$2"; shift 2; _direct_build_images_locked "$@"' \
       workbench-bounded-build "${BASH_SOURCE[0]}" "$compose_declaration" "$@"; then
     return 0
   else
     status=$?
     if [ "$status" -eq 75 ]; then
-      printf 'Workbench bounded build: another validation build holds the host-wide lock\n' >&2
+      printf 'Workbench bounded build: another direct build holds the host-wide lock\n' >&2
     fi
     return "$status"
   fi
 )
 
-_validation_build_images_locked() (
+_direct_build_images_locked() (
   set -Eeuo pipefail
   trap - ERR
-  builder="${WORKBENCH_BUILD_BUILDER:-workbench-validation-bounded}"
+  builder="${WORKBENCH_BUILD_BUILDER:-workbench-direct-bounded}"
   memory_mib="${WORKBENCH_BUILD_MEMORY_MIB:-6144}"
   reserve_mib="${WORKBENCH_BUILD_RESERVE_MIB:-2048}"
   cpus="${WORKBENCH_BUILD_CPUS:-2}"
@@ -54,12 +54,12 @@ _validation_build_images_locked() (
   }
   trap build_cleanup EXIT
 
-  [ "$(uname -s)" = Linux ] || build_fail 'server-side validation builds require a local Linux Docker host'
+  [ "$(uname -s)" = Linux ] || build_fail 'direct builds require a Linux Docker host'
   for command in docker node awk mktemp; do
     command -v "$command" >/dev/null || build_fail "required command is missing: $command"
   done
-  [[ "$builder" =~ ^workbench-validation-[a-z0-9][a-z0-9-]{0,39}$ ]] \
-    || build_fail 'WORKBENCH_BUILD_BUILDER must use the workbench-validation- namespace (up to 60 characters)'
+  [[ "$builder" =~ ^workbench-direct-[a-z0-9][a-z0-9-]{0,39}$ ]] \
+    || build_fail 'WORKBENCH_BUILD_BUILDER must use the workbench-direct- namespace (up to 60 characters)'
   [[ "$memory_mib" =~ ^[1-9][0-9]{0,4}$ ]] && [ "$memory_mib" -ge 512 ] && [ "$memory_mib" -le 65536 ] \
     || build_fail 'WORKBENCH_BUILD_MEMORY_MIB must be an integer from 512 to 65536'
   [[ "$reserve_mib" =~ ^[1-9][0-9]{0,4}$ ]] && [ "$reserve_mib" -ge 1024 ] && [ "$reserve_mib" -le 65536 ] \
@@ -70,6 +70,8 @@ _validation_build_images_locked() (
   [ "${COMPOSE[0]:-}" = docker ] && [ "${COMPOSE[1]:-}" = compose ] \
     || build_fail 'COMPOSE must invoke docker compose'
   [ -r "$config" ] || build_fail 'the BuildKit resource policy is missing'
+  node "${BASH_SOURCE[0]%/*}/workbench-disk-preflight.mjs" "$(pwd -P)" \
+    || build_fail 'disk reserves are insufficient or unreadable; no automatic prune is permitted'
   scratch="$(mktemp -d "${TMPDIR:-/tmp}/workbench-bounded-build.XXXXXXXX")"
   available_kib="$(awk '$1 == "MemAvailable:" && $3 == "kB" { print $2; found++ } END { if (found != 1) exit 1 }' /proc/meminfo)" \
     || build_fail 'cannot read Linux MemAvailable; refusing to build'
@@ -116,7 +118,7 @@ NODE
   # Check persisted settings before starting an existing builder. Unknown or
   # drifted builders are never reconfigured, deleted, or selected globally.
   node - "$scratch/builders.jsonl" "$builder" "$endpoint" "$memory_bytes" "$cpu_quota" "$config" <<'NODE' \
-    || build_fail 'builder settings differ from the bounded policy; use a fresh workbench-validation- name'
+    || build_fail 'builder settings differ from the bounded policy; use a fresh workbench-direct- name'
 const fs = require("node:fs");
 const [file, name, endpoint, memory, quota, config] = process.argv.slice(2);
 const records = fs.readFileSync(file, "utf8").split(/\r?\n/).filter(Boolean).map(line => JSON.parse(line)).filter(item => item.Name === name);

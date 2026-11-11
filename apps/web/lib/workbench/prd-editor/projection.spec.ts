@@ -5,9 +5,11 @@ import {
   prdDocumentSchema,
   prdDocumentV1Schema,
   prdDocumentV2Schema,
+  prdDocumentV3Schema,
+  prdTableOfContentsEntriesForV3,
   prdTableOfContentsEntriesFor,
 } from "@workbench/workbench-contracts";
-import { prdDocumentV2Example } from "@workbench/workbench-contracts/test-fixtures";
+import { prdDocumentV2Example, prdDocumentV3Example } from "@workbench/workbench-contracts/test-fixtures";
 import { describe, expect, it } from "vitest";
 
 import { prdDocument } from "../../../components/workbench/workbench-prd-test-fixture";
@@ -18,6 +20,35 @@ import {
 } from "./projection";
 
 describe("PRD Tiptap projection", () => {
+  it("round-trips v3 functional sections and inline diagrams without losing IDs or citations", () => {
+    const source = structuredClone(prdDocumentV3Example);
+    const editor = new Editor({ extensions: workbenchPrdExtensions, content: prdDocumentToTiptap(source) });
+    expect(prdDocumentV3Schema.parse(applyTiptapToPrdDocument(source, editor.getJSON()))).toEqual(source);
+    const functionNode = findJsonNode(editor.getJSON(), (node) => node.attrs?.sectionKey === "v3:function:section-task-state");
+    expect(functionNode?.content?.filter((node) => node.type === "prdDiagram")).toHaveLength(2);
+    editor.destroy();
+  });
+
+  it("edits a single function with embedded acceptance and no diagrams, keeping the TOC and protected data", () => {
+    const source = structuredClone(prdDocumentV3Example);
+    source.sections.businessRequirements.functionSections = [{
+      id: "single-function", title: "2.2 任务提交处理",
+      blocks: source.sections.businessRequirements.functionSections.flatMap((section) => section.blocks), diagrams: [],
+    }];
+    source.tableOfContents.entries = prdTableOfContentsEntriesForV3(["2.2 任务提交处理"]);
+    const projected = prdDocumentToTiptap(prdDocumentV3Schema.parse(source));
+    replaceNodeText(projected, ["sections", "businessRequirements", "functionSections", 0, "title"], "2.2 任务提交与回执");
+    projected.content?.push({ type: "paragraph", attrs: {
+      prdPath: JSON.stringify(["sections", "businessRequirements", "functionSections", 0, "id"]), prdValueKind: "string",
+    }, content: [{ type: "text", text: "injected-id" }] });
+    const result = prdDocumentV3Schema.parse(applyTiptapToPrdDocument(source, projected));
+    expect(result.sections.businessRequirements.functionSections[0]!.id).toBe("single-function");
+    expect(result.tableOfContents.entries).toContain("2.2 任务提交与回执");
+    expect(result.sections.safetyBaseline).toEqual(source.sections.safetyBaseline);
+    expect(result.citations).toEqual(source.citations);
+    expect(JSON.stringify(projected)).not.toContain('"type":"prdDiagram"');
+  });
+
   it("round-trips the internal PRD without persisting editor JSON", () => {
     const source = prdDocument();
     const projected = prdDocumentToTiptap(source);

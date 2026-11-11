@@ -9,10 +9,16 @@ Use this reference before drafting, supplementing, or reviewing a requirement do
 - The TOC must be on its own page. TOC headings must match the body headings after edits.
 - Upload/submission timing is outside document generation, but the final output should be ready for the requirement baseline attachment list.
 
+## Style And Chapter Structure
+
+- Use black editable text throughout, white table backgrounds, and black table borders. Remove colored heading accents, hyperlink colors, striped fills, and highlighting; distinguish levels by size, weight, and spacing. Supplied screenshots and logos keep their original colors unless requested otherwise.
+- Follow the H5 example: cover, separate version-history page, separate TOC page, `1 引言` with `1.1–1.3`, `2 业务需求`, `3 业务降级方案（必填）`, and `4 需求安全基线要求（必填）`.
+- In chapter 2 keep `2.1 页面链接`, then number actual functional or business-rule sections from `2.2` onward. Do not require fixed generic `2.2/2.3/2.4` names. Flow, page/state, acceptance, and interface-impact content may be embedded in related functional sections or added as later subsections when needed.
+- Allow an evidence-based新增/修改接口 subsection as in the H5 example; do not invent interfaces or require a technical contract to fill it. Omit it when irrelevant.
+
 ## Required Content Quality
 
 - Include clear requirement background and concrete execution details that support test-case writing.
-- The requirement subject and requested business change must come from the user, an authorized project source, or an attachment. Never invent them merely because the user selected PRD as the output kind.
 - State the system/software/channel, current state, reason for change, changed module, target function, and expected purpose.
 - Keep background and requirement description related but not duplicated.
 - Do not copy the same body text under multiple headings.
@@ -22,9 +28,10 @@ Use this reference before drafting, supplementing, or reviewing a requirement do
 - Do not paste links as a replacement for concrete requirements. If a route/link is needed, still describe the required behavior in text.
 - Do not write only `与XX逻辑相同` or `在XXX基础上`. Spell out the inherited or changed logic.
 - If a diagram is included, add text that explains how the diagram relates to this requirement.
-- Keep the fixed `2.1` through `2.4` sections and include both `产品流程图` and `产品架构图` in `2.3`.
+- Independently assess the need for `产品流程图` and `产品架构图` using `structure.md`; neither, either one, or both may be appropriate. Do not fail a document solely because a diagram type or a standalone flow section is absent. Related functional sections must still explain relevant steps, states, and page rules in text or tables.
+- Acceptance criteria are required content; an independently titled or fixed-numbered acceptance section is not required.
+- Review included diagrams for actual explanatory value, consistency with the requirement, legibility, and adjacent explanatory text. Follow explicit user or delivery requirements for mandatory diagrams; routine automated checks do not infer these requirements from document length or item count.
 - Keep exactly one channel table and ensure its selected channels agree with the surrounding requirement text.
-- Acceptance results must be observable. Do not use `正常展示`, `友好提示`, `流转顺畅`, `正确显示结果`, `符合预期`, `满足要求`, or a generic promise to improve efficiency/quality as a substitute for an exact result.
 
 ## Page Or Capability Details
 

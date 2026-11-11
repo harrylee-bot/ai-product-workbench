@@ -1,0 +1,178 @@
+{
+  "protocol": "workbench.deerflow-source-patch.v1",
+  "upstreamRepository": "https://github.com/bytedance/deer-flow",
+  "upstreamCommit": "345f08be00c8a9495079b732a39b46aa9af1584e",
+  "agent": {
+    "path": "deerflow/agents/lead_agent/agent.py",
+    "upstreamSha256": "ac72292feba8d58f59d1ebad6ce7836ee2a5240761452eda60dc8e923d95db48",
+    "patchedSha256": "589d668de2390f3c55c444d229eddabfc32d1434fc7601c833ff613193a1415b",
+    "anchor": "    # Coalesce every SystemMessage into a single leading one before the request\n",
+    "insertion": "    # Product Workbench tools are registered globally but scoped per Run.\n    from deerflow.agents.middlewares.workbench_tool_scope_middleware import (\n        WorkbenchToolScopeMiddleware,\n        workbench_canvas_policy_from_runnable_config,\n        workbench_knowledge_enabled_from_runnable_config,\n        workbench_requested_artifact_kinds_from_runnable_config,\n        workbench_run_scope_from_runnable_config,\n    )\n\n    middlewares.append(\n        WorkbenchToolScopeMiddleware(\n            workbench_canvas_policy_from_runnable_config(config),\n            workbench_requested_artifact_kinds_from_runnable_config(config),\n            workbench_knowledge_enabled_from_runnable_config(config),\n            workbench_run_scope_from_runnable_config(config),\n        )\n    )\n\n"
+  },
+  "deferredMiddleware": {
+    "path": "deerflow/agents/middlewares/deferred_tool_filter_middleware.py",
+    "sha256": "99bcce2c2205d8ac0fcfb60a820997f30568b7d473d77edd8430e26c2fc4cbba"
+  },
+  "toolScopeMiddleware": {
+    "path": "deerflow/agents/middlewares/workbench_tool_scope_middleware.py",
+    "sha256": "455e5b9e0e6a5907117d26109f361031d9c282b7ef8cc784e1936b222dc0a0e1"
+  },
+  "additionalSources": [
+    {
+      "path": "deerflow/tools/builtins/task_tool.py",
+      "upstreamSha256": "b650fa0815fa0be406c2f612670cb71687f4df15aed6c8195545998381ff9e7d",
+      "patchedSha256": "b46460b3aff7000d66530fd5023026b2427d7aa973bd29061ccd72a46537be30",
+      "replacements": [
+        {
+          "anchor": "    # Create executor\n",
+          "position": "before",
+          "insertion": "    # Product Workbench publication, Knowledge, PRD reference, and Canvas tools are parent-run scoped. A\n    # subagent must never rediscover them from the inherited global tool group.\n    _workbench_parent_run_tool_names = frozenset(\n        {\n            \"workbench_generation_stage_update\",\n            \"workbench_artifact_draft_publish\",\n            \"workbench_prototype_patch_publish\",\n            \"workbench_knowledge_retrieve\",\n            \"read_file\",\n            \"get_visible_screens\",\n            \"get_selected_screens\",\n            \"view_screen\",\n            \"select_screen\",\n            \"quick_edit\",\n            \"duplicate_screen\",\n            \"rename_screen\",\n            \"navigate_canvas\",\n        }\n    )\n    tools = [\n        tool\n        for tool in tools\n        if getattr(tool, \"name\", None) not in _workbench_parent_run_tool_names\n    ]\n\n"
+        }
+      ]
+    },
+    {
+      "path": "deerflow/runtime/checkpoint_state.py",
+      "upstreamSha256": "c40dbee1cacb74d90615247e3de7cb33b79aed53a5b8352a5636148a0436185a",
+      "patchedSha256": "15bb4f58771acf4cb364294733499279a2cf84a1eb68d720c32fcec4e6ae7ad8",
+      "replacements": [
+        {
+          "anchor": "async def ahistory(self, config: dict[str, Any], *, limit: int | None = None) -> list[Any]:",
+          "insertion": "async def ahistory(self, config: dict[str, Any], *, limit: int | None = None, metadata_filter: dict[str, Any] | None = None) -> list[Any]:",
+          "position": "replace"
+        },
+        {
+          "anchor": "        async for snapshot in self.graph.aget_state_history(prepared, limit=limit):",
+          "insertion": "        history_kwargs = {\"filter\": metadata_filter} if metadata_filter else {}\n        async for snapshot in self.graph.aget_state_history(prepared, limit=limit, **history_kwargs):",
+          "position": "replace"
+        }
+      ]
+    },
+    {
+      "path": "deerflow/runtime/runs/worker.py",
+      "upstreamSha256": "0453eb48365143af5d83cf06c99fb4c0b4c632ae2a8d77efb233570a177bc0ec",
+      "patchedSha256": "591d3e6e60125c7afe22e1fa7b9379ccd426503bd17d4bd33457ca869491a254",
+      "replacements": [
+        {
+          "anchor": "            if not record.ownership_lost and _is_edit_replay_run(record) and record.status != RunStatus.success:",
+          "insertion": "            workbench_context = config.get(\"context\", {})\n            workbench_fallback = (\n                isinstance(workbench_context, dict)\n                and isinstance(workbench_context.get(\"workbench\"), dict)\n                and (llm_error_fallback_message or (journal is not None and journal.had_llm_error_fallback))\n            )\n            if not record.ownership_lost and (_is_edit_replay_run(record) or workbench_fallback) and record.status != RunStatus.success:",
+          "position": "replace"
+        },
+        {
+          "anchor": "edit replay restored pre-run checkpoint",
+          "insertion": "failed run restored pre-run checkpoint",
+          "position": "replace"
+        },
+        {
+          "anchor": "edit replay rollback failed",
+          "insertion": "failed run rollback failed",
+          "position": "replace"
+        }
+      ]
+    }
+  ],
+  "gatewaySources": [
+    {
+      "path": "app/gateway/services.py",
+      "upstreamSha256": "8379c34eeb2ddb46270b0e937035d5ee032dab68459b36b10435d28b8e2ab601",
+      "patchedSha256": "7dc25649ff92ff42c3a81ca8f23f3ce987f29e7ee00127a84f206ecd3a5cf8dc",
+      "replacements": [
+        {
+          "anchor": "def merge_run_context_overrides(config: dict[str, Any], context: Mapping[str, Any] | None, *, internal: bool = False) -> None:\n",
+          "insertion": "_WORKBENCH_CONTEXT_KEYS: frozenset[str] = frozenset({\"workbench\", \"secrets\"})\n_WORKBENCH_SECRET_KEYS: frozenset[str] = frozenset(\n    {\n        \"WORKBENCH_KNOWLEDGE_CAPABILITY\",\n        \"WORKBENCH_CANVAS_CAPABILITY\",\n    }\n)\n_WORKBENCH_REQUESTED_ARTIFACT_KINDS: frozenset[str] = frozenset(\n    {\"prd\", \"prototype\", \"image\", \"code\", \"document\", \"data\"}\n)\n_WORKBENCH_SCOPE_KEYS: frozenset[str] = frozenset(\n    {\n        \"runId\",\n        \"runtimeAttemptId\",\n        \"requestedArtifactKinds\",\n        \"knowledgeEnabled\",\n        \"canvasTools\",\n        \"prototypePatchBaselines\",\n    }\n)\n\n\ndef _is_trusted_internal_caller(request: Request | None) -> bool:\n    user = getattr(getattr(request, \"state\", None), \"user\", None)\n    return (getattr(user, \"system_role\", None) == INTERNAL_SYSTEM_ROLE\n            and getattr(getattr(request, \"state\", None), \"auth_source\", None) == AUTH_SOURCE_INTERNAL)\n\n\ndef _strip_workbench_channels(value: Any) -> Any:\n    if not isinstance(value, Mapping):\n        return value\n    sanitized = dict(value)\n    for key in (*_WORKBENCH_CONTEXT_KEYS, *_WORKBENCH_SECRET_KEYS):\n        sanitized.pop(key, None)\n    return sanitized\n\n\ndef _sanitize_run_config(request_config: dict[str, Any] | None) -> dict[str, Any] | None:\n    \"\"\"Remove reserved Workbench channels before config persistence or execution.\"\"\"\n    if request_config is None:\n        return None\n    sanitized = dict(request_config)\n    sanitized.pop(\"recursion_limit\", None)\n    for container_name in (\"configurable\", \"context\"):\n        if container_name in sanitized:\n            sanitized[container_name] = _strip_workbench_channels(sanitized[container_name])\n    for key in (*_WORKBENCH_CONTEXT_KEYS, *_WORKBENCH_SECRET_KEYS):\n        sanitized.pop(key, None)\n    return sanitized\n\n\ndef _normalize_workbench_scope(value: Any) -> dict[str, Any] | None:\n    if not isinstance(value, Mapping):\n        return None\n    if not set(value).issubset(_WORKBENCH_SCOPE_KEYS):\n        return None\n    run_id = value.get(\"runId\")\n    runtime_attempt_id = value.get(\"runtimeAttemptId\")\n    requested_artifact_kinds = value.get(\"requestedArtifactKinds\")\n    knowledge_enabled = value.get(\"knowledgeEnabled\")\n    if (\n        not isinstance(run_id, str)\n        or not run_id\n        or not isinstance(runtime_attempt_id, str)\n        or not runtime_attempt_id\n        or (knowledge_enabled is not None and knowledge_enabled is not True)\n        or (\n            requested_artifact_kinds is not None\n            and (\n                not isinstance(requested_artifact_kinds, list)\n                or len(requested_artifact_kinds) > len(_WORKBENCH_REQUESTED_ARTIFACT_KINDS)\n                or any(\n                    not isinstance(kind, str)\n                    or kind not in _WORKBENCH_REQUESTED_ARTIFACT_KINDS\n                    for kind in requested_artifact_kinds\n                )\n                or len(set(requested_artifact_kinds)) != len(requested_artifact_kinds)\n            )\n        )\n    ):\n        return None\n    return {key: value[key] for key in _WORKBENCH_SCOPE_KEYS if key in value}\n\n\ndef _normalize_workbench_secrets(value: Any) -> dict[str, str]:\n    if not isinstance(value, Mapping):\n        return {}\n    return {\n        key: secret\n        for key, secret in value.items()\n        if key in _WORKBENCH_SECRET_KEYS and isinstance(secret, str) and secret\n    }\n\n\n_DEFAULT_LEAD_GRAPH_RECURSION_LIMIT = 100\n_WORKBENCH_PRD_LEAD_GRAPH_RECURSION_LIMIT = 200\n_WORKBENCH_LINKED_LEAD_GRAPH_RECURSION_LIMIT = 400\n\n\ndef _apply_workbench_lead_recursion_limit(\n    config: dict[str, Any],\n    *,\n    trusted_internal_caller: bool,\n) -> None:\n    normalized_scope = None\n    runtime_context = config.get(\"context\")\n    if trusted_internal_caller is True and isinstance(runtime_context, Mapping):\n        normalized_scope = _normalize_workbench_scope(runtime_context.get(\"workbench\"))\n    requested_kinds = (\n        normalized_scope.get(\"requestedArtifactKinds\")\n        if normalized_scope is not None\n        else None\n    )\n    # Each tool round traverses multiple middleware nodes. Linked delivery must\n    # complete both staged artifacts while keeping the graph budget bounded.\n    if requested_kinds is not None and set(requested_kinds) == {\"prd\", \"prototype\"}:\n        config[\"recursion_limit\"] = _WORKBENCH_LINKED_LEAD_GRAPH_RECURSION_LIMIT\n    elif requested_kinds == [\"prd\"]:\n        config[\"recursion_limit\"] = _WORKBENCH_PRD_LEAD_GRAPH_RECURSION_LIMIT\n    else:\n        config[\"recursion_limit\"] = _DEFAULT_LEAD_GRAPH_RECURSION_LIMIT\n\n\n",
+          "position": "before"
+        },
+        {
+          "anchor": "def merge_run_context_overrides(config: dict[str, Any], context: Mapping[str, Any] | None, *, internal: bool = False) -> None:\n",
+          "insertion": "def merge_run_context_overrides(config: dict[str, Any], context: Mapping[str, Any] | None, *, internal: bool = False, allow_workbench_context: bool = False) -> None:\n",
+          "position": "replace"
+        },
+        {
+          "anchor": "    if \"user_id\" in context and isinstance(runtime_context, dict):\n        runtime_context.setdefault(\"user_id\", context[\"user_id\"])\n",
+          "position": "replace",
+          "insertion": "    if \"user_id\" in context and isinstance(runtime_context, dict):\n        runtime_context.setdefault(\"user_id\", context[\"user_id\"])\n    if allow_workbench_context and isinstance(runtime_context, dict):\n        scope = _normalize_workbench_scope(context.get(\"workbench\"))\n        if scope is None:\n            return\n        secrets = _normalize_workbench_secrets(context.get(\"secrets\"))\n        if scope.get(\"knowledgeEnabled\") is True:\n            if \"WORKBENCH_KNOWLEDGE_CAPABILITY\" not in secrets:\n                scope = dict(scope)\n                scope.pop(\"knowledgeEnabled\", None)\n        else:\n            secrets.pop(\"WORKBENCH_KNOWLEDGE_CAPABILITY\", None)\n        runtime_context[\"workbench\"] = scope\n        if secrets:\n            runtime_context[\"secrets\"] = secrets\n"
+        },
+        {
+          "anchor": "    default_recursion_limit, max_recursion_limit = _resolve_gateway_recursion_limits()\n",
+          "insertion": "    request_config = _sanitize_run_config(request_config)\n",
+          "position": "before"
+        },
+        {
+          "anchor": "    owner_context_token = set_current_user(SimpleNamespace(id=owner_user_id)) if owner_user_id else None\n",
+          "insertion": "    trusted_internal_caller = _is_trusted_internal_caller(request)\n    sanitized_request_config = _sanitize_run_config(body.config)\n",
+          "position": "before"
+        },
+        {
+          "anchor": "config = build_run_config(thread_id, body.config, run_metadata, assistant_id=body.assistant_id)",
+          "insertion": "config = build_run_config(thread_id, sanitized_request_config, run_metadata, assistant_id=body.assistant_id)",
+          "position": "replace"
+        },
+        {
+          "anchor": "merge_run_context_overrides(config, getattr(body, \"context\", None), internal=is_internal_caller)",
+          "insertion": "merge_run_context_overrides(config, getattr(body, \"context\", None), internal=is_internal_caller, allow_workbench_context=trusted_internal_caller)\n        _apply_workbench_lead_recursion_limit(config, trusted_internal_caller=trusted_internal_caller)",
+          "position": "replace"
+        },
+        {
+          "anchor": "redact_config_secrets(body.config)",
+          "insertion": "redact_config_secrets(sanitized_request_config)",
+          "position": "replace"
+        },
+        {
+          "anchor": "async def ahistory(self, config: dict[str, Any], *, limit: int | None = None) -> list[_RawCheckpointSnapshot]:",
+          "insertion": "async def ahistory(self, config: dict[str, Any], *, limit: int | None = None, metadata_filter: dict[str, Any] | None = None) -> list[_RawCheckpointSnapshot]:",
+          "position": "replace"
+        },
+        {
+          "anchor": "            if anchor is not None:\n                result.append(_RawCheckpointSnapshot(config, anchor))",
+          "insertion": "            if anchor is not None and all((getattr(anchor, \"metadata\", None) or {}).get(key) == value for key, value in (metadata_filter or {}).items()):\n                result.append(_RawCheckpointSnapshot(config, anchor))",
+          "position": "replace"
+        },
+        {
+          "anchor": "            async for tup in self.checkpointer.alist(walk_config, before=before, limit=remaining):",
+          "insertion": "            history_kwargs = {\"filter\": metadata_filter} if metadata_filter else {}\n            async for tup in self.checkpointer.alist(walk_config, before=before, limit=remaining, **history_kwargs):",
+          "position": "replace"
+        }
+      ]
+    },
+    {
+      "path": "app/gateway/routers/threads.py",
+      "upstreamSha256": "4c7e1b2312a68f52fe4ee090d11bcccf96f2718dc14ca306f59a0db9c6883ada",
+      "patchedSha256": "3ffe2e524e433612044acb4dac461f98e5049897fb247c0896351a86e77e0371",
+      "replacements": [
+        {
+          "anchor": "class ThreadHistoryRequest(BaseModel):\n    \"\"\"Request body for checkpoint history.\"\"\"\n\n    limit: int = Field(default=10, ge=1, le=100, description=\"Maximum entries\")\n    before: str | None = Field(default=None, description=\"Cursor for pagination\")\n",
+          "insertion": "_WORKBENCH_RUN_HISTORY_METADATA_KEYS: frozenset[str] = frozenset(\n    {\n        \"run_id\",\n        \"workbench_run_id\",\n        \"workbench_runtime_attempt_id\",\n        \"workbench_provider_idempotency_key\",\n        \"workbench_attempt\",\n    }\n)\n_WORKBENCH_RUN_HISTORY_METADATA_VALUE_MAX_LENGTH = 128\n\n\nclass ThreadHistoryRequest(BaseModel):\n    \"\"\"Request body for checkpoint history.\"\"\"\n\n    limit: int = Field(default=10, ge=1, le=100, description=\"Maximum entries\")\n    before: str | None = Field(default=None, description=\"Cursor for pagination\")\n    metadata: dict[str, Any] = Field(default_factory=dict, description=\"Checkpoint metadata filter\")\n\n    @field_validator(\"metadata\")\n    @classmethod\n    def _validate_workbench_run_filter(cls, value: dict[str, Any]) -> dict[str, Any]:\n        if not value:\n            return value\n        if set(value) != _WORKBENCH_RUN_HISTORY_METADATA_KEYS:\n            raise ValueError(\"History metadata filter must contain exactly the Workbench Run binding keys\")\n        for key in _WORKBENCH_RUN_HISTORY_METADATA_KEYS:\n            candidate = value[key]\n            if key == \"workbench_attempt\":\n                if not isinstance(candidate, int) or isinstance(candidate, bool) or candidate < 1:\n                    raise ValueError(\"History metadata attempt must be a positive integer\")\n                continue\n            if key == \"workbench_provider_idempotency_key\":\n                if (\n                    not isinstance(candidate, str)\n                    or len(candidate) != 69\n                    or not candidate.startswith(\"wbrt:\")\n                    or any(character not in \"0123456789abcdef\" for character in candidate[5:])\n                ):\n                    raise ValueError(\"History provider idempotency key must use the Workbench format\")\n                continue\n            if (\n                not isinstance(candidate, str)\n                or not candidate\n                or len(candidate) > _WORKBENCH_RUN_HISTORY_METADATA_VALUE_MAX_LENGTH\n                or candidate.strip() != candidate\n                or any(\n                    not character.isascii()\n                    or not (character.isalnum() or character in \"-_\")\n                    for character in candidate\n                )\n            ):\n                raise ValueError(\"History metadata filter values must be bounded identifiers\")\n        return value\n",
+          "position": "replace"
+        },
+        {
+          "anchor": "snapshots = await accessor.ahistory(config, limit=body.limit)",
+          "insertion": "snapshots = await accessor.ahistory(config, limit=body.limit, metadata_filter=body.metadata or None)",
+          "position": "replace"
+        }
+      ]
+    },
+    {
+      "path": "app/gateway/routers/thread_runs.py",
+      "upstreamSha256": "e076353df63cd4aa99ff79d5380cd3dfe848def606ad019bf6c57d43cde1a45e",
+      "patchedSha256": "3b6aa1a15c5d5a6271699d2e233992c0312f411df6a7715dd2367938161427f9",
+      "replacements": [
+        {
+          "anchor": "async def list_runs(thread_id: ThreadId, request: Request) -> list[RunResponse]:\n    \"\"\"List the newest runs for a thread (default 100, as a bare array).\"\"\"\n    run_mgr = get_run_manager(request)\n    user_id = await _run_scope_user_id(request)\n    records = await run_mgr.list_by_thread(thread_id, user_id=user_id)\n    return [_record_to_response(r) for r in records]\n",
+          "insertion": "async def list_runs(\n    thread_id: ThreadId,\n    request: Request,\n    limit: int = Query(default=100, ge=1, le=100),\n    offset: int = Query(default=0, ge=0, le=10_000),\n) -> list[RunResponse]:\n    \"\"\"List a bounded page of runs for a thread, newest first.\"\"\"\n    run_mgr = get_run_manager(request)\n    user_id = await _run_scope_user_id(request)\n    page_end = offset + limit\n    records = await run_mgr.list_by_thread(thread_id, user_id=user_id, limit=page_end)\n    return [_record_to_response(r) for r in records[offset:page_end]]",
+          "position": "replace"
+        }
+      ]
+    }
+  ],
+  "patchApplier": {
+    "sha256": "7a4ac3357cc6dfa579a4607c60230fb247423d4a2393c42712f0d3b5b2c2c44b"
+  },
+  "contractTest": {
+    "sha256": "6cc1cd508d3ff07835a88514fbc137503a9d7313e5a6f2f084b01c9b5ead0df5"
+  },
+  "requestContextTest": {
+    "sha256": "80c5fb6fce723e4173075f170641e5c12bf01f850a6e8cc739df809a21e1e48e"
+  },
+  "upgradeTest": {
+    "sha256": "6002ad054f20720f765e07b9354eabf712a0c335dda162f8efcc9b6ea5f3f880"
+  }
+}

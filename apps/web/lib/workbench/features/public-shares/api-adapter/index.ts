@@ -5,6 +5,8 @@ import {
   createProjectRemixResponseSchema,
   publicArtifactVersionDetailSchema,
   publicShareSchema,
+  exportPreviewTokenResponseSchema,
+  type ExportPreviewTokenResponse,
   type CreateProjectRemixRequest,
   type CreateProjectRemixResponse,
   type PublicArtifactVersionDetail,
@@ -18,6 +20,7 @@ import {
   createIdempotencyKey,
   immutableVersioned,
   normalizeIdempotencyKey,
+  parseContract,
   requireData,
   versioned,
   WorkbenchContractError,
@@ -88,6 +91,19 @@ export class WorkbenchPublicSharesApi {
       },
     );
     return requireBlob(result.data, "get public shared artifact content");
+  }
+
+  async createSourcePrototypePreviewToken(
+    shareToken: string,
+    artifactId: string,
+    artifactVersionId: string,
+    signal?: AbortSignal,
+  ): Promise<ExportPreviewTokenResponse> {
+    const result = await this.api.POST(
+      "/public/shares/{shareToken}/artifacts/{artifactId}/versions/{artifactVersionId}/preview-token" as never,
+      { params: { path: { shareToken, artifactId, artifactVersionId } }, signal } as never,
+    );
+    return parseContract(exportPreviewTokenResponseSchema, result.data, "create public source prototype preview");
   }
 
   async createProjectRemix(

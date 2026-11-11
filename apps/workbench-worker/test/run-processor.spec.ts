@@ -178,6 +178,11 @@ describe("Runtime retry classification", () => {
   });
 
   it("does not retry deterministic stream protocol or identity failures", () => {
+    const rejected = new Error("DEERFLOW_RUN_REQUEST_REJECTED");
+    expect(publicErrorMessage(rejected)).toBe("DEERFLOW_RUN_REQUEST_REJECTED");
+    expect(isRetryableRuntimeError(rejected)).toBe(false);
+    expect(isRetryableRuntimeError(new Error("DEERFLOW_STREAM_REPLAY_GAP"))).toBe(false);
+    expect(isRetryableRuntimeError(new Error("DEERFLOW_STREAM_LOCATION_INVALID"))).toBe(false);
     expect(isRetryableRuntimeError(new Error("DEERFLOW_STREAM_END_INVALID"))).toBe(false);
     expect(isRetryableRuntimeError(new Error("RUNTIME_EXTERNAL_EVENT_IDENTITY_CONFLICT")))
       .toBe(false);

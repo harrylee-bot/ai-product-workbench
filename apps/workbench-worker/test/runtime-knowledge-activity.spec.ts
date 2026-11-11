@@ -54,4 +54,22 @@ describe("knowledge process facts", () => {
     expect(effects[0]!.detail).toContain("尚无可引用资料");
     expect(effects[0]!.detail).not.toContain("secret");
   });
+  it("projects canonical document reference reads without exposing file contents", () => {
+    const referenceCall = {
+      type: "ai",
+      tool_calls: [{ id: "reference-1", name: "read_file", args: { path: "/mnt/skills/public/requirement-doc-template/references/structure.md" } }],
+    };
+    const referenceTool = {
+      type: "tool", name: "read_file", tool_call_id: "reference-1", status: "success",
+      content: "# 内部文档结构\n不要把原文回传给前端",
+    };
+    const effects = tracker().push({ messages: [human, referenceCall, referenceTool] });
+    expect(effects[0]).toMatchObject({
+      activityId: expect.stringMatching(/^document:/),
+      label: "文档规范",
+      status: "succeeded",
+    });
+    expect(effects[0]!.detail).toContain("需求文档结构规范");
+    expect(effects[0]!.detail).not.toContain("内部文档结构");
+  });
 });

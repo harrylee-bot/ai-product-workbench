@@ -13,8 +13,51 @@ import {
   httpOriginClass,
   httpPathClass,
   persistedTerminalSseAbortAttribution,
+  projectRouteFetchSettlement,
+  recoveredBoardRevisionConflicts,
   shouldFailRealStackEvidenceForSourceDrift,
 } from "./workbench-browser-network-evidence.mjs";
+
+test("project reload waits for the exact streamed client navigation to finish and fails on aborts", () => {
+  const pathHash = "a".repeat(64);
+  const pending = { pathHash, rsc: true, prefetch: false, state: "pending", responseStatus: null, flight: false };
+  const response = { ...pending, state: "response", responseStatus: 200, flight: true };
+  const finished = { ...response, state: "finished" };
+  const settle = (records) => projectRouteFetchSettlement(records, pathHash);
+  assert.equal(settle([]), "pending");
+  assert.equal(settle([pending]), "pending");
+  assert.equal(settle([response]), "pending", "headers and a rendered shell do not prove body completion");
+  assert.equal(settle([finished]), "complete");
+  assert.equal(settle([finished, pending]), "pending");
+  assert.equal(settle([{ ...finished, pathHash: "b".repeat(64) }]), "pending");
+  assert.equal(settle([{ ...finished, rsc: false }]), "pending");
+  assert.equal(settle([{ ...finished, prefetch: true }]), "complete", "production navigation may render from its completed cache");
+  assert.equal(settle([finished, { ...pending, prefetch: true }]), "pending");
+  assert.equal(settle([{ ...finished, prefetch: true }, { ...response, state: "failed" }]), "failed");
+  for (const failed of [
+    { ...response, state: "failed" },
+    { ...response, responseStatus: 401 },
+    { ...response, responseStatus: 500 },
+    { ...finished, flight: false },
+  ]) assert.equal(settle([finished, failed]), "failed");
+});
+
+test("Board conflict attribution requires a fresh CAS, persisted viewport, and unchanged existing content", () => {
+  const node = { id: "existing", data: { title: "Keep this content" } };
+  const request = { viewport: { x: 12, y: 24, zoom: 0.8 }, nodes: [node], edges: [] };
+  const failed = { responseIndex: 2, projectPath: "/projects/same/board", status: 412,
+    code: "REVISION_CONFLICT", ifMatch: '"1"', request };
+  const saved = { responseIndex: 4, projectPath: failed.projectPath, status: 200, ifMatch: '"2"',
+    request, board: { ...request, revision: 3, nodes: [node, { id: "generated" }] } };
+  assert.equal(recoveredBoardRevisionConflicts([failed, saved]).length, 1);
+  for (const invalid of [
+    { ...saved, ifMatch: '"1"' },
+    { ...saved, projectPath: "/projects/other/board" },
+    { ...saved, board: { ...saved.board, nodes: [{ id: "generated" }] } },
+    { ...saved, board: { ...saved.board, viewport: { x: 0, y: 0, zoom: 1 } } },
+  ]) assert.deepEqual(recoveredBoardRevisionConflicts([failed, invalid]), []);
+  assert.deepEqual(recoveredBoardRevisionConflicts([failed]), []);
+});
 
 test("browser-only mode fails closed unless the real-stack browser lane is enabled", () => {
   assert.doesNotThrow(() => assertRealStackBrowserMode({ browserOnly: false, enabled: false }));
@@ -33,40 +76,33 @@ test("source drift invalidates otherwise successful real-stack evidence", () => 
   assert.equal(shouldFailRealStackEvidenceForSourceDrift("running", true), false);
 });
 
-test("attributes only a same-route client prefetch abort with successful route evidence", () => {
-  const failure = {
-    abortAttribution: null,
-    originClass: "web",
-    method: "GET",
-    pathClass: "/projects/:id",
-    errorText: "net::ERR_ABORTED",
-    resourceType: "fetch",
-  };
-  const navigationEvidence = [{
-    actualPathClass: "/projects/:id",
-    status: 200,
-    targetPathClass: "/projects/:id",
-  }];
-  assert.deepEqual(clientRoutePrefetchAbortAttribution({
-    currentPathClass: "/projects/:id",
-    failure,
-    navigationEvidence,
-  }), { cause: "client-route-prefetch" });
-  assert.equal(clientRoutePrefetchAbortAttribution({
-    currentPathClass: "/",
-    failure,
-    navigationEvidence,
-  }), null);
-  assert.equal(clientRoutePrefetchAbortAttribution({
-    currentPathClass: "/projects/:id",
-    failure: { ...failure, resourceType: "document" },
-    navigationEvidence,
-  }), null);
-  assert.equal(clientRoutePrefetchAbortAttribution({
-    currentPathClass: "/projects/:id",
-    failure,
-    navigationEvidence: [],
-  }), null);
+test("prefetch abort attribution requires Next request markers and the same rendered destination", () => {
+  const pathHash = "a".repeat(64);
+  const failure = { abortAttribution: null, originClass: "web", method: "GET",
+    pathClass: "/projects/:id", errorText: "net::ERR_ABORTED", resourceType: "fetch",
+    routeFetch: { rsc: true, prefetch: true, navigationRequest: false, pathHash, responseStatus: null } };
+  const hardNavigation = { actualPathClass: "/projects/:id", targetPathClass: "/projects/:id", pathHash,
+    kind: "reload", status: 200 };
+  const clientNavigation = { ...hardNavigation, kind: "client-route", status: null, projectShellReady: true };
+  const classify = (candidate = failure, evidence = [clientNavigation], currentPathClass = "/projects/:id") =>
+    clientRoutePrefetchAbortAttribution({ currentPathClass, failure: candidate, navigationEvidence: evidence });
+  const expected = { cause: "client-route-prefetch", nextRscPrefetchVerified: true, destinationRendered: true };
+  assert.deepEqual(classify(), expected);
+  assert.deepEqual(classify(failure, [hardNavigation]), expected);
+  assert.equal(classify(failure, [], "/projects/:id"), null);
+  assert.equal(classify(failure, [clientNavigation], "/"), null);
+  assert.equal(classify(failure, [{ ...clientNavigation, projectShellReady: false }]), null);
+  assert.equal(classify(failure, [{ ...clientNavigation, pathHash: "b".repeat(64) }]), null);
+  assert.equal(classify(failure, [{ ...hardNavigation, status: 500 }]), null);
+  for (const change of [
+    { resourceType: "document" }, { pathClass: "/api/v1/projects/:id" },
+    { errorText: "net::ERR_CONNECTION_RESET" }, { method: "POST" },
+    { routeFetch: undefined }, { abortAttribution: { cause: "already-attributed" } },
+  ]) assert.equal(classify({ ...failure, ...change }), null);
+  for (const change of [
+    { rsc: false }, { prefetch: false }, { navigationRequest: true },
+    { pathHash: "unverified" }, { responseStatus: undefined }, { responseStatus: 401 }, { responseStatus: 500 },
+  ]) assert.equal(classify({ ...failure, routeFetch: { ...failure.routeFetch, ...change } }), null);
 });
 
 test("classifies browser origins and failures without retaining unknown locations or messages", () => {
@@ -105,6 +141,15 @@ test("requires forward SSE replay plus completed and failed browser terminal evi
 });
 
 test("accepts only allowlisted browser-observed SSE names and forward sequences", () => {
+  assert.deepEqual(browserSseEventEvidence({
+    afterSequence: 7,
+    eventName: "artifact.preview.updated",
+    sequence: 8,
+  }), {
+    afterSequence: 7,
+    eventName: "artifact.preview.updated",
+    sequence: 8,
+  });
   assert.deepEqual(browserSseEventEvidence({
     afterSequence: 7,
     eventName: "run.completed",

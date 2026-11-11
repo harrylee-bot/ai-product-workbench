@@ -22,7 +22,7 @@ MAX_REPAIR_BYTES = 65_536
 MAX_HISTORY_DRAFTS = 32
 _ROOT_MOVE_SOURCES = frozenset({
     "degradation", "safetyBaseline", "flowAndPages", "introduction",
-    "businessRequirements", "acceptanceCriteria", "additionalSections", "sections",
+    "businessRequirements", "acceptanceCriteria", "additionalSections", "functionSections", "sections",
 })
 _IDENTITY_FIELDS = ("kind", "schemaVersion", "operation")
 
@@ -300,7 +300,7 @@ def template_restore_operation(issue: Any) -> dict[str, str] | None:
 
 
 def _restore_template(candidate: dict[str, Any], operation: dict[str, Any], parts: list[str]) -> None:
-    if candidate.get("kind") != "prd" or candidate.get("schemaVersion") != 2:
+    if candidate.get("kind") != "prd" or candidate.get("schemaVersion") not in (2, 3):
         _fail("TEMPLATE_PATH_FORBIDDEN")
     # Recompute after earlier operations. Never trust model-supplied expected text
     # or stale directory indexes from an ACK before a section move.

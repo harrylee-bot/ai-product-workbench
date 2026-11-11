@@ -18,6 +18,7 @@ type RuntimeExecuteQueueSender = {
 export class RuntimeExecutionReconciler {
   private timer: NodeJS.Timeout | null = null;
   private running = false;
+  private activeRun: Promise<void> | null = null;
 
   constructor(
     private readonly db: PrismaClient,
@@ -33,13 +34,26 @@ export class RuntimeExecutionReconciler {
     this.timer.unref();
   }
 
-  stop(): void {
-    if (!this.timer) return;
-    clearInterval(this.timer);
-    this.timer = null;
+  stop(): Promise<void> {
+    if (this.timer) {
+      clearInterval(this.timer);
+      this.timer = null;
+    }
+    return this.activeRun ?? Promise.resolve();
   }
 
   async runOnce(): Promise<void> {
+    if (this.activeRun) return;
+    const run = this.reconcile();
+    this.activeRun = run;
+    try {
+      await run;
+    } finally {
+      if (this.activeRun === run) this.activeRun = null;
+    }
+  }
+
+  private async reconcile(): Promise<void> {
     if (this.running) return;
     this.running = true;
     try {

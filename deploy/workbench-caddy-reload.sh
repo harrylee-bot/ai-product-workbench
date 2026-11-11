@@ -4,13 +4,7 @@ set -eu
 APP_DIR=${WORKBENCH_APP_DIR:-/opt/workbench}
 ENV_FILE=${WORKBENCH_ENV_FILE:-$APP_DIR/deploy/workbench.env}
 CADDY_FILE=${WORKBENCH_CADDY_FILE:-$APP_DIR/deploy/workbench-production.Caddyfile}
-if [ -n "${WORKBENCH_PREFLIGHT_SCRIPT:-}" ]; then
-  PREFLIGHT_SCRIPT="$WORKBENCH_PREFLIGHT_SCRIPT"
-elif printf '%s' "$CADDY_FILE" | grep -Fq 'workbench-server-validation.Caddyfile'; then
-  PREFLIGHT_SCRIPT="$APP_DIR/deploy/workbench-server-preflight.sh"
-else
-  PREFLIGHT_SCRIPT="$APP_DIR/deploy/workbench-production-preflight.sh"
-fi
+PREFLIGHT_SCRIPT="$APP_DIR/deploy/workbench-production-preflight.sh"
 CADDY_INSTALL_FILE=/etc/caddy/Caddyfile
 CADDY_RUNTIME_ENV_FILE=/etc/caddy/workbench-origin-edge.env
 CADDY_DROP_IN_DIR=/etc/systemd/system/caddy.service.d
@@ -58,14 +52,11 @@ web_origin=$(env_value WORKBENCH_WEB_ORIGIN)
 
 origin_env_tmp=$(mktemp)
 trap 'rm -f "$origin_env_tmp"' EXIT HUP INT TERM
-WORKBENCH_IDENTITY_HOSTNAME=
 node "$ORIGIN_MANIFEST_SCRIPT" --env-file "$ENV_FILE" --format caddy-env >"$origin_env_tmp" \
   || fail "public origin manifest is invalid"
 . "$origin_env_tmp"
 web_hostname=$WORKBENCH_WEB_HOSTNAME
 preview_hostname=$WORKBENCH_PREVIEW_HOSTNAME
-s3_hostname=$WORKBENCH_S3_HOSTNAME
-identity_hostname=$WORKBENCH_IDENTITY_HOSTNAME
 
 WORKBENCH_EDGE_WIREGUARD_IP="$edge_wireguard_ip" \
 WORKBENCH_ORIGIN_WIREGUARD_IP="$origin_wireguard_ip" \
@@ -73,8 +64,6 @@ WORKBENCH_ORIGIN_HTTP_PORT="$origin_http_port" \
 WORKBENCH_EDGE_ORIGIN_AUTH_SECRET="$edge_origin_auth_secret" \
 WORKBENCH_WEB_HOSTNAME="$web_hostname" \
 WORKBENCH_PREVIEW_HOSTNAME="$preview_hostname" \
-WORKBENCH_S3_HOSTNAME="$s3_hostname" \
-WORKBENCH_IDENTITY_HOSTNAME="$identity_hostname" \
   caddy validate --adapter caddyfile --config "$CADDY_FILE" >/dev/null
 
 runtime_env_tmp=$(mktemp)
@@ -87,10 +76,6 @@ umask 077
   printf 'WORKBENCH_EDGE_ORIGIN_AUTH_SECRET=%s\n' "$edge_origin_auth_secret"
   printf 'WORKBENCH_WEB_HOSTNAME=%s\n' "$web_hostname"
   printf 'WORKBENCH_PREVIEW_HOSTNAME=%s\n' "$preview_hostname"
-  printf 'WORKBENCH_S3_HOSTNAME=%s\n' "$s3_hostname"
-  if [ -n "$identity_hostname" ]; then
-    printf 'WORKBENCH_IDENTITY_HOSTNAME=%s\n' "$identity_hostname"
-  fi
 } >"$runtime_env_tmp"
 
 install -d -m 0755 "$(dirname "$CADDY_INSTALL_FILE")" "$CADDY_DROP_IN_DIR"

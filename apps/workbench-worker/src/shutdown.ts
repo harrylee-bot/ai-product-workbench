@@ -1,5 +1,5 @@
 export type WorkerShutdownDependencies = {
-  stopReconcilers: () => void;
+  stopReconcilers: () => Promise<void>;
   stopQueue: () => Promise<void>;
   disconnectDatabase: () => Promise<void>;
   shutdownTelemetry: () => Promise<void>;
@@ -12,7 +12,7 @@ export async function shutdownWorker(
   dependencies: WorkerShutdownDependencies,
 ): Promise<void> {
   dependencies.log(`[worker] received ${signal}`);
-  dependencies.stopReconcilers();
+  await dependencies.stopReconcilers();
   dependencies.log("[worker] shutdown phase=reconcilers-stopped");
   await dependencies.stopQueue();
   dependencies.log("[worker] shutdown phase=queue-stopped");

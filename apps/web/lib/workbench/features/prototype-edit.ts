@@ -1,11 +1,12 @@
 import {
   canonicalJson,
   type PrototypeDocument,
+  type SourcePrototypeInput,
 } from "@workbench/workbench-contracts";
 
 export function prototypeDocumentEditIdempotencyKey(
   baseArtifactVersionId: string,
-  document: PrototypeDocument,
+  document: PrototypeDocument | SourcePrototypeInput,
 ): string {
   const serialized = canonicalJson(document);
   const baseSegment = baseArtifactVersionId.slice(0, 80);

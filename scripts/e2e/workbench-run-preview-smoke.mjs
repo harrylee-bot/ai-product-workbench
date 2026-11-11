@@ -18,7 +18,7 @@ const evidenceLevel = process.env.WORKBENCH_E2E_EVIDENCE_LEVEL ?? "fixture";
 const incrementalPreview = process.env.WORKBENCH_E2E_GENERATION_PREVIEW === "1";
 const readyHandoff = process.env.WORKBENCH_E2E_READY_HANDOFF === "1";
 let checkpointFailures = 0;
-let visibleSequence = incrementalPreview || readyHandoff ? 9 : Infinity;
+let visibleSequence = 9;
 const previewWaiters = new Set();
 function advancePreview(sequence) {
   visibleSequence = sequence;
@@ -270,6 +270,24 @@ if (incrementalPreview) {
   events.push(runEvent(11, draft.type, draft.payload));
 }
 
+function completeRun() {
+  if (run.status === "succeeded") return;
+  const versionSequence = events.at(-1).sequence + 1;
+  const completedSequence = versionSequence + 1;
+  Object.assign(run, { status: "succeeded", attempt: 1, lastEventSequence: completedSequence, startedAt: timestamp, finishedAt: timestamp });
+  board = { ...board, revision: board.revision + 1, nodes: prototypeDocument.screens.map((screen, index) => ({
+    id: index === 0 ? "node-ready-handoff" : "node-ready-approval", kind: "artifact", parentNodeId: null, order: index,
+    position: { x: 120 + index * 470, y: 120 }, size: screen.viewport,
+    artifactId: prototypeArtifactId, artifactVersionId: prototypeVersionId,
+    data: { protocol: "workbench.board-node.v1", nodeType: "artifact",
+      title: screen.name, artifactKind: "prototype", screenId: screen.id },
+  })) };
+  events.push(runEvent(versionSequence, "artifact.version.created", {
+    artifactId: prototypeArtifactId, artifactVersionId: prototypeVersionId, version: 1,
+  }), runEvent(completedSequence, "run.completed", { artifactCount: 1 }));
+  advancePreview(completedSequence);
+}
+
 await mkdir(outputDir, { recursive: true });
 const browser = await chromium.launch({ headless: true });
 
@@ -315,7 +333,7 @@ try {
       assert(runSubmitted, "Run events must not be requested before SubmissionIntent submit succeeds");
       const afterSequence = Number(url.searchParams.get("afterSequence") ?? "0");
       streamCursors.push(afterSequence);
-      if ((incrementalPreview || readyHandoff) && afterSequence >= visibleSequence) await new Promise((resolve) => previewWaiters.add(resolve));
+      if (run.status !== "succeeded" && afterSequence >= visibleSequence) await new Promise((resolve) => previewWaiters.add(resolve));
       const pendingEvents = events.filter((event) => event.sequence > afterSequence && event.sequence <= visibleSequence);
       return sse(route, pendingEvents);
     }
@@ -376,7 +394,7 @@ try {
         selectedThreadId: thread.id,
         entries: runSubmitted ? [promptEntry] : [],
         board,
-        artifacts: readyHandoff && run.status === "succeeded" ? [{
+        artifacts: run.status === "succeeded" ? [{
           id: prototypeArtifactId, projectId: project.id, kind: "prototype",
           title: prototypeDocument.title, revision: 1,
           currentVersion: { artifactId: prototypeArtifactId, artifactVersionId: prototypeVersionId,
@@ -506,7 +524,7 @@ try {
         version: 1,
         kind: "prototype",
         schemaVersion: 1,
-        status: readyHandoff && run.status === "succeeded" ? "ready" : "staging",
+        status: run.status === "succeeded" ? "ready" : "staging",
         checksum: prototypeChecksum,
         citations: [],
         createdByRunId: run.id,
@@ -647,58 +665,65 @@ try {
     page,
     "SubmissionIntent submit",
   );
+  const previewNode = page.locator(
+    '[data-workbench-generated-node][data-generated-index="1"]',
+  );
+  let activeLogRowCount = 0;
   if (incrementalPreview) {
     const live = page.getByRole("region", { name: "生成中预览" });
-    await live.waitFor();
+    await page.locator('[data-panel-motion="agent-card"]').getByRole("button", { name: "查看生成过程" }).waitFor();
+    assert(await live.count() === 0, "A screen name without generated nodes must not create a blank preview");
     assert(await page.locator("[data-workbench-generated-node]").count() === 0, "Live preview must precede the first validated Artifact");
-    assert(await live.getByRole("button", { name: "提交采购审批" }).count() === 0, "The first partial screen must not invent later components");
     advancePreview(10);
+    await live.waitFor();
     await live.getByRole("button", { name: "提交采购审批" }).waitFor();
+    await waitForPreviewContentVisibility(page);
     await page.screenshot({ path: path.join(outputDir, "generation-preview-desktop.png"), fullPage: true });
     await page.setViewportSize({ width: 390, height: 844 });
     await assertNoHorizontalPageOverflow(page, "live preview at 390px");
     const box = await live.boundingBox();
     assert(box && box.width > 300 && box.height > 250, "Live preview must remain readable on mobile");
+    await waitForPreviewContentVisibility(page);
     await page.screenshot({ path: path.join(outputDir, "generation-preview-mobile.png"), fullPage: true });
     await page.setViewportSize({ width: 1501, height: 855 });
-    advancePreview(11);
-    await live.waitFor({ state: "detached" });
+    activeLogRowCount = await captureActiveRunSurface(page, desktopScreenshot, mobileScreenshot);
+    completeRun();
+    await page.getByRole("region", { name: "生成结果预览" }).waitFor();
+    assert(await page.getByRole("region", { name: "生成中预览" }).count() === 0,
+      "Completed Run must replace the live preview in the same dock");
+  } else if (!readyHandoff) {
+    await page.locator('[data-panel-motion="agent-card"]').getByRole("button", { name: "查看生成过程" }).waitFor();
+    assert(await page.locator("[data-workbench-generation-preview]").count() === 0,
+      "Preview must remain absent until generated content arrives");
+    activeLogRowCount = await captureActiveRunSurface(page, desktopScreenshot, mobileScreenshot);
+    completeRun();
+  } else {
+    await page.locator('[data-panel-motion="agent-card"]').getByRole("button", { name: "查看生成过程" }).waitFor();
+    assert(await page.locator("[data-workbench-generated-node]").count() === 0,
+      "Active Run must keep staging artifacts out of the saved canvas");
+    completeRun();
   }
-  const previewNode = page.locator(
-    '[data-workbench-generated-node][data-generated-index="1"]',
-  );
-  try {
-    await previewNode.waitFor({ timeout: 10_000 });
-  } catch (error) {
-    const pageState = await page.locator("body").innerText().catch(() => "<body unavailable>");
-    throw new Error([
-      "Run preview did not appear after SubmissionIntent submit",
-      `unknownRequests=${JSON.stringify(unknownRequests)}`,
-      `consoleErrors=${JSON.stringify(consoleErrors)}`,
-      `currentSubmissionIntentReads=${JSON.stringify(currentSubmissionIntentReads)}`,
-      `pageState=${JSON.stringify(pageState.slice(0, 4_000))}`,
-    ].join("\n"), { cause: error });
+  if (incrementalPreview || readyHandoff) {
+    try {
+      await previewNode.waitFor({ timeout: 10_000 });
+    } catch (error) {
+      const pageState = await page.locator("body").innerText().catch(() => "<body unavailable>");
+      throw new Error([
+        "Run preview did not appear after SubmissionIntent submit",
+        `unknownRequests=${JSON.stringify(unknownRequests)}`,
+        `consoleErrors=${JSON.stringify(consoleErrors)}`,
+        `currentSubmissionIntentReads=${JSON.stringify(currentSubmissionIntentReads)}`,
+        `pageState=${JSON.stringify(pageState.slice(0, 4_000))}`,
+      ].join("\n"), { cause: error });
+    }
   }
-  const runSurface = page.locator("[data-workbench-project]");
   if (readyHandoff) {
-    await waitForValue(() => checkpointFailures >= 3, page, "bounded checkpoint failures");
-    await previewNode.getByText("Generating artifact...", { exact: true }).waitFor();
-    Object.assign(run, { status: "succeeded", attempt: 1, lastEventSequence: 11, finishedAt: timestamp });
-    board = { ...board, revision: board.revision + 1, nodes: [{
-      id: "node-ready-handoff", kind: "artifact", parentNodeId: null, order: 0,
-      position: { x: 120, y: 120 }, size: { width: 390, height: 844 },
-      artifactId: prototypeArtifactId, artifactVersionId: prototypeVersionId,
-      data: { protocol: "workbench.board-node.v1", nodeType: "artifact",
-        title: prototypeDocument.title, artifactKind: "prototype", screenId: "screen-request" },
-    }] };
-    events.push(runEvent(10, "artifact.version.created", {
-      artifactId: prototypeArtifactId, artifactVersionId: prototypeVersionId, version: 1,
-    }), runEvent(11, "run.completed", { artifactCount: 1 }));
-    advancePreview(11);
     const formalNode = page.locator('[data-id="node-ready-handoff"]');
     await formalNode.locator('[data-canvas-visual-screen][data-canvas-screen-id="screen-request"]').waitFor({ timeout: 15_000 });
     assert(await page.getByText("Generating artifact...", { exact: true }).count() === 0,
       "Ready content must replace the stuck projection in the same page");
+    assert(checkpointFailures >= 1,
+      "Ready handoff must exercise recovery from an unavailable draft checkpoint");
     await page.screenshot({ path: path.join(outputDir, "ready-handoff-desktop.png"), fullPage: true });
     await page.setViewportSize({ width: 390, height: 844 });
     await formalNode.locator('[data-canvas-visual-screen][data-canvas-screen-id="screen-request"]').waitFor();
@@ -710,57 +735,14 @@ try {
     console.log(JSON.stringify({ ok: true, evidenceLevel, mockedTransport: true,
       readyHandoff: true, withoutReload: true, checkpointFailures, consoleErrors }));
   } else {
-  await previewNode.getByText("正在细化：采购审批页", { exact: true }).first().waitFor();
-  await runSurface.getByText(prompt, { exact: true }).first().waitFor();
-  await runSurface.getByText(activityLabel, { exact: true }).first().waitFor();
-  await runSurface.getByText(assistantMessage, { exact: true }).first().waitFor();
-  const phaseLabels = runSurface.getByText(phaseLabel, { exact: true });
-  await phaseLabels.first().waitFor();
-
-  assert(
-    await runSurface.getByText(projectTitle, { exact: true }).count() >= 1,
-    "Pending Board preview must show the real Project title",
-  );
-  assert(
-    await phaseLabels.count() >= 1,
-    "Pending Board preview must show the real Run phase label",
-  );
-  const logPanel = runSurface.locator("[data-left-task-stack]");
-  const logHeader = logPanel.getByText("智能体日志", { exact: true });
-  await logHeader.waitFor();
-  const logRows = logPanel.locator("div.workbench-task-pill, button[aria-pressed]");
-  const desktopLogRowCount = await logRows.count();
-  assert(
-    desktopLogRowCount === 4,
-    `Pending Board preview must render exactly four Run log rows: ${desktopLogRowCount}`,
-  );
-  assert(
-    await page.locator('[data-id*="synthetic"]').count() === 0,
-    "Pending Board preview must not expose synthetic node ids",
-  );
-  for (const fakeCopy of legacySyntheticCopy) {
-    assert(
-      await page.getByText(fakeCopy, { exact: true }).count() === 0,
-      `Legacy synthetic copy must be absent: ${fakeCopy}`,
-    );
-  }
-
-  await assertNoHorizontalPageOverflow(page, "desktop");
-  await page.screenshot({ path: desktopScreenshot, fullPage: true });
-
-  await page.setViewportSize({ width: 390, height: 844 });
-  await page.waitForTimeout(350);
-  await assertNoHorizontalPageOverflow(page, "390px mobile");
-  assert(
-    await runSurface.getByText(activityLabel, { exact: true }).count() >= 1,
-    "Real Run activity must remain mounted at 390px",
-  );
-  assert(
-    await runSurface.getByText(assistantMessage, { exact: true }).count() >= 1,
-    "Real assistant message must remain mounted at 390px",
-  );
-  assert(await logRows.count() === 4, "Run log must remain four rows at 390px");
-  await page.screenshot({ path: mobileScreenshot, fullPage: true });
+  if (!incrementalPreview) await previewNode.waitFor({ timeout: 10_000 });
+  await previewNode.getByText("采购审批页", { exact: true }).first().waitFor();
+  assert(await previewNode.getAttribute("data-generated-ready") === "true",
+    "Completed Run preview must expose a ready generated screen");
+  await previewNode.locator('[data-canvas-visual-screen][data-canvas-screen-id="screen-approval"]').waitFor();
+  await page.getByRole("region", { name: "生成结果预览" }).waitFor();
+  await assertNoHorizontalPageOverflow(page, "completed Run");
+  await page.screenshot({ path: path.join(outputDir, "generation-result-desktop.png"), fullPage: true });
 
   assert(streamCursors[0] === 0, `Run stream must start at sequence 0: ${streamCursors.join(", ")}`);
   assert(designPresetReads === 1, `Design Preset catalog must be loaded exactly once: ${designPresetReads}`);
@@ -788,7 +770,7 @@ try {
     prompt,
     activityLabel,
     assistantMessage,
-    runLogRows: await logRows.count(),
+    runLogRows: activeLogRowCount,
     streamCursors,
     designPreset: designPresetReference,
     submissionIntentCreates: submissionIntentCreates.length,
@@ -908,6 +890,80 @@ function prototypeDocumentFixture() {
   };
 }
 
+async function captureActiveRunSurface(page, desktopPath, mobilePath) {
+  const runSurface = page.locator("[data-workbench-project]");
+  await runSurface.getByText(prompt, { exact: true }).first().waitFor();
+  await runSurface.getByText(activityLabel, { exact: true }).first().waitFor();
+  await runSurface.getByText(assistantMessage, { exact: true }).first().waitFor();
+  const phaseLabels = runSurface.getByText(phaseLabel, { exact: true });
+  await phaseLabels.first().waitFor();
+  const logPanel = runSurface.locator("[data-left-task-stack]");
+  await logPanel.getByText("智能体日志", { exact: true }).waitFor();
+  const logRows = logPanel.locator("div.workbench-task-pill, button[aria-pressed]");
+  const logRowCount = await logRows.count();
+  assert(logRowCount === 4,
+    `Pending Board preview must render exactly four Run log rows: ${logRowCount}`);
+  assert(await runSurface.getByText(projectTitle, { exact: true }).count() >= 1,
+    "Pending Board preview must show the real Project title");
+  assert(await phaseLabels.count() >= 1,
+    "Pending Board preview must show the real Run phase label");
+  assert(await page.locator('[data-id*="synthetic"]').count() === 0,
+    "Pending Board preview must not expose synthetic node ids");
+  for (const fakeCopy of legacySyntheticCopy) {
+    assert(await page.getByText(fakeCopy, { exact: true }).count() === 0,
+      `Legacy synthetic copy must be absent: ${fakeCopy}`);
+  }
+  await assertNoHorizontalPageOverflow(page, "desktop");
+  await verifyProcessLocation(page, "desktop");
+  await page.screenshot({ path: desktopPath, fullPage: true });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.waitForTimeout(350);
+  await assertNoHorizontalPageOverflow(page, "390px mobile");
+  for (const name of ["Pan", "Select"]) {
+    const control = page.locator("[data-right-tool-rail]").getByRole("button", { name, exact: true });
+    const bounds = await control.boundingBox();
+    assert(bounds, `Mobile ${name} control must be visible`);
+    await control.click({ position: { x: bounds.width / 2, y: bounds.height - 4 } });
+    assert(await control.getAttribute("aria-pressed") === "true",
+      `Generation preview must not block the mobile ${name} control`);
+  }
+  const mobileActivity = await runSurface.getByText(activityLabel, { exact: true }).count() >= 1;
+  const mobileAssistantMessage = await runSurface.getByText(assistantMessage, { exact: true }).count() >= 1;
+  assert(mobileActivity, "Real Run activity must remain mounted at 390px");
+  assert(mobileAssistantMessage, "Real assistant message must remain mounted at 390px");
+  assert(await logRows.count() === 4, "Run log must remain four rows at 390px");
+  await verifyProcessLocation(page, "mobile");
+  await page.screenshot({ path: mobilePath, fullPage: true });
+  await page.setViewportSize({ width: 1501, height: 855 });
+  return logRowCount;
+}
+
+async function verifyProcessLocation(page, device) {
+  const status = page.locator(device === "mobile" ? "[data-mobile-run-status]" : '[data-panel-motion="agent-card"]');
+  const trigger = status.getByRole("button", { name: "查看生成过程" });
+  await trigger.click();
+  const process = status.getByRole("region", { name: "生成过程" });
+  await process.waitFor();
+  assert(await process.locator("[data-generation-step]").count() > 0, "Upper task status must expose real generation stages");
+  assert(await page.locator("[data-workbench-generation-preview] [data-generation-step], [data-workbench-generation-preview] [data-workbench-generation-process]").count() === 0,
+    "Preview must contain generated content without generation process");
+  await page.screenshot({ path: `output/audit/1.0.0/process-preview/process-${device}.png`, fullPage: true });
+  await status.getByRole("button", { name: "收起生成过程" }).click();
+  assert(await status.getByRole("region", { name: "生成过程" }).count() === 0, "Process disclosure must close");
+}
+
+async function waitForPreviewContentVisibility(page) {
+  await page.waitForFunction(() => {
+    const viewport = document.querySelector("[data-workbench-generation-preview-scroll]");
+    const button = viewport?.querySelector("button");
+    if (!viewport || !button) return false;
+    const contentBounds = viewport.getBoundingClientRect();
+    const buttonBounds = button.getBoundingClientRect();
+    return buttonBounds.top >= contentBounds.top && buttonBounds.bottom <= contentBounds.bottom
+      && buttonBounds.left >= contentBounds.left && buttonBounds.right <= contentBounds.right;
+  }, undefined, { timeout: 10_000 });
+}
+
 async function waitForValue(predicate, page, label) {
   const startedAt = Date.now();
   while (!predicate() && Date.now() - startedAt < 8_000) {
@@ -918,7 +974,7 @@ async function waitForValue(predicate, page, label) {
 
 async function sse(route, streamEvents) {
   const body = [
-    incrementalPreview || readyHandoff ? "retry: 100\n\n" : "retry: 10000\n\n",
+    "retry: 100\n\n",
     ...streamEvents.map((event) => (
       `id: ${event.sequence}\nevent: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`
     )),

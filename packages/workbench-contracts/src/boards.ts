@@ -116,7 +116,7 @@ export const boardEdgeSchema = z.object({
   sourceNodeId: opaqueIdSchema,
   targetNodeId: opaqueIdSchema,
   kind: z.string().min(1).max(80),
-  data: z.record(z.unknown()),
+  data: z.record(z.string(), z.unknown()),
 });
 
 export const boardNodesSchema = z.array(boardNodeSchema).max(maximumBoardNodeCount).superRefine((nodes, context) => {

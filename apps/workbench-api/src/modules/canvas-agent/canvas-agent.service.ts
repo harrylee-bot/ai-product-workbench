@@ -48,8 +48,6 @@ import {
 import { Prisma } from "@workbench/workbench-db";
 import { hashRequest, validateIdempotencyKey } from "../../common/idempotency.js";
 import {
-  notFoundProblem,
-  revisionConflictProblem,
   validationProblem,
 } from "../../common/problem-details.js";
 import { WorkbenchDbService } from "../../platform/database/workbench-db.service.js";
@@ -1376,7 +1374,7 @@ export class CanvasAgentService {
       });
       if (existing) {
         if (existing.requestHash !== requestHash) throw canvasInvocationConflictProblem("toolCallId was reused with a different request");
-        const replay = await this.replayInvocation(tx, existing as unknown as InvocationRow, request);
+        const replay = await this.replayInvocation(tx, existing as unknown as InvocationRow);
         if (replay) return { kind: "replay" as const, result: replay };
         if (existing.status !== "in_flight" || !existing.leaseToken || !existing.leaseExpiresAt) {
           throw canvasInvocationConflictProblem("Canvas invocation is not in a recoverable state");
@@ -1399,7 +1397,7 @@ export class CanvasAgentService {
         if (transferred.count !== 1) {
           const latest = await tx.canvasToolInvocation.findUnique({ where: { id: existing.id } });
           if (latest) {
-            const settled = await this.replayInvocation(tx, latest as unknown as InvocationRow, request);
+            const settled = await this.replayInvocation(tx, latest as unknown as InvocationRow);
             if (settled) return { kind: "replay" as const, result: settled };
           }
           throw canvasInvocationConflictProblem("Canvas invocation lease changed concurrently");
@@ -1477,7 +1475,6 @@ export class CanvasAgentService {
   private async replayInvocation(
     tx: Prisma.TransactionClient,
     invocation: InvocationRow,
-    request: CanvasAgentToolRequest,
   ): Promise<CanvasAgentToolResult | null> {
     if (terminalInvocationStatuses.has(invocation.status) && invocation.response !== null) {
       return canvasAgentToolResultSchema.parse(invocation.response);
@@ -2667,10 +2664,4 @@ function decodeCommandCursor(value: string): { createdAt: Date; id: string } {
   } catch {
     throw validationProblem("The Canvas command cursor is invalid");
   }
-}
-
-function extractSelectedNodeIds(result: unknown): string[] {
-  const parsed = canvasSelectScreenOutputSchema.safeParse(result);
-  if (!parsed.success) return [];
-  return parsed.data.selection.items.map((item) => item.reference.boardNodeId);
 }

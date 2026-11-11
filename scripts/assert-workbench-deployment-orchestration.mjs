@@ -6,12 +6,9 @@ import YAML from "yaml";
 
 const compose = readYaml("deploy/workbench-compose.yml");
 const runtime = readYaml("deploy/deerflow-runtime-compose.yml");
-const validation = readYaml("deploy/workbench-server-validation-compose.yml");
 const serverDeploy = read("deploy/server-deploy.sh");
-const preflight = read("deploy/workbench-server-preflight.sh");
 const productionPreflight = read("deploy/workbench-production-preflight.sh");
 const deerflowProductionPreflight = read("deploy/deerflow-production-preflight.sh");
-const caddy = read("deploy/workbench-server-validation.Caddyfile");
 const productionCaddy = read("deploy/workbench-production.Caddyfile");
 const readme = read("README.md");
 const envExample = read("deploy/workbench.env.example");
@@ -96,15 +93,10 @@ assert(
   envExample.includes("WORKBENCH_RUNTIME_PROVIDER_STATE_MODE=projection-required"),
   "deployment env must keep Runtime provider-state reads on the verified projection",
 );
-for (const [label, source] of [
-  ["server preflight", preflight],
-  ["production preflight", productionPreflight],
-]) {
-  assert(
-    source.includes("WORKBENCH_RUNTIME_PROVIDER_STATE_MODE must be projection-required"),
-    `${label} must reject the legacy Runtime provider-state replay path`,
-  );
-}
+assert(
+  productionPreflight.includes("WORKBENCH_RUNTIME_PROVIDER_STATE_MODE must be projection-required"),
+  "production preflight must reject the legacy Runtime provider-state replay path",
+);
 const preview = compose.services?.["workbench-preview"];
 assert(preview, "Preview service is required");
 assert(
@@ -154,15 +146,12 @@ assert(
 for (const marker of [
   "prepare_deerflow_runtime",
   "wait_for_deerflow",
-  "WORKBENCH_DEPLOY_IMAGE_MODE",
+  "prepare_direct_images",
   "--no-build",
   "compose_up_force_recreate",
   "--force-recreate",
   "already occupied by container",
-  "rollback)",
   "on_deploy_error",
-  "Rollback image manifest is missing",
-  "Rollback image manifest signature bundle is missing",
   "RUNTIME_QUEUE_PARTICIPANTS",
   "stop_runtime_queue_participants",
   "run_runtime_queue_migrator",
@@ -170,33 +159,16 @@ for (const marker of [
 ]) {
   assert(serverDeploy.includes(marker), `server deploy is missing ${marker}`);
 }
-assert(productionPreflight.includes("production image manifest"), "production preflight must require the signed image manifest");
-assert(
-  envExample.includes(
-    "WORKBENCH_IMAGE_INVENTORY_BUNDLE_PATH=/etc/workbench/release/production-image-manifest.bundle.json",
-  ),
-  "deployment env must pin the production image manifest signature bundle",
-);
 for (const [label, source] of [
   ["server deploy", serverDeploy],
   ["Workbench production preflight", productionPreflight],
   ["DeerFlow production preflight", deerflowProductionPreflight],
 ]) {
-  for (const marker of ["--bundle", "--certificate-identity", "--certificate-oidc-issuer"]) {
-    assert(source.includes(marker), `${label} must pass ${marker} to manifest verification`);
-  }
+  assert(!source.includes("production-image-inventory"), `${label} must not depend on the retired image inventory`);
+  assert(!source.includes("COSIGN"), `${label} must not depend on the retired signing contract`);
 }
-for (const marker of ["--bundle", "--certificate-identity", "--certificate-oidc-issuer"]) {
-  assert(
-    serverDeploy.split(marker).length - 1 >= 2,
-    `server deploy must pass ${marker} for active and rollback candidates`,
-  );
-}
-assert(
-  productionPreflight.includes("cosign is required to verify the production image manifest")
-    && deerflowProductionPreflight.includes("cosign is required to verify the production image manifest"),
-  "all production preflights must fail closed when Cosign is unavailable",
-);
+assert(!envExample.includes("WORKBENCH_IMAGE_INVENTORY"), "deployment env must not expose the retired image inventory");
+assert(!envExample.includes("WORKBENCH_COSIGN"), "deployment env must not expose the retired signing contract");
 assert(productionPreflight.includes("config --quiet"), "production preflight must render the base Compose topology");
 assert(
   productionPreflight.includes("assert-workbench-database-role-contract.mjs"),
@@ -208,9 +180,9 @@ assert(productionPreflight.includes("WORKBENCH_NODE_IMAGE must be an immutable d
 assert(envExample.includes("WORKBENCH_NODE_IMAGE=node:22-alpine"), "deployment env must expose the hardened Node base image input");
 assert(compose.services?.["workbench-api"]?.build?.args?.NODE_IMAGE?.includes("WORKBENCH_NODE_IMAGE"), "API build must consume the pinned Node base image input");
 assert(compose.services?.knowledge?.build?.args?.NGINX_IMAGE?.includes("WORKBENCH_NGINX_IMAGE"), "Quartz build must consume the pinned Nginx base image input");
-assert(serverDeploy.includes("base greenfield Compose without a validation overlay"), "production must reject the validation overlay");
 assert(serverDeploy.indexOf("prepare_deerflow_runtime") < serverDeploy.indexOf("compose_up"), "DeerFlow must be ready before Workbench consumers start");
-assert(serverDeploy.includes("down --remove-orphans"), "deployment must have a deterministic shutdown path");
+assert(serverDeploy.includes('"${COMPOSE[@]}" down'), "deployment must have a deterministic shutdown path");
+assert(!serverDeploy.includes("--remove-orphans"), "direct deployment must not remove unrelated Compose services");
 assert(
   serverDeploy.includes('export WORKBENCH_ALLOW_RUNTIME_QUEUE_RECREATE="$ALLOW_RUNTIME_QUEUE_RECREATE"'),
   "queue policy recreation must be authorized by the deploy invocation instead of a persisted env-file value",
@@ -227,14 +199,6 @@ assert(
   migrateBody.includes("prepare_runtime_queue_cutover"),
   "the manual migration target must use the drained Runtime queue cutover",
 );
-const rollbackBody = caseBody(serverDeploy, "rollback");
-const rollbackMigrate = rollbackBody.indexOf('"${ROLLBACK_COMPOSE[@]}" run --rm --no-deps migrate');
-const rollbackDown = rollbackBody.indexOf('"${COMPOSE[@]}" down --remove-orphans');
-assert(
-  rollbackMigrate >= 0 && rollbackDown > rollbackMigrate,
-  "rollback must restore queue policy with the previous candidate migrator before teardown",
-);
-
 for (const [target, requiredMarkers] of [
   ["all", ["prepare_runtime_queue_cutover", "compose_up_force_recreate preview-gateway gateway"]],
   ["api", ["compose_up workbench-api", "compose_up_force_recreate gateway"]],
@@ -252,12 +216,7 @@ for (const profile of ["local-object-storage", "local-docling"]) {
   assert(readme.includes(profile), `README must document ${profile}`);
   assert(readme.includes(`--profile ${profile}`) || readme.includes(`COMPOSE_PROFILES=local-object-storage,local-docling`), `README must enable ${profile}`);
 }
-assert(validation.services?.["workbench-import-worker"]?.depends_on?.clamav?.condition === "service_healthy", "validation must gate Import Worker on ClamAV");
-assert(validation.services?.["workbench-file-worker"]?.depends_on?.docling?.condition === "service_healthy", "validation must gate File Worker on Docling");
-
-assert(!caddy.includes("aionbench.com"), "server-validation Caddy must not contain a product hostname");
-assert(caddy.includes("{$WORKBENCH_WEB_HOSTNAME}"), "Caddy must consume the derived Web hostname");
-assert(preflight.includes("workbench-origin-manifest.mjs"), "preflight must use the shared origin manifest");
+assert(productionPreflight.includes("workbench-origin-manifest.mjs"), "production preflight must use the shared origin manifest");
 assert(
   productionCaddy.includes("{$WORKBENCH_WEB_HOSTNAME}")
     && productionCaddy.includes("{$WORKBENCH_PREVIEW_HOSTNAME}"),
@@ -266,7 +225,7 @@ assert(
 assert(
   !productionCaddy.includes("127.0.0.1:9100")
     && !productionCaddy.includes("127.0.0.1:5556"),
-  "production Caddy must not proxy validation-only S3 or Dex services",
+  "production Caddy must not proxy local S3 or Dex services",
 );
 
 console.log("Workbench deployment orchestration contract passed.");

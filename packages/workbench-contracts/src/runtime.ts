@@ -7,6 +7,7 @@ import {
   prdDocumentV1Schema,
   runtimePrdDocumentSchema,
   runtimePrdDocumentV2Schema,
+  runtimePrdDocumentV3Schema,
   type PrdDocument,
 } from "./prd.js";
 import {
@@ -47,7 +48,7 @@ type RuntimeArtifactOperation =
 export type RuntimeArtifactDraft = RuntimeArtifactDraftBase & (
   | {
       kind: "prd";
-      schemaVersion: 1 | 2;
+      schemaVersion: 1 | 2 | 3;
       content: PrdDocument;
       operation: RuntimeArtifactOperation;
     }
@@ -110,9 +111,18 @@ export const runtimeArtifactDraftPrdV2Schema = z.object({
   operation: runtimeArtifactOperationSchema,
 }).strict();
 
-export const runtimeArtifactDraftPrdSchema: z.ZodType<RuntimeArtifactDraft, z.ZodTypeDef, unknown> = z.union([
+export const runtimeArtifactDraftPrdV3Schema = z.object({
+  ...runtimeArtifactDraftBaseShape,
+  kind: z.literal("prd"),
+  schemaVersion: z.literal(3),
+  content: runtimePrdDocumentV3Schema,
+  operation: runtimeArtifactOperationSchema,
+}).strict();
+
+export const runtimeArtifactDraftPrdSchema: z.ZodType<RuntimeArtifactDraft, unknown> = z.union([
   runtimeArtifactDraftPrdV1RevisionSchema,
   runtimeArtifactDraftPrdV2Schema,
+  runtimeArtifactDraftPrdV3Schema,
 ]);
 
 export const runtimeArtifactDraftPrototypeSchema = z.object({
@@ -155,7 +165,7 @@ export const runtimeArtifactDraftDataSchema = z.object({
   operation: runtimeArtifactOperationSchema,
 }).strict();
 
-export const runtimeArtifactDraftContractSchema: z.ZodType<RuntimeArtifactDraft, z.ZodTypeDef, unknown> = z.union([
+export const runtimeArtifactDraftContractSchema: z.ZodType<RuntimeArtifactDraft, unknown> = z.union([
   runtimeArtifactDraftPrdSchema,
   runtimeArtifactDraftPrototypeSchema,
   runtimeArtifactDraftImageSchema,
@@ -164,11 +174,11 @@ export const runtimeArtifactDraftContractSchema: z.ZodType<RuntimeArtifactDraft,
   runtimeArtifactDraftDataSchema,
 ]).describe("A PRD draft's top-level citations exactly match its content citations; enforced by the runtime Zod contract.");
 
-export const runtimeArtifactDraftSchema: z.ZodType<RuntimeArtifactDraft, z.ZodTypeDef, unknown> = z.discriminatedUnion("kind", [
+export const runtimeArtifactDraftSchema: z.ZodType<RuntimeArtifactDraft, unknown> = z.discriminatedUnion("kind", [
   z.object({
     ...runtimeArtifactDraftBaseShape,
     kind: z.literal("prd"),
-    schemaVersion: z.union([z.literal(1), z.literal(2)]),
+    schemaVersion: z.union([z.literal(1), z.literal(2), z.literal(3)]),
     content: runtimePrdDocumentSchema,
     operation: runtimeArtifactOperationSchema,
   }).strict(),
@@ -179,7 +189,7 @@ export const runtimeArtifactDraftSchema: z.ZodType<RuntimeArtifactDraft, z.ZodTy
   runtimeArtifactDraftDataSchema,
 ]).superRefine((draft, context) => {
   if (draft.kind !== "prd") return;
-  const expectedSchemaVersion = draft.content.protocol === "workbench.prd.v2" ? 2 : 1;
+  const expectedSchemaVersion = draft.content.protocol === "workbench.prd.v3" ? 3 : draft.content.protocol === "workbench.prd.v2" ? 2 : 1;
   if (draft.schemaVersion !== expectedSchemaVersion) {
     context.addIssue({
       code: z.ZodIssueCode.custom,
@@ -187,14 +197,14 @@ export const runtimeArtifactDraftSchema: z.ZodType<RuntimeArtifactDraft, z.ZodTy
       message: `PRD schemaVersion must be ${expectedSchemaVersion} for ${draft.content.protocol}`,
     });
   }
-  if (draft.operation.kind === "create" && draft.content.protocol !== "workbench.prd.v2") {
+  if (draft.operation.kind === "create" && draft.content.protocol === "workbench.prd.v1") {
     context.addIssue({
       code: z.ZodIssueCode.custom,
       path: ["content", "protocol"],
-      message: "New PRD Artifacts must use workbench.prd.v2; v1 is revision-only",
+      message: "New PRD Artifacts must use workbench.prd.v3 or compatible workbench.prd.v2; v1 is revision-only",
     });
   }
-  if (draft.operation.kind === "create" && draft.content.protocol === "workbench.prd.v2") {
+  if (draft.operation.kind === "create" && draft.content.protocol !== "workbench.prd.v1") {
     for (const [index, row] of draft.content.sections.safetyBaseline.rows.entries()) {
       if (row.applicability === "不涉及" && row.remarks !== null) {
         context.addIssue({
@@ -214,13 +224,13 @@ export type RuntimeResult = {
   artifacts: RuntimeArtifactDraft[];
 };
 
-export const runtimeResultContractSchema: z.ZodType<RuntimeResult, z.ZodTypeDef, unknown> = z.object({
+export const runtimeResultContractSchema: z.ZodType<RuntimeResult, unknown> = z.object({
   protocol: z.literal("workbench.runtime.result.v1"),
   message: z.string().max(100_000),
   artifacts: z.array(runtimeArtifactDraftContractSchema).max(20),
 }).strict();
 
-export const runtimeResultSchema: z.ZodType<RuntimeResult, z.ZodTypeDef, unknown> = z.object({
+export const runtimeResultSchema: z.ZodType<RuntimeResult, unknown> = z.object({
   protocol: z.literal("workbench.runtime.result.v1"),
   message: z.string().max(100_000),
   artifacts: z.array(runtimeArtifactDraftSchema).max(20),

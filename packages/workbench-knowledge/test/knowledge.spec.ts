@@ -5,6 +5,7 @@ import { relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { describe, expect, it, vi } from "vitest";
+import { parseDocument } from "yaml";
 
 import {
   buildKnowledgeRelease,
@@ -69,6 +70,22 @@ describe("path, frontmatter, and routing", () => {
     const document = parseKnowledgeSource({ path: "00-规范/a.md", content: new Uint8Array([0xc3, 0x28]) });
     expect(document.route).toBe("quarantine");
     expect(document.issues.map((issue) => issue.code)).toContain("INVALID_SOURCE_ENCODING");
+  });
+
+  it("treats Markdown source evidence under storage as an asset reference", () => {
+    const document = parseKnowledgeSources([source(
+      "02-业务域知识/a.md",
+      "已生效",
+      "[逐页证据](<storage/source-assets/example/review/page.md>)",
+    )])[0]!;
+    expect(document.issues).toEqual([]);
+    expect(document.references).toEqual([
+      expect.objectContaining({
+        kind: "internal_asset",
+        resolution: "resolved",
+        resolvedLocator: "storage://storage/source-assets/example/review/page.md",
+      }),
+    ]);
   });
 });
 
@@ -239,7 +256,7 @@ describe("repository Vault release", () => {
     expect(sources.length).toBeGreaterThan(0);
     expect(new Set(sources.map((source) => source.path)).size).toBe(sources.length);
     const assets = await readVaultAssets(sources);
-    expect(assets).toHaveLength(60);
+    expect(assets).toHaveLength(558);
     const input = {
       releaseKey: "global-product-knowledge",
       releaseVersion: 1,
@@ -273,9 +290,15 @@ describe("repository Vault release", () => {
       counts[document.route] = (counts[document.route] ?? 0) + 1;
       return counts;
     }, {});
+    const expectedRoutes = repositoryRouteExpectations(sources);
+    for (const [route, paths] of Object.entries(expectedRoutes)) {
+      expect(first.documents.filter((document) => document.route === route).map((document) => document.sourcePath).sort())
+        .toEqual([...paths].sort());
+    }
+    expect(routeCounts).toEqual(Object.fromEntries(Object.entries(expectedRoutes)
+      .filter(([, paths]) => paths.length > 0)
+      .map(([route, paths]) => [route, paths.length])));
     expect(routeCounts.production).toBeGreaterThan(0);
-    expect(routeCounts.source_lookup).toBe(sources.filter((source) => source.path.startsWith("07-")).length);
-    expect(routeCounts.quarantine).toBe(sources.filter((source) => source.path.startsWith("_templates/")).length);
     expect(Object.values(routeCounts).reduce((sum, count) => sum + count, 0)).toBe(sources.length);
     const unresolved = first.documents.flatMap((document) => document.references.filter((reference) => (
       reference.kind !== "external" && reference.resolution !== "resolved"
@@ -283,6 +306,28 @@ describe("repository Vault release", () => {
     expect(unresolved).toEqual([]);
   }, 15_000);
 });
+
+function repositoryRouteExpectations(sources: readonly VaultSourceInput[]) {
+  const routes: Record<string, string[]> = { production: [], source_lookup: [], quarantine: [], excluded: [] };
+  for (const source of sources) {
+    const header = normalizeMarkdownInput(source.content).match(/^---\n([\s\S]*?)\n---(?:\n|$)/)?.[1];
+    expect(header).toBeDefined();
+    const yaml = parseDocument(header!);
+    expect(yaml.errors).toEqual([]);
+    const status = (yaml.toJS() as { status: string }).status;
+    const directory = source.path.split("/", 1)[0]!;
+    const main = source.path === "README.md" || /^(?:0[0-6])(?:-|$)/.test(directory);
+    const sourceIndex = /^07(?:-|$)/.test(directory);
+    let route = "quarantine";
+    if ((main || sourceIndex) && directory !== "_templates" && status !== "草稿") {
+      route = status === "不参与检索"
+        ? "excluded"
+        : sourceIndex || status === "仅查来源" ? "source_lookup" : "production";
+    }
+    routes[route]!.push(source.path);
+  }
+  return routes;
+}
 
 function source(path: string, status: string, body: string): VaultSourceInput {
   return {

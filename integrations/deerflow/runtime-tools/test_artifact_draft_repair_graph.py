@@ -10,7 +10,7 @@ import unittest
 
 
 ROOT = Path(__file__).resolve().parents[3]
-PATCH_ROOT = ROOT / "integrations/deerflow/source-patches/7a6c4a994a86583d2a3c056ee9d0f157d4f030c2"
+PATCH_ROOT = ROOT / "integrations/deerflow/source-patches/345f08be00c8a9495079b732a39b46aa9af1584e"
 
 
 def real_runtime_available() -> bool:

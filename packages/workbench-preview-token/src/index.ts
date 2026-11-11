@@ -106,3 +106,5 @@ function isExactPayload(value: unknown): value is
     && typeof candidate.exp === "number"
     && Number.isSafeInteger(candidate.exp);
 }
+
+export * from "./source-prototype.js";

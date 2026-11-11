@@ -11,6 +11,7 @@ import {
   type FileStatus,
 } from "@workbench/workbench-contracts";
 import { hashRequest, validateIdempotencyKey } from "../../common/idempotency.js";
+import { isUniqueConflict } from "../../common/prisma-errors.js";
 import {
   idempotencyConflictProblem,
   notFoundProblem,
@@ -35,7 +36,6 @@ import {
   type ProjectCapability,
 } from "../access/access.service.js";
 import { lockActiveProject } from "../projects/project-lock.js";
-
 const extractionSelect = {
   id: true,
   fileAssetId: true,
@@ -374,8 +374,4 @@ export function decodeFileCursor(value: string): FileCursor {
   } catch {
     throw validationProblem("The File cursor is invalid");
   }
-}
-
-function isUniqueConflict(error: unknown) {
-  return error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002";
 }
