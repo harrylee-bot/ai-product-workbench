@@ -37,7 +37,7 @@ test("production preflight rejects a Canvas visual endpoint outside the tool ori
 });
 
 test("production preflight requires a private WireGuard Edge peer", () => {
-  const result = runPreflight({ WORKBENCH_EDGE_WIREGUARD_IP: "8.130.160.177" });
+  const result = runPreflight({ WORKBENCH_EDGE_WIREGUARD_IP: "198.51.100.10" });
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /must be an RFC1918 IPv4 address/u);
 });
@@ -119,7 +119,7 @@ function runPreflight(overrides) {
     `PrivateKey = ${"A".repeat(43)}=`,
     "[Peer]",
     `PublicKey = ${"B".repeat(43)}=`,
-    "Endpoint = 8.130.160.177:51820",
+    "Endpoint = 198.51.100.10:51820",
     "AllowedIPs = 10.88.0.1/32",
     "",
   ].join("\n"));
@@ -147,7 +147,7 @@ function runPreflight(overrides) {
     WORKBENCH_AUTH_CLIENT_IP_HEADER: "x-workbench-client-ip",
     WORKBENCH_EDGE_WIREGUARD_IP: "10.88.0.1",
     WORKBENCH_ORIGIN_WIREGUARD_IP: "10.88.0.2",
-    WORKBENCH_EDGE_WIREGUARD_ENDPOINT: "8.130.160.177:51820",
+    WORKBENCH_EDGE_WIREGUARD_ENDPOINT: "198.51.100.10:51820",
     WORKBENCH_ORIGIN_HTTP_PORT: "8080",
     WORKBENCH_EDGE_ORIGIN_AUTH_SECRET: "A".repeat(64),
     WORKBENCH_KNOWLEDGE_TOKENIZER_HOST_DIR: "/srv/tokenizer",

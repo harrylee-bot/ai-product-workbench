@@ -7,14 +7,14 @@
 | 项目 | 当前值 |
 | --- | --- |
 | 用户域名 | `https://requirements.aionbench.com` |
-| Origin IPv4 | `45.207.206.119` |
-| 远端主机名 | `C202607221115992` |
-| SSH 用户 | `root` |
-| SSH 身份 | `~/.ssh/id_ed25519` |
-| 应用目录 | `/opt/apitable` |
-| Compose 文件 | `/opt/apitable/docker-compose.yml` |
+| Origin IPv4 | `REDACTED_ORIGIN_IP` |
+| 远端主机名 | `REDACTED_ORIGIN_HOSTNAME` |
+| SSH 用户 | `受控环境提供的 SSH 用户` |
+| SSH 身份 | `仓库外受控的 SSH 身份` |
+| 应用目录 | `受控环境提供的 APITable 安装目录` |
+| Compose 文件 | `受控环境提供的 Compose 文件` |
 | Compose 项目 | `workbench-apitable` |
-| 公网入口 | Origin Caddy -> `127.0.0.1:4290` -> APITable gateway |
+| 公网入口 | `受控公网入口 -> 本机网关 -> APITable gateway` |
 
 ## 连接确认
 
@@ -33,16 +33,16 @@ curl --fail --silent --show-error --connect-timeout 8 --max-time 20 \
 需要独立物理出口时，先在 macOS 用 `networksetup -listallhardwareports` 和 `ifconfig` 确认当前有地址且 active 的接口，再对单次连接设置接口。Wi-Fi 和 USB 有线网卡的接口名称可能不同，不能固定假设是 `en0`。可用 `curl --interface <已核验接口> --noproxy '*' --resolve dns.alidns.com:443:223.5.5.5 'https://dns.alidns.com/resolve?name=requirements.aionbench.com&type=A'` 对照阿里公共 DNS，保持证书校验，不改系统路由或关闭 VPN。SSH/SCP 使用同一 `-o BindInterface=<已核验接口>`；接口不可用时停止，不重试默认路由。
 
 ```sh
-ssh -i ~/.ssh/id_ed25519 -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
-  -o UserKnownHostsFile="$HOME/.ssh/workbench_known_hosts" root@45.207.206.119 \
-  'hostname; test -d /opt/apitable && echo apitable-found'
+ssh -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
+  -o UserKnownHostsFile="$HOME/.ssh/workbench_known_hosts" "${REQUIREMENT_POOL_USER:?}@${REQUIREMENT_POOL_HOST:?}" \
+  'hostname; test -d "$APITABLE_INSTALL_DIR" && echo apitable-found'
 ```
 
-只有解析地址为 `45.207.206.119`、主机名为 `C202607221115992` 且 `/opt/apitable` 存在时，才允许继续。任一条件不满足，停止操作并核验部署信息。
+只有独立核验结果与仓库外受控运维记录中的 Origin、主机名和 APITable 安装目录全部匹配时，才允许继续。任一条件不满足，停止操作并核验部署信息。
 
 ## 本机 SSH 身份丢失时
 
-通过实际服务器厂商的已认证管理控制台恢复访问。DNS 托管商不等于服务器厂商，不能仅凭 `hichina.com` 等权威 NS 判断主机属于哪家云。用控制台资产记录中的 IP 与实例身份确认目标，再通过串行控制台、VNC 或厂商命令通道核对 `hostname` 和 `/opt/apitable`。
+通过实际服务器厂商的已认证管理控制台恢复访问。DNS 托管商不等于服务器厂商，不能仅凭 `hichina.com` 等权威 NS 判断主机属于哪家云。用控制台资产记录中的 IP 与实例身份确认目标，再通过串行控制台、VNC 或厂商命令通道核对 `hostname` 和受控的 APITable 安装目录。
 
 在控制台读取 `/etc/ssh/ssh_host_ed25519_key.pub` 并计算 `ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub`，将该受控来源的公开主机密钥写入本机专用 `~/.ssh/workbench_known_hosts`。网络扫描得到的密钥只能用于比对，不能自动作为信任来源；恢复本机访问不需要重新生成服务器 host key。
 
@@ -56,7 +56,7 @@ ssh -i ~/.ssh/id_ed25519 -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
 - 修改 Compose 前在服务器受控目录创建带时间戳的配置备份。
 - 直接改库前备份相关表，并同步处理 revision、operation 和 room-server 缓存一致性。
 - 不执行全量 Docker prune，不删除未核验的卷、镜像、目录或数据。
-- 不打印 `/opt/apitable/.env`，不将数据库密码、MinIO 密钥、Redis 密码或会话凭据写回项目。
+- 不打印 APITable 安装目录下的私有环境文件，不将数据库密码、MinIO 密钥、Redis 密码或会话凭据写回项目。
 - APITable 与 Workbench 的发布、迁移、重启和数据写入分开执行，不能用 Workbench 操作替代 APITable 变更。
 
 ## 数据与分享
@@ -75,7 +75,7 @@ ssh -i ~/.ssh/id_ed25519 -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
 ## 运行检查
 
 ```sh
-cd /opt/apitable
+cd "$APITABLE_INSTALL_DIR"
 docker compose ps
 docker compose images
 grep -n 'image:' docker-compose.yml

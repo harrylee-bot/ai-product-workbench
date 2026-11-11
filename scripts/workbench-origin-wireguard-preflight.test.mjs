@@ -31,7 +31,7 @@ function runPreflight(allowedIps) {
   writeFileSync(envFile, [
     "WORKBENCH_EDGE_WIREGUARD_IP=10.88.0.1",
     "WORKBENCH_ORIGIN_WIREGUARD_IP=10.88.0.2",
-    "WORKBENCH_EDGE_WIREGUARD_ENDPOINT=8.130.160.177:51820",
+    "WORKBENCH_EDGE_WIREGUARD_ENDPOINT=198.51.100.10:51820",
     "",
   ].join("\n"));
   writeFileSync(wireguardConfig, [
@@ -40,7 +40,7 @@ function runPreflight(allowedIps) {
     `PrivateKey = ${"A".repeat(43)}=`,
     "[Peer]",
     `PublicKey = ${"B".repeat(43)}=`,
-    "Endpoint = 8.130.160.177:51820",
+    "Endpoint = 198.51.100.10:51820",
     allowedIps.trimEnd(),
     "",
   ].join("\n"));

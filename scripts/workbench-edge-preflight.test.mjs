@@ -15,7 +15,7 @@ test("Edge preflight accepts the fixed WireGuard origin contract", () => {
 });
 
 test("Edge preflight rejects a public WireGuard peer address", () => {
-  const result = runPreflight({ WORKBENCH_EDGE_WIREGUARD_IP: "8.130.160.177" });
+  const result = runPreflight({ WORKBENCH_EDGE_WIREGUARD_IP: "198.51.100.10" });
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /must be an RFC1918 IPv4 address/u);
 });
@@ -47,7 +47,7 @@ function runPreflight(overrides = {}, peerSource = "AllowedIPs = 10.88.0.2/32\n"
     WORKBENCH_PREVIEW_HOSTNAME: "preview.aionbench.com",
     WORKBENCH_EDGE_WIREGUARD_IP: "10.88.0.1",
     WORKBENCH_ORIGIN_WIREGUARD_IP: "10.88.0.2",
-    WORKBENCH_EDGE_WIREGUARD_ENDPOINT: "8.130.160.177:51820",
+    WORKBENCH_EDGE_WIREGUARD_ENDPOINT: "198.51.100.10:51820",
     WORKBENCH_ORIGIN_HTTP_PORT: "8080",
     WORKBENCH_EDGE_ORIGIN_AUTH_SECRET: "A".repeat(64),
     ...overrides,

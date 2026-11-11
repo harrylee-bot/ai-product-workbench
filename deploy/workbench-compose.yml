@@ -301,7 +301,7 @@ services:
     read_only: true
     security_opt: [no-new-privileges:true]
     extra_hosts:
-      - ${WORKBENCH_KNOWLEDGE_ORIGIN_HOSTNAME:-aionbench.com}:${WORKBENCH_KNOWLEDGE_ORIGIN_IP:-172.18.0.1}
+      - ${WORKBENCH_KNOWLEDGE_ORIGIN_HOSTNAME:-aionbench.com}:${WORKBENCH_KNOWLEDGE_ORIGIN_IP:-host-gateway}
     tmpfs: [/tmp]
     volumes:
       - workbench-api-ready-object-spool:/var/lib/workbench-api/ready-object-spool
@@ -449,7 +449,7 @@ services:
     read_only: true
     security_opt: [no-new-privileges:true]
     extra_hosts:
-      - ${WORKBENCH_KNOWLEDGE_ORIGIN_HOSTNAME:-aionbench.com}:${WORKBENCH_KNOWLEDGE_ORIGIN_IP:-172.18.0.1}
+      - ${WORKBENCH_KNOWLEDGE_ORIGIN_HOSTNAME:-aionbench.com}:${WORKBENCH_KNOWLEDGE_ORIGIN_IP:-host-gateway}
     volumes:
       - ${WORKBENCH_RUNTIME_WORKER_EXECUTION_PRIVATE_KEY_HOST_PATH:?WORKBENCH_RUNTIME_WORKER_EXECUTION_PRIVATE_KEY_HOST_PATH is required}:/run/secrets/runtime-worker-execution.key:ro
     tmpfs: [/tmp]
@@ -540,7 +540,7 @@ services:
       - ../storage:/workspace/storage:ro
       - ${WORKBENCH_KNOWLEDGE_TOKENIZER_HOST_DIR:?WORKBENCH_KNOWLEDGE_TOKENIZER_HOST_DIR is required}:/models/embedding-tokenizer:ro
     extra_hosts:
-      - ${WORKBENCH_KNOWLEDGE_ORIGIN_HOSTNAME:-aionbench.com}:${WORKBENCH_KNOWLEDGE_ORIGIN_IP:-172.18.0.1}
+      - ${WORKBENCH_KNOWLEDGE_ORIGIN_HOSTNAME:-aionbench.com}:${WORKBENCH_KNOWLEDGE_ORIGIN_IP:-host-gateway}
     read_only: true
     security_opt: [no-new-privileges:true]
     tmpfs: [/tmp]

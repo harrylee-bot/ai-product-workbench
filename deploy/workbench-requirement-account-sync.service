@@ -4,13 +4,14 @@ After=docker.service network-online.target
 Requires=docker.service
 
 [Service]
+EnvironmentFile=-/etc/workbench/workbench-private.env
 Type=oneshot
 User=root
 UMask=0077
-ExecStart=/usr/bin/python3 /opt/workbench-1.0.0/deploy/sync-requirement-accounts.py --execute
+ExecStart=/usr/bin/python3 /srv/workbench/app/1.0.0/deploy/sync-requirement-accounts.py --execute
 TimeoutStartSec=180
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectHome=read-only
 ProtectSystem=strict
-ReadWritePaths=/home/data/workbench-private/1.0.0/recovery /run/lock
+ReadWritePaths=/srv/workbench/private/1.0.0/recovery /run/lock

@@ -192,15 +192,20 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--execute", action="store_true")
     parser.add_argument("--backup-dir", type=pathlib.Path,
-                        default=pathlib.Path("/home/data/workbench-private/1.0.0/recovery"))
+                        default=pathlib.Path(os.environ.get("WORKBENCH_ACCOUNT_SYNC_BACKUP_DIR", "/srv/workbench/private/1.0.0/recovery")))
     args = parser.parse_args()
-    if subprocess.check_output(["hostname"], text=True).strip() != "C202607221115992":
-        raise RuntimeError("Run only on the verified requirement-pool origin")
-    if not pathlib.Path("/opt/apitable").is_dir():
+    expected_host = os.environ.get("WORKBENCH_REQUIREMENT_POOL_HOSTNAME")
+    expected_origin_ip = os.environ.get("WORKBENCH_REQUIREMENT_POOL_ORIGIN_IP")
+    apitable_dir = pathlib.Path(os.environ.get("WORKBENCH_APITABLE_INSTALL_DIR", "/srv/apitable"))
+    if not expected_host or not expected_origin_ip:
+        raise RuntimeError("WORKBENCH_REQUIREMENT_POOL_HOSTNAME and WORKBENCH_REQUIREMENT_POOL_ORIGIN_IP are required")
+    if subprocess.check_output(["hostname"], text=True).strip() != expected_host:
+        raise RuntimeError("Run only on the explicitly verified requirement-pool origin")
+    if not apitable_dir.is_dir():
         raise RuntimeError("Requirement-pool application directory is missing")
     resolved = subprocess.check_output(["getent", "ahostsv4", "requirements.aionbench.com"], text=True)
-    if {line.split()[0] for line in resolved.splitlines()} != {"45.207.206.119"}:
-        raise RuntimeError("Requirement-pool DNS does not match the verified origin")
+    if {line.split()[0] for line in resolved.splitlines()} != {expected_origin_ip}:
+        raise RuntimeError("Requirement-pool DNS does not match the configured origin")
     with open("/run/lock/workbench-requirement-account-sync.lock", "w") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         source = read_source()
