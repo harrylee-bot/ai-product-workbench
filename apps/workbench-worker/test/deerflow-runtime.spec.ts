@@ -1800,7 +1800,7 @@ describe("DeerFlow runtime adapter", () => {
           type: "ai",
           content,
           tool_calls: [],
-          response_metadata: { model_name: "gemini-2.5-pro", finish_reason: "content_filter" },
+          response_metadata: { model_name: "deepseek-flash", finish_reason: "content_filter" },
         },
       ];
       expect(() => resolveRuntimeResult({ values: { messages } }, ["prototype"], execution()))

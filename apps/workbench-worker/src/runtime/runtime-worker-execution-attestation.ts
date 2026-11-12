@@ -18,7 +18,6 @@ const identifierPattern = /^[A-Za-z0-9][A-Za-z0-9._:/-]{1,127}$/u;
 const jobIdPattern = /^[A-Za-z0-9_-]{1,128}$/u;
 const commitPattern = /^[0-9a-f]{40}$/u;
 const digestPattern = /^sha256:[0-9a-f]{64}$/u;
-const keyIdPattern = /^sha256:[0-9a-f]{64}$/u;
 const maximumPrivateKeyBytes = 64 * 1024;
 const signingEnvironmentVariables = [
   "WORKBENCH_RUNTIME_WORKER_EXECUTION_PRIVATE_KEY_PATH",

@@ -1299,7 +1299,7 @@ function refinePrdTemplateDocument(
   const requirementIds = new Set(requirements.map((requirement) => requirement.id));
   const criterionIds = new Set(criteria.map((criterion) => criterion.id));
   const flowIds = new Set(flows.map((flow) => flow.id));
-  for (const [index, requirement] of requirements.entries()) {
+  for (const requirement of requirements) {
     for (const duplicate of duplicateValues([...requirement.goalIds, ...requirement.acceptanceCriterionIds])) {
       addIssue(context, blockPaths.get(requirement) ?? [], `duplicate requirement reference: ${duplicate}`);
     }
@@ -1317,7 +1317,7 @@ function refinePrdTemplateDocument(
       }
     }
   }
-  for (const [index, criterion] of criteria.entries()) {
+  for (const criterion of criteria) {
     for (const requirementId of criterion.requirementIds) {
       const requirement = requirements.find((candidate) => candidate.id === requirementId);
       if (!requirement) {
@@ -1327,7 +1327,7 @@ function refinePrdTemplateDocument(
       }
     }
   }
-  for (const [flowIndex, flow] of flows.entries()) {
+  for (const flow of flows) {
     for (const [stepIndex, step] of flow.steps.entries()) {
       for (const requirementId of step.requirementIds) {
         if (!requirementIds.has(requirementId)) {

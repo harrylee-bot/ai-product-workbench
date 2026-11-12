@@ -40,7 +40,7 @@ docker compose --env-file deploy/workbench.env \
 
 正式发布入口是 `deploy/workbench-direct-release.sh`：本机只从干净 Git 提交生成源码归档，通过受保护 SSH 交给线上 AMD64 主机；线上执行 `npm ci`、合同预检、原生镜像构建、迁移、服务切换和公网健康检查。发布不经过 GitHub Actions、GitHub Artifact、本机 Colima 或 self-hosted Runner。版本固定为 `1.0.0`；发布前比较当前运行版本和变更文件摘要，只更新本次涉及的服务。历史 owner/GitHub 发布入口已删除，不再保留第二套生产发布链。
 
-直接发布需要本机环境变量 `WORKBENCH_PRODUCTION_HOST`、`WORKBENCH_PRODUCTION_USER`、`WORKBENCH_WEB_ORIGIN`，以及受控提供的 `WORKBENCH_PRODUCTION_KNOWN_HOSTS` 或 `WORKBENCH_PRODUCTION_KNOWN_HOSTS_FILE`；可选 `WORKBENCH_SSH_KEY_PATH`，未提供时使用本机 SSH 配置。`WORKBENCH_SSH_BIND_INTERFACE` 可指定单次 SSH/SCP 使用的本地物理接口，不修改系统路由或关闭 VPN。默认不绑定；先用 `networksetup -listallhardwareports`、`ifconfig` 确认当前有地址的物理接口（如 Wi-Fi `en0` 或 USB 有线网卡 `en6`），不可照抄示例。绑定失败会立即停止，不回退到 VPN 默认路由；SSH 主机校验与身份认证保持不变。线上目录默认为 `$WORKBENCH_PRODUCTION_APP_DIR` 和 `$WORKBENCH_PRODUCTION_PRIVATE_DIR`，可通过对应 `WORKBENCH_PRODUCTION_*_DIR` 覆盖。工作树必须干净；当前线上状态只维护在 `docs/audit/1.0.0.md`，不保留历史发布证据文件。
+直接发布需要本机环境变量 `WORKBENCH_PRODUCTION_HOST`、`WORKBENCH_PRODUCTION_USER`、`WORKBENCH_WEB_ORIGIN`，以及受控提供的 `WORKBENCH_PRODUCTION_KNOWN_HOSTS` 或 `WORKBENCH_PRODUCTION_KNOWN_HOSTS_FILE`；可选 `WORKBENCH_SSH_KEY_PATH`，未提供时使用本机 SSH 配置。`WORKBENCH_SSH_BIND_INTERFACE` 可指定单次 SSH/SCP 使用的本地物理接口，不修改系统路由或关闭 VPN。默认不绑定；先用 `networksetup -listallhardwareports`、`ifconfig` 确认当前有地址的物理接口（如 Wi-Fi `en0` 或 USB 有线网卡 `en6`），不可照抄示例。绑定失败会立即停止，不回退到 VPN 默认路由；SSH 主机校验与身份认证保持不变。线上目录默认为 `/opt/workbench-1.0.0` 和 `/home/data/workbench-private/1.0.0`，可通过对应 `WORKBENCH_PRODUCTION_*_DIR` 覆盖。工作树必须干净；当前线上状态只维护在 `docs/audit/1.0.0.md`，不保留历史发布证据文件。
 
 示例：
 

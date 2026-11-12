@@ -61,7 +61,7 @@ export class PrototypePatchService {
   private readonly events: RunEventStore;
 
   constructor(private readonly db: PrismaClient) {
-    this.events = new RunEventStore(db);
+    this.events = new RunEventStore();
   }
 
   async persistPatch(

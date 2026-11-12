@@ -46,7 +46,6 @@ import type {
   RuntimeContentLocator,
   RuntimeDesignAsset,
   RuntimePort,
-  RuntimeExternalEventPart,
   RuntimeSubmissionState,
 } from "../runtime/runtime.port.js";
 import {
@@ -89,7 +88,6 @@ import {
 } from "./canvas-staged-intents.js";
 import { RunEventStore } from "./run-event.store.js";
 import { assertGenerationKnowledgeEvidence } from "./generation-knowledge-evidence.js";
-import { lockRunStatus } from "./run-state-lock.js";
 import { runtimeProviderCancellationUnconfirmedCode } from "./runtime-cancellation-state.js";
 import {
   isPrototypeDraft,
@@ -228,7 +226,7 @@ export class RunProcessor {
       providerStateShadowReporter?: (finding: RuntimeProviderStateShadowFinding) => void;
     } = {},
   ) {
-    this.events = new RunEventStore(db);
+    this.events = new RunEventStore();
     this.bindings = new RuntimeBindingService(db, runtime);
     const leaseMs = execution.leaseMs ?? 45_000;
     this.attempts = new RuntimeAttemptService(
@@ -753,7 +751,6 @@ export class RunProcessor {
   async cancel(
     runId: string,
     jobSignal?: AbortSignal,
-    retry = { retryCount: 0, retryLimit: 0 },
   ) {
     this.active.get(runId)?.abort(new RuntimeCancelledError());
     const run = await this.db.run.findUnique({

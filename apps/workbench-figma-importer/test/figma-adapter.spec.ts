@@ -18,8 +18,6 @@ import {
 import { buildFigmaImportPlan } from "../src/import-plan";
 import { exportFixture } from "./fixtures";
 
-type PropertyBag = Record<string, unknown>;
-
 class FakeNode implements FigmaImportNode {
   name = "";
   removed = false;

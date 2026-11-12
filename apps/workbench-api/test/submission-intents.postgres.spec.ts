@@ -83,7 +83,7 @@ describeWithPostgres("SubmissionIntent PostgreSQL vertical slice", () => {
       const runs = new RunsService(
         db as never,
         access,
-        new RunEventStore(db as never),
+        new RunEventStore(),
         queue as never,
         runtimeModels as never,
         { resolve: vi.fn() } as never,

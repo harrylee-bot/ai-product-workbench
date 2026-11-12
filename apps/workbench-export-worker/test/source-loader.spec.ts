@@ -340,7 +340,7 @@ describe("ExportSourceLoader", () => {
   it("loads a frozen source prototype without reading any unpinned binary asset", async () => {
     const command = await sourcePrototypeFixture();
     const storage = { readVerified: vi.fn() };
-    const loader = new ExportSourceLoader({} as never, storage as never, { maximumInputBytes: 1024 * 1024 });
+    const loader = new ExportSourceLoader(storage as never, { maximumInputBytes: 1024 * 1024 });
     const loaded = await loader.load(command);
     expect(loaded.artifacts[0]).toMatchObject({ kind: "prototype", schemaVersion: 2, assets: [] });
     expect(storage.readVerified).not.toHaveBeenCalled();
@@ -353,7 +353,7 @@ describe("ExportSourceLoader", () => {
     else document.build.html += "<!-- changed -->";
     refreshPrototypeChecksum(command);
     const storage = { readVerified: vi.fn() };
-    const loader = new ExportSourceLoader({} as never, storage as never, { maximumInputBytes: 1024 * 1024 });
+    const loader = new ExportSourceLoader(storage as never, { maximumInputBytes: 1024 * 1024 });
     await expect(loader.load(command)).rejects.toMatchObject({ code: target === "source" ? "SOURCE_PROTOTYPE_SOURCE_CHECKSUM_MISMATCH" : "SOURCE_PROTOTYPE_HTML_CHECKSUM_MISMATCH" });
     expect(storage.readVerified).not.toHaveBeenCalled();
   });
@@ -361,7 +361,7 @@ describe("ExportSourceLoader", () => {
   it("accepts only checksum-verified immutable release and inline ArtifactVersion data", async () => {
     const store = { loadReadyAssetBlobs: vi.fn(async () => []) };
     const storage = { readVerified: vi.fn() };
-    const loader = new ExportSourceLoader(store as never, storage as never, { maximumInputBytes: 1024 * 1024 });
+    const loader = new ExportSourceLoader(storage as never, { maximumInputBytes: 1024 * 1024 });
     const result = await loader.load(fixture() as never);
     expect(result.releaseId).toBe("release-1");
     expect(result.artifacts).toHaveLength(1);
@@ -397,7 +397,6 @@ describe("ExportSourceLoader", () => {
       preview,
     };
     const loader = new ExportSourceLoader(
-      { loadReadyAssetBlobs: vi.fn(async () => []) } as never,
       { readVerified: vi.fn() } as never,
       { maximumInputBytes: 1024 * 1024 },
     );
@@ -426,7 +425,6 @@ describe("ExportSourceLoader", () => {
       artifactPins: base.release.artifactPins,
     };
     const loader = new ExportSourceLoader(
-      {} as never,
       { readVerified: vi.fn() } as never,
       { maximumInputBytes: 1024 * 1024 },
     );
@@ -486,7 +484,7 @@ describe("ExportSourceLoader", () => {
     command.release.manifestSha256 = sha(command.release.manifest);
     command.selection = { kind: "board_nodes", nodeIds: ["frame-root"] };
     const storage = { readVerified: vi.fn(async () => bytes) };
-    const loader = new ExportSourceLoader({} as never, storage as never, { maximumInputBytes: 1024 * 1024 });
+    const loader = new ExportSourceLoader(storage as never, { maximumInputBytes: 1024 * 1024 });
 
     const result = await loader.load(command as never);
 
@@ -499,7 +497,7 @@ describe("ExportSourceLoader", () => {
     const { command } = prototypeFixture();
     command.selection = { kind: "board_nodes", nodeIds: ["node-outside-release"] };
     const storage = { readVerified: vi.fn() };
-    const loader = new ExportSourceLoader({} as never, storage as never, { maximumInputBytes: 1024 * 1024 });
+    const loader = new ExportSourceLoader(storage as never, { maximumInputBytes: 1024 * 1024 });
 
     await expect(loader.load(command as never)).rejects.toMatchObject({
       code: "EXPORT_BOARD_NODE_SELECTION_NOT_PINNED",
@@ -508,7 +506,7 @@ describe("ExportSourceLoader", () => {
   });
 
   it("rejects a changed board snapshot or changed ArtifactVersion content", async () => {
-    const loader = new ExportSourceLoader({ loadReadyAssetBlobs: vi.fn(async () => []) } as never, { readVerified: vi.fn() } as never, { maximumInputBytes: 1024 * 1024 });
+    const loader = new ExportSourceLoader({ readVerified: vi.fn() } as never, { maximumInputBytes: 1024 * 1024 });
     const boardChanged = fixture();
     boardChanged.release.boardSnapshot.nodes[0]!.position.x = 999;
     await expect(loader.load(boardChanged as never)).rejects.toMatchObject({ code: "EXPORT_BOARD_CHECKSUM_MISMATCH" });
@@ -521,7 +519,7 @@ describe("ExportSourceLoader", () => {
   it("loads Prototype bytes only through the immutable asset relation", async () => {
     const { command, bytes } = prototypeFixture();
     const storage = { readVerified: vi.fn(async () => bytes) };
-    const loader = new ExportSourceLoader({} as never, storage as never, { maximumInputBytes: 1024 * 1024 });
+    const loader = new ExportSourceLoader(storage as never, { maximumInputBytes: 1024 * 1024 });
 
     const result = await loader.load(command as never);
 
@@ -550,7 +548,7 @@ describe("ExportSourceLoader", () => {
         storageKey.endsWith("blob-font") ? fontBytes : imageBytes
       )),
     };
-    const loader = new ExportSourceLoader({} as never, storage as never, { maximumInputBytes: 1024 * 1024 });
+    const loader = new ExportSourceLoader(storage as never, { maximumInputBytes: 1024 * 1024 });
 
     const result = await loader.load(command as never);
 
@@ -569,14 +567,14 @@ describe("ExportSourceLoader", () => {
     const manifestChanged = prototypeFixture();
     manifestChanged.command.release.manifest.artifacts[0].assets[0].metadata.name = "Changed in manifest";
     manifestChanged.command.release.manifestSha256 = sha(manifestChanged.command.release.manifest);
-    await expect(new ExportSourceLoader({} as never, { readVerified: vi.fn() } as never, { maximumInputBytes: 1024 * 1024 })
+    await expect(new ExportSourceLoader({ readVerified: vi.fn() } as never, { maximumInputBytes: 1024 * 1024 })
       .load(manifestChanged.command as never)).rejects.toMatchObject({ code: "EXPORT_RELEASE_CONTRACT_INVALID" });
 
     const relationChanged = prototypeFixture();
     relationChanged.command.release.artifactPins[0].artifactVersion.assets[0].metadata.name = "Changed in relation";
     relationChanged.command.release.manifest.artifacts[0].assets[0].metadata.name = "Changed in relation";
     relationChanged.command.release.manifestSha256 = sha(relationChanged.command.release.manifest);
-    await expect(new ExportSourceLoader({} as never, { readVerified: vi.fn() } as never, { maximumInputBytes: 1024 * 1024 })
+    await expect(new ExportSourceLoader({ readVerified: vi.fn() } as never, { maximumInputBytes: 1024 * 1024 })
       .load(relationChanged.command as never)).rejects.toMatchObject({ code: "EXPORT_ARTIFACT_ASSET_PIN_MISMATCH" });
   });
 
@@ -585,7 +583,7 @@ describe("ExportSourceLoader", () => {
     command.release.artifactPins[0].artifactVersion.content.assets[0].blobId = "blob-unpinned";
     refreshPrototypeChecksum(command);
     const storage = { readVerified: vi.fn() };
-    const loader = new ExportSourceLoader({} as never, storage as never, { maximumInputBytes: 1024 * 1024 });
+    const loader = new ExportSourceLoader(storage as never, { maximumInputBytes: 1024 * 1024 });
 
     await expect(loader.load(command as never)).rejects.toMatchObject({ code: "EXPORT_ARTIFACT_ASSET_PIN_MISMATCH" });
     expect(storage.readVerified).not.toHaveBeenCalled();

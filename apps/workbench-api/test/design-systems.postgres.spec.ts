@@ -147,7 +147,7 @@ describeWithPostgres("Design System PostgreSQL vertical slice", () => {
         const runs = new RunsService(
           transactionalDb as never,
           access,
-          new RunEventStore(tx as never),
+          new RunEventStore(),
           { sendInTransaction: vi.fn().mockResolvedValue("job_design") } as never,
           { assertAvailable: vi.fn().mockResolvedValue(undefined) } as never,
           { resolve: vi.fn() } as never,

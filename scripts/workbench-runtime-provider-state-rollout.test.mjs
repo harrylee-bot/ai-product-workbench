@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { chmod, mkdtemp, mkdir, readFile, readdir, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -120,8 +120,9 @@ test("rejects sensitive evidence paths and unexpected observation fields", () =>
   );
 });
 
-test("writes an immutable chained receipt sequence and verifies it end to end", async () => {
+test("writes an immutable chained receipt sequence and verifies it end to end", async (t) => {
   const root = await mkdtemp(path.join(os.tmpdir(), "workbench-runtime-rollout-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
   const receiptsDirectory = path.join(root, "receipts");
   let terminalSha = null;
   for (const phase of ["backfill", "shadow", "canary", "cutover", "full"]) {
@@ -153,8 +154,9 @@ test("writes an immutable chained receipt sequence and verifies it end to end", 
   assert.deepEqual(chain.receipts.map((entry) => entry.phase), ["backfill", "shadow", "canary", "cutover", "full"]);
 });
 
-test("replays an identical phase idempotently and rejects conflicting evidence", async () => {
+test("replays an identical phase idempotently and rejects conflicting evidence", async (t) => {
   const root = await mkdtemp(path.join(os.tmpdir(), "workbench-runtime-rollout-replay-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
   const receiptsDirectory = path.join(root, "receipts");
   const observationPath = path.join(root, "backfill.json");
   await writeFile(observationPath, `${JSON.stringify(observationFor("backfill"))}\n`);
@@ -181,8 +183,9 @@ test("replays an identical phase idempotently and rejects conflicting evidence",
   await assert.rejects(() => executeRolloutOperation(conflictingOperation), /immutable receipt already exists/u);
 });
 
-test("never overwrites a receipt that appears during atomic publication", async () => {
+test("never overwrites a receipt that appears during atomic publication", async (t) => {
   const root = await mkdtemp(path.join(os.tmpdir(), "workbench-runtime-rollout-race-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
   const receiptsDirectory = path.join(root, "receipts");
   const observationPath = path.join(root, "backfill.json");
   await writeFile(observationPath, `${JSON.stringify(observationFor("backfill"))}\n`);
@@ -209,8 +212,9 @@ test("never overwrites a receipt that appears during atomic publication", async 
   );
 });
 
-test("detects receipt tampering and refuses out-of-order phases", async () => {
+test("detects receipt tampering and refuses out-of-order phases", async (t) => {
   const root = await mkdtemp(path.join(os.tmpdir(), "workbench-runtime-rollout-tamper-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
   const receiptsDirectory = path.join(root, "receipts");
   const shadowPath = path.join(root, "shadow.json");
   await writeFile(shadowPath, `${JSON.stringify(observationFor("shadow"))}\n`);
@@ -240,9 +244,10 @@ test("detects receipt tampering and refuses out-of-order phases", async () => {
   );
 });
 
-test("requires staging and production receipts outside the repository", async () => {
+test("requires staging and production receipts outside the repository", async (t) => {
   await mkdir(path.join(process.cwd(), "output"), { recursive: true });
   const root = await mkdtemp(path.join(process.cwd(), "output", "runtime-rollout-test-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
   const observationPath = path.join(root, "backfill.json");
   await writeFile(observationPath, `${JSON.stringify(observationFor("backfill", {
     environmentId: "staging-cn-1",

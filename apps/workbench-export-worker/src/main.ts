@@ -62,7 +62,7 @@ async function main() {
     prismaReadyObjectIntegrityRecorder(db),
   );
   const store = new PrismaExportStore(db, config);
-  const loader = new ExportSourceLoader(store, storage, config);
+  const loader = new ExportSourceLoader(storage, config);
   const browser = new BrowserExportService(config);
   const processor = new ExportProcessor(store, loader, storage, browser, config);
   const deliveryStore = new PrismaExternalExportDeliveryStore(db, config);

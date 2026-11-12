@@ -107,10 +107,7 @@ async function main() {
         retryCount: job.retryCount,
         retryLimit: job.retryLimit,
       }, job.data, () => (
-        processor.cancel(command.runId, job.signal, {
-          retryCount: job.retryCount,
-          retryLimit: job.retryLimit,
-        })
+        processor.cancel(command.runId, job.signal)
       ));
       recordRuntimeLivenessMetric({
         operation: "cancel",

@@ -1131,7 +1131,7 @@ describeWithPostgres("RuntimeAttempt PostgreSQL external event crash replay", ()
     const fixture = await seedAttemptFixture(db, true);
     const { service, claim } = await activateExternalRun(db, fixture, 45_000);
     const input = externalEvent(fixture, "event-slow-atomic-commit");
-    const events = new RunEventStore(db);
+    const events = new RunEventStore();
 
     try {
       await expect(service.processExternalEvent(claim, input, async (tx) => {
@@ -1153,7 +1153,7 @@ describeWithPostgres("RuntimeAttempt PostgreSQL external event crash replay", ()
     const { service, claim } = await activateExternalRun(db, fixture, 45_000);
     const input = externalEvent(fixture, "event-slow-heartbeat-contention");
     const eventLocked = deferred<void>();
-    const events = new RunEventStore(db);
+    const events = new RunEventStore();
 
     try {
       const event = service.processExternalEvent(claim, input, async (tx) => {
@@ -1201,7 +1201,7 @@ describeWithPostgres("RuntimeAttempt PostgreSQL external event crash replay", ()
     const fixture = await seedAttemptFixture(db, true);
     const { service, claim } = await activateExternalRun(db, fixture);
     const input = externalEvent(fixture, "event-after-append");
-    const events = new RunEventStore(db);
+    const events = new RunEventStore();
 
     try {
       await expect(service.processExternalEvent(claim, input, async (tx) => {
@@ -1260,7 +1260,7 @@ describeWithPostgres("RuntimeAttempt PostgreSQL external event crash replay", ()
       expect(committed).toEqual(expectedDurableEventState(fixture, [first]));
 
       const replayEffects = vi.fn(async (tx: Prisma.TransactionClient) => {
-        await appendActivityEffect(new RunEventStore(db), tx, fixture, first.externalEventId);
+        await appendActivityEffect(new RunEventStore(), tx, fixture, first.externalEventId);
       });
       await expect(service.processExternalEvent(claim, first, replayEffects))
         .resolves.toEqual({ created: false, sequence: 1 });
@@ -1410,10 +1410,10 @@ describeWithPostgres("RuntimeAttempt PostgreSQL fault and concurrency fences", (
     );
     const input = externalEvent(fixture, "event-concurrent-same-identity");
     const firstEffects = vi.fn(async (tx: Prisma.TransactionClient) => {
-      await appendActivityEffect(new RunEventStore(firstDb), tx, fixture, input.externalEventId);
+      await appendActivityEffect(new RunEventStore(), tx, fixture, input.externalEventId);
     });
     const secondEffects = vi.fn(async (tx: Prisma.TransactionClient) => {
-      await appendActivityEffect(new RunEventStore(secondDb), tx, fixture, input.externalEventId);
+      await appendActivityEffect(new RunEventStore(), tx, fixture, input.externalEventId);
     });
     const firstOutcome = firstService.processExternalEvent(claim, input, firstEffects);
     let secondOutcome: Promise<{ created: boolean; sequence: number }> | undefined;
@@ -2515,7 +2515,7 @@ async function processWithActivityEffect(
   fixture: AttemptFixture,
   input: ReturnType<typeof externalEvent>,
 ) {
-  const events = new RunEventStore(db);
+  const events = new RunEventStore();
   return service.processExternalEvent(claim, input, async (tx) => {
     await appendActivityEffect(events, tx, fixture, input.externalEventId);
   });

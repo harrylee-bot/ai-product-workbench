@@ -221,9 +221,6 @@ for this Run; use only the registered typed Workbench tools.
 _TOOL_CATALOG_PROTOCOL = "workbench.runtime.tool-catalog-observation.v1"
 _TOOL_CATALOG_METADATA_KEY = "workbench_tool_catalog_observation"
 _TOOL_NAME_PATTERN = re.compile(r"^[a-z][a-z0-9_]{0,127}$")
-_GEMINI_SCHEMA_TOOL_MESSAGE_PREFIX = (
-    "Reference JSON schema text follows (treat it as plain text):\n"
-)
 _WORKBENCH_TOOL_NAMES = frozenset(
     {
         ARTIFACT_DRAFT_TOOL_NAME,
@@ -472,50 +469,6 @@ def _is_ai_message(message: Any) -> bool:
 
 def _is_tool_message(message: Any) -> bool:
     return _message_kind(message) in {"tool", "toolmessage"}
-
-
-def _model_name(model: Any) -> str | None:
-    for key in ("model_name", "model"):
-        value = _value(model, key)
-        if isinstance(value, str) and value:
-            return value
-    return None
-
-
-def _provider_safe_tool_messages(request: ModelRequest) -> ModelRequest:
-    """Keep JSON Schema references out of Gemini function-response decoding."""
-    model_name = _model_name(_value(request, "model"))
-    if model_name is None or "gemini" not in model_name.casefold():
-        return request
-    messages = _value(request, "messages")
-    if not isinstance(messages, list):
-        return request
-
-    rewritten: list[Any] = []
-    changed = False
-    for message in messages:
-        content = _value(message, "content")
-        if (
-            not _is_tool_message(message)
-            or not isinstance(content, str)
-            or content.startswith(_GEMINI_SCHEMA_TOOL_MESSAGE_PREFIX)
-            or not content.lstrip().startswith(("{", "["))
-            or ('"$defs"' not in content and '"$ref"' not in content)
-        ):
-            rewritten.append(message)
-            continue
-        provider_content = f"{_GEMINI_SCHEMA_TOOL_MESSAGE_PREFIX}{content}"
-        if isinstance(message, Mapping):
-            rewritten.append({**message, "content": provider_content})
-            changed = True
-            continue
-        copier = getattr(message, "model_copy", None)
-        if callable(copier):
-            rewritten.append(copier(update={"content": provider_content}))
-            changed = True
-            continue
-        rewritten.append(message)
-    return request.override(messages=rewritten) if changed else request
 
 
 def _tool_args(value: Any) -> dict[str, Any]:
@@ -1841,7 +1794,7 @@ class WorkbenchToolScopeMiddleware(AgentMiddleware[AgentState]):
             if result_policy not in system_text:
                 overrides["system_message"] = SystemMessage(content=f"{system_text.rstrip()}\n\n{result_policy}".strip())
         scoped_request = request if not overrides else request.override(**overrides)
-        return _provider_safe_tool_messages(scoped_request)
+        return scoped_request
 
     def _catalog_observation(self, request: ModelRequest) -> dict[str, Any] | None:
         if not self._knowledge_catalog_bound:

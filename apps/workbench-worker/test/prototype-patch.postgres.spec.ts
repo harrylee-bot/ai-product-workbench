@@ -438,7 +438,7 @@ describeWithPostgres("Prototype Patch PostgreSQL transactions", () => {
     const db = new PrismaClient({ datasourceUrl: databaseUrl! });
     const applicationFixture = await seedFixture(db);
     const readyFixture = await seedFixture(db);
-    const events = new RunEventStore(db);
+    const events = new RunEventStore();
     const patch = patchReplacingText(applicationFixture.document, 0, 1, "Forged receipt");
     const applied = applyPrototypePatch(applicationFixture.document, patch).document;
     const requestSha256 = "c".repeat(64);
@@ -568,7 +568,7 @@ describeWithPostgres("Prototype Patch PostgreSQL transactions", () => {
 
       const document = applyPrototypePatch(fixture.document, patch).document;
       const projectionChecksum = screenChecksum(document, "screen-home", 1);
-      const events = new RunEventStore(db);
+      const events = new RunEventStore();
       await db.$transaction(async (tx) => {
         await events.appendOnce(
           tx,

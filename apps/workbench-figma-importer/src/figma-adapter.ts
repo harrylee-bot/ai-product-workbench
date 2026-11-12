@@ -123,7 +123,6 @@ export interface FigmaImportFrameNode extends FigmaImportRectangleLikeNode {
 export interface FigmaImportRectangleNode extends FigmaImportRectangleLikeNode {}
 export interface FigmaImportVectorNode extends FigmaImportCornerNode {}
 
-type FigmaImportShapeNode = FigmaImportRectangleNode | FigmaImportVectorNode;
 type CreatedNode =
   | { kind: "text"; node: FigmaImportTextNode }
   | { kind: "frame"; node: FigmaImportFrameNode }

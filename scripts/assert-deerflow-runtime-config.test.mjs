@@ -31,7 +31,7 @@ test("accepts the pinned OpenAI-compatible model and canonical Workbench tools",
 test("rejects the legacy model and sandbox shape before runtime startup", () => {
   const fixture = createFixture({
     config: {
-      models: [{ name: "gpt-5.5", use: "datatoken:gpt-5.5" }],
+      models: [{ name: "legacy-model", use: "unsupported.adapter:Model" }],
       sandbox: {},
       tool_groups: [WORKBENCH_TOOL_GROUP],
       tools: WORKBENCH_RUNTIME_TOOLS,

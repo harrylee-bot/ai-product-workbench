@@ -108,7 +108,7 @@ function service(
   return new RunsService(
     db as never,
     new AccessService(db as never),
-    new RunEventStore(db as never),
+    new RunEventStore(),
     queue as never,
     {} as never,
     {} as never,

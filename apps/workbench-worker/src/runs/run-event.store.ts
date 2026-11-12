@@ -4,11 +4,9 @@ import {
   runEventSourceIdSchema,
   type RunEvent,
 } from "@workbench/workbench-contracts";
-import { Prisma, type PrismaClient } from "@workbench/workbench-db";
+import { Prisma } from "@workbench/workbench-db";
 
 export class RunEventStore {
-  constructor(private readonly db: PrismaClient) {}
-
   async append(
     tx: Prisma.TransactionClient,
     runId: string,

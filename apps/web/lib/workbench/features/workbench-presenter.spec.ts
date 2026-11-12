@@ -69,8 +69,8 @@ const run: Run = {
 describe("Workbench runtime choices and project mode", () => {
   it("keeps runtime models real while expressing specialized actions as workflows", () => {
     const models: RuntimeModel[] = [{
-      id: "gemini-3-flash",
-      displayName: "Gemini 3 Flash",
+      id: "deepseek-flash",
+      displayName: "DeepSeek Flash",
       description: "Fast design model",
       supportedWorkflows: ["generate", "redesign", "ideate", "edit"],
       supportsThinking: false,
@@ -78,10 +78,10 @@ describe("Workbench runtime choices and project mode", () => {
     }];
 
     expect(toWorkbenchModelChoices(models)).toEqual([
-      expect.objectContaining({ key: "model:gemini-3-flash", modelId: "gemini-3-flash", workflow: "generate" }),
-      expect.objectContaining({ label: "Redesign", modelId: "gemini-3-flash", workflow: "redesign" }),
-      expect.objectContaining({ label: "Ideate", modelId: "gemini-3-flash", workflow: "ideate" }),
-      expect.objectContaining({ label: "Edit", modelId: "gemini-3-flash", workflow: "edit" }),
+      expect.objectContaining({ key: "model:deepseek-flash", modelId: "deepseek-flash", workflow: "generate" }),
+      expect.objectContaining({ label: "Redesign", modelId: "deepseek-flash", workflow: "redesign" }),
+      expect.objectContaining({ label: "Ideate", modelId: "deepseek-flash", workflow: "ideate" }),
+      expect.objectContaining({ label: "Edit", modelId: "deepseek-flash", workflow: "edit" }),
     ]);
     expect(toWorkbenchModelChoices([])).toEqual([]);
   });

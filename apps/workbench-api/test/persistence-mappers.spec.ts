@@ -48,7 +48,7 @@ describe("persisted JSON mappers", () => {
         occurredAt: now,
       }]),
     };
-    const eventStore = new RunEventStore(db as never);
+    const eventStore = new RunEventStore();
     const service = new RunsService(
       db as never,
       {} as never,
