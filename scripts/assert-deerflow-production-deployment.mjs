@@ -108,10 +108,10 @@ assert(gateway.security_opt?.includes("no-new-privileges:true"), "DeerFlow must 
 assert(String(gateway.command).includes("--workers 1"), "DeerFlow must keep a single in-process runtime worker");
 assert(String(gateway.command).includes("uv run --no-sync"), "DeerFlow must not mutate the read-only image while starting");
 
-const configuredModel = baseConfigExample.models?.find((model) => model?.name === "gemini-3.6-flash");
-assert(configuredModel, "the DeerFlow base-config example must define the pinned gemini-3.6-flash model");
+const configuredModel = baseConfigExample.models?.find((model) => model?.name === "deepseek-flash");
+assert(configuredModel, "the DeerFlow base-config example must define the pinned deepseek-flash model");
 assert(configuredModel.use === "langchain_openai:ChatOpenAI", "the DeerFlow base-config example must use the OpenAI-compatible adapter");
-assert(configuredModel.model === "gemini-3.6-flash", "the DeerFlow base-config example must pin the gemini-3.6-flash API model");
+assert(configuredModel.model === "deepseek-flash", "the DeerFlow base-config example must pin the deepseek-flash API model");
 assert(configuredModel.api_key === "$OPENAI_API_KEY", "the DeerFlow base-config example must reference the provider key by environment name");
 assert(configuredModel.base_url === "$WORKBENCH_DEERFLOW_PROVIDER_BASE_URL", "the DeerFlow base-config example must reference the approved provider URL by environment name");
 assert(baseConfigExample.sandbox?.use === "deerflow.sandbox.local:LocalSandboxProvider", "the DeerFlow base-config example must select the local provider explicitly");

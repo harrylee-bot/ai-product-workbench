@@ -5,14 +5,23 @@ database:
   sqlite_dir: .deer-flow/data
 
 models:
-  - name: gemini-3.6-flash
-    display_name: Gemini 3.6
+  - name: deepseek-v4-pro
+    display_name: DeepSeek V4 Pro
     use: langchain_openai:ChatOpenAI
-    model: gemini-3.6-flash
+    model: deepseek-v4-pro
     api_key: $OPENAI_API_KEY
     base_url: $WORKBENCH_DEERFLOW_PROVIDER_BASE_URL
     supports_thinking: true
     supports_reasoning_effort: true
+    supports_vision: true
+  - name: deepseek-flash
+    display_name: DeepSeek Flash
+    use: langchain_openai:ChatOpenAI
+    model: deepseek-flash
+    api_key: $OPENAI_API_KEY
+    base_url: $WORKBENCH_DEERFLOW_PROVIDER_BASE_URL
+    supports_thinking: false
+    supports_reasoning_effort: false
     supports_vision: true
 
 sandbox:
