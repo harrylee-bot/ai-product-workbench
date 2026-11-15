@@ -1,6 +1,19 @@
 "use client";
 import { useEffect, useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
+import {
+  prdChannelRowSchema,
+  prdVersionHistoryEntrySchema,
+  prdSafetyBaselineRowSchema,
+  prdTemplateDiagramSchema,
+} from "@workbench/workbench-contracts";
+import {
+  PrdChannels,
+  PrdSafetyBaseline,
+  PrdDiagram,
+  PrdCover,
+  PrdVersionHistory,
+} from "./prd-semantics";
 import type {
   JsonValue,
   ExportPreviewTokenResponse,
@@ -38,6 +51,18 @@ export function StructuredContent({ value }: { value: JsonValue }): ReactNode {
   if (typeof value === "number") return <span>{value}</span>;
   if (typeof value === "string")
     return <ReactMarkdown remarkPlugins={[remarkGfm]}>{value}</ReactMarkdown>;
+  if (
+    Array.isArray(value) &&
+    value.length > 0 &&
+    value[0] &&
+    typeof value[0] === "object" &&
+    !Array.isArray(value[0]) &&
+    "author" in value[0] &&
+    "participants" in value[0]
+  ) {
+    const entries = prdVersionHistoryEntrySchema.array().safeParse(value);
+    if (entries.success) return <PrdVersionHistory entries={entries.data} />;
+  }
   if (Array.isArray(value))
     return (
       <>
@@ -46,6 +71,40 @@ export function StructuredContent({ value }: { value: JsonValue }): ReactNode {
         ))}
       </>
     );
+  if (
+    typeof value.workOrderName === "string" &&
+    typeof value.title === "string"
+  )
+    return (
+      <PrdCover
+        cover={{ workOrderName: value.workOrderName, title: value.title }}
+      />
+    );
+  if (value.title === "活动投放渠道") {
+    const rows = prdChannelRowSchema.array().safeParse(value.rows);
+    if (rows.success)
+      return <PrdChannels table={{ title: "活动投放渠道", rows: rows.data }} />;
+  }
+  if (
+    value.title === "4 需求安全基线要求（必填）" &&
+    typeof value.intro === "string"
+  ) {
+    const rows = prdSafetyBaselineRowSchema.array().safeParse(value.rows);
+    if (rows.success)
+      return (
+        <PrdSafetyBaseline
+          baseline={{
+            title: "4 需求安全基线要求（必填）",
+            intro: value.intro,
+            rows: rows.data,
+          }}
+        />
+      );
+  }
+  if (value.kind === "productFlow" || value.kind === "productArchitecture") {
+    const diagram = prdTemplateDiagramSchema.safeParse(value);
+    if (diagram.success) return <PrdDiagram diagram={diagram.data} />;
+  }
   const render = (v: JsonValue | undefined) =>
     v === undefined ? null : <StructuredContent value={v} />;
   const list = Array.isArray(value.items) ? value.items : [];

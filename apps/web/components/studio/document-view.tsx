@@ -8,6 +8,11 @@ import {
 } from "@tanstack/react-query";
 import {
   prdDocumentSchema,
+  prdTableOfContentsEntriesForV3,
+  type PrdDocument,
+  prdChannelRowSchema,
+  prdSafetyBaselineRowSchema,
+  prdTemplateDiagramSchema,
   jsonValueSchema,
   canonicalJson,
   runPrdScreenPlanSchema,
@@ -30,6 +35,13 @@ import {
 } from "./content";
 import { workbenchQueryKeys } from "@/lib/workbench/query/keys";
 import { useStudioAction } from "./actions";
+import {
+  PrdChannels,
+  PrdSafetyBaseline,
+  PrdDiagram,
+  PrdCover,
+  PrdVersionHistory,
+} from "./prd-semantics";
 import { ImageEditor } from "./image-editor";
 import { ArtifactRelations } from "./relations";
 const documentDraftRecordSchema = z
@@ -48,6 +60,27 @@ const documentDraftRecordSchema = z
       .nullable(),
   })
   .strict();
+function parsePrdDraft(value: JsonValue): PrdDocument {
+  const parsed = prdDocumentSchema.safeParse(value);
+  if (parsed.success) return parsed.data;
+  const messages = parsed.error.issues.map((issue) => {
+    const path = issue.path.map(String);
+    if (path.includes("channelTable"))
+      return "投放渠道需与使用场景正文一致，请在正文明确说明启用的渠道";
+    if (path.includes("safetyBaseline")) {
+      const row = Number(path[path.indexOf("rows") + 1]);
+      return `第${Number.isFinite(row) ? row + 1 : "相关"}项安全基线的判定、备注与正文需一致；是/否必须有对应事实与依据`;
+    }
+    if (path[0] === "versionHistory")
+      return "修订记录的作者、参与者、日期与说明需完整";
+    if (path[0] === "cover" || path[0] === "title")
+      return "请填写完整工单名称，封面和文档标题将自动同步";
+    return "请检查正文是否完整，以及章节编号、图示和目录是否一致";
+  });
+  throw new Error(
+    `文档尚不能保存：${[...new Set(messages)].slice(0, 4).join("；")}。草稿已保留。`,
+  );
+}
 const hidden = new Set([
   "protocol",
   "schemaVersion",
@@ -69,6 +102,18 @@ const hidden = new Set([
   "artifactVersionId",
   "sourceRefs",
   "metadata",
+]);
+const fixedPrdTitles = new Set([
+  "title",
+  "cover.title",
+  "tableOfContents.title",
+  "sections.introduction.title",
+  "sections.introduction.background.title",
+  "sections.introduction.scope.title",
+  "sections.introduction.usageScenarios.title",
+  "sections.businessRequirements.title",
+  "sections.businessRequirements.pageLinks.title",
+  "sections.degradation.title",
 ]);
 const editable = new Set([
   "title",
@@ -163,13 +208,34 @@ export function DocumentView({
         (value?.contentMode === "inline"
           ? (value.content as unknown as JsonValue)
           : null));
-  const update = (path: (string | number)[], text: string) => {
+  const update = (path: (string | number)[], text: JsonValue) => {
     if (content === null) return;
     const copy = structuredClone(content);
     let parent = copy as Record<string, unknown>;
     for (const part of path.slice(0, -1))
       parent = parent[part] as Record<string, unknown>;
     parent[path.at(-1)!] = text;
+    if (value?.kind === "prd") {
+      const document = copy as unknown as PrdDocument;
+      if (
+        path.join(".") === "cover.workOrderName" &&
+        typeof text === "string"
+      ) {
+        document.title = `${text}需求说明书`;
+        document.cover.title = document.title;
+      }
+      if (
+        path.slice(0, 3).join(".") ===
+          "sections.businessRequirements.functionSections" &&
+        path.at(-1) === "title"
+      ) {
+        document.tableOfContents.entries = prdTableOfContentsEntriesForV3(
+          document.sections.businessRequirements.functionSections.map(
+            (section) => section.title,
+          ),
+        );
+      }
+    }
     setDraft(copy);
     if (value?.kind === "prd")
       local.save({
@@ -184,9 +250,11 @@ export function DocumentView({
     path: (string | number)[] = [],
     depth = 0,
   ): ReactNode => {
-    if (data === null || typeof data === "boolean") return null;
+    if (data === null) return null;
     if (typeof data === "string")
-      return editing && editable.has(String(path.at(-1))) ? (
+      return editing &&
+        editable.has(String(path.at(-1))) &&
+        !fixedPrdTitles.has(path.join(".")) ? (
         <textarea
           key={path.join(".")}
           aria-label={`编辑 ${path.join(" / ")}`}
@@ -197,7 +265,28 @@ export function DocumentView({
       ) : (
         <ReactMarkdown remarkPlugins={[remarkGfm]}>{data}</ReactMarkdown>
       );
+    if (typeof data === "boolean")
+      return (
+        <label>
+          <input
+            type="checkbox"
+            aria-label={`编辑 ${path.join(" / ")}`}
+            checked={data}
+            disabled={!canEdit || action.busy}
+            onChange={(event) => update(path, event.target.checked)}
+          />
+          {path.at(-1) === "applicable" ? "适用业务降级方案" : "是否启用"}
+        </label>
+      );
     if (typeof data === "number") return <span>{data}</span>;
+    if (Array.isArray(data) && path.join(".") === "versionHistory")
+      return (
+        <PrdVersionHistory
+          entries={data as unknown as PrdDocument["versionHistory"]}
+          disabled={!canEdit || action.busy}
+          onChange={(next) => update(path, next)}
+        />
+      );
     if (Array.isArray(data))
       return (
         <div className="studio-document-blocks">
@@ -206,6 +295,51 @@ export function DocumentView({
           ))}
         </div>
       );
+    if (
+      path.join(".") === "cover" &&
+      typeof data.workOrderName === "string" &&
+      typeof data.title === "string"
+    )
+      return (
+        <PrdCover
+          cover={{ workOrderName: data.workOrderName, title: data.title }}
+          disabled={!canEdit || action.busy}
+          onChange={(name) => update([...path, "workOrderName"], name)}
+        />
+      );
+    if (data.title === "活动投放渠道") {
+      const rows = prdChannelRowSchema.array().safeParse(data.rows);
+      if (rows.success)
+        return (
+          <PrdChannels
+            table={{ title: "活动投放渠道", rows: rows.data }}
+            disabled={!canEdit || action.busy}
+            onChange={(next) => update(path, next)}
+          />
+        );
+    }
+    if (
+      data.title === "4 需求安全基线要求（必填）" &&
+      typeof data.intro === "string"
+    ) {
+      const rows = prdSafetyBaselineRowSchema.array().safeParse(data.rows);
+      if (rows.success)
+        return (
+          <PrdSafetyBaseline
+            baseline={{
+              title: "4 需求安全基线要求（必填）",
+              intro: data.intro,
+              rows: rows.data,
+            }}
+            disabled={!canEdit || action.busy}
+            onChange={(next) => update(path, next)}
+          />
+        );
+    }
+    if (data.kind === "productFlow" || data.kind === "productArchitecture") {
+      const diagram = prdTemplateDiagramSchema.safeParse(data);
+      if (diagram.success) return <PrdDiagram diagram={diagram.data} />;
+    }
     if (typeof data.text === "string" && !editing)
       return <span>{data.text}</span>;
     return (
@@ -328,7 +462,7 @@ export function DocumentView({
                         ? local.value.prepared
                         : null;
                     if (!prepared) {
-                      const document = prdDocumentSchema.parse(content);
+                      const document = parsePrdDraft(content);
                       const baseline = prdDocumentSchema.parse(value.content);
                       const current = await api.getArtifact(artifact.id);
                       if (

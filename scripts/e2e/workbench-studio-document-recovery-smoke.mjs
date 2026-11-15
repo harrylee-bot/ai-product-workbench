@@ -10,10 +10,15 @@ import {
   createArtifactVersionRequestSchema,
   artifactVersionRelationsSchema,
   canonicalJson,
+  prdSafetyBaselineItems,
+  prdChannelLabels,
 } from "@workbench/workbench-contracts";
+const semantics = process.env.WORKBENCH_E2E_PRD_SEMANTICS === "1";
 const origin = process.env.WORKBENCH_E2E_WEB_ORIGIN ?? "http://127.0.0.1:18930";
 const output = new URL(
-  "../../output/audit/1.0.0/studio-document-recovery/",
+  semantics
+    ? "../../output/audit/1.0.0/studio-prd-semantics/"
+    : "../../output/audit/1.0.0/studio-document-recovery/",
   import.meta.url,
 );
 await mkdir(output, { recursive: true });
@@ -302,10 +307,178 @@ const textField = () =>
 try {
   await open(null);
   await page.waitForURL(/artifactVersion=prd-v1/);
+  if (semantics) {
+    const baseline = page.getByRole("region", {
+      name: "4 需求安全基线要求（必填）",
+      exact: true,
+    });
+    for (const item of prdSafetyBaselineItems)
+      await baseline.getByText(item.requirement, { exact: true }).waitFor();
+    for (const line of prdDocumentV3Example.sections.safetyBaseline.intro.split(
+      "\n",
+    ))
+      await baseline.getByText(line, { exact: true }).waitFor();
+    assert.equal(await baseline.getByRole("row").count(), 22);
+    for (const label of Object.values(prdChannelLabels))
+      await page
+        .getByRole("region", { name: "活动投放渠道", exact: true })
+        .getByRole("rowheader", { name: label, exact: true })
+        .waitFor();
+    await page.getByRole("button", { name: "专注预览", exact: true }).click();
+    await page.setViewportSize({ width: 1440, height: 1200 });
+    const diagrams =
+      prdDocumentV3Example.sections.businessRequirements.functionSections.flatMap(
+        (s) => s.diagrams,
+      );
+    for (const diagram of diagrams) {
+      const figure = page.getByRole("figure", {
+        name: diagram.title,
+        exact: true,
+      });
+      await figure
+        .getByRole("img", { name: diagram.title, exact: true })
+        .waitFor();
+      assert.equal(
+        await figure.locator("[data-prd-node]").count(),
+        diagram.nodes.length,
+      );
+      assert.equal(
+        await figure.locator("[data-prd-edge] path[marker-end]").count(),
+        diagram.edges.length,
+      );
+      assert(!/flow-node-|arch-node-/.test(await figure.innerText()));
+      await figure.locator("summary").click();
+      assert.equal(
+        await figure.getByRole("listitem").count(),
+        diagram.edges.length,
+      );
+      await figure.locator("summary").click();
+      await figure.screenshot({
+        path: new URL(`${diagram.id}.png`, output).pathname,
+      });
+    }
+    await page.setViewportSize({ width: 390, height: 844 });
+    const figure = page.getByRole("figure", {
+      name: "图1 产品流程图",
+      exact: true,
+    });
+    await figure.screenshot({
+      path: new URL("diagram-mobile.png", output).pathname,
+    });
+    const metrics = await page.evaluate(() => ({
+      width: innerWidth,
+      scroll: document.documentElement.scrollWidth,
+      graphs: [...document.querySelectorAll(".studio-prd-diagram svg")].map(
+        (svg) => ({
+          display: svg.getBoundingClientRect().width,
+          intrinsic: svg.viewBox.baseVal.width,
+        }),
+      ),
+    }));
+    assert(metrics.scroll <= metrics.width + 1, JSON.stringify(metrics));
+    assert(
+      metrics.graphs.every((graph) => graph.display >= graph.intrinsic - 1),
+      "diagrams retain legible scale inside local scroll areas",
+    );
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.getByRole("button", { name: "展开输入框", exact: true }).click();
+    results.checks.push(
+      "typed reader shows all 21 canonical requirements/scopes, complete intro and named channels; both diagrams render every node and directed edge with accessible text relationships and locally scrollable mobile geometry",
+    );
+  }
+
   await page.getByRole("button", { name: "编辑文档", exact: true }).click();
   await textField().fill(
     "修改后的项目背景；保留原始版本，形成可追溯文档修订。",
   );
+  if (semantics) {
+    assert.equal(
+      await page
+        .getByRole("region", { name: "活动投放渠道", exact: true })
+        .getByRole("checkbox")
+        .count(),
+      3,
+    );
+    assert.equal(
+      await page.locator('select[aria-label$="安全基线判定"]').count(),
+      21,
+    );
+    assert.equal(
+      await page.locator('textarea[aria-label$="安全基线备注"]').count(),
+      21,
+    );
+    await page
+      .getByLabel("编辑 sections / degradation / applicable", { exact: true })
+      .uncheck();
+    assert(
+      !(await page
+        .getByLabel("编辑 sections / degradation / applicable", { exact: true })
+        .isChecked()),
+    );
+    await page
+      .getByLabel("编辑 sections / degradation / applicable", { exact: true })
+      .check();
+    await page.getByLabel("工单名称", { exact: true }).fill("修改后的验收工单");
+    await page.getByLabel("版本1状态", { exact: true }).selectOption("评审中");
+    await page.getByLabel("版本1作者", { exact: true }).fill("产品负责人");
+    await page
+      .getByLabel("版本1参与者", { exact: true })
+      .fill("产品负责人、测试负责人");
+    await page.getByLabel("版本1起始日期", { exact: true }).fill("2026-07-23");
+    await page.getByLabel("版本1结束日期", { exact: true }).fill("2026-07-24");
+    await page
+      .getByLabel("版本1备注", { exact: true })
+      .fill("完善渠道、安全判定和验收描述后进入评审。");
+    await page
+      .getByLabel(
+        "编辑 sections / businessRequirements / functionSections / 0 / title",
+        { exact: true },
+      )
+      .fill("2.2 任务提交与业务校验调整");
+    await page.getByLabel("WAP/H5端外渠道是否投放", { exact: true }).check();
+    await page.getByRole("button", { name: "保存新版本", exact: true }).click();
+    await page
+      .getByRole("alert")
+      .filter({ hasText: "投放渠道需与使用场景正文一致" })
+      .waitFor();
+    assert.equal(writes.length, 0);
+    assert(
+      await page
+        .getByLabel("WAP/H5端外渠道是否投放", { exact: true })
+        .isChecked(),
+    );
+    results.checks.push(
+      "inconsistent structured input gives actionable Chinese validation, retains the draft and sends no write until the body is corrected",
+    );
+
+    await page
+      .getByLabel(
+        "编辑 sections / introduction / usageScenarios / blocks / 0 / content / 0 / text",
+        { exact: true },
+      )
+      .fill(
+        "业务功能面向公众用户。已登录用户从产品工作台端内入口或 WAP/H5 网页端发起任务，查看实时状态，并在成功或可恢复失败后完成结果确认。",
+      );
+    await page.getByLabel("2安全基线判定", { exact: true }).selectOption("是");
+    await page
+      .getByLabel("2安全基线备注", { exact: true })
+      .fill("业务功能面向公众用户，使用现有账户登录后访问任务页面。");
+    await page
+      .getByLabel("2安全基线判定", { exact: true })
+      .selectOption("不涉及");
+    assert(
+      await page.getByLabel("2安全基线备注", { exact: true }).isDisabled(),
+    );
+    assert.equal(
+      await page.getByLabel("2安全基线备注", { exact: true }).inputValue(),
+      "",
+    );
+    await page.getByLabel("2安全基线判定", { exact: true }).selectOption("是");
+    await page
+      .getByLabel("2安全基线备注", { exact: true })
+      .fill("业务功能面向公众用户，使用现有账户登录后访问任务页面。");
+  }
+
   await page
     .getByRole("button", { name: "退出编辑并保留草稿", exact: true })
     .click();
@@ -316,6 +489,25 @@ try {
     "修改后的项目背景；保留原始版本，形成可追溯文档修订。",
   );
   assert.equal(versions.size, 1);
+  if (semantics) {
+    assert(
+      await page
+        .getByLabel("WAP/H5端外渠道是否投放", { exact: true })
+        .isChecked(),
+    );
+    assert.equal(
+      await page.getByLabel("2安全基线判定", { exact: true }).inputValue(),
+      "是",
+    );
+    assert.equal(
+      await page.getByLabel("2安全基线备注", { exact: true }).inputValue(),
+      "业务功能面向公众用户，使用现有账户登录后访问任务页面。",
+    );
+    results.checks.push(
+      "new Studio exposes all channel and baseline controls; changes, nullable remarks and the supporting body survive draft close/reload",
+    );
+  }
+
   results.checks.push(
     "nested PRD edit survives close and reload without changing its frozen source version",
   );
@@ -338,6 +530,65 @@ try {
     prdDocumentV3Example.sections.introduction.background.blocks[0].content[0]
       .text,
   );
+  if (semantics) {
+    await page.reload({ waitUntil: "networkidle" });
+    const saved = versions.get("prd-v2").detail.content,
+      original = versions.get("prd-v1").detail.content;
+    assert.equal(saved.cover.workOrderName, "修改后的验收工单");
+    assert.equal(saved.title, "修改后的验收工单需求说明书");
+    assert.equal(saved.cover.title, saved.title);
+    assert.deepEqual(saved.versionHistory[0], {
+      status: "评审中",
+      author: "产品负责人",
+      participants: ["产品负责人", "测试负责人"],
+      startDate: "2026-07-23",
+      endDate: "2026-07-24",
+      notes: "完善渠道、安全判定和验收描述后进入评审。",
+    });
+    assert(
+      saved.tableOfContents.entries.includes("2.2 任务提交与业务校验调整"),
+    );
+    assert.equal(
+      original.cover.workOrderName,
+      prdDocumentV3Example.cover.workOrderName,
+    );
+    assert.deepEqual(
+      original.versionHistory,
+      prdDocumentV3Example.versionHistory,
+    );
+    results.checks.push(
+      "cover work-order editing synchronizes generated titles; full version history metadata and business heading/TOC changes round-trip without changing original metadata",
+    );
+    assert.equal(
+      saved.sections.introduction.usageScenarios.channelTable.rows[1].enabled,
+      true,
+    );
+    assert.equal(
+      original.sections.introduction.usageScenarios.channelTable.rows[1]
+        .enabled,
+      false,
+    );
+    assert.deepEqual(saved.sections.safetyBaseline.rows[1], {
+      sequence: 2,
+      applicability: "是",
+      remarks: "业务功能面向公众用户，使用现有账户登录后访问任务页面。",
+    });
+    assert.deepEqual(original.sections.safetyBaseline.rows[1], {
+      sequence: 2,
+      applicability: "不涉及",
+      remarks: null,
+    });
+    const baseline = page.getByRole("region", {
+      name: "4 需求安全基线要求（必填）",
+      exact: true,
+    });
+    await baseline
+      .getByText(saved.sections.safetyBaseline.rows[1].remarks, { exact: true })
+      .waitFor();
+    results.checks.push(
+      "strict PRD contract accepts changed channel/answer/remarks and matching body; saved/reloaded new version retains them, old version stays unchanged, and lost-response replay remains exact",
+    );
+  }
   results.checks.push(
     "manual save advances revision and preserves base; accepted/lost response replays identical body, key and ETag after reload although current version advanced",
   );
@@ -395,6 +646,7 @@ try {
 } catch (error) {
   results.status = "failed";
   results.error = String(error.stack ?? error);
+  results.body = (await page.locator("body").innerText()).slice(0, 12000);
   await page.screenshot({ path: new URL("failure.png", output).pathname });
   throw error;
 } finally {
