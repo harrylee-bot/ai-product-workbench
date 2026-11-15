@@ -7,15 +7,15 @@ import { buildOssRamManifest } from "./workbench-oss-ram-manifest.mjs";
 
 const bucket = "aionbench-workbench-prod";
 
-test("builds eight independent least-privilege OSS identities", () => {
+test("builds nine independent least-privilege OSS identities", () => {
   const manifest = buildOssRamManifest({ bucket, environment: "prod" });
 
   assert.equal(manifest.schemaVersion, "workbench.oss-ram-identity-manifest.v1");
   assert.equal(manifest.defaultAuthorization, "deny");
-  assert.equal(manifest.identities.length, 8);
-  assert.equal(new Set(manifest.identities.map(({ userName }) => userName)).size, 8);
-  assert.equal(new Set(manifest.identities.map(({ policyName }) => policyName)).size, 8);
-  assert.equal(new Set(manifest.identities.map(({ envPrefix }) => envPrefix)).size, 8);
+  assert.equal(manifest.identities.length, 9);
+  assert.equal(new Set(manifest.identities.map(({ userName }) => userName)).size, 9);
+  assert.equal(new Set(manifest.identities.map(({ policyName }) => policyName)).size, 9);
+  assert.equal(new Set(manifest.identities.map(({ envPrefix }) => envPrefix)).size, 9);
 
   for (const identity of manifest.identities) {
     assert.match(identity.userName, /^wb-prod-[a-z-]+$/u);
@@ -82,6 +82,24 @@ test("maps application operations to exact OSS actions and prefixes", () => {
       `acs:oss:*:*:${bucket}/blobs/*`,
     ],
   }]);
+  assert.deepEqual(identities.get("prototype-artifact"), [{
+    Effect: "Allow",
+    Action: ["oss:GetObject", "oss:PutObject"],
+    Resource: [`acs:oss:*:*:${bucket}/prototype-v2/*`],
+  }]);
+});
+
+test("selects only the new prototype role when upgrading existing OSS identities", () => {
+  const manifest = JSON.parse(execFileSync(process.execPath, [
+    "scripts/workbench-oss-ram-manifest.mjs", "--bucket", bucket,
+    "--identity", "prototype-artifact",
+  ], { encoding: "utf8" }));
+  assert.deepEqual(manifest.identities.map(({ id }) => id), ["prototype-artifact"]);
+  assert.equal(manifest.identities[0].envPrefix, "WORKBENCH_PROTOTYPE_ARTIFACT_S3");
+  assert.throws(() => buildOssRamManifest({ bucket, environment: "prod", identity: "unknown" }), /supported OSS role/u);
+  assert.throws(() => execFileSync(process.execPath, [
+    "scripts/workbench-oss-ram-manifest.mjs", "--bucket", bucket, "--identity",
+  ], { stdio: "pipe" }));
 });
 
 test("rejects names that could widen an OSS resource", () => {
@@ -116,6 +134,8 @@ test("CLI output is deterministic and the provisioner fails closed", () => {
   assert.match(provisioner, /set \+x/u);
   assert.match(provisioner, /umask 077/u);
   assert.match(provisioner, /WORKBENCH_OSS_PROVISION_CONFIRM/u);
+  assert.match(provisioner, /WORKBENCH_OSS_IDENTITY/u);
+  assert.match(provisioner, /manifest_args\+=\(--identity "\$IDENTITY"\)/u);
   for (const requiredSetting of [
     "WORKBENCH_OSS_REGION",
     "WORKBENCH_OSS_INTERNAL_ENDPOINT",

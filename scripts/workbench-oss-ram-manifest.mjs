@@ -71,17 +71,29 @@ const ROLE_DEFINITIONS = Object.freeze([
     ]),
   }),
   readyReader("preview", "Preview", "WORKBENCH_PREVIEW_S3", "Workbench Preview ready Blob reader"),
+  Object.freeze({
+    id: "prototype-artifact",
+    policyStem: "PrototypeArtifact",
+    envPrefix: "WORKBENCH_PROTOTYPE_ARTIFACT_S3",
+    description: "Workbench immutable prototype artifact identity",
+    statements: Object.freeze([
+      statement(["oss:GetObject", "oss:PutObject"], ["prototype-v2"]),
+    ]),
+  }),
 ]);
 
-export function buildOssRamManifest({ bucket, environment }) {
+export function buildOssRamManifest({ bucket, environment, identity }) {
   assertIdentifier(bucket, "bucket", BUCKET_PATTERN);
   assertIdentifier(environment, "environment", ENVIRONMENT_PATTERN);
+  if (identity !== undefined && !ROLE_DEFINITIONS.some(({ id }) => id === identity)) {
+    throw new Error("identity is not a supported OSS role");
+  }
   const environmentTitle = environment
     .split("-")
     .map((part) => `${part[0].toUpperCase()}${part.slice(1)}`)
     .join("");
 
-  const identities = ROLE_DEFINITIONS.map((definition) => {
+  const identities = ROLE_DEFINITIONS.filter(({ id }) => identity === undefined || id === identity).map((definition) => {
     const policyDocument = {
       Version: "1",
       Statement: definition.statements.map(({ actions, prefixes }) => ({
@@ -142,6 +154,10 @@ function parseArguments(argv) {
     const argument = argv[index];
     if (argument === "--bucket") result.bucket = argv[++index];
     else if (argument === "--environment") result.environment = argv[++index];
+    else if (argument === "--identity") {
+      result.identity = argv[++index];
+      if (!result.identity) throw new Error("--identity requires a supported OSS role");
+    }
     else throw new Error(`unsupported argument: ${argument}`);
   }
   if (!result.bucket) throw new Error("--bucket is required");

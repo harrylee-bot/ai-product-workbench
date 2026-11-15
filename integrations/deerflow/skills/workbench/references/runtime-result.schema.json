@@ -5337,6 +5337,34 @@
             "null"
           ],
           "properties": {
+            "color": {
+              "anyOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "kind": {
+                      "type": "string",
+                      "enum": [
+                        "literal"
+                      ]
+                    },
+                    "value": {
+                      "type": "string",
+                      "pattern": "^#[0-9a-f]{6}(?:[0-9a-f]{2})?$"
+                    }
+                  },
+                  "required": [
+                    "kind",
+                    "value"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "$ref": "#/$defs/PrototypeTokenReference"
+                }
+              ],
+              "description": "Optional text color, independent of a control's background fill. Accepts a hex literal or color token; omitted values preserve legacy text fill and control contrast defaults."
+            },
             "fontFamily": {
               "$ref": "#/$defs/PrototypeStringValue"
             },

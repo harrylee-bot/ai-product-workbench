@@ -7,6 +7,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 APP_DIR="${WORKBENCH_APP_DIR:-$(cd "$SCRIPT_DIR/.." && pwd)}"
 BUCKET="${WORKBENCH_OSS_BUCKET:-}"
 ENVIRONMENT="${WORKBENCH_OSS_ENVIRONMENT:-prod}"
+IDENTITY="${WORKBENCH_OSS_IDENTITY:-}"
 REGION="${WORKBENCH_OSS_REGION:-}"
 INTERNAL_ENDPOINT="${WORKBENCH_OSS_INTERNAL_ENDPOINT:-}"
 EGRESS_UPSTREAM_HOST="${WORKBENCH_OSS_EGRESS_UPSTREAM_HOST:-}"
@@ -97,9 +98,11 @@ cleanup() {
 }
 trap cleanup EXIT
 
-node "$APP_DIR/scripts/workbench-oss-ram-manifest.mjs" \
-  --bucket "$BUCKET" \
-  --environment "$ENVIRONMENT" >"$manifest"
+manifest_args=(--bucket "$BUCKET" --environment "$ENVIRONMENT")
+if [ -n "$IDENTITY" ]; then
+  manifest_args+=(--identity "$IDENTITY")
+fi
+node "$APP_DIR/scripts/workbench-oss-ram-manifest.mjs" "${manifest_args[@]}" >"$manifest"
 
 caller_json="$(aliyun sts GetCallerIdentity)"
 jq -e '.AccountId and .Arn' <<<"$caller_json" >/dev/null
