@@ -467,6 +467,15 @@ await context.route("**/api/**", (route) => {
         contentType: "image/png",
         body: corruptImage ? Buffer.alloc(imageBytes.length) : imageBytes,
       });
+    if (path === `/api/v1/projects/${projectId}/artifacts`)
+      return json(route, {
+        items: [artifact, imageArtifact].filter(
+          (item) =>
+            !url.searchParams.has("kind") ||
+            item.kind === url.searchParams.get("kind"),
+        ),
+        nextCursor: null,
+      });
     if (path.endsWith("/preview-token")) {
       assert(path.includes(`/artifacts/${artifactId}/versions/${versionId}/`));
       return json(route, capability(true));
@@ -599,7 +608,9 @@ try {
   checks.push(
     "fixed artifact/version preview survives direct navigation and refresh",
   );
-  await page.screenshot({ path: new URL("private-prototype.png", output).pathname });
+  await page.screenshot({
+    path: new URL("private-prototype.png", output).pathname,
+  });
   await page
     .getByRole("combobox", { name: "选择文档" })
     .selectOption("image-one");

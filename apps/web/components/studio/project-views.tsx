@@ -1,8 +1,13 @@
 "use client";
-import { useState } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useRef, useState } from "react";
+import {
+  useInfiniteQuery,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query";
 import { useRouter, useSearchParams } from "next/navigation";
 import type {
+  Artifact,
   GenerationPreview,
   ProjectBootstrap,
   Run,
@@ -20,10 +25,13 @@ import { ProjectPublishing } from "./project-publishing";
 import { ContextImports, KnowledgeLibrary } from "./context-library";
 import { Streamdown } from "streamdown";
 import type { RunProjectionState } from "@/lib/workbench/run/reducer";
-import { projectedRun } from "@/lib/studio/run";
+import { isActiveRun, projectedRun } from "@/lib/studio/run";
 import { DocumentView } from "./document-view";
 import { RunOutputs } from "./relations";
 import { ProjectMembers } from "./project-members";
+const uniqueItems = <T extends { id: string }>(items: T[]) => [
+  ...new Map(items.map((item) => [item.id, item])).values(),
+];
 const etag = (v: { revision: number }) => `"${v.revision}"`;
 export function ProjectViews({
   activeRunId,
@@ -94,11 +102,27 @@ function Resources({
     >("url_snapshot"),
     [value, setValue] = useState(""),
     [ref, setRef] = useState("main");
-  const query = useQuery({
-    queryKey: workbenchQueryKeys.importSources(projectId),
-    queryFn: () => api.listImportSources(projectId, { limit: 100 }),
-    refetchInterval: 5000,
+  const importIntent = useRef<{ input: string; key: string } | null>(null);
+  const query = useInfiniteQuery({
+    queryKey: [
+      ...workbenchQueryKeys.importSources(projectId),
+      "studio-infinite",
+    ],
+    initialPageParam: undefined as string | undefined,
+    queryFn: ({ pageParam }) =>
+      api.listImportSources(projectId, { limit: 30, cursor: pageParam }),
+    getNextPageParam: (page) => page.nextCursor ?? undefined,
+    refetchInterval: (query) =>
+      !query.state.error &&
+      query.state.data?.pages.some((page) =>
+        page.items.some((source) => source.status === "pending"),
+      )
+        ? 5000
+        : false,
   });
+  const sources = uniqueItems(
+    query.data?.pages.flatMap((page) => page.items) ?? [],
+  );
   return (
     <>
       <h1>{knowledge ? "知识上下文" : "项目资料"}</h1>
@@ -113,14 +137,24 @@ function Resources({
           onSubmit={(e) => {
             e.preventDefault();
             void action.run(async () => {
+              const request =
+                kind === "github_snapshot"
+                  ? { kind, repository: value.trim(), ref: ref.trim() }
+                  : kind === "figma_snapshot"
+                    ? { kind, fileKey: value.trim() }
+                    : { kind, sourceUrl: value.trim() };
+              const input = JSON.stringify([projectId, request]);
+              if (importIntent.current?.input !== input)
+                importIntent.current = {
+                  input,
+                  key: `studio-import:${crypto.randomUUID()}`,
+                };
               await api.createImportSource(
                 projectId,
-                kind === "github_snapshot"
-                  ? { kind, repository: value, ref }
-                  : kind === "figma_snapshot"
-                    ? { kind, fileKey: value }
-                    : { kind, sourceUrl: value },
+                request,
+                importIntent.current.key,
               );
+              importIntent.current = null;
               setValue("");
               await query.refetch();
               await client.invalidateQueries({
@@ -169,7 +203,7 @@ function Resources({
         </p>
       )}
       <div className="studio-resource-list">
-        {query.data?.items.map((source) => (
+        {sources.map((source) => (
           <article key={source.id}>
             <div>
               <h2>{source.label}</h2>
@@ -209,12 +243,20 @@ function Resources({
           </article>
         ))}
       </div>
-      {query.data?.items.length === 0 && (
+      {query.isPending && <p role="status">正在读取资料…</p>}
+      {!query.isPending && !query.error && sources.length === 0 && (
         <p className="studio-empty-copy">
           尚无项目资料。上传附件或导入链接开始。
         </p>
       )}
-      {query.data?.nextCursor && <p>当前显示最近 100 项资料。</p>}
+      {query.hasNextPage && (
+        <button
+          disabled={query.isFetching}
+          onClick={() => void query.fetchNextPage()}
+        >
+          加载更多资料
+        </button>
+      )}
     </>
   );
 }
@@ -231,21 +273,30 @@ function Documents({
   canEdit: boolean;
   onPrompt: (text: string, context?: StudioArtifactContext) => void;
 }) {
-  const artifacts = bootstrap.artifacts.filter((a) =>
-    [
-      "prd",
-      "document",
-      "data",
-      "image",
-      "code",
-      "design_system",
-      "prototype",
-    ].includes(a.kind),
-  );
   const params = useSearchParams(),
     selected = params.get("artifact") ?? "",
     requestedVersion = params.get("artifactVersion") ?? undefined;
   const api = useWorkbenchArtifactsApi();
+  const [kind, setKind] = useState<Artifact["kind"] | "">("");
+  const list = useInfiniteQuery({
+    queryKey: [
+      ...workbenchQueryKeys.artifacts(bootstrap.project.id),
+      "studio-infinite",
+      kind,
+    ],
+    initialPageParam: undefined as string | undefined,
+    queryFn: ({ pageParam }) =>
+      api.listArtifacts(bootstrap.project.id, {
+        limit: 30,
+        cursor: pageParam,
+        ...(kind ? { kind } : {}),
+      }),
+    getNextPageParam: (page) => page.nextCursor ?? undefined,
+  });
+  const artifacts = uniqueItems(
+    list.data?.pages.flatMap((page) => page.items) ??
+      bootstrap.artifacts.filter((item) => !kind || item.kind === kind),
+  );
   const pinned = useQuery({
     queryKey: ["studio", "pinned-artifact", bootstrap.project.id, selected],
     enabled: Boolean(
@@ -259,7 +310,8 @@ function Documents({
     },
   });
   const artifact = selected
-    ? (artifacts.find((a) => a.id === selected) ?? pinned.data)
+    ? (artifacts.find((a) => a.id === selected) ??
+      (pinned.error ? undefined : pinned.data))
     : (artifacts.find(
         (a) => a.currentVersion?.createdByRunId === activeRunId,
       ) ?? artifacts[0]);
@@ -267,6 +319,41 @@ function Documents({
     <>
       <div className="studio-view-heading">
         <h1>文档与产物</h1>
+        <label>
+          产物类型
+          <select
+            aria-label="产物类型"
+            value={kind}
+            onChange={(e) => setKind(e.target.value as typeof kind)}
+          >
+            <option value="">全部类型</option>
+            {(
+              [
+                "prd",
+                "document",
+                "prototype",
+                "image",
+                "data",
+                "code",
+                "design_system",
+              ] as const
+            ).map((value) => (
+              <option key={value} value={value}>
+                {
+                  {
+                    prd: "需求文档",
+                    document: "文档",
+                    prototype: "原型",
+                    image: "图片",
+                    data: "数据",
+                    code: "代码",
+                    design_system: "设计系统",
+                  }[value]
+                }
+              </option>
+            ))}
+          </select>
+        </label>
         <select
           aria-label="选择文档"
           value={artifact?.id ?? ""}
@@ -290,6 +377,21 @@ function Documents({
             )}
         </select>
       </div>
+      {list.isPending && <p role="status">正在读取产物目录…</p>}
+      {list.error && (
+        <p role="alert">
+          产物目录读取失败。
+          <button onClick={() => void list.refetch()}>重试产物目录</button>
+        </p>
+      )}
+      {list.hasNextPage && (
+        <button
+          disabled={list.isFetching}
+          onClick={() => void list.fetchNextPage()}
+        >
+          加载更多产物
+        </button>
+      )}
       {previews
         .filter((p) => p.kind === "prd")
         .map((p) => (
@@ -334,8 +436,23 @@ function Runs({
     projects = useWorkbenchProjectsApi();
   const params = useSearchParams(),
     requestedRunId = params.get("run") ?? "";
-  const [manualThreadId, setThread] = useState(
-    bootstrap.selectedThreadId ?? "",
+  const requestedThreadId =
+    params.get("thread") ?? bootstrap.selectedThreadId ?? "";
+  const threads = useInfiniteQuery({
+    queryKey: [
+      ...workbenchQueryKeys.threadLists(bootstrap.project.id),
+      "studio-infinite",
+    ],
+    initialPageParam: undefined as string | undefined,
+    queryFn: ({ pageParam }) =>
+      projects.listThreads(bootstrap.project.id, {
+        limit: 30,
+        cursor: pageParam,
+      }),
+    getNextPageParam: (page) => page.nextCursor ?? undefined,
+  });
+  const threadItems = uniqueItems(
+    threads.data?.pages.flatMap((page) => page.items) ?? bootstrap.threads,
   );
   const pinned = useQuery({
     queryKey: ["studio", "pinned-run", bootstrap.project.id, requestedRunId],
@@ -346,23 +463,75 @@ function Runs({
         throw new Error("此运行不属于当前项目");
       return result;
     },
+    refetchInterval: (query) =>
+      !query.state.error && isActiveRun(query.state.data) ? 5000 : false,
   });
-  const threadId = requestedRunId
-    ? (pinned.data?.threadId ?? "")
-    : manualThreadId;
-  const list = useQuery({
-    queryKey: ["studio", "runs", bootstrap.project.id, threadId],
-    queryFn: () => api.listRuns(threadId, { limit: 100 }),
+  const candidateThreadId = requestedRunId
+    ? pinned.error
+      ? ""
+      : (pinned.data?.threadId ?? "")
+    : requestedThreadId;
+  const pinnedThread = useQuery({
+    queryKey: [
+      "studio",
+      "pinned-thread",
+      bootstrap.project.id,
+      candidateThreadId,
+    ],
+    enabled:
+      !!candidateThreadId &&
+      !threadItems.some((item) => item.id === candidateThreadId),
+    queryFn: async () => {
+      const result = await projects.getThread(candidateThreadId);
+      if (result.value.projectId !== bootstrap.project.id)
+        throw new Error("此对话不属于当前项目");
+      return result.value;
+    },
+  });
+  const selectedThread =
+    threadItems.find((item) => item.id === candidateThreadId) ??
+    (pinnedThread.error ? undefined : pinnedThread.data);
+  const threadId = selectedThread?.id ?? "";
+  const list = useInfiniteQuery({
+    queryKey: [
+      ...workbenchQueryKeys.runLists(bootstrap.project.id, threadId),
+      "studio-infinite",
+    ],
+    initialPageParam: undefined as string | undefined,
+    queryFn: ({ pageParam }) =>
+      api.listRuns(threadId, { limit: 30, cursor: pageParam }),
+    getNextPageParam: (page) => page.nextCursor ?? undefined,
     enabled: Boolean(threadId),
-    refetchInterval: 5000,
+    refetchInterval: (query) =>
+      !query.state.error && query.state.data?.pages[0]?.items.some(isActiveRun)
+        ? 5000
+        : false,
   });
-  const history = useQuery({
-    queryKey: ["studio", "thread-history", bootstrap.project.id, threadId],
-    queryFn: () => projects.getProjectBootstrap(bootstrap.project.id, threadId),
+  const runs = uniqueItems(
+    list.data?.pages.flatMap((page) => page.items) ?? [],
+  );
+  const history = useInfiniteQuery({
+    queryKey: [
+      ...workbenchQueryKeys.entryLists(bootstrap.project.id, threadId),
+      "studio-infinite",
+    ],
+    initialPageParam: 0,
+    queryFn: ({ pageParam }) =>
+      projects.listThreadEntries(threadId, {
+        afterSequence: pageParam,
+        limit: 100,
+      }),
+    getNextPageParam: (page) => page.nextAfterSequence ?? undefined,
     enabled: Boolean(threadId),
-    refetchInterval: 5000,
   });
-  const run = requestedRunId ? pinned.data : list.data?.items[0];
+  const entries = uniqueItems(
+    history.data?.pages.flatMap((page) => page.items) ?? [],
+  ).sort((a, b) => a.sequence - b.sequence);
+  const run = requestedRunId
+    ? pinned.error
+      ? undefined
+      : pinned.data
+    : runs[0];
   return (
     <>
       <h1>运行与对话</h1>
@@ -371,22 +540,22 @@ function Runs({
           aria-label="对话"
           value={threadId}
           onChange={(e) => {
-            setThread(e.target.value);
             const url = new URL(window.location.href);
             url.searchParams.delete("run");
+            url.searchParams.set("thread", e.target.value);
             window.history.pushState(null, "", url);
           }}
         >
-          {bootstrap.threads.map((t) => (
+          {threadItems.map((t) => (
             <option key={t.id} value={t.id}>
               {t.title || t.id}
             </option>
           ))}
-          {pinned.data &&
-            !bootstrap.threads.some(
-              (item) => item.id === pinned.data?.threadId,
-            ) && (
-              <option value={pinned.data.threadId}>固定运行的来源对话</option>
+          {selectedThread &&
+            !threadItems.some((item) => item.id === selectedThread.id) && (
+              <option value={selectedThread.id}>
+                {selectedThread.title} · 固定对话
+              </option>
             )}
         </select>
         <select
@@ -398,20 +567,54 @@ function Runs({
             window.history.pushState(null, "", url);
           }}
         >
-          {list.data?.items.map((r) => (
+          {runs.map((r) => (
             <option value={r.id} key={r.id}>
               {new Date(r.createdAt).toLocaleString()} · {r.status}
             </option>
           ))}
-          {pinned.data &&
-            !list.data?.items.some((item) => item.id === pinned.data?.id) && (
-              <option value={pinned.data.id}>
-                固定运行 · {pinned.data.status}
-              </option>
-            )}
+          {pinned.data && !runs.some((item) => item.id === pinned.data?.id) && (
+            <option value={pinned.data.id}>
+              固定运行 · {pinned.data.status}
+            </option>
+          )}
         </select>
       </div>
-      {list.error && <p role="alert">{list.error.message}</p>}
+      {threads.hasNextPage && (
+        <button
+          disabled={threads.isFetching}
+          onClick={() => void threads.fetchNextPage()}
+        >
+          加载更多对话
+        </button>
+      )}
+      {list.hasNextPage && (
+        <button
+          disabled={list.isFetching}
+          onClick={() => void list.fetchNextPage()}
+        >
+          加载更多运行
+        </button>
+      )}
+      {threads.error && (
+        <p role="alert">
+          对话目录读取失败。
+          <button onClick={() => void threads.refetch()}>重试对话目录</button>
+        </p>
+      )}
+      {pinnedThread.error && (
+        <p role="alert">
+          {pinnedThread.error.message}
+          <button onClick={() => void pinnedThread.refetch()}>
+            重试固定对话
+          </button>
+        </p>
+      )}
+      {list.error && (
+        <p role="alert">
+          {list.error.message}
+          <button onClick={() => void list.refetch()}>重试运行列表</button>
+        </p>
+      )}
       {requestedRunId && pinned.error && (
         <p role="alert">
           {pinned.error.message}
@@ -419,26 +622,81 @@ function Runs({
         </p>
       )}
       {run ? (
-        <>
-          <RunDetails key={run.id} run={run} canEdit={canEdit} />
-          <h2>历史对话</h2>
-          {history.data?.value.entries
-            .filter((entry) => entry.producedByRunId === run.id)
-            .map((entry) => (
-              <article className="studio-chat-message" key={entry.id}>
-                {entry.content.type === "user.prompt" ||
-                entry.content.type === "assistant.message"
-                  ? entry.content.text
-                  : entry.content.type === "activity.status"
+        <RunDetails key={run.id} run={run} canEdit={canEdit} />
+      ) : (
+        !pinned.error &&
+        !pinnedThread.error && (
+          <p>
+            {requestedRunId || (list.isPending && !!threadId)
+              ? "正在读取运行…"
+              : "尚无运行记录。"}
+          </p>
+        )
+      )}
+      {threadId && (
+        <section aria-label="完整对话历史">
+          <h2>当前对话的全部消息</h2>
+          <button
+            disabled={history.isFetching}
+            onClick={() => void history.refetch()}
+          >
+            刷新对话消息
+          </button>
+          <p>按发送顺序展示，包括用户输入和各次运行的回复。</p>
+          {history.isPending && <p role="status">正在读取对话消息…</p>}
+          {history.error && (
+            <p role="alert">
+              对话消息读取失败。
+              <button onClick={() => void history.refetch()}>
+                重试对话消息
+              </button>
+            </p>
+          )}
+          {entries.map((entry) => (
+            <article className="studio-chat-message" key={entry.id}>
+              <small>
+                {
+                  { user: "用户", assistant: "助手", system: "状态" }[
+                    entry.role
+                  ]
+                }{" "}
+                · {entry.sequence}
+                {entry.producedByRunId && (
+                  <button
+                    onClick={() => {
+                      const url = new URL(window.location.href);
+                      url.searchParams.set("run", entry.producedByRunId!);
+                      window.history.pushState(null, "", url);
+                    }}
+                  >
+                    查看关联运行
+                  </button>
+                )}
+              </small>
+              {entry.content.type === "user.prompt" ||
+              entry.content.type === "assistant.message" ? (
+                <Streamdown>{entry.content.text}</Streamdown>
+              ) : (
+                <p>
+                  {entry.content.type === "activity.status"
                     ? `${entry.content.label} · ${entry.content.status}`
                     : entry.content.prompt}
-              </article>
-            ))}
-        </>
-      ) : (
-        !pinned.error && (
-          <p>{requestedRunId ? "正在读取固定运行…" : "尚无运行记录。"}</p>
-        )
+                </p>
+              )}
+            </article>
+          ))}
+          {history.hasNextPage && (
+            <button
+              disabled={history.isFetching}
+              onClick={() => void history.fetchNextPage()}
+            >
+              加载后续消息
+            </button>
+          )}
+          {!history.isPending && !history.error && entries.length === 0 && (
+            <p>此对话尚无消息。</p>
+          )}
+        </section>
       )}
     </>
   );

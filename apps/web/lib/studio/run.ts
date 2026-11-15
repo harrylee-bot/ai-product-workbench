@@ -59,6 +59,9 @@ export function useStudioRun(projectId: string, runId: string) {
     void client.invalidateQueries({
       queryKey: workbenchQueryKeys.bootstraps(projectId),
     });
+    void client.invalidateQueries({
+      queryKey: workbenchQueryKeys.artifacts(projectId),
+    });
   }, [run, client, projectId]);
   return {
     run,

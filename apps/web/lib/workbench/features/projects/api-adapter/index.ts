@@ -14,6 +14,9 @@ import {
   projectMemberListSchema,
   projectMemberSchema,
   projectSchema,
+  threadSchema,
+  threadListSchema,
+  threadEntryListSchema,
   workspaceMemberListSchema,
   type AcceptProjectInvitationResponse,
   type CreateProjectInvitationRequest,
@@ -44,6 +47,7 @@ import {
   responseEtag,
   versioned,
   type Versioned,
+  type CursorPageOptions,
 } from "../../../transport/contracts";
 import type {
   ProjectInvitationListOptions,
@@ -53,6 +57,34 @@ import type {
 
 export class WorkbenchProjectsApi {
   constructor(private readonly api: WorkbenchApiClient) {}
+
+  async listThreads(projectId: string, options: CursorPageOptions = {}) {
+    const result = await this.api.GET("/projects/{projectId}/threads", {
+      params: { path: { projectId }, query: options },
+    });
+    return parseContract(threadListSchema, result.data, "list project threads");
+  }
+
+  async getThread(threadId: string) {
+    const result = await this.api.GET("/threads/{threadId}", {
+      params: { path: { threadId } },
+    });
+    return versioned(threadSchema, result.data, result.response, "get thread");
+  }
+
+  async listThreadEntries(
+    threadId: string,
+    options: { afterSequence?: number; limit?: number } = {},
+  ) {
+    const result = await this.api.GET("/threads/{threadId}/entries", {
+      params: { path: { threadId }, query: options },
+    });
+    return parseContract(
+      threadEntryListSchema,
+      result.data,
+      "list thread entries",
+    );
+  }
 
   async listProjects(options: ProjectListOptions = {}): Promise<ProjectList> {
     const result = await this.api.GET("/projects", {
@@ -83,7 +115,12 @@ export class WorkbenchProjectsApi {
       params: { path: { workspaceId } },
       body: request,
     });
-    return versioned(projectSchema, result.data, result.response, "create project");
+    return versioned(
+      projectSchema,
+      result.data,
+      result.response,
+      "create project",
+    );
   }
 
   async updateProject(
@@ -98,7 +135,12 @@ export class WorkbenchProjectsApi {
       },
       body: request,
     });
-    return versioned(projectSchema, result.data, result.response, "update project");
+    return versioned(
+      projectSchema,
+      result.data,
+      result.response,
+      "update project",
+    );
   }
 
   async archiveProject(
@@ -111,7 +153,12 @@ export class WorkbenchProjectsApi {
         header: { "If-Match": normalizeEtag(ifMatch) },
       },
     });
-    return versioned(projectSchema, result.data, result.response, "archive project");
+    return versioned(
+      projectSchema,
+      result.data,
+      result.response,
+      "archive project",
+    );
   }
 
   async duplicateProject(
@@ -205,7 +252,9 @@ export class WorkbenchProjectsApi {
     );
   }
 
-  async previewProjectInvitation(token: string): Promise<ProjectInvitationPreview> {
+  async previewProjectInvitation(
+    token: string,
+  ): Promise<ProjectInvitationPreview> {
     const result = await this.api.POST("/project-invitations/preview", {
       body: projectInvitationTokenRequestSchema.parse({ token }),
     });

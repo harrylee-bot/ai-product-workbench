@@ -462,6 +462,10 @@ const server = createServer(async (req, res) => {
       contentMode: "inline",
       content: prdDocumentV3Example,
     });
+  if (path === `/api/v1/projects/${projectId}/threads`)
+    return json(res, { items: [thread], nextCursor: null });
+  if (path === `/api/v1/projects/${projectId}/artifacts`)
+    return json(res, { items: artifacts, nextCursor: null });
   if (path.endsWith("/runs"))
     return json(res, { items: [run], nextCursor: null });
   if (path.endsWith("/entries"))
