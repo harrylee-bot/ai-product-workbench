@@ -16,6 +16,7 @@ export async function pinGeneratedPrototypeDraft(db: PrismaClient, input: Protot
   const sourceDocument = generated.sourceDocument ? prototypeDocumentSchema.parse(generated.sourceDocument) : null;
   const reference: PrototypeDraftReference = {
     projectId: input.projectId, planId: input.planId, revisionId: input.revisionId, title: generated.title,
+    ...(generated.sourceArtifactVersionId ? { sourceArtifactVersionId: generated.sourceArtifactVersionId } : {}),
     documentSha256: hash(pages), sourceDocumentSha256: sourceDocument ? hash(sourceDocument) : null,
     pageCount: pages.length, byteSize: payloadSize(pages, sourceDocument),
   };
@@ -30,7 +31,7 @@ export async function pinGeneratedPrototypeDraft(db: PrismaClient, input: Protot
     if (!["approved", "generating"].includes(plan.status)) throw new Error("PROTOTYPE_PLAN_NOT_ACTIVE");
     const updated = await tx.prototypeRevision.updateMany({
       where: { id: revision.id, projectId: input.projectId, revision: revision.revision, documentSha256: pendingHash, status: { in: ["queued", "generating"] } },
-      data: { title: generated.title, pages: pages as Prisma.InputJsonValue, ...(sourceDocument ? { sourceDocument: sourceDocument as Prisma.InputJsonValue } : {}), documentSha256: reference.documentSha256, revision: { increment: 1 } },
+      data: { title: generated.title, pages: pages as Prisma.InputJsonValue, ...(sourceDocument ? { sourceDocument: sourceDocument as Prisma.InputJsonValue } : {}), ...(generated.sourceArtifactVersionId ? { sourceArtifactVersionId: generated.sourceArtifactVersionId } : {}), documentSha256: reference.documentSha256, revision: { increment: 1 } },
     });
     if (updated.count !== 1) throw new Error("PROTOTYPE_DRAFT_CONFLICT");
     return reference;
@@ -89,10 +90,10 @@ async function loadRows(db: Db, reference: PrototypeDraftReference) {
   return { plan, revision };
 }
 
-function assertDraft(reference: PrototypeDraftReference, revision: { title: string; pages: unknown; sourceDocument: unknown; documentSha256: string }) {
+function assertDraft(reference: PrototypeDraftReference, revision: { title: string; pages: unknown; sourceDocument: unknown; documentSha256: string; sourceArtifactVersionId?: string | null }) {
   const pages = Array.isArray(revision.pages) ? revision.pages.map(page => prototypePageSchema.parse(page)) : [];
   const sourceDocument = revision.sourceDocument ? prototypeDocumentSchema.parse(revision.sourceDocument) : null;
-  if (revision.title !== reference.title || revision.documentSha256 !== reference.documentSha256 || hash(pages) !== reference.documentSha256
+  if ((reference.sourceArtifactVersionId && reference.sourceArtifactVersionId !== revision.sourceArtifactVersionId) || revision.title !== reference.title || revision.documentSha256 !== reference.documentSha256 || hash(pages) !== reference.documentSha256
     || (sourceDocument ? hash(sourceDocument) : null) !== reference.sourceDocumentSha256 || pages.length !== reference.pageCount
     || payloadSize(pages, sourceDocument) !== reference.byteSize) throw new Error("PROTOTYPE_DRAFT_INTEGRITY_FAILURE");
   return { title: revision.title, pages, sourceDocument };

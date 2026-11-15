@@ -4,6 +4,7 @@ import { useState, type ReactNode } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   prdDocumentSchema,
+  runPrdScreenPlanSchema,
   type Artifact,
   type JsonValue,
 } from "@workbench/workbench-contracts";
@@ -13,6 +14,7 @@ import { useWorkbenchArtifactsApi } from "@/lib/studio/api";
 import { StructuredContent, SourcePreview } from "./content";
 import { workbenchQueryKeys } from "@/lib/workbench/query/keys";
 import { useStudioAction, saveBlob } from "./actions";
+import { ArtifactRelations } from "./relations";
 const hidden = new Set([
   "protocol",
   "schemaVersion",
@@ -48,15 +50,18 @@ export function DocumentView({
   artifact,
   canEdit,
   onPrompt,
+  initialVersionId,
 }: {
   artifact: Artifact;
   canEdit: boolean;
   onPrompt: (text: string, context?: StudioArtifactContext) => void;
+  initialVersionId?: string;
 }) {
   const api = useWorkbenchArtifactsApi(),
     client = useQueryClient(),
     action = useStudioAction();
-  const [selected, setSelected] = useState(""),
+  const [selected, setSelected] = useState(initialVersionId ?? ""),
+    [screenNames, setScreenNames] = useState(""),
     [draft, setDraft] = useState<JsonValue | null>(null),
     [editing, setEditing] = useState(false);
   const versions = useQuery({
@@ -140,6 +145,10 @@ export function DocumentView({
           aria-label="文档版本"
           value={versionId}
           onChange={(e) => {
+            const url = new URL(window.location.href);
+            url.searchParams.set("artifact", artifact.id);
+            url.searchParams.set("artifactVersion", e.target.value);
+            window.history.pushState(window.history.state, "", url);
             setSelected(e.target.value);
             setDraft(null);
             setEditing(false);
@@ -231,7 +240,88 @@ export function DocumentView({
           </button>
         )}
       </div>
+      {value?.kind === "prd" && value.contentMode === "inline" && (
+        <section className="studio-document">
+          <h2>从此需求版本生成界面</h2>
+          <p>
+            固定已保存的版本 {value.version}。填写一行生成单屏，填写 2–12
+            行生成连贯流程；进入计划后审阅完整输入再开始。
+          </p>
+          <label>
+            页面范围（每行一个页面名称）
+            <textarea
+              aria-label="PRD 生成页面范围"
+              value={screenNames}
+              onChange={(event) => setScreenNames(event.target.value)}
+              placeholder="订单列表\n订单详情\n提交结果"
+            />
+          </label>
+          {editing && <p>请先保存或退出文档编辑，再基于固定版本生成。</p>}
+          <div className="studio-actions">
+            {(["prd-prototype", "prd-flow"] as const).map((intent) => (
+              <button
+                key={intent}
+                disabled={
+                  !canEdit || editing || value.status !== "ready" || action.busy
+                }
+                onClick={() =>
+                  void action.run(async () => {
+                    const screens = runPrdScreenPlanSchema.parse(
+                      screenNames
+                        .split("\n")
+                        .map((name) => name.trim())
+                        .filter(Boolean)
+                        .map((title, index) => ({
+                          id: `screen-${index + 1}`,
+                          title,
+                        })),
+                    );
+                    if (
+                      intent === "prd-prototype"
+                        ? screens.length !== 1
+                        : screens.length < 2
+                    )
+                      throw new Error(
+                        intent === "prd-prototype"
+                          ? "单屏界面请填写一个页面名称"
+                          : "多屏流程请填写 2–12 个页面名称",
+                      );
+                    onPrompt(
+                      `基于固定的《${artifact.title}》版本 ${value.version}，生成${intent === "prd-flow" ? "有真实跨页交互的流程" : "可操作的界面"}：${screens.map((screen) => screen.title).join(" → ")}。`,
+                      {
+                        title: `${artifact.title} · 版本 ${value.version}`,
+                        workflow: "generate",
+                        generationIntent: intent,
+                        prdScreenPlan: screens,
+                        artifactTargets: [
+                          {
+                            artifactId: artifact.id,
+                            artifactVersionId: versionId,
+                            screenIds: [],
+                          },
+                        ],
+                        requestedArtifactKinds: ["prototype"],
+                      },
+                    );
+                  }, "已将固定需求版本和页面范围放入输入框")
+                }
+              >
+                {intent === "prd-prototype"
+                  ? "基于此 PRD 生成界面"
+                  : "生成多屏流程"}
+              </button>
+            ))}
+          </div>
+        </section>
+      )}
       {action.notice}
+      {value && (value.kind === "prd" || value.kind === "prototype") && (
+        <ArtifactRelations
+          projectId={artifact.projectId}
+          artifactId={artifact.id}
+          versionId={versionId}
+        />
+      )}
       {detail.error && <p role="alert">{detail.error.message}</p>}
       {detail.isPending && <p>正在加载文档…</p>}
       {value?.kind === "prototype" && value.schemaVersion === 2 ? (

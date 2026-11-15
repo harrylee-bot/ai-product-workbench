@@ -56,6 +56,7 @@ export function mapRun(run: {
     modelId: run.modelId,
     workflow: request.workflow,
     generationIntent: request.generationIntent,
+    ...(request.prdScreenPlan ? { prdScreenPlan: request.prdScreenPlan } : {}),
     targetSurface: request.targetSurface,
     designStyle: request.designStyle,
     artifactTargets: request.artifactTargets,

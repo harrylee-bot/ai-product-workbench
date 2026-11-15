@@ -1400,6 +1400,7 @@ export class DeerFlowRuntimeAdapter implements RuntimePort {
       modelId: execution.request.modelId,
       workflow: execution.request.workflow,
       generationIntent: execution.request.generationIntent,
+      ...(execution.request.prdScreenPlan ? { prdScreenPlan: execution.request.prdScreenPlan } : {}),
       targetSurface: execution.request.targetSurface,
       designStyle: execution.designStyleSnapshot
         ? {
@@ -1449,6 +1450,9 @@ export class DeerFlowRuntimeAdapter implements RuntimePort {
             JSON.stringify(context),
             "</workbench_context>",
             ...(resultGuidance ? [resultGuidance] : []),
+            ...(execution.request.prdScreenPlan ? [
+              "This Generate operation uses the one fixed PRD in artifactTargets as read-only requirements. Return only a new Prototype (operation=create), never revise or replace that PRD. Use prdScreenPlan screen ids in exactly the declared order. For prd-flow, implement real navigation connecting the declared screens and retain each page's input/state as appropriate. The source PRD version relation is assigned by the server; never invent a source version id.",
+            ] : []),
             execution.request.prompt,
           ].join("\n"),
         }],

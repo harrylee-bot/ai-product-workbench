@@ -16,6 +16,7 @@ export type StudioSubmission = {
   requestedArtifactKinds: StartRunRequest["requestedArtifactKinds"];
   artifactTargets: StartRunRequest["artifactTargets"];
   generationIntent: StartRunRequest["generationIntent"];
+  prdScreenPlan?: StartRunRequest["prdScreenPlan"];
 };
 export type StudioView =
   | "pages"
@@ -28,7 +29,9 @@ export type StudioView =
 
 export type StudioArtifactContext = {
   title: string;
-  workflow: "edit";
+  workflow: "edit" | "generate";
+  generationIntent?: StartRunRequest["generationIntent"];
+  prdScreenPlan?: StartRunRequest["prdScreenPlan"];
   artifactTargets: StartRunRequest["artifactTargets"];
   requestedArtifactKinds: StartRunRequest["requestedArtifactKinds"];
 };

@@ -14,6 +14,7 @@ import {
 import type { Response } from "express";
 import {
   artifactKindSchema,
+  artifactRelationsQuerySchema,
   createArtifactRequestSchema,
   createArtifactVersionRequestSchema,
   type Artifact,
@@ -129,6 +130,15 @@ export class ArtifactsController {
     );
     response.setHeader("Cache-Control", "private, no-store");
     return result.detail;
+  }
+
+  @Get("artifacts/:artifactId/versions/:artifactVersionId/relations")
+  async relations(@CurrentPrincipal() principal: AuthenticatedPrincipal, @Param("artifactId") artifactId: string,
+    @Param("artifactVersionId") artifactVersionId: string,
+    @Query(new ZodValidationPipe(artifactRelationsQuerySchema)) query: {cursor?:string;limit:number},
+    @Res({passthrough:true}) response: Response) {
+    response.setHeader("Cache-Control","private, no-store");
+    return this.artifacts.relations(principal.id,artifactId,artifactVersionId,query);
   }
 
   @Get("artifacts/:artifactId/versions/:artifactVersionId")

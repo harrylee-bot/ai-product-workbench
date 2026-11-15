@@ -54,12 +54,16 @@
 
 浏览计划、版本或前后导航不改变正在编辑的提交目标，输入区始终显示固定来源。显式切换新计划或文档操作会暂存先前完整草稿，并提供恢复入口。提交分支直接来自同一上下文状态；异步加载来源期间输入的文字保留，已放弃上下文的迟到响应不抢回输入区。设计预设选择固定 id/version/checksum；失效设计或模型要求明确替换，只有确有服务端快照的原设计可以继续沿用。
 
-## 后续合同提案（尚未实现，不是可调用 API）
+## 固定 PRD 生成与持久版本关联
 
-以下是需求 1.2 的剩余合同工作，不应将本节当成接口已经存在。
+`generationIntent=prd-prototype|prd-flow` 采用 Generate，精确引用一个已保存的 PRD ArtifactVersion，screenIds 为空，输出仅为 prototype。`prdScreenPlan` 显式固定页面 id、标题和顺序；单屏恰好一页，多屏为 2–12 页且 id 唯一。普通 Generate 的源屏幕规则保持原合同。编辑源原型时归一化为 edit 并移除生成范围，不覆盖历史请求。
 
-| 需求 | 建议合同与约束 | 集成验证 |
-| --- | --- | --- |
-| FR-24 PRD→原型/多屏与双向关系 | 生成意图固定 sourcePrdVersionId 和明确 screen/flow 范围；授权验证源版本，服务返回 PRD 版本与 prototype revision/artifact version 的持久关系、分项状态；按固定关系查询双向入口 | 文档生成界面、多屏、联合输出及分项失败；不得用时间接近或标题猜测关系 |
+API 验证源 PRD 属于当前项目、已就绪且为有效内联 PRD v3。Worker 校验实际源字节的 checksum，将固定来源写入 prototype ArtifactVersion 的 sourcePrdVersionId；草稿及终态均核对输出屏幕 id/顺序，终态要求一个原型。PRD 当前版本后来改变不影响已保存的关联。
+
+`GET artifacts/:artifactId/versions/:artifactVersionId/relations` 返回版本来源、精确 sourcePrd 和关联原型，按 createdAt/id 降序进行有界游标分页（默认 30、最大 100），游标绑定源版本。`GET P/revisions/:revisionId/relations` 通过 sourceArtifactVersionId 返回该修订的实际产物与 PRD 来源。项目成员权限适用，响应不含完整正文；历史无确定来源时明确 null，不按标题或时间猜测。
+
+`GET runs/:runId/outputs` 返回该 Run 的分项产物状态及可导航的精确版本。ready 才提供可用成果入口；失败 Run 中已暂存但未发布的内容标为 unpublished，缺失输出标为 failed/cancelled。超过 20 个实际产物时 coverage=window，不能将截断之外解释为缺失。新文档 URL 使用 artifact/artifactVersion，运行 URL 使用 run；直接访问先核对项目归属，不退回其他文档或最近运行。
+
+必须一并集成 `20261115140000_prototype_prd_relations` 迁移。它仅回填同项目、实际绑定 Run、相同内容版本与完全相同文档的唯一匹配；模糊或跨项目记录不回填。数据库阻止已记录源身份改写并验证固定 PRD 来源。客户端、合同、API、Worker、运行提示与校验器一起交付；本合同不表示真实模型或全部需求已验收。
 
 媒体与关系/变体入口、完整成员和邀请管理、项目级分享、公开错误细分、上传/提交意图中断后的完整恢复等继续按业务能力清单验收，不挂载旧前端作为备用路径。

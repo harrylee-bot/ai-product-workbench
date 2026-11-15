@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  artifactVersionRelationsSchema,
   artifactCreationSchema,
   artifactFinalizationStateSchema,
   confirmArtifactFinalizationRequestSchema,
@@ -183,6 +184,11 @@ export class WorkbenchArtifactsApi {
       result.data,
       "list artifact version favorites",
     );
+  }
+
+  async getArtifactVersionRelations(artifactId:string,artifactVersionId:string,query:{cursor?:string;limit?:number}={}) {
+    const result=await this.api.GET("/artifacts/{artifactId}/versions/{artifactVersionId}/relations",{params:{path:{artifactId,artifactVersionId},query}});
+    return parseContract(artifactVersionRelationsSchema,result.data,"read persisted artifact relations");
   }
 
   async getArtifactVersion(

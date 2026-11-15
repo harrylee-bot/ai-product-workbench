@@ -83,7 +83,7 @@ export class PrototypeRuntimeBridge {
       if (signal.aborted) throw signal.reason ?? new DOMException("Workflow cancelled", "AbortError");
       const run = await this.db.run.findUniqueOrThrow({ where: { id: runId }, select: { status: true, errorCode: true } });
       if (run.status !== "succeeded") throw new Error(run.errorCode || `PROTOTYPE_RUNTIME_${run.status.toUpperCase()}`);
-      const artifacts = await this.db.artifactVersion.findMany({ where: { createdByRunId: runId, projectId: input.projectId, status: "ready", artifact: { kind: "prototype" } }, select: { content: true, schemaVersion: true, artifact: { select: { title: true } } } });
+      const artifacts = await this.db.artifactVersion.findMany({ where: { createdByRunId: runId, projectId: input.projectId, status: "ready", artifact: { kind: "prototype" } }, select: { id: true, content: true, schemaVersion: true, artifact: { select: { title: true } } } });
       if (artifacts.length !== 1 || artifacts[0]!.schemaVersion !== 1) throw new Error("DEERFLOW_PROTOTYPE_ARTIFACT_MISSING");
       // RunProcessor has already checked exact retrieved citations, validated IR,
       // provider event identities and atomically published this artifact.
@@ -92,7 +92,7 @@ export class PrototypeRuntimeBridge {
       const pages = prototypeDocumentToPages(document, assets);
       if (pages.length < 1 || pages.length > 50) throw new Error("DEERFLOW_PROTOTYPE_PAGE_COUNT_INVALID");
       heartbeat("deerflow:complete");
-      return { title: artifacts[0]!.artifact.title, pages, sourceDocument: document };
+      return { title: artifacts[0]!.artifact.title, pages, sourceDocument: document, sourceArtifactVersionId: artifacts[0]!.id };
     } finally {
       clearInterval(timer);
       signal.removeEventListener("abort", cancel);

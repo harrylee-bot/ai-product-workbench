@@ -193,7 +193,12 @@ export function StudioComposer({
           artifactContext?.artifactTargets ??
           initialInput?.artifactTargets ??
           [],
-        generationIntent: initialInput?.generationIntent ?? null,
+        generationIntent:
+          artifactContext?.generationIntent ??
+          initialInput?.generationIntent ??
+          null,
+        prdScreenPlan:
+          artifactContext?.prdScreenPlan ?? initialInput?.prdScreenPlan,
       });
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "提交失败，请重试");

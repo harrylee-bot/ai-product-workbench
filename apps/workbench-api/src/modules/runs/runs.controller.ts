@@ -23,6 +23,11 @@ import { RunsService, validateIdempotencyKey } from "./runs.service.js";
 export class RunsController {
   constructor(private readonly runs: RunsService) {}
 
+  @Get("runs/:runId/outputs")
+  outputs(@CurrentPrincipal() principal:AuthenticatedPrincipal,@Param("runId") runId:string,@Res({passthrough:true}) response:Response){
+    response.setHeader("Cache-Control","private, no-store");return this.runs.outputs(principal.id,runId);
+  }
+
   @Get("threads/:threadId/runs")
   list(
     @CurrentPrincipal() principal: AuthenticatedPrincipal,

@@ -4,7 +4,7 @@ import {
   runApprovalListSchema,
   runApprovalSchema,
   runListSchema,
-  runSchema,
+  runSchema, runOutputsSchema,
   submitApprovalResponseSchema,
   type Run,
   type RunApproval,
@@ -28,6 +28,11 @@ import {
 
 export class WorkbenchRunsApi {
   constructor(private readonly api: WorkbenchApiClient) {}
+
+  async getRunOutputs(runId:string){
+    const result=await this.api.GET("/runs/{runId}/outputs",{params:{path:{runId}}});
+    return parseContract(runOutputsSchema,result.data,"read per-artifact output state");
+  }
 
   async listRuns(threadId: string, options: CursorPageOptions = {}): Promise<RunList> {
     const result = await this.api.GET("/threads/{threadId}/runs", {

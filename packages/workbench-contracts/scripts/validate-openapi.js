@@ -63,11 +63,11 @@ function requiresPositiveInteger(schema) {
 
 if (contract.openapi !== "3.1.0") throw new Error("The Workbench contract must use OpenAPI 3.1.0");
 if (!contract.paths || Object.keys(contract.paths).length === 0) throw new Error("The Workbench contract has no paths");
-assert(Object.keys(contract.paths).length === 120, "Workbench v1 must expose exactly 120 resource paths including complete plan inputs and feedback locations");
+assert(Object.keys(contract.paths).length === 123, "Workbench v1 must expose exactly 123 resource paths including fixed PRD relations and per-artifact outputs");
 const operationCount = Object.values(contract.paths).reduce((count, pathItem) => (
   count + ["get", "post", "put", "patch", "delete"].filter((method) => pathItem?.[method]).length
 ), 0);
-assert(operationCount === 146, "Workbench v1 must expose exactly 146 generated operations including complete plan inputs and feedback locations");
+assert(operationCount === 149, "Workbench v1 must expose exactly 149 generated operations including fixed PRD relations and per-artifact outputs");
 const feedbackLocations = contract.paths["/projects/{projectId}/prototype-v2/revisions/{revisionId}/feedback-locations"]?.get;
 assert(feedbackLocations?.responses?.["200"]?.content?.["application/json"]?.schema?.$ref === "#/components/schemas/PrototypeFeedbackLocations", "Feedback locations must return the source-bound resolution contract");
 assert(feedbackLocations.parameters?.some((parameter) => parameter.name === "sourceRevisionId" && parameter.in === "query" && parameter.required), "Feedback locations must require an explicit source revision");
@@ -533,7 +533,7 @@ const startRunWorkflowDescription = schemas.StartRunRequest.description ?? "";
 for (const invariant of [
   "Redesign requires a ready Import Source",
   "Edit requires an Artifact target",
-  "Generate accepts explicit non-empty screen targets only when prototype is requested",
+  "Generate accepts explicit source screen targets or one fixed PRD with prdScreenPlan when prototype is requested",
   "Redesign and Ideate forbid targets",
 ]) {
   assert(

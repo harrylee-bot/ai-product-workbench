@@ -1,6 +1,8 @@
+import { relationVersion, relationVersionSelect } from "./artifact-relations.js";
 import { createHash } from "node:crypto";
 import { Inject, Injectable } from "@nestjs/common";
 import {
+  artifactVersionRelationsSchema, artifactRelationsQuerySchema,
   artifactCreationSchema,
   artifactListSchema,
   artifactSchema,
@@ -639,6 +641,26 @@ export class ArtifactsService {
         ? encodeArtifactVersionCursor({ version: last.version, id: last.id })
         : null,
     });
+  }
+
+  async relations(principalId: string, artifactId: string, artifactVersionId: string, input: {cursor?:string;limit?:number} = {}) {
+    const query=artifactRelationsQuerySchema.parse(input);
+    return this.db.$transaction(async tx=>{
+      const version=await tx.artifactVersion.findFirst({where:{id:artifactVersionId,artifactId,AND:[exactArtifactVersionReadFilter()],artifact:{project:{status:"active",members:projectMembershipFilter(principalId,"read")}}},select:relationVersionSelect});
+      if(!version)throw notFoundProblem("Artifact version");
+      let cursor:{createdAt:string;id:string}|undefined;
+      if(query.cursor){try{
+        const value=JSON.parse(Buffer.from(query.cursor,"base64url").toString("utf8"));
+        if(value.artifactVersionId!==artifactVersionId||typeof value.id!=="string"||!value.id||typeof value.createdAt!=="string"||!Number.isFinite(Date.parse(value.createdAt)))throw new Error("cursor");
+        cursor=value;
+      }catch{throw validationProblem("Artifact relation cursor is invalid for this version");}}
+      const source=version.sourcePrdVersionId?await tx.artifactVersion.findFirst({where:{id:version.sourcePrdVersionId,projectId:version.projectId,artifact:{kind:"prd"}},select:relationVersionSelect}):null;
+      const rows=version.artifact.kind==="prd"?await tx.artifactVersion.findMany({where:{projectId:version.projectId,sourcePrdVersionId:version.id,artifact:{kind:"prototype"},...(cursor?{OR:[{createdAt:{lt:new Date(cursor.createdAt)}},{createdAt:new Date(cursor.createdAt),id:{lt:cursor.id}}]}:{})},orderBy:[{createdAt:"desc"},{id:"desc"}],take:query.limit+1,select:relationVersionSelect}):[];
+      const items=rows.slice(0,query.limit),last=items.at(-1);
+      return artifactVersionRelationsSchema.parse({version:await relationVersion(tx,version),sourcePrd:source?await relationVersion(tx,source):null,
+        derivedPrototypes:await Promise.all(items.map(item=>relationVersion(tx,item))),
+        nextCursor:rows.length>query.limit&&last?Buffer.from(JSON.stringify({artifactVersionId,createdAt:last.createdAt.toISOString(),id:last.id})).toString("base64url"):null});
+    },{isolationLevel:Prisma.TransactionIsolationLevel.RepeatableRead});
   }
 
   async getVersion(

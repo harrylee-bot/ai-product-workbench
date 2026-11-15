@@ -1357,6 +1357,82 @@ components:
         - items
         - nextCursor
       additionalProperties: false
+    ArtifactRelationsQuery:
+      type: object
+      properties:
+        cursor:
+          type: string
+          minLength: 1
+          maxLength: 2048
+        limit:
+          type: integer
+          minimum: 1
+          maximum: 100
+          default: 30
+      additionalProperties: false
+    ArtifactRelationVersion:
+      type: object
+      properties:
+        artifactId:
+          type: string
+          minLength: 1
+          maxLength: 128
+        artifactVersionId:
+          type: string
+          minLength: 1
+          maxLength: 128
+        version:
+          type: integer
+          exclusiveMinimum: 0
+        schemaVersion:
+          type: integer
+          exclusiveMinimum: 0
+        title:
+          type: string
+          minLength: 1
+          maxLength: 240
+        kind:
+          $ref: "#/components/schemas/ArtifactKind"
+        status:
+          $ref: "#/components/schemas/ArtifactVersionStatus"
+        createdByRunId:
+          type:
+            - string
+            - "null"
+          minLength: 1
+          maxLength: 128
+        prototypeRevision:
+          type:
+            - object
+            - "null"
+          properties:
+            id:
+              type: string
+              minLength: 1
+              maxLength: 128
+            planId:
+              type: string
+              minLength: 1
+              maxLength: 128
+            version:
+              type: integer
+              exclusiveMinimum: 0
+          required:
+            - id
+            - planId
+            - version
+          additionalProperties: false
+      required:
+        - artifactId
+        - artifactVersionId
+        - version
+        - schemaVersion
+        - title
+        - kind
+        - status
+        - createdByRunId
+        - prototypeRevision
+      additionalProperties: false
     ArtifactVersionBlobDetail:
       type: object
       properties:
@@ -7163,6 +7239,213 @@ components:
         - artifactVersionId
         - version
       additionalProperties: false
+    ArtifactVersionRelations:
+      type: object
+      properties:
+        version:
+          type: object
+          properties:
+            artifactId:
+              type: string
+              minLength: 1
+              maxLength: 128
+            artifactVersionId:
+              type: string
+              minLength: 1
+              maxLength: 128
+            version:
+              type: integer
+              exclusiveMinimum: 0
+            schemaVersion:
+              type: integer
+              exclusiveMinimum: 0
+            title:
+              type: string
+              minLength: 1
+              maxLength: 240
+            kind:
+              $ref: "#/components/schemas/ArtifactKind"
+            status:
+              $ref: "#/components/schemas/ArtifactVersionStatus"
+            createdByRunId:
+              type:
+                - string
+                - "null"
+              minLength: 1
+              maxLength: 128
+            prototypeRevision:
+              type:
+                - object
+                - "null"
+              properties:
+                id:
+                  type: string
+                  minLength: 1
+                  maxLength: 128
+                planId:
+                  type: string
+                  minLength: 1
+                  maxLength: 128
+                version:
+                  type: integer
+                  exclusiveMinimum: 0
+              required:
+                - id
+                - planId
+                - version
+              additionalProperties: false
+          required:
+            - artifactId
+            - artifactVersionId
+            - version
+            - schemaVersion
+            - title
+            - kind
+            - status
+            - createdByRunId
+            - prototypeRevision
+          additionalProperties: false
+        sourcePrd:
+          type:
+            - object
+            - "null"
+          properties:
+            artifactId:
+              type: string
+              minLength: 1
+              maxLength: 128
+            artifactVersionId:
+              type: string
+              minLength: 1
+              maxLength: 128
+            version:
+              type: integer
+              exclusiveMinimum: 0
+            schemaVersion:
+              type: integer
+              exclusiveMinimum: 0
+            title:
+              type: string
+              minLength: 1
+              maxLength: 240
+            kind:
+              $ref: "#/components/schemas/ArtifactKind"
+            status:
+              $ref: "#/components/schemas/ArtifactVersionStatus"
+            createdByRunId:
+              type:
+                - string
+                - "null"
+              minLength: 1
+              maxLength: 128
+            prototypeRevision:
+              type:
+                - object
+                - "null"
+              properties:
+                id:
+                  type: string
+                  minLength: 1
+                  maxLength: 128
+                planId:
+                  type: string
+                  minLength: 1
+                  maxLength: 128
+                version:
+                  type: integer
+                  exclusiveMinimum: 0
+              required:
+                - id
+                - planId
+                - version
+              additionalProperties: false
+          required:
+            - artifactId
+            - artifactVersionId
+            - version
+            - schemaVersion
+            - title
+            - kind
+            - status
+            - createdByRunId
+            - prototypeRevision
+          additionalProperties: false
+        derivedPrototypes:
+          type: array
+          items:
+            type: object
+            properties:
+              artifactId:
+                type: string
+                minLength: 1
+                maxLength: 128
+              artifactVersionId:
+                type: string
+                minLength: 1
+                maxLength: 128
+              version:
+                type: integer
+                exclusiveMinimum: 0
+              schemaVersion:
+                type: integer
+                exclusiveMinimum: 0
+              title:
+                type: string
+                minLength: 1
+                maxLength: 240
+              kind:
+                $ref: "#/components/schemas/ArtifactKind"
+              status:
+                $ref: "#/components/schemas/ArtifactVersionStatus"
+              createdByRunId:
+                type:
+                  - string
+                  - "null"
+                minLength: 1
+                maxLength: 128
+              prototypeRevision:
+                type:
+                  - object
+                  - "null"
+                properties:
+                  id:
+                    type: string
+                    minLength: 1
+                    maxLength: 128
+                  planId:
+                    type: string
+                    minLength: 1
+                    maxLength: 128
+                  version:
+                    type: integer
+                    exclusiveMinimum: 0
+                required:
+                  - id
+                  - planId
+                  - version
+                additionalProperties: false
+            required:
+              - artifactId
+              - artifactVersionId
+              - version
+              - schemaVersion
+              - title
+              - kind
+              - status
+              - createdByRunId
+              - prototypeRevision
+            additionalProperties: false
+          maxItems: 100
+        nextCursor:
+          type:
+            - string
+            - "null"
+      required:
+        - version
+        - sourcePrd
+        - derivedPrototypes
+        - nextCursor
+      additionalProperties: false
     BoardEdge:
       type: object
       properties:
@@ -12105,6 +12388,29 @@ components:
       enum:
         - followup-design
         - interactive-prototype
+        - prd-prototype
+        - prd-flow
+    RunPrdScreenPlan:
+      type: array
+      items:
+        type: object
+        properties:
+          id:
+            type: string
+            minLength: 1
+            maxLength: 96
+            pattern: ^[A-Za-z][A-Za-z0-9]*(?:[-_.:][A-Za-z0-9]+)*$
+          title:
+            type: string
+            minLength: 1
+            maxLength: 160
+        required:
+          - id
+          - title
+        additionalProperties: false
+      minItems: 1
+      maxItems: 12
+      description: PRD-generated screen ids are unique, ordered and bounded to twelve; single-screen and multi-screen cardinality follows the explicit generation intent.
     RunSourceIds:
       type: array
       items:
@@ -12156,8 +12462,12 @@ components:
           enum:
             - followup-design
             - interactive-prototype
+            - prd-prototype
+            - prd-flow
             - null
           default: null
+        prdScreenPlan:
+          $ref: "#/components/schemas/RunPrdScreenPlan"
         targetSurface:
           $ref: "#/components/schemas/RunTargetSurface"
         designStyle:
@@ -12273,7 +12583,7 @@ components:
         - targetSurface
         - designStyle
       additionalProperties: false
-      description: Redesign requires a ready Import Source; Edit requires an Artifact target; Generate accepts explicit non-empty screen targets only when prototype is requested; Redesign and Ideate forbid targets. Enforced by the runtime Zod contract.
+      description: Redesign requires a ready Import Source; Edit requires an Artifact target; Generate accepts explicit source screen targets or one fixed PRD with prdScreenPlan when prototype is requested; Redesign and Ideate forbid targets. Enforced by the runtime Zod contract.
     CreatePrototypePlanRequest:
       type: object
       properties:
@@ -12397,8 +12707,12 @@ components:
           enum:
             - followup-design
             - interactive-prototype
+            - prd-prototype
+            - prd-flow
             - null
           default: null
+        prdScreenPlan:
+          $ref: "#/components/schemas/RunPrdScreenPlan"
         targetSurface:
           $ref: "#/components/schemas/RunTargetSurface"
         designStyle:
@@ -15418,7 +15732,11 @@ components:
           enum:
             - followup-design
             - interactive-prototype
+            - prd-prototype
+            - prd-flow
             - null
+        prdScreenPlan:
+          $ref: "#/components/schemas/RunPrdScreenPlan"
         targetSurface:
           $ref: "#/components/schemas/RunTargetSurface"
         designStyle:
@@ -15844,7 +16162,11 @@ components:
               enum:
                 - followup-design
                 - interactive-prototype
+                - prd-prototype
+                - prd-flow
                 - null
+            prdScreenPlan:
+              $ref: "#/components/schemas/RunPrdScreenPlan"
             targetSurface:
               $ref: "#/components/schemas/RunTargetSurface"
             designStyle:
@@ -18369,7 +18691,11 @@ components:
               enum:
                 - followup-design
                 - interactive-prototype
+                - prd-prototype
+                - prd-flow
                 - null
+            prdScreenPlan:
+              $ref: "#/components/schemas/RunPrdScreenPlan"
             targetSurface:
               $ref: "#/components/schemas/RunTargetSurface"
             designStyle:
@@ -20485,6 +20811,148 @@ components:
       items:
         $ref: "#/components/schemas/PrototypeRevisionSummary"
       maxItems: 50
+    PrototypeRevisionRelations:
+      type: object
+      properties:
+        revisionId:
+          type: string
+          minLength: 1
+          maxLength: 128
+        sourceArtifact:
+          type:
+            - object
+            - "null"
+          properties:
+            artifactId:
+              type: string
+              minLength: 1
+              maxLength: 128
+            artifactVersionId:
+              type: string
+              minLength: 1
+              maxLength: 128
+            version:
+              type: integer
+              exclusiveMinimum: 0
+            schemaVersion:
+              type: integer
+              exclusiveMinimum: 0
+            title:
+              type: string
+              minLength: 1
+              maxLength: 240
+            kind:
+              $ref: "#/components/schemas/ArtifactKind"
+            status:
+              $ref: "#/components/schemas/ArtifactVersionStatus"
+            createdByRunId:
+              type:
+                - string
+                - "null"
+              minLength: 1
+              maxLength: 128
+            prototypeRevision:
+              type:
+                - object
+                - "null"
+              properties:
+                id:
+                  type: string
+                  minLength: 1
+                  maxLength: 128
+                planId:
+                  type: string
+                  minLength: 1
+                  maxLength: 128
+                version:
+                  type: integer
+                  exclusiveMinimum: 0
+              required:
+                - id
+                - planId
+                - version
+              additionalProperties: false
+          required:
+            - artifactId
+            - artifactVersionId
+            - version
+            - schemaVersion
+            - title
+            - kind
+            - status
+            - createdByRunId
+            - prototypeRevision
+          additionalProperties: false
+        sourcePrd:
+          type:
+            - object
+            - "null"
+          properties:
+            artifactId:
+              type: string
+              minLength: 1
+              maxLength: 128
+            artifactVersionId:
+              type: string
+              minLength: 1
+              maxLength: 128
+            version:
+              type: integer
+              exclusiveMinimum: 0
+            schemaVersion:
+              type: integer
+              exclusiveMinimum: 0
+            title:
+              type: string
+              minLength: 1
+              maxLength: 240
+            kind:
+              $ref: "#/components/schemas/ArtifactKind"
+            status:
+              $ref: "#/components/schemas/ArtifactVersionStatus"
+            createdByRunId:
+              type:
+                - string
+                - "null"
+              minLength: 1
+              maxLength: 128
+            prototypeRevision:
+              type:
+                - object
+                - "null"
+              properties:
+                id:
+                  type: string
+                  minLength: 1
+                  maxLength: 128
+                planId:
+                  type: string
+                  minLength: 1
+                  maxLength: 128
+                version:
+                  type: integer
+                  exclusiveMinimum: 0
+              required:
+                - id
+                - planId
+                - version
+              additionalProperties: false
+          required:
+            - artifactId
+            - artifactVersionId
+            - version
+            - schemaVersion
+            - title
+            - kind
+            - status
+            - createdByRunId
+            - prototypeRevision
+          additionalProperties: false
+      required:
+        - revisionId
+        - sourceArtifact
+        - sourcePrd
+      additionalProperties: false
     PrototypeScreenProjection:
       type: object
       properties:
@@ -21712,7 +22180,11 @@ components:
                 enum:
                   - followup-design
                   - interactive-prototype
+                  - prd-prototype
+                  - prd-flow
                   - null
+              prdScreenPlan:
+                $ref: "#/components/schemas/RunPrdScreenPlan"
               targetSurface:
                 $ref: "#/components/schemas/RunTargetSurface"
               designStyle:
@@ -21845,6 +22317,118 @@ components:
       required:
         - items
         - nextCursor
+      additionalProperties: false
+    RunOutputs:
+      type: object
+      properties:
+        projectId:
+          type: string
+          minLength: 1
+          maxLength: 128
+        runId:
+          type: string
+          minLength: 1
+          maxLength: 128
+        status:
+          $ref: "#/components/schemas/RunStatus"
+        coverage:
+          type: string
+          enum:
+            - complete
+            - window
+        items:
+          type: array
+          items:
+            type: object
+            properties:
+              kind:
+                $ref: "#/components/schemas/RuntimeRequestedArtifactKind"
+              state:
+                type: string
+                enum:
+                  - pending
+                  - generating
+                  - ready
+                  - unpublished
+                  - failed
+                  - cancelled
+              version:
+                type:
+                  - object
+                  - "null"
+                properties:
+                  artifactId:
+                    type: string
+                    minLength: 1
+                    maxLength: 128
+                  artifactVersionId:
+                    type: string
+                    minLength: 1
+                    maxLength: 128
+                  version:
+                    type: integer
+                    exclusiveMinimum: 0
+                  schemaVersion:
+                    type: integer
+                    exclusiveMinimum: 0
+                  title:
+                    type: string
+                    minLength: 1
+                    maxLength: 240
+                  kind:
+                    $ref: "#/components/schemas/ArtifactKind"
+                  status:
+                    $ref: "#/components/schemas/ArtifactVersionStatus"
+                  createdByRunId:
+                    type:
+                      - string
+                      - "null"
+                    minLength: 1
+                    maxLength: 128
+                  prototypeRevision:
+                    type:
+                      - object
+                      - "null"
+                    properties:
+                      id:
+                        type: string
+                        minLength: 1
+                        maxLength: 128
+                      planId:
+                        type: string
+                        minLength: 1
+                        maxLength: 128
+                      version:
+                        type: integer
+                        exclusiveMinimum: 0
+                    required:
+                      - id
+                      - planId
+                      - version
+                    additionalProperties: false
+                required:
+                  - artifactId
+                  - artifactVersionId
+                  - version
+                  - schemaVersion
+                  - title
+                  - kind
+                  - status
+                  - createdByRunId
+                  - prototypeRevision
+                additionalProperties: false
+            required:
+              - kind
+              - state
+              - version
+            additionalProperties: false
+          maxItems: 32
+      required:
+        - projectId
+        - runId
+        - status
+        - coverage
+        - items
       additionalProperties: false
     RunPrototypePatchCheckpointScreen:
       type: object
@@ -22487,8 +23071,12 @@ components:
           enum:
             - followup-design
             - interactive-prototype
+            - prd-prototype
+            - prd-flow
             - null
           default: null
+        prdScreenPlan:
+          $ref: "#/components/schemas/RunPrdScreenPlan"
         targetSurface:
           $ref: "#/components/schemas/RunTargetSurface"
         designStyle:
@@ -22660,7 +23248,11 @@ components:
               enum:
                 - followup-design
                 - interactive-prototype
+                - prd-prototype
+                - prd-flow
                 - null
+            prdScreenPlan:
+              $ref: "#/components/schemas/RunPrdScreenPlan"
             targetSurface:
               $ref: "#/components/schemas/RunTargetSurface"
             designStyle:
@@ -22916,7 +23508,11 @@ components:
               enum:
                 - followup-design
                 - interactive-prototype
+                - prd-prototype
+                - prd-flow
                 - null
+            prdScreenPlan:
+              $ref: "#/components/schemas/RunPrdScreenPlan"
             targetSurface:
               $ref: "#/components/schemas/RunTargetSurface"
             designStyle:
@@ -25673,6 +26269,39 @@ paths:
           $ref: "#/components/responses/Problem"
         "428":
           $ref: "#/components/responses/Problem"
+  /artifacts/{artifactId}/versions/{artifactVersionId}/relations:
+    get:
+      operationId: getArtifactVersionRelations
+      summary: Read persisted PRD/prototype version relations
+      parameters:
+        - $ref: "#/components/parameters/ArtifactId"
+        - $ref: "#/components/parameters/ArtifactVersionId"
+        - schema:
+            type: string
+            minLength: 1
+            maxLength: 2048
+          required: false
+          name: cursor
+          in: query
+        - schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 30
+          required: false
+          name: limit
+          in: query
+      responses:
+        "200":
+          description: Read persisted PRD/prototype version relations
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ArtifactVersionRelations"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
   /artifacts/{artifactId}/versions/{artifactVersionId}:
     get:
       operationId: getArtifactVersion
@@ -26518,6 +27147,21 @@ paths:
                 $ref: "#/components/schemas/RunList"
         "404":
           $ref: "#/components/responses/Problem"
+  /runs/{runId}/outputs:
+    get:
+      operationId: getRunOutputs
+      summary: Per-artifact persisted output states; ready is independent of overall Run status
+      parameters:
+        - $ref: "#/components/parameters/RunId"
+      responses:
+        "200":
+          description: Per-artifact persisted output states; ready is independent of overall Run status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RunOutputs"
+        "404":
+          $ref: "#/components/responses/Problem"
   /runs/{runId}:
     get:
       operationId: getRun
@@ -26754,6 +27398,24 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/PrototypeRevision"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+  /projects/{projectId}/prototype-v2/revisions/{revisionId}/relations:
+    get:
+      operationId: getPrototypeRevisionRelations
+      summary: Read exact frozen source Artifact and PRD relations
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/PrototypeRevisionId"
+      responses:
+        "200":
+          description: Read exact frozen source Artifact and PRD relations
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PrototypeRevisionRelations"
         "403":
           $ref: "#/components/responses/Problem"
         "404":

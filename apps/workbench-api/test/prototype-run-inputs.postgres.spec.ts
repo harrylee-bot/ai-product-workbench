@@ -1,6 +1,8 @@
 import { createHash, randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { canonicalJson, startRunRequestSchema } from "@workbench/workbench-contracts";
+import { prdDocumentV3Example } from "@workbench/workbench-contracts/test-fixtures";
+import { ArtifactsService } from "../src/modules/artifacts/artifacts.service.js";
 import { PrismaClient, type Prisma } from "@workbench/workbench-db";
 import { seedKnowledgeReceipt, seedReadyKnowledge } from "../../../scripts/test-support/knowledge-fixture.mjs";
 import { AccessService } from "../src/modules/access/access.service.js";
@@ -21,6 +23,66 @@ const url = process.env.WORKBENCH_TEST_DATABASE_URL;
     const rollback = new Error("ROLLBACK_PROTOTYPE_INPUT_FIXTURE");
     await expect(db.$transaction(async tx => { await action(tx, await seed(tx)); throw rollback; }, { timeout: 60000 })).rejects.toBe(rollback);
   }
+  it("pins a fixed PRD through generation and exposes exact bidirectional artifact/revision relations",async()=>fixture(async(tx,f)=>{
+    const {api,principal}=prototypeApi(tx,f),projectId=f.input.projectId;
+    const prd=await tx.artifact.create({data:{projectId,kind:"prd",title:"Fixed requirements"}});
+    const source=await tx.artifactVersion.create({data:{artifactId:prd.id,projectId,version:1,schemaVersion:3,status:"ready",content:prdDocumentV3Example as never,checksum:sha(prdDocumentV3Example),citations:[]}});
+    await tx.artifact.update({where:{id:prd.id},data:{currentVersionId:source.id}});
+    const request=startRunRequestSchema.parse({...f.input.request,canvasSnapshot:null,generationIntent:"prd-flow",artifactTargets:[{artifactId:prd.id,artifactVersionId:source.id,screenIds:[]}],prdScreenPlan:[{id:"screen-a",title:"First"},{id:"screen-b",title:"Second"}]});
+    const plan=await api.createPlan(principal,projectId,{title:"From PRD",prompt:request.prompt,generationRequest:request},"fixed-prd-create");
+    expect((await api.getPlanInput(principal,projectId,plan.id)).request).toEqual(request);
+    await api.approvePlan(principal,projectId,plan.id,"fixed-prd-approve",'"0"',{});
+    const result=await finishPlan(tx,f,plan.id,plan.id,1);
+    const relation=await api.revisionRelations(principal,projectId,result.revision.id);
+    expect(relation).toMatchObject({sourceArtifact:{artifactVersionId:result.versionId},sourcePrd:{artifactId:prd.id,artifactVersionId:source.id,version:1}});
+    const scopedDb={...tx,$transaction:(action:(tx:Prisma.TransactionClient)=>unknown)=>action(tx)},artifacts=new ArtifactsService(scopedDb as never,{} as never);
+    const fromPrd=await artifacts.relations(f.input.principalId,prd.id,source.id);
+    expect(fromPrd.derivedPrototypes).toHaveLength(1);expect(fromPrd.derivedPrototypes[0]).toMatchObject({artifactVersionId:result.versionId,prototypeRevision:{id:result.revision.id,planId:plan.id}});
+    expect((await artifacts.relations(f.input.principalId,result.artifactId,result.versionId)).sourcePrd?.artifactVersionId).toBe(source.id);
+    const newerPrd=await tx.artifactVersion.create({data:{artifactId:prd.id,projectId,version:2,schemaVersion:3,status:"ready",content:prdDocumentV3Example as never,checksum:sha(prdDocumentV3Example),citations:[]}});
+    await tx.artifact.update({where:{id:prd.id},data:{currentVersionId:newerPrd.id}});
+    expect((await api.revisionRelations(principal,projectId,result.revision.id)).sourcePrd?.artifactVersionId).toBe(source.id);
+    expect((await artifacts.relations(f.input.principalId,prd.id,newerPrd.id)).derivedPrototypes).toEqual([]);
+    const another=await api.createPlan(principal,projectId,{title:"Second from fixed PRD",prompt:request.prompt,generationRequest:request},"fixed-prd-second");
+    await api.approvePlan(principal,projectId,another.id,"fixed-prd-second-approve",'"0"',{});
+    const second=await finishPlan(tx,f,another.id,another.id,1);
+    const firstPage=await artifacts.relations(f.input.principalId,prd.id,source.id,{limit:1});
+    expect(firstPage.derivedPrototypes).toHaveLength(1);expect(firstPage.nextCursor).not.toBeNull();
+    const nextPage=await artifacts.relations(f.input.principalId,prd.id,source.id,{limit:1,cursor:firstPage.nextCursor!});
+    expect(nextPage.nextCursor).toBeNull();
+    expect(new Set([...firstPage.derivedPrototypes,...nextPage.derivedPrototypes].map(item=>item.artifactVersionId))).toEqual(new Set([result.versionId,second.versionId]));
+    await expect(artifacts.relations(f.input.principalId,prd.id,newerPrd.id,{cursor:firstPage.nextCursor!})).rejects.toMatchObject({status:400});
+    expect((await tx.artifactVersion.findUniqueOrThrow({where:{id:source.id}})).checksum).toBe(sha(prdDocumentV3Example));
+    await expect(artifacts.relations("outsider",prd.id,source.id)).rejects.toMatchObject({status:404});
+    await expect(api.revisionRelations({id:"outsider"} as never,projectId,result.revision.id)).rejects.toMatchObject({status:403});
+    const modification=await api.getRevisionInput(principal,projectId,result.revision.id);
+    expect(modification.modificationRequest).toMatchObject({workflow:"edit",generationIntent:null});expect(modification.modificationRequest.prdScreenPlan).toBeUndefined();
+    const bound=await tx.prototypePlan.findUniqueOrThrow({where:{id:plan.id}});
+    expect((await f.runs.outputs(f.input.principalId,bound.runtimeRunId!)).items).toMatchObject([{kind:"prototype",state:"ready",version:{artifactVersionId:result.versionId}}]);
+    await tx.$executeRawUnsafe("SAVEPOINT fixed_prd_guard");
+    await expect(tx.artifactVersion.update({where:{id:result.versionId},data:{sourcePrdVersionId:null}})).rejects.toThrow(/IMMUTABLE|PRD/);
+    await tx.$executeRawUnsafe("ROLLBACK TO SAVEPOINT fixed_prd_guard");await tx.$executeRawUnsafe("RELEASE SAVEPOINT fixed_prd_guard");
+    await tx.$executeRawUnsafe("SAVEPOINT revision_source_guard");
+    await expect(tx.prototypeRevision.update({where:{id:result.revision.id},data:{sourceArtifactVersionId:null}})).rejects.toThrow(/IMMUTABLE/);
+    await tx.$executeRawUnsafe("ROLLBACK TO SAVEPOINT revision_source_guard");await tx.$executeRawUnsafe("RELEASE SAVEPOINT revision_source_guard");
+    const foreign=await seed(tx);
+    await expect(prototypeApi(tx,foreign).api.createPlan({id:foreign.input.principalId} as never,foreign.input.projectId,{title:"Wrong project",prompt:request.prompt,generationRequest:{...request,sourceIds:[]}},"wrong-project-prd")).rejects.toMatchObject({status:404});
+  }),90000);
+
+  it("reports unpublished PRD and missing Prototype separately after a joint Run fails",async()=>fixture(async(tx,f)=>{
+    const {api,principal}=prototypeApi(tx,f),projectId=f.input.projectId;
+    const request={...f.input.request,canvasSnapshot:null,requestedArtifactKinds:["prd","prototype"] as ("prd"|"prototype")[]};
+    const plan=await api.createPlan(principal,projectId,{title:"Partial output",prompt:request.prompt,generationRequest:request},"partial-create");
+    await api.approvePlan(principal,projectId,plan.id,"partial-approve",'"0"',{});
+    const runId=(await tx.prototypePlan.findUniqueOrThrow({where:{id:plan.id}})).runtimeRunId!;
+    await tx.run.update({where:{id:runId},data:{status:"running",attempt:1,startedAt:new Date()}});
+    const artifact=await tx.artifact.create({data:{projectId,kind:"prd",title:"Unpublished PRD"}});
+    await tx.artifactVersion.create({data:{artifactId:artifact.id,projectId,version:1,schemaVersion:3,status:"staging",createdByRunId:runId,runtimeDraftIndex:0,runtimeDraftSourceId:"partial-prd-draft",runtimeDraftTitle:"Unpublished PRD",content:prdDocumentV3Example as never,checksum:sha(prdDocumentV3Example),citations:[]}});
+    await tx.run.update({where:{id:runId},data:{status:"failed",finishedAt:new Date(),errorCode:"PROTOTYPE_FAILED",errorDetail:"Prototype generation stopped",errorRetryable:true}});
+    const outputs=await f.runs.outputs(f.input.principalId,runId);
+    expect(outputs).toMatchObject({status:"failed",coverage:"complete",items:[{kind:"prd",state:"unpublished"},{kind:"prototype",state:"failed",version:null}]});
+    await expect(f.runs.outputs("outsider",runId)).rejects.toMatchObject({status:404});
+  }),90000);
   it("adjusts complete draft input with CAS, keeps snapshots after source removal, and freezes approved input", async()=>fixture(async(tx,f)=>{
     const {api,principal}=prototypeApi(tx,f),projectId=f.input.projectId;
     const request={...f.input.request,canvasSnapshot:null};
@@ -326,7 +388,7 @@ async function seed(tx: Prisma.TransactionClient) {
   const source = await new ImportSourcesService(scopedDb as never, access, queue as never).create(principalId, projectId, `source:${suffix}`, { kind: "file", fileAssetId: fileId });
   const presets = new DesignPresetsService(); const preset = presets.list().items[0]!;
   const models = { assertAvailable: vi.fn(async () => undefined) };
-  const runs = new RunsService(tx as never, access, new RunEventStore(), queue as never, models as never, presets);
+  const runs = new RunsService(scopedDb as never, access, new RunEventStore(), queue as never, models as never, presets);
   const request = startRunRequestSchema.parse({
     prompt: "Use the attached specification", modelId: "selected-model", workflow: "generate", generationIntent: null,
     targetSurface: "app", designStyle: { kind: "preset", presetId: preset.presetId, version: preset.version, checksum: preset.checksum },
@@ -369,9 +431,10 @@ async function finishPlan(tx:Prisma.TransactionClient,f:Awaited<ReturnType<typeo
   const citations=await seedKnowledgeReceipt(tx,attempt.id);await tx.run.update({where:{id:run.id},data:{status:"succeeded",finishedAt:new Date()}});
   const document=prototypeDocumentFixture(),projectId=f.input.projectId;
   const artifactId=existingArtifactId??(await tx.artifact.create({data:{projectId,kind:"prototype",title:"Lineage source"}})).id;
-  const version=await tx.artifactVersion.create({data:{artifactId,projectId,version:number,schemaVersion:1,status:"ready",content:document as never,checksum:sha(document),citations,knowledgeReleaseId:run.knowledgeReleaseId,createdByRunId:run.id}});
+  const request=startRunRequestSchema.parse(run.request);
+  const version=await tx.artifactVersion.create({data:{artifactId,projectId,version:number,schemaVersion:1,status:"ready",content:document as never,checksum:sha(document),citations,knowledgeReleaseId:run.knowledgeReleaseId,createdByRunId:run.id,sourcePrdVersionId:request.generationIntent?.startsWith("prd-")?request.artifactTargets[0]!.artifactVersionId:null}});
   await tx.artifact.update({where:{id:artifactId},data:{currentVersionId:version.id}});
   const content="<main>Version</main>";
-  const revision=await tx.prototypeRevision.create({data:{projectId,planId:rootPlanId,createdById:f.input.principalId,version:number,sourceRevisionId,status:"ready",title:`Version ${number}`,sourceDocument:document as never,pages:[{id:document.screens[0]!.id,slug:"home",title:"Home",route:"/",order:0,content,sha256:sha(content)}],documentSha256:sha(document),idempotencyKey:`fixture-revision-${number}`,requestHash:sha(number)}});
+  const revision=await tx.prototypeRevision.create({data:{projectId,planId:rootPlanId,createdById:f.input.principalId,version:number,sourceRevisionId,sourceArtifactVersionId:version.id,status:"ready",title:`Version ${number}`,sourceDocument:document as never,pages:[{id:document.screens[0]!.id,slug:"home",title:"Home",route:"/",order:0,content,sha256:sha(content)}],documentSha256:sha(document),idempotencyKey:`fixture-revision-${number}`,requestHash:sha(number)}});
   return {artifactId,versionId:version.id,revision};
 }

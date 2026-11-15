@@ -1,7 +1,7 @@
 "use client";
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import type {
   GenerationPreview,
   ProjectBootstrap,
@@ -12,6 +12,7 @@ import { useWorkbenchReleasesApi } from "@/lib/studio/api";
 import { useWorkbenchExportsApi } from "@/lib/studio/api";
 import { useWorkbenchProjectsApi } from "@/lib/studio/api";
 import { useWorkbenchRunsApi } from "@/lib/studio/api";
+import { useWorkbenchArtifactsApi } from "@/lib/studio/api";
 import { useWorkbenchRunActions } from "@/lib/workbench/features/workbench-run-actions";
 import { useWorkbenchRunController } from "@/lib/workbench/features/run-controller";
 import { workbenchQueryKeys } from "@/lib/workbench/query/keys";
@@ -22,6 +23,7 @@ import { Streamdown } from "streamdown";
 import type { RunProjectionState } from "@/lib/workbench/run/reducer";
 import { projectedRun } from "@/lib/studio/run";
 import { DocumentView } from "./document-view";
+import { RunOutputs } from "./relations";
 const etag = (v: { revision: number }) => `"${v.revision}"`;
 export function ProjectViews({
   activeRunId,
@@ -236,11 +238,27 @@ function Documents({
       "prototype",
     ].includes(a.kind),
   );
-  const [selected, setSelected] = useState("");
-  const artifact =
-    artifacts.find((a) => a.id === selected) ??
-    artifacts.find((a) => a.currentVersion?.createdByRunId === activeRunId) ??
-    artifacts[0];
+  const params = useSearchParams(),
+    selected = params.get("artifact") ?? "",
+    requestedVersion = params.get("artifactVersion") ?? undefined;
+  const api = useWorkbenchArtifactsApi();
+  const pinned = useQuery({
+    queryKey: ["studio", "pinned-artifact", bootstrap.project.id, selected],
+    enabled: Boolean(
+      selected && !artifacts.some((item) => item.id === selected),
+    ),
+    queryFn: async () => {
+      const result = await api.getArtifact(selected);
+      if (result.value.projectId !== bootstrap.project.id)
+        throw new Error("此产物不属于当前项目");
+      return result.value;
+    },
+  });
+  const artifact = selected
+    ? (artifacts.find((a) => a.id === selected) ?? pinned.data)
+    : (artifacts.find(
+        (a) => a.currentVersion?.createdByRunId === activeRunId,
+      ) ?? artifacts[0]);
   return (
     <>
       <div className="studio-view-heading">
@@ -248,13 +266,24 @@ function Documents({
         <select
           aria-label="选择文档"
           value={artifact?.id ?? ""}
-          onChange={(e) => setSelected(e.target.value)}
+          onChange={(e) => {
+            const url = new URL(window.location.href);
+            url.searchParams.set("artifact", e.target.value);
+            url.searchParams.delete("artifactVersion");
+            window.history.pushState(window.history.state, "", url);
+          }}
         >
           {artifacts.map((a) => (
             <option value={a.id} key={a.id}>
               {a.title} · {a.kind}
             </option>
           ))}
+          {pinned.data &&
+            !artifacts.some((item) => item.id === pinned.data.id) && (
+              <option value={pinned.data.id}>
+                {pinned.data.title} · 固定产物
+              </option>
+            )}
         </select>
       </div>
       {previews
@@ -267,11 +296,21 @@ function Documents({
         ))}
       {artifact ? (
         <DocumentView
-          key={artifact.id}
+          key={`${artifact.id}:${requestedVersion ?? "current"}`}
           artifact={artifact}
+          initialVersionId={requestedVersion}
           canEdit={canEdit}
           onPrompt={onPrompt}
         />
+      ) : selected ? (
+        pinned.error ? (
+          <p role="alert">
+            {pinned.error.message}
+            <button onClick={() => void pinned.refetch()}>重试文档</button>
+          </p>
+        ) : (
+          <p role="status">正在读取固定文档…</p>
+        )
       ) : (
         <p className="studio-empty-copy">
           还没有文档。选择底部的“需求文档”或“文档＋原型”开始生成。
@@ -289,8 +328,24 @@ function Runs({
 }) {
   const api = useWorkbenchRunsApi(),
     projects = useWorkbenchProjectsApi();
-  const [threadId, setThread] = useState(bootstrap.selectedThreadId ?? ""),
-    [selected, setSelected] = useState("");
+  const params = useSearchParams(),
+    requestedRunId = params.get("run") ?? "";
+  const [manualThreadId, setThread] = useState(
+    bootstrap.selectedThreadId ?? "",
+  );
+  const pinned = useQuery({
+    queryKey: ["studio", "pinned-run", bootstrap.project.id, requestedRunId],
+    enabled: Boolean(requestedRunId),
+    queryFn: async () => {
+      const result = await api.getRun(requestedRunId);
+      if (result.projectId !== bootstrap.project.id)
+        throw new Error("此运行不属于当前项目");
+      return result;
+    },
+  });
+  const threadId = requestedRunId
+    ? (pinned.data?.threadId ?? "")
+    : manualThreadId;
   const list = useQuery({
     queryKey: ["studio", "runs", bootstrap.project.id, threadId],
     queryFn: () => api.listRuns(threadId, { limit: 100 }),
@@ -303,8 +358,7 @@ function Runs({
     enabled: Boolean(threadId),
     refetchInterval: 5000,
   });
-  const run =
-    list.data?.items.find((r) => r.id === selected) ?? list.data?.items[0];
+  const run = requestedRunId ? pinned.data : list.data?.items[0];
   return (
     <>
       <h1>运行与对话</h1>
@@ -314,7 +368,9 @@ function Runs({
           value={threadId}
           onChange={(e) => {
             setThread(e.target.value);
-            setSelected("");
+            const url = new URL(window.location.href);
+            url.searchParams.delete("run");
+            window.history.pushState(window.history.state, "", url);
           }}
         >
           {bootstrap.threads.map((t) => (
@@ -322,30 +378,48 @@ function Runs({
               {t.title || t.id}
             </option>
           ))}
+          {pinned.data &&
+            !bootstrap.threads.some(
+              (item) => item.id === pinned.data?.threadId,
+            ) && (
+              <option value={pinned.data.threadId}>固定运行的来源对话</option>
+            )}
         </select>
         <select
           aria-label="运行记录"
           value={run?.id ?? ""}
-          onChange={(e) => setSelected(e.target.value)}
+          onChange={(e) => {
+            const url = new URL(window.location.href);
+            url.searchParams.set("run", e.target.value);
+            window.history.pushState(window.history.state, "", url);
+          }}
         >
           {list.data?.items.map((r) => (
             <option value={r.id} key={r.id}>
               {new Date(r.createdAt).toLocaleString()} · {r.status}
             </option>
           ))}
+          {pinned.data &&
+            !list.data?.items.some((item) => item.id === pinned.data?.id) && (
+              <option value={pinned.data.id}>
+                固定运行 · {pinned.data.status}
+              </option>
+            )}
         </select>
       </div>
       {list.error && <p role="alert">{list.error.message}</p>}
+      {requestedRunId && pinned.error && (
+        <p role="alert">
+          {pinned.error.message}
+          <button onClick={() => void pinned.refetch()}>重试运行</button>
+        </p>
+      )}
       {run ? (
         <>
           <RunDetails key={run.id} run={run} canEdit={canEdit} />
           <h2>历史对话</h2>
           {history.data?.value.entries
-            .filter(
-              (entry) =>
-                entry.producedByRunId === run.id ||
-                entry.content.type === "user.prompt",
-            )
+            .filter((entry) => entry.producedByRunId === run.id)
             .map((entry) => (
               <article className="studio-chat-message" key={entry.id}>
                 {entry.content.type === "user.prompt" ||
@@ -358,7 +432,9 @@ function Runs({
             ))}
         </>
       ) : (
-        <p>尚无运行记录。</p>
+        !pinned.error && (
+          <p>{requestedRunId ? "正在读取固定运行…" : "尚无运行记录。"}</p>
+        )
       )}
     </>
   );
@@ -401,6 +477,7 @@ function RunDetailsContent({
         · 第 {run.attempt} 次执行
       </p>
       <small>运行编号：{run.id}</small>
+      <RunOutputs run={run} />
       {action.notice}
       {run.failure && (
         <p role="alert">

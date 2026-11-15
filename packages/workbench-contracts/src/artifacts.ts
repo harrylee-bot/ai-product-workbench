@@ -72,6 +72,28 @@ export const artifactListSchema = z.object({
 
 export const artifactVersionContentModeSchema = z.enum(["inline", "blob"]);
 
+export const artifactRelationVersionSchema = artifactVersionReferenceSchema.extend({
+  schemaVersion: z.number().int().positive(),
+  title: z.string().min(1).max(240), kind: artifactKindSchema,
+  status: artifactVersionStatusSchema, createdByRunId: opaqueIdSchema.nullable(),
+  prototypeRevision: z.object({ id: opaqueIdSchema, planId: opaqueIdSchema, version: z.number().int().positive() }).strict().nullable(),
+}).strict();
+export const artifactRelationsQuerySchema = z.object({
+  cursor: z.string().min(1).max(2048).optional(), limit: z.coerce.number().int().min(1).max(100).default(30),
+}).strict();
+export const artifactVersionRelationsSchema = z.object({
+  version: artifactRelationVersionSchema,
+  sourcePrd: artifactRelationVersionSchema.nullable(),
+  derivedPrototypes: z.array(artifactRelationVersionSchema).max(100),
+  nextCursor: z.string().nullable(),
+}).strict();
+export type ArtifactVersionRelations = z.infer<typeof artifactVersionRelationsSchema>;
+export const prototypeRevisionRelationsSchema = z.object({
+  revisionId: opaqueIdSchema,
+  sourceArtifact: artifactRelationVersionSchema.nullable(),
+  sourcePrd: artifactRelationVersionSchema.nullable(),
+}).strict();
+
 const artifactVersionDetailBaseShape = {
   ...artifactVersionReferenceSchema.shape,
   status: artifactVersionStatusSchema,

@@ -2591,6 +2591,7 @@ model PrototypePlan {
 }
 
 model PrototypeRevision {
+  sourceArtifactVersionId String? @map("source_artifact_version_id")
   builtArtifactKey String? @map("built_artifact_key")
   builtArtifactSha256 String? @map("built_artifact_sha256") @db.Char(64)
   builtArtifactByteSize Int? @map("built_artifact_byte_size")
@@ -2616,6 +2617,7 @@ model PrototypeRevision {
 
   @@unique([projectId, planId, idempotencyKey])
   @@unique([planId, version])
+  @@index([sourceArtifactVersionId, createdAt, id], map: "prototype_revision_source_artifact_idx")
   @@index([projectId, createdAt])
   @@index([projectId, status, updatedAt])
   @@map("prototype_revisions")

@@ -42,6 +42,7 @@ await context.route('**/api/v1/**',async r=>{const u=new URL(r.request().url()),
  if(path.endsWith(`/revisions/${revisionId}`))return json(r,revision);
  if(path.endsWith(`/revisions/${secondRevisionId}`))return json(r,secondRevision);
  if(path.endsWith('/diff'))return json(r,{sourceRevisionId:null,pages:pages.map(p=>({pageId:p.id,change:'added'}))});
+ if(path.endsWith('/relations'))return json(r,{revisionId:path.split('/').at(-2),sourceArtifact:null,sourcePrd:null});
  if(path.endsWith('/revise')&&method==='POST'){revisionRequests.push(r.request().postDataJSON());return json(r,{status:409,title:'批注已被其他成员更新，请核对所选批注'},409);}
  if(path.endsWith('/feedback-locations')){
    const sourceRevisionId=u.searchParams.get('sourceRevisionId'),targetRevisionId=path.split('/').at(-2);

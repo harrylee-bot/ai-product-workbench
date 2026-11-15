@@ -187,6 +187,17 @@ const version = {
   createdByRunId: "run-document",
   createdAt: now,
 };
+const relationVersion = {
+  artifactId: version.artifactId,
+  artifactVersionId: version.artifactVersionId,
+  version: version.version,
+  kind: version.kind,
+  schemaVersion: version.schemaVersion,
+  status: version.status,
+  createdByRunId: version.createdByRunId,
+  title: "需求说明书",
+  prototypeRevision: null,
+};
 const server = createServer(async (req, res) => {
   res.setHeader("Access-Control-Allow-Origin", origin);
   res.setHeader("Access-Control-Allow-Credentials", "true");
@@ -274,7 +285,32 @@ const server = createServer(async (req, res) => {
   if (path.endsWith("/prototype-v2/plans"))
     return json(res, mode === "plan" ? [plan] : []);
   if (path.endsWith(`/plans/${planId}`)) return json(res, plan);
-  if(path.endsWith('/input'))return json(res,{plan,request:{prompt:plan.prompt,modelId:run.modelId,workflow:'generate',targetSurface:'web',designStyle:{kind:'automatic'},sourceIds:[],artifactTargets:[],requestedArtifactKinds:['prototype'],generationIntent:null,canvasSnapshot:null},snapshot:{sources:[],designStyle:{artifactVersionId:null,snapshot:null,snapshotSha256:null},knowledgeReleaseId:null},sha256:'a'.repeat(64)});
+  if (path.endsWith("/input"))
+    return json(res, {
+      plan,
+      request: {
+        prompt: plan.prompt,
+        modelId: run.modelId,
+        workflow: "generate",
+        targetSurface: "web",
+        designStyle: { kind: "automatic" },
+        sourceIds: [],
+        artifactTargets: [],
+        requestedArtifactKinds: ["prototype"],
+        generationIntent: null,
+        canvasSnapshot: null,
+      },
+      snapshot: {
+        sources: [],
+        designStyle: {
+          artifactVersionId: null,
+          snapshot: null,
+          snapshotSha256: null,
+        },
+        knowledgeReleaseId: null,
+      },
+      sha256: "a".repeat(64),
+    });
   if (path.endsWith("/progress")) {
     progressReads++;
     return json(res, {
@@ -316,6 +352,37 @@ const server = createServer(async (req, res) => {
     return json(res, run, 202);
   }
   if (path.endsWith(`/runs/${run.id}`)) return json(res, run);
+  if (path.endsWith(`/runs/${run.id}/outputs`))
+    return json(res, {
+      projectId,
+      runId: run.id,
+      status: run.status,
+      coverage: "complete",
+      items: run.requestedArtifactKinds.map((kind) => ({
+        kind,
+        state:
+          run.id === "run-partial"
+            ? kind === "prd"
+              ? "unpublished"
+              : "failed"
+            : run.status === "succeeded" && kind === "prd"
+              ? "ready"
+              : run.status === "failed"
+                ? "failed"
+                : run.status === "cancelled"
+                  ? "cancelled"
+                  : "pending",
+        version:
+          kind === "prd" &&
+          (run.status === "succeeded" || run.id === "run-partial")
+            ? {
+                ...relationVersion,
+                status: run.id === "run-partial" ? "staging" : "ready",
+                createdByRunId: run.id,
+              }
+            : null,
+      })),
+    });
   if (path.endsWith("/approvals")) return json(res, { items: approvals });
   if (path.includes("/approvals/")) {
     const item = approvals.find((a) => path.endsWith("/" + a.id));
@@ -378,6 +445,13 @@ const server = createServer(async (req, res) => {
   if (path.endsWith("/artifact-prd/versions"))
     return json(res, {
       items: [{ ...version, contentMode: "inline" }],
+      nextCursor: null,
+    });
+  if (path.endsWith("/artifact-prd/versions/version-prd/relations"))
+    return json(res, {
+      version: relationVersion,
+      sourcePrd: null,
+      derivedPrototypes: [],
       nextCursor: null,
     });
   if (path.endsWith("/artifact-prd/versions/version-prd"))
@@ -678,6 +752,41 @@ try {
   );
   results.checks.push(
     "retry follows the new run identity; cancel acceptance stays busy until cancelled terminal event",
+  );
+  await page.goto("about:blank");
+  run = {
+    ...freshRun("run-partial", ["prd", "prototype"]),
+    status: "failed",
+    finishedAt: now,
+    failure: {
+      code: "PARTIAL_OUTPUT",
+      message: "原型生成中断",
+      retryable: true,
+    },
+  };
+  events = [];
+  approvals = [];
+  await page.goto(`${origin}/studio/${projectId}?view=runs&run=${run.id}`, {
+    waitUntil: "domcontentloaded",
+  });
+  const visibleOutputs = page.getByRole("region", { name: "分项产物状态" });
+  await visibleOutputs
+    .getByText("需求文档：已有草稿，尚未发布", { exact: true })
+    .waitFor();
+  await visibleOutputs.getByText("原型：未完成", { exact: true }).waitFor();
+  assert.equal(
+    await page.getByRole("combobox", { name: "运行记录" }).inputValue(),
+    "run-partial",
+  );
+  assert.equal(
+    await page
+      .getByRole("region", { name: "分项产物状态" })
+      .getByRole("link")
+      .count(),
+    0,
+  );
+  results.checks.push(
+    "direct fixed-run navigation shows unpublished PRD and failed Prototype separately without a usable-output link for a failed joint task",
   );
   assert.deepEqual(results.errors, []);
   assert.deepEqual(results.unknown, []);

@@ -12,6 +12,7 @@ import {
   canonicalJson as canonicalizeJson,
   designPresetDefinitionFromRuntimeSnapshot,
   jsonValueSchema,
+  isPrdPrototypeIntent,
   messageDeltaMaxLength,
   prdDocumentSchema,
   projectPrototypeSourceScreens,
@@ -1484,10 +1485,13 @@ export class RunProcessor {
         ? await tx.artifactVersion.findFirst({
             where: { createdByRunId: runId, projectId: run.projectId, runtimeDraftIndex: 0, artifact: { kind: "prd" } },
           })
-        : null;
+        : event.draft.kind === "prototype" && isPrdPrototypeIntent(request.generationIntent)
+          ? await tx.artifactVersion.findFirst({ where: { id: request.artifactTargets[0]!.artifactVersionId, artifactId: request.artifactTargets[0]!.artifactId, projectId: run.projectId, status: "ready", artifact: { kind: "prd" } } })
+          : null;
       if (event.draft.kind === "prototype" && request.requestedArtifactKinds.includes("prd") && !sourcePrd) {
         throw new Error("RUNTIME_LINKED_PRD_REQUIRED_FIRST");
       }
+      if (event.draft.kind === "prototype" && isPrdPrototypeIntent(request.generationIntent) && !sourcePrd) throw new Error("RUNTIME_FIXED_PRD_REQUIRED");
       const replayed = await tx.runEvent.findFirst({
         where: { runId, sourceId: event.sourceEventId },
         select: { type: true, payload: true },
@@ -2893,6 +2897,10 @@ export function validateRuntimeArtifactOperations(
   if (unrequestedKinds.length > 0) {
     throw new Error(`RUNTIME_ARTIFACTS_UNREQUESTED:${unrequestedKinds.join(",")}`);
   }
+  if (isPrdPrototypeIntent(request.generationIntent)) {
+    if (result.artifacts.length !== 1) throw new Error("RUNTIME_PRD_PROTOTYPE_COUNT_MISMATCH");
+    validatePrdPrototypeScreenPlan(request, result.artifacts[0]!);
+  }
   if (request.workflow !== "edit") {
     const missing = [...requestedKinds].filter((kind) => !result.artifacts.some((draft) => draft.kind === kind));
     if (missing.length) throw new Error(`RUNTIME_ARTIFACTS_INCOMPLETE:${missing.join(",")}`);
@@ -2926,10 +2934,23 @@ export function validateRuntimeArtifactOperations(
   }
 }
 
+function validatePrdPrototypeScreenPlan(
+  request: StartRunRequest,
+  draft: RuntimeArtifactDraft,
+) {
+  if (isPrdPrototypeIntent(request.generationIntent) && draft.kind === "prototype") {
+    const document = prototypeDocumentSchema.parse(draft.content);
+    if (canonicalJson(document.screens.map(screen => screen.id)) !== canonicalJson(request.prdScreenPlan?.map(screen => screen.id))) {
+      throw new Error("RUNTIME_PRD_SCREEN_PLAN_MISMATCH");
+    }
+  }
+}
+
 function validateRuntimeArtifactDraftOperation(
   request: StartRunRequest,
   draft: RuntimeArtifactDraft,
 ) {
+  validatePrdPrototypeScreenPlan(request, draft);
   if (!request.requestedArtifactKinds.includes(draft.kind)) {
     throw new Error("RUNTIME_ARTIFACT_KIND_NOT_REQUESTED");
   }

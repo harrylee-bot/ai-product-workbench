@@ -116,9 +116,20 @@ export function PlanInputSummary({
       {request.generationIntent && (
         <p>
           生成意图：
-          {request.generationIntent === "followup-design"
-            ? "衍生设计"
-            : "交互原型"}
+          {
+            {
+              "followup-design": "衍生设计",
+              "interactive-prototype": "交互原型",
+              "prd-prototype": "PRD 生成单屏界面",
+              "prd-flow": "PRD 生成多屏流程",
+            }[request.generationIntent]
+          }
+        </p>
+      )}
+      {request.prdScreenPlan && (
+        <p>
+          固定页面范围：
+          {request.prdScreenPlan.map((screen) => screen.title).join(" → ")}
         </p>
       )}
       {!snapshot && (

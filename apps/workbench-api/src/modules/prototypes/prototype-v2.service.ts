@@ -1,10 +1,12 @@
 import { feedbackPageQuery } from "./prototype-feedback-page.js";
+import { relationVersion, relationVersionSelect } from "../artifacts/artifact-relations.js";
 import { feedbackAnchorIndex, resolveFeedbackLocation } from "./prototype-feedback-location.js";
 import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { Inject, Injectable, Optional, type OnModuleInit, type OnModuleDestroy } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import {
   canonicalJson,
+  prototypeRevisionRelationsSchema,
   prototypePlanInputSchema, prototypeRevisionInputSchema, prototypeInputSnapshotSchema, updatePrototypePlanRequestSchema, createPrototypeRevisionPlanRequestSchema,
   type UpdatePrototypePlanRequest, type CreatePrototypeRevisionPlanRequest,
   prototypeProgressSchema, prototypeFeedbackLocationsSchema,
@@ -327,6 +329,16 @@ export class PrototypeV2Service implements OnModuleInit, OnModuleDestroy {
     const paging = feedbackPageQuery(projectId, revisionId, revisionId, query);
     const page = paging.page(await this.db.prototypeFeedback.findMany(paging.args));
     return prototypeFeedbackPageSchema.parse({ ...page, items: page.items.map(toFeedback) });
+  }
+  async revisionRelations(principal: AuthenticatedPrincipal, projectId: string, revisionId: string) {
+    await this.requireProjectMember(principal.id,projectId,"viewer");
+    return this.db.$transaction(async tx=>{
+      const revision=await tx.prototypeRevision.findFirst({where:{id:revisionId,projectId},select:{sourceArtifactVersionId:true}});
+      if(!revision)throw notFoundProblem("Prototype revision");
+      const artifact=revision.sourceArtifactVersionId?await tx.artifactVersion.findFirst({where:{id:revision.sourceArtifactVersionId,projectId},select:relationVersionSelect}):null;
+      const prd=artifact?.sourcePrdVersionId?await tx.artifactVersion.findFirst({where:{id:artifact.sourcePrdVersionId,projectId,artifact:{kind:"prd"}},select:relationVersionSelect}):null;
+      return prototypeRevisionRelationsSchema.parse({revisionId,sourceArtifact:artifact?await relationVersion(tx,artifact):null,sourcePrd:prd?await relationVersion(tx,prd):null});
+    },{isolationLevel:Prisma.TransactionIsolationLevel.RepeatableRead});
   }
   async feedbackLocations(principal:AuthenticatedPrincipal,projectId:string,sourceRevisionId:string,targetRevisionId:string,query:PrototypeFeedbackQuery={}){
     await this.requireProjectMember(principal.id,projectId,"viewer");

@@ -1071,6 +1071,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/artifacts/{artifactId}/versions/{artifactVersionId}/relations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Read persisted PRD/prototype version relations */
+        get: operations["getArtifactVersionRelations"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/artifacts/{artifactId}/versions/{artifactVersionId}": {
         parameters: {
             query?: never;
@@ -1469,6 +1486,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/runs/{runId}/outputs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Per-artifact persisted output states; ready is independent of overall Run status */
+        get: operations["getRunOutputs"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/runs/{runId}": {
         parameters: {
             query?: never;
@@ -1616,6 +1650,23 @@ export interface paths {
         };
         /** Read persisted prototype history */
         get: operations["getPrototypeRevision"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/projects/{projectId}/prototype-v2/revisions/{revisionId}/relations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Read exact frozen source Artifact and PRD relations */
+        get: operations["getPrototypeRevisionRelations"];
         put?: never;
         post?: never;
         delete?: never;
@@ -2435,6 +2486,26 @@ export interface components {
         ArtifactList: {
             items: components["schemas"]["Artifact"][];
             nextCursor: string | null;
+        };
+        ArtifactRelationsQuery: {
+            cursor?: string;
+            /** @default 30 */
+            limit: number;
+        };
+        ArtifactRelationVersion: {
+            artifactId: string;
+            artifactVersionId: string;
+            version: number;
+            schemaVersion: number;
+            title: string;
+            kind: components["schemas"]["ArtifactKind"];
+            status: components["schemas"]["ArtifactVersionStatus"];
+            createdByRunId: string | null;
+            prototypeRevision: {
+                id: string;
+                planId: string;
+                version: number;
+            } | null;
         };
         /** @description PRD blob details require schemaVersion 3 and prototype blob details require schemaVersion 1; enforced by the runtime Zod contract. */
         ArtifactVersionBlobDetail: {
@@ -3997,6 +4068,54 @@ export interface components {
             artifactVersionId: string;
             version: number;
         };
+        ArtifactVersionRelations: {
+            version: {
+                artifactId: string;
+                artifactVersionId: string;
+                version: number;
+                schemaVersion: number;
+                title: string;
+                kind: components["schemas"]["ArtifactKind"];
+                status: components["schemas"]["ArtifactVersionStatus"];
+                createdByRunId: string | null;
+                prototypeRevision: {
+                    id: string;
+                    planId: string;
+                    version: number;
+                } | null;
+            };
+            sourcePrd: {
+                artifactId: string;
+                artifactVersionId: string;
+                version: number;
+                schemaVersion: number;
+                title: string;
+                kind: components["schemas"]["ArtifactKind"];
+                status: components["schemas"]["ArtifactVersionStatus"];
+                createdByRunId: string | null;
+                prototypeRevision: {
+                    id: string;
+                    planId: string;
+                    version: number;
+                } | null;
+            } | null;
+            derivedPrototypes: {
+                artifactId: string;
+                artifactVersionId: string;
+                version: number;
+                schemaVersion: number;
+                title: string;
+                kind: components["schemas"]["ArtifactKind"];
+                status: components["schemas"]["ArtifactVersionStatus"];
+                createdByRunId: string | null;
+                prototypeRevision: {
+                    id: string;
+                    planId: string;
+                    version: number;
+                } | null;
+            }[];
+            nextCursor: string | null;
+        };
         BoardEdge: {
             id: string;
             sourceNodeId: string;
@@ -5543,7 +5662,12 @@ export interface components {
         };
         RunDesignStyle: components["schemas"]["RunDesignStyleAutomatic"] | components["schemas"]["RunDesignStylePreset"] | components["schemas"]["RunDesignStyleArtifact"];
         /** @enum {string} */
-        RunGenerationIntent: "followup-design" | "interactive-prototype";
+        RunGenerationIntent: "followup-design" | "interactive-prototype" | "prd-prototype" | "prd-flow";
+        /** @description PRD-generated screen ids are unique, ordered and bounded to twelve; single-screen and multi-screen cardinality follows the explicit generation intent. */
+        RunPrdScreenPlan: {
+            id: string;
+            title: string;
+        }[];
         /**
          * @description Unique ready Import Source ids resolved before Run creation
          * @default []
@@ -5555,7 +5679,7 @@ export interface components {
         RuntimeRequestedArtifactKind: "prd" | "prototype" | "image" | "code" | "document" | "data";
         /** @enum {string} */
         RunWorkflow: "generate" | "redesign" | "ideate" | "edit";
-        /** @description Redesign requires a ready Import Source; Edit requires an Artifact target; Generate accepts explicit non-empty screen targets only when prototype is requested; Redesign and Ideate forbid targets. Enforced by the runtime Zod contract. */
+        /** @description Redesign requires a ready Import Source; Edit requires an Artifact target; Generate accepts explicit source screen targets or one fixed PRD with prdScreenPlan when prototype is requested; Redesign and Ideate forbid targets. Enforced by the runtime Zod contract. */
         StartRunRequest: {
             prompt: string;
             modelId: string;
@@ -5564,7 +5688,8 @@ export interface components {
              * @default null
              * @enum {string|null}
              */
-            generationIntent: "followup-design" | "interactive-prototype" | null;
+            generationIntent: "followup-design" | "interactive-prototype" | "prd-prototype" | "prd-flow" | null;
+            prdScreenPlan?: components["schemas"]["RunPrdScreenPlan"];
             targetSurface: components["schemas"]["RunTargetSurface"];
             designStyle: components["schemas"]["RunDesignStyle"];
             sourceIds?: components["schemas"]["RunSourceIds"];
@@ -5645,7 +5770,8 @@ export interface components {
              * @default null
              * @enum {string|null}
              */
-            generationIntent: "followup-design" | "interactive-prototype" | null;
+            generationIntent: "followup-design" | "interactive-prototype" | "prd-prototype" | "prd-flow" | null;
+            prdScreenPlan?: components["schemas"]["RunPrdScreenPlan"];
             targetSurface: components["schemas"]["RunTargetSurface"];
             designStyle: components["schemas"]["RunDesignStyle"];
             sourceIds?: components["schemas"]["RunSourceIds"];
@@ -6557,7 +6683,8 @@ export interface components {
             modelId: string;
             workflow: components["schemas"]["RunWorkflow"];
             /** @enum {string|null} */
-            generationIntent: "followup-design" | "interactive-prototype" | null;
+            generationIntent: "followup-design" | "interactive-prototype" | "prd-prototype" | "prd-flow" | null;
+            prdScreenPlan?: components["schemas"]["RunPrdScreenPlan"];
             targetSurface: components["schemas"]["RunTargetSurface"];
             designStyle: components["schemas"]["RunDesignStyle"];
             artifactTargets: components["schemas"]["RunArtifactTargets"];
@@ -6687,7 +6814,8 @@ export interface components {
                 modelId: string;
                 workflow: components["schemas"]["RunWorkflow"];
                 /** @enum {string|null} */
-                generationIntent: "followup-design" | "interactive-prototype" | null;
+                generationIntent: "followup-design" | "interactive-prototype" | "prd-prototype" | "prd-flow" | null;
+                prdScreenPlan?: components["schemas"]["RunPrdScreenPlan"];
                 targetSurface: components["schemas"]["RunTargetSurface"];
                 designStyle: components["schemas"]["RunDesignStyle"];
                 artifactTargets: components["schemas"]["RunArtifactTargets"];
@@ -7423,7 +7551,8 @@ export interface components {
                 modelId: string;
                 workflow: components["schemas"]["RunWorkflow"];
                 /** @enum {string|null} */
-                generationIntent: "followup-design" | "interactive-prototype" | null;
+                generationIntent: "followup-design" | "interactive-prototype" | "prd-prototype" | "prd-flow" | null;
+                prdScreenPlan?: components["schemas"]["RunPrdScreenPlan"];
                 targetSurface: components["schemas"]["RunTargetSurface"];
                 designStyle: components["schemas"]["RunDesignStyle"];
                 artifactTargets: components["schemas"]["RunArtifactTargets"];
@@ -7997,6 +8126,39 @@ export interface components {
             } | null;
         };
         PrototypeRevisionList: components["schemas"]["PrototypeRevisionSummary"][];
+        PrototypeRevisionRelations: {
+            revisionId: string;
+            sourceArtifact: {
+                artifactId: string;
+                artifactVersionId: string;
+                version: number;
+                schemaVersion: number;
+                title: string;
+                kind: components["schemas"]["ArtifactKind"];
+                status: components["schemas"]["ArtifactVersionStatus"];
+                createdByRunId: string | null;
+                prototypeRevision: {
+                    id: string;
+                    planId: string;
+                    version: number;
+                } | null;
+            } | null;
+            sourcePrd: {
+                artifactId: string;
+                artifactVersionId: string;
+                version: number;
+                schemaVersion: number;
+                title: string;
+                kind: components["schemas"]["ArtifactKind"];
+                status: components["schemas"]["ArtifactVersionStatus"];
+                createdByRunId: string | null;
+                prototypeRevision: {
+                    id: string;
+                    planId: string;
+                    version: number;
+                } | null;
+            } | null;
+        };
         PrototypeScreenProjection: {
             /** @enum {string} */
             protocol: "workbench.prototype-screen-projection.v1";
@@ -8352,7 +8514,8 @@ export interface components {
                 modelId: string;
                 workflow: components["schemas"]["RunWorkflow"];
                 /** @enum {string|null} */
-                generationIntent: "followup-design" | "interactive-prototype" | null;
+                generationIntent: "followup-design" | "interactive-prototype" | "prd-prototype" | "prd-flow" | null;
+                prdScreenPlan?: components["schemas"]["RunPrdScreenPlan"];
                 targetSurface: components["schemas"]["RunTargetSurface"];
                 designStyle: components["schemas"]["RunDesignStyle"];
                 artifactTargets: components["schemas"]["RunArtifactTargets"];
@@ -8382,6 +8545,33 @@ export interface components {
                 finishedAt: string | null;
             }[];
             nextCursor: string | null;
+        };
+        RunOutputs: {
+            projectId: string;
+            runId: string;
+            status: components["schemas"]["RunStatus"];
+            /** @enum {string} */
+            coverage: "complete" | "window";
+            items: {
+                kind: components["schemas"]["RuntimeRequestedArtifactKind"];
+                /** @enum {string} */
+                state: "pending" | "generating" | "ready" | "unpublished" | "failed" | "cancelled";
+                version: {
+                    artifactId: string;
+                    artifactVersionId: string;
+                    version: number;
+                    schemaVersion: number;
+                    title: string;
+                    kind: components["schemas"]["ArtifactKind"];
+                    status: components["schemas"]["ArtifactVersionStatus"];
+                    createdByRunId: string | null;
+                    prototypeRevision: {
+                        id: string;
+                        planId: string;
+                        version: number;
+                    } | null;
+                } | null;
+            }[];
         };
         RunPrototypePatchCheckpointScreen: {
             screenId: string;
@@ -8579,7 +8769,8 @@ export interface components {
              * @default null
              * @enum {string|null}
              */
-            generationIntent: "followup-design" | "interactive-prototype" | null;
+            generationIntent: "followup-design" | "interactive-prototype" | "prd-prototype" | "prd-flow" | null;
+            prdScreenPlan?: components["schemas"]["RunPrdScreenPlan"];
             targetSurface: components["schemas"]["RunTargetSurface"];
             designStyle: components["schemas"]["RunDesignStyle"];
             sourceIds?: components["schemas"]["RunSourceIds"];
@@ -8638,7 +8829,8 @@ export interface components {
                 modelId: string;
                 workflow: components["schemas"]["RunWorkflow"];
                 /** @enum {string|null} */
-                generationIntent: "followup-design" | "interactive-prototype" | null;
+                generationIntent: "followup-design" | "interactive-prototype" | "prd-prototype" | "prd-flow" | null;
+                prdScreenPlan?: components["schemas"]["RunPrdScreenPlan"];
                 targetSurface: components["schemas"]["RunTargetSurface"];
                 designStyle: components["schemas"]["RunDesignStyle"];
                 artifactTargets: components["schemas"]["RunArtifactTargets"];
@@ -8704,7 +8896,8 @@ export interface components {
                 modelId: string;
                 workflow: components["schemas"]["RunWorkflow"];
                 /** @enum {string|null} */
-                generationIntent: "followup-design" | "interactive-prototype" | null;
+                generationIntent: "followup-design" | "interactive-prototype" | "prd-prototype" | "prd-flow" | null;
+                prdScreenPlan?: components["schemas"]["RunPrdScreenPlan"];
                 targetSurface: components["schemas"]["RunTargetSurface"];
                 designStyle: components["schemas"]["RunDesignStyle"];
                 artifactTargets: components["schemas"]["RunArtifactTargets"];
@@ -11140,6 +11333,34 @@ export interface operations {
             428: components["responses"]["Problem"];
         };
     };
+    getArtifactVersionRelations: {
+        parameters: {
+            query?: {
+                cursor?: string;
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                artifactId: components["parameters"]["ArtifactId"];
+                artifactVersionId: components["parameters"]["ArtifactVersionId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Read persisted PRD/prototype version relations */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ArtifactVersionRelations"];
+                };
+            };
+            400: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+        };
+    };
     getArtifactVersion: {
         parameters: {
             query?: never;
@@ -12090,6 +12311,29 @@ export interface operations {
             404: components["responses"]["Problem"];
         };
     };
+    getRunOutputs: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                runId: components["parameters"]["RunId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Per-artifact persisted output states; ready is independent of overall Run status */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RunOutputs"];
+                };
+            };
+            404: components["responses"]["Problem"];
+        };
+    };
     getRun: {
         parameters: {
             query?: never;
@@ -12380,6 +12624,31 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PrototypeRevision"];
+                };
+            };
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+        };
+    };
+    getPrototypeRevisionRelations: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectId: components["parameters"]["ProjectId"];
+                revisionId: components["parameters"]["PrototypeRevisionId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Read exact frozen source Artifact and PRD relations */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PrototypeRevisionRelations"];
                 };
             };
             403: components["responses"]["Problem"];

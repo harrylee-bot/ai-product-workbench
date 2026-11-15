@@ -30,7 +30,7 @@ function harness() {
     },
     runEvent: { create: vi.fn(async ({ data }: any) => ({ id: "event-1", ...data, occurredAt: new Date() })) },
     prototypeRevision: { upsert: vi.fn(async (_args?: any) => ({ id: input.revisionId, status: "generating" })) },
-    artifactVersion: { findMany: vi.fn(async () => [{ schemaVersion: 1, content: prototypeDocumentFixture(), artifact: { title: "Generated signup" } }]) },
+    artifactVersion: { findMany: vi.fn(async () => [{ id: "fixed-generated-prototype", schemaVersion: 1, content: prototypeDocumentFixture(), artifact: { title: "Generated signup" } }]) },
   };
   const db = { ...tx, $transaction: vi.fn(async (action: (tx: unknown) => Promise<unknown>) => action(tx)) };
   return { db, tx, plan, get run() { return run; } };
@@ -88,7 +88,7 @@ describe("Prototype Runtime bridge execution", () => {
     const provider = runtime(); const execute = vi.fn(async () => ({ runId: "run-1", artifactCount: 1 }));
     const bridge = new PrototypeRuntimeBridge(h.db as never, provider, { issue: vi.fn() }, factory(execute));
     const result = await bridge.generate(input, new AbortController().signal, vi.fn());
-    expect(result.pages.map(page => page.route)).toEqual(["/a", "/b"]); expect(result.title).toBe("Generated signup");
+    expect(result.sourceArtifactVersionId).toBe("fixed-generated-prototype"); expect(result.pages.map(page => page.route)).toEqual(["/a", "/b"]); expect(result.title).toBe("Generated signup");
     expect(h.tx.artifactVersion.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: { createdByRunId: "run-1", projectId: input.projectId, status: "ready", artifact: { kind: "prototype" } } }));
     expect(provider.execute).not.toHaveBeenCalled();
   });

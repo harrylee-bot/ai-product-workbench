@@ -19,6 +19,18 @@ const request = {
 };
 
 describe("Run target ArtifactVersion contracts", () => {
+  it("binds PRD generation to one immutable document and explicit single or flow screen plans", () => {
+    const fixed={...request,workflow:"generate",generationIntent:"prd-prototype",requestedArtifactKinds:["prototype"],
+      artifactTargets:[{artifactId:"prd",artifactVersionId:"prd-v1",screenIds:[]}],prdScreenPlan:[{id:"screen-one",title:"Order list"}]};
+    expect(startRunRequestSchema.safeParse(fixed).success).toBe(true);
+    expect(startRunRequestSchema.safeParse({...fixed,generationIntent:"prd-flow",prdScreenPlan:[...fixed.prdScreenPlan,{id:"screen-two",title:"Order detail"}]}).success).toBe(true);
+    for(const invalid of [
+      {...fixed,workflow:"edit"}, {...fixed,artifactTargets:[]}, {...fixed,prdScreenPlan:undefined},
+      {...fixed,generationIntent:"prd-flow"}, {...fixed,requestedArtifactKinds:["prd","prototype"]},
+      {...fixed,artifactTargets:[{...fixed.artifactTargets[0],screenIds:["unrelated-screen"]}]},
+      {...fixed,generationIntent:null}, {...fixed,prdScreenPlan:[fixed.prdScreenPlan[0],fixed.prdScreenPlan[0]]},
+    ])expect(startRunRequestSchema.safeParse(invalid).success).toBe(false);
+  });
   it("accepts linked PRD and Prototype work and rejects unsupported mixed kinds", () => {
     expect(startRunRequestSchema.safeParse({
       ...request, workflow: "generate", requestedArtifactKinds: ["prd", "prototype"],

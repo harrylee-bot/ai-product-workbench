@@ -93,6 +93,9 @@ export function usePlanSubmission(projectId: string) {
             requestedArtifactKinds: input.requestedArtifactKinds,
             artifactTargets: input.artifactTargets,
             generationIntent: input.generationIntent,
+            ...(input.prdScreenPlan
+              ? { prdScreenPlan: input.prdScreenPlan }
+              : {}),
             canvasSnapshot: null,
           },
         },

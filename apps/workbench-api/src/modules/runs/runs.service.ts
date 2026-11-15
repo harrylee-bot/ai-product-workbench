@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
+import { relationVersion, relationVersionSelect } from "../artifacts/artifact-relations.js";
 import { Injectable } from "@nestjs/common";
 import { Prisma } from "@workbench/workbench-db";
 import type {
@@ -11,6 +12,9 @@ import type {
 } from "@workbench/workbench-contracts";
 import {
   canonicalJson,
+  isPrdPrototypeIntent,
+  prdDocumentSchema,
+  runPrdScreenPlanSchema,
   prototypeInputSnapshotSchema,
   isoDateTimeSchema,
   materializeRuntimeDesignPresetSnapshot,
@@ -20,6 +24,7 @@ import {
   runSourceBlobLimit,
   runEventSchema,
   runSchema,
+  runOutputsSchema,
   runStatusSchema,
   runtimeCancelQueue,
   runtimeExecuteQueue,
@@ -118,7 +123,8 @@ export class RunsService {
         throw validationProblem("The selected revision does not match its immutable generation source");
       }
       if (versions[0]!.artifact.currentVersionId !== versions[0]!.id) throw new ProblemException({ title: "Prototype base version changed", status: 409, detail: "Select the current prototype version before requesting a revision", code: "PROTOTYPE_BASE_VERSION_CONFLICT" });
-      return startRunRequestSchema.parse({ ...request, workflow: "edit", generationIntent: null,
+      const editingRequest = { ...request }; delete editingRequest.prdScreenPlan;
+      return startRunRequestSchema.parse({ ...editingRequest, workflow: "edit", generationIntent: null,
         requestedArtifactKinds: ["prototype"], canvasSnapshot: null,
         artifactTargets: [{ artifactId: versions[0]!.artifactId, artifactVersionId: versions[0]!.id, screenIds: [] }],
       });
@@ -547,6 +553,21 @@ export class RunsService {
     return mapRun(run);
   }
 
+  async outputs(principalId: string, runId: string) {
+    const authorized = await this.access.findRun(principalId,runId,"read");
+    return this.db.$transaction(async tx=>{
+      const run=await tx.run.findUniqueOrThrow({where:{id:runId},select:{status:true,request:true}});
+      const request=startRunRequestSchema.parse(run.request),active=["queued","running","waiting_input","cancelling"].includes(run.status);
+      const rows=await tx.artifactVersion.findMany({where:{projectId:authorized.projectId,createdByRunId:runId,artifact:{kind:{not:"design_system"}}},orderBy:[{runtimeDraftIndex:"asc"},{id:"asc"}],take:21,select:relationVersionSelect});
+      const versions=await Promise.all(rows.slice(0,20).map(row=>relationVersion(tx,row)));
+      const items:Array<{kind:string;version:typeof versions[number]|null;state:string}>=versions.map(version=>({kind:version.kind,version,state:version.status==="ready"?"ready":version.status==="rejected"?"failed":active?"generating":"unpublished"}));
+      if(rows.length<=20)for(const kind of request.requestedArtifactKinds){
+        if(!versions.some(version=>version.kind===kind))items.push({kind,version:null,state:active?"pending":run.status==="cancelled"?"cancelled":"failed"});
+      }
+      return runOutputsSchema.parse({projectId:authorized.projectId,runId,status:run.status,coverage:rows.length>20?"window":"complete",items});
+    },{isolationLevel:Prisma.TransactionIsolationLevel.RepeatableRead});
+  }
+
   private async assertReadyArtifactTargets(
     tx: Prisma.TransactionClient,
     projectId: string,
@@ -587,6 +608,12 @@ export class RunsService {
       const version = byId.get(target.artifactVersionId);
       if (!version || version.artifactId !== target.artifactId) {
         throw notFoundProblem("Artifact version");
+      }
+      if (isPrdPrototypeIntent(request.generationIntent)) {
+        if (version.kind !== "prd" || version.schemaVersion !== 3 || version.contentBlobId !== null || !prdDocumentSchema.safeParse(version.content).success) {
+          throw validationProblem("PRD generation requires a ready validated inline PRD version from this Project");
+        }
+        continue;
       }
       if (
         request.workflow === "generate"
@@ -1063,9 +1090,19 @@ function canvasReferenceKey(reference: {
 export function assertRunWorkflowInputs(
   request: Pick<
     StartRunRequest,
-    "artifactTargets" | "generationIntent" | "requestedArtifactKinds" | "workflow"
+    "artifactTargets" | "generationIntent" | "requestedArtifactKinds" | "workflow" | "prdScreenPlan"
   >,
 ): void {
+  if (isPrdPrototypeIntent(request.generationIntent)) {
+    if (request.workflow !== "generate" || request.artifactTargets.length !== 1 || request.artifactTargets[0]?.screenIds.length !== 0
+      || request.requestedArtifactKinds.length !== 1 || request.requestedArtifactKinds[0] !== "prototype"
+      || !runPrdScreenPlanSchema.safeParse(request.prdScreenPlan).success
+      || (request.generationIntent === "prd-prototype" ? request.prdScreenPlan?.length !== 1 : (request.prdScreenPlan?.length ?? 0) < 2)) {
+      throw validationProblem("PRD generation requires one fixed PRD version and an explicit single-screen or multi-screen plan");
+    }
+    return;
+  }
+  if (request.prdScreenPlan !== undefined) throw validationProblem("A PRD screen plan requires a PRD generation intent");
   if (request.workflow === "edit") {
     if (request.generationIntent !== null) {
       throw validationProblem(

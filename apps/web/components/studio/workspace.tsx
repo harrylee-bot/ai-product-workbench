@@ -38,6 +38,7 @@ import { useStudioRun, projectedRun, isActiveRun } from "@/lib/studio/run";
 import { useWorkbenchPrototypeV2Api } from "@/lib/studio/api";
 import { useStudioComposerSession } from "@/lib/studio/composer-session";
 import { PlanInputSummary } from "./plan-input";
+import { RevisionRelations, RunOutputs } from "./relations";
 import { PageStage } from "./page-stage";
 import { StudioComposer, type StudioComposerProps } from "./composer";
 import type {
@@ -693,6 +694,9 @@ export function StudioWorkspace({
               <strong>{plan.title}</strong>
               <p className="visual-prose">{plan.prompt}</p>
               <p role="status">{planStatusLabel(plan.status)}</p>
+              {livePlanRun && livePlanRun.status !== "waiting_input" && (
+                <RunOutputs run={livePlanRun} />
+              )}
               <PlanInputSummary
                 projectId={projectId}
                 plan={plan}
@@ -800,6 +804,12 @@ export function StudioWorkspace({
       )}
       {panel === "versions" && (
         <>
+          {selectedRevision && (
+            <RevisionRelations
+              projectId={projectId}
+              revisionId={selectedRevision.id}
+            />
+          )}
           {revisions.length === 0 && <p>尚无生成版本</p>}
           {[...revisions].reverse().map((revision) => (
             <button
@@ -1407,8 +1417,8 @@ export function StudioWorkspace({
                     context
                       ? {
                           kind: "artifact",
-                          key: `artifact:${JSON.stringify(context.artifactTargets)}`,
-                          title: `完善：${context.title}`,
+                          key: `artifact:${JSON.stringify({ workflow: context.workflow, generationIntent: context.generationIntent ?? null, prdScreenPlan: context.prdScreenPlan ?? null, targets: context.artifactTargets })}`,
+                          title: `${context.workflow === "generate" ? "基于 PRD 生成" : "完善"}：${context.title}`,
                           artifact: context,
                         }
                       : composerSession.newContext,
@@ -1626,7 +1636,7 @@ export function StudioWorkspace({
                           : inputContext?.target.kind === "draft"
                             ? `${inputContext.title} · 保存后需审批`
                             : artifactContext
-                              ? `完善固定产物：${artifactContext.title}`
+                              ? `${artifactContext.workflow === "generate" ? "基于固定 PRD 生成" : "完善固定产物"}：${artifactContext.title}`
                               : "使用下方模型、资料和设计"}
                       </span>
                     </div>

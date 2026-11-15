@@ -209,6 +209,28 @@ const prdArtifact = {
   title: "订单需求",
   currentVersion: prdVersion,
 };
+const prdRelation = {
+  artifactId: "artifact-prd",
+  artifactVersionId: "version-prd",
+  version: 1,
+  schemaVersion: 3,
+  kind: "prd",
+  status: "ready",
+  title: "订单需求",
+  createdByRunId: null,
+  prototypeRevision: null,
+};
+const prototypeRelation = {
+  artifactId: "source-prototype",
+  artifactVersionId: "source-version-1",
+  version: 1,
+  schemaVersion: 1,
+  kind: "prototype",
+  status: "ready",
+  title: "关联订单原型",
+  createdByRunId: null,
+  prototypeRevision: { id: revisionId, planId: "root-plan", version: 1 },
+};
 const results = {
   evidence: "mocked API UI regression, not real model generation",
   checks: [],
@@ -317,6 +339,20 @@ await context.route("**/api/v1/**", async (route) => {
     }
     return json(route, plans);
   }
+  if (path.endsWith("/artifact-prd/versions/version-prd/relations"))
+    return json(route, {
+      version: prdRelation,
+      sourcePrd: null,
+      derivedPrototypes: [prototypeRelation],
+      nextCursor: null,
+    });
+  if (path.includes("/prototype-v2/revisions/") && path.endsWith("/relations"))
+    return json(route, {
+      revisionId: path.split("/").at(-2),
+      sourceArtifact: prototypeRelation,
+      sourcePrd: prdRelation,
+    });
+  if (path.endsWith("/artifacts/artifact-prd")) return json(route, prdArtifact);
   if (path.endsWith("/artifact-prd/versions"))
     return json(route, {
       items: [{ ...prdVersion, contentMode: "inline" }],
@@ -880,6 +916,77 @@ try {
     .waitFor();
   results.checks.push(
     "document action and browser back keep the visible fixed document target; actual submission-intent request targets that exact artifact, while the original prototype draft is recoverable",
+  );
+  await page.goto(
+    `${origin}/studio/${projectId}?view=documents&artifact=artifact-prd&artifactVersion=version-prd`,
+    { waitUntil: "networkidle" },
+  );
+  await page
+    .getByRole("textbox", { name: "PRD 生成页面范围" })
+    .fill("订单列表");
+  await page
+    .getByRole("button", { name: "基于此 PRD 生成界面", exact: true })
+    .click();
+  await page.getByRole("button", { name: "发送需求", exact: true }).click();
+  await page.getByText("固定页面范围：订单列表", { exact: true }).waitFor();
+  assert.equal(commands.at(-1).kind, "new");
+  assert.equal(
+    commands.at(-1).body.generationRequest.generationIntent,
+    "prd-prototype",
+  );
+  assert.deepEqual(commands.at(-1).body.generationRequest.prdScreenPlan, [
+    { id: "screen-1", title: "订单列表" },
+  ]);
+  assert.deepEqual(commands.at(-1).body.generationRequest.artifactTargets, [
+    {
+      artifactId: "artifact-prd",
+      artifactVersionId: "version-prd",
+      screenIds: [],
+    },
+  ]);
+  await page.getByRole("button", { name: "文档", exact: true }).click();
+  await page
+    .getByRole("textbox", { name: "PRD 生成页面范围" })
+    .fill("订单列表\n订单详情\n提交结果");
+  await page.getByRole("button", { name: "生成多屏流程", exact: true }).click();
+  const flowPrompt = await page
+    .getByRole("textbox", { name: "描述需求或修改" })
+    .inputValue();
+  await page.reload({ waitUntil: "networkidle" });
+  assert.equal(
+    await page.getByRole("textbox", { name: "描述需求或修改" }).inputValue(),
+    flowPrompt,
+  );
+  await page.getByRole("button", { name: "发送需求", exact: true }).click();
+  await page
+    .getByText("固定页面范围：订单列表 → 订单详情 → 提交结果", { exact: true })
+    .waitFor();
+  const flow = commands.at(-1).body.generationRequest;
+  assert.equal(flow.workflow, "generate");
+  assert.equal(flow.generationIntent, "prd-flow");
+  assert.equal(flow.prdScreenPlan.length, 3);
+  assert.deepEqual(flow.requestedArtifactKinds, ["prototype"]);
+  assert.equal(flow.artifactTargets[0].artifactVersionId, "version-prd");
+  results.checks.push(
+    "PRD single-screen and multi-screen actions preserve the exact document version, distinct operation contexts and explicit screen plans across refresh before creating reviewable plans",
+  );
+  await page.getByRole("button", { name: "文档", exact: true }).click();
+  await page.getByRole("link", { name: /关联订单原型 · 版本 1/ }).click();
+  await page.getByRole("button", { name: "版本", exact: true }).first().click();
+  await page
+    .getByRole("link", { name: "订单需求 · 版本 1", exact: true })
+    .click();
+  await page.getByRole("combobox", { name: "文档版本" }).waitFor();
+  assert.equal(
+    new URL(page.url()).searchParams.get("artifactVersion"),
+    "version-prd",
+  );
+  assert.equal(
+    await page.getByRole("combobox", { name: "文档版本" }).inputValue(),
+    "version-prd",
+  );
+  results.checks.push(
+    "persisted document-to-prototype and frozen revision-to-PRD links return the exact document version and survive direct navigation",
   );
   await page.screenshot({ path: new URL("fixed-input.png", output).pathname });
   assert.deepEqual(results.errors, []);

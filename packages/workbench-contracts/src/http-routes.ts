@@ -2,6 +2,7 @@ import { z, type ZodTypeAny } from "zod";
 import { artifactFinalizationStateSchema, confirmArtifactFinalizationRequestSchema } from "./finalizations.js";
 import {
   artifactKindSchema,
+  artifactRelationsQuerySchema, artifactVersionRelationsSchema, prototypeRevisionRelationsSchema,
   artifactCreationSchema,
   artifactListSchema,
   artifactSchema,
@@ -72,6 +73,7 @@ import {
   runPrototypePatchCheckpointQuerySchema,
   runPrototypePatchCheckpointSchema,
   runSchema,
+  runOutputsSchema,
   submitApprovalRequestSchema,
   submitApprovalResponseSchema,
 } from "./runs.js";
@@ -747,6 +749,12 @@ export const workbenchHttpRoutes = [
     problemStatuses: problems(400, 404, 409, 412, 428),
   },
   {
+    method: "get", path: "/artifacts/{artifactId}/versions/{artifactVersionId}/relations", operationId: "getArtifactVersionRelations",
+    query: artifactRelationsQuerySchema,
+    response: response(200,"Read persisted PRD/prototype version relations",named("ArtifactVersionRelations",artifactVersionRelationsSchema)),
+    problemStatuses: problems(400,404),
+  },
+  {
     method: "get", path: "/artifacts/{artifactId}/versions/{artifactVersionId}", operationId: "getArtifactVersion",
     requestHeaders: ["ifNoneMatch"],
     response: response(200, "Immutable Artifact version content, explicitly inline or blob-backed", named("ArtifactVersionDetail", artifactVersionDetailSchema), ["etag"]),
@@ -948,6 +956,10 @@ export const workbenchHttpRoutes = [
     problemStatuses: problems(404),
   },
   {
+    method: "get", path: "/runs/{runId}/outputs", operationId: "getRunOutputs",
+    response: response(200,"Per-artifact persisted output states; ready is independent of overall Run status",named("RunOutputs",runOutputsSchema)),problemStatuses:problems(404),
+  },
+  {
     method: "get", path: "/runs/{runId}", operationId: "getRun",
     response: response(200, "Durable Run snapshot", named("Run", runSchema)), problemStatuses: problems(404),
   },
@@ -1004,6 +1016,11 @@ export const workbenchHttpRoutes = [
     method: "get", path: "/projects/{projectId}/prototype-v2/revisions/{revisionId}", operationId: "getPrototypeRevision",
     response: response(200, "Read persisted prototype history", named("PrototypeRevision", prototypeRevisionSchema), ["etag"]),
     problemStatuses: problems(403, 404),
+  },
+  {
+    method: "get", path: "/projects/{projectId}/prototype-v2/revisions/{revisionId}/relations", operationId: "getPrototypeRevisionRelations",
+    response: response(200,"Read exact frozen source Artifact and PRD relations",named("PrototypeRevisionRelations",prototypeRevisionRelationsSchema)),
+    problemStatuses: problems(403,404),
   },
   {
     method: "get", path: "/projects/{projectId}/prototype-v2/revisions/{revisionId}/feedback-locations", operationId: "getPrototypeFeedbackLocations",

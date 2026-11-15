@@ -50,6 +50,12 @@ export class PrototypeV2Controller {
     return this.service.feedbackLocations(principal, projectId, sourceRevisionId, revisionId, pagination);
   }
 
+  @Get("revisions/:revisionId/relations")
+  revisionRelations(@CurrentPrincipal() principal: AuthenticatedPrincipal,@Param("projectId") projectId:string,@Param("revisionId") revisionId:string,@Res({passthrough:true}) response:Response){
+    response.setHeader("Cache-Control","private, no-store");
+    return this.service.revisionRelations(principal,projectId,revisionId);
+  }
+
   @Get("revisions/:revisionId/feedback")
   listFeedback(@CurrentPrincipal() principal: AuthenticatedPrincipal, @Param("projectId") projectId: string, @Param("revisionId") revisionId: string, @Query(body(prototypeFeedbackQuerySchema)) query: z.infer<typeof prototypeFeedbackQuerySchema>, @Res({ passthrough: true }) response: Response) { response.setHeader("Cache-Control", "private, no-store"); return this.service.listFeedback(principal, projectId, revisionId, query); }
 

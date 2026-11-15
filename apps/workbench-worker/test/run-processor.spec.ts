@@ -1148,6 +1148,17 @@ describe("Artifact Board placement", () => {
 });
 
 describe("Runtime Artifact target snapshots", () => {
+  it("keeps the complete fixed PRD as verified read-only Generate context", () => {
+    const content = runtimePrdResultFixture.artifacts[0]!.content;
+    const target = { artifactId: "prd", artifactVersionId: "prd-v1", screenIds: [] };
+    const row = { id: target.artifactVersionId, artifactId: target.artifactId, projectId: "project-1",
+      status: "ready", schemaVersion: 3, checksum: sha256Canonical(content), content,
+      contentBlob: null, artifact: { kind: "prd" }, assets: [] };
+    expect(mapRuntimeArtifactTarget("project-1", target, row as never, "generate-source"))
+      .toMatchObject({ ...target, kind: "prd", content: { mode: "inline", value: content }, assets: [] });
+    expect(() => mapRuntimeArtifactTarget("project-1", target, { ...row, checksum: "0".repeat(64) } as never, "generate-source"))
+      .toThrow("RUNTIME_ARTIFACT_TARGET_CHECKSUM_INVALID");
+  });
   it("materializes the exact inline Prototype and selected screens", () => {
     const content = prototypeDocument();
     const target = {
@@ -1464,6 +1475,22 @@ describe("Runtime Artifact publication operations", () => {
       ...editRequest,
       workflow: "generate",
     }, revision)).toThrow("RUNTIME_ARTIFACT_REVISION_NOT_ALLOWED");
+  });
+
+  it("requires one fixed-PRD Prototype with the exact planned screen ids and order in terminal results", () => {
+    const content = prototypeDocument();
+    const request = { ...editRequest, workflow: "generate" as const, generationIntent: "prd-flow" as const,
+      artifactTargets: [{ artifactId: "prd", artifactVersionId: "prd-v1", screenIds: [] }],
+      prdScreenPlan: content.screens.map(screen => ({ id: screen.id, title: screen.name })) };
+    const draft = { ...revision.artifacts[0]!, operation: { kind: "create" as const } };
+    const result = { ...revision, artifacts: [draft] };
+    expect(() => validateRuntimeArtifactOperations(request, result)).not.toThrow();
+    for (const screens of [content.screens.slice(1), [...content.screens].reverse()]) {
+      expect(() => validateRuntimeArtifactOperations(request, { ...result,
+        artifacts: [{ ...draft, content: { ...content, screens } }] })).toThrow();
+    }
+    expect(() => validateRuntimeArtifactOperations(request, { ...result, artifacts: [draft, draft] }))
+      .toThrow("RUNTIME_PRD_PROTOTYPE_COUNT_MISMATCH");
   });
 
   it("rejects result kinds that the Run did not request", () => {
@@ -2254,6 +2281,32 @@ describe("Runtime Artifact draft staging and publication", () => {
     expect(tx.artifactVersion.create).toHaveBeenCalledWith(expect.objectContaining({
       data: expect.objectContaining({ runtimeDraftIndex: 1, sourcePrdVersionId: "version-prd" }),
     }));
+  });
+
+  it("pins PRD-driven drafts to the exact ready source and rejects a missing source or changed screen plan before staging", async () => {
+    const { processor, tx } = draftStagingHarness();
+    const run = await tx.run.findUniqueOrThrow();
+    const { event, source } = createDraftFixture();
+    const request = { ...run.request, generationIntent: "prd-flow", artifactTargets: [
+      { artifactId: "artifact-prd", artifactVersionId: "fixed-prd-v1", screenIds: [] },
+    ], prdScreenPlan: prototypeDocument().screens.map(screen => ({ id: screen.id, title: screen.name })) };
+    tx.run.findUniqueOrThrow.mockResolvedValue({ ...run, request });
+    const findFirst = vi.fn().mockResolvedValue({ id: "fixed-prd-v1" });
+    Object.assign(tx.artifactVersion, { findFirst });
+    await persistArtifactDraft(processor, executionClaim, event, [source], []);
+    expect(findFirst).toHaveBeenCalledWith({ where: { id: "fixed-prd-v1", artifactId: "artifact-prd",
+      projectId: "project-1", status: "ready", artifact: { kind: "prd" } } });
+    expect(tx.artifactVersion.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ sourcePrdVersionId: "fixed-prd-v1" }),
+    }));
+    tx.artifactVersion.create.mockClear();
+    findFirst.mockResolvedValue(null);
+    await expect(persistArtifactDraft(processor, executionClaim, event, [source], []))
+      .rejects.toThrow("RUNTIME_FIXED_PRD_REQUIRED");
+    tx.run.findUniqueOrThrow.mockResolvedValue({ ...run, request: { ...request, prdScreenPlan: [...request.prdScreenPlan].reverse() } });
+    await expect(persistArtifactDraft(processor, executionClaim, event, [source], []))
+      .rejects.toThrow("RUNTIME_PRD_SCREEN_PLAN_MISMATCH");
+    expect(tx.artifactVersion.create).not.toHaveBeenCalled();
   });
 
   it("retains the source PRD version when AI revises a linked Prototype", async () => {

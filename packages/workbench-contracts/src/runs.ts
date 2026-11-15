@@ -4,6 +4,7 @@ import {
   artifactKindSchema,
   artifactVersionReferenceSchema,
   artifactVersionStatusSchema,
+  artifactRelationVersionSchema,
 } from "./artifacts.js";
 import { canvasSnapshotSchema } from "./canvas-agent-tools.js";
 import {
@@ -71,7 +72,16 @@ export const runWorkflowSchema = z.enum([
 export const runGenerationIntentSchema = z.enum([
   "followup-design",
   "interactive-prototype",
+  "prd-prototype",
+  "prd-flow",
 ]);
+
+export function isPrdPrototypeIntent(intent: unknown): intent is "prd-prototype" | "prd-flow" {
+  return intent === "prd-prototype" || intent === "prd-flow";
+}
+export const runPrdScreenPlanSchema = z.array(z.object({
+  id: artifactIrIdSchema, title: z.string().trim().min(1).max(160),
+}).strict()).min(1).max(12).refine(screens => new Set(screens.map(screen => screen.id)).size === screens.length, "Planned screen ids must be unique");
 
 export const runTargetSurfaceSchema = z.enum(["app", "web"]);
 export const runtimeRequestedArtifactKindSchema = artifactKindSchema.exclude(["design_system"]);
@@ -134,6 +144,7 @@ export const runArtifactTargetsSchema = z.array(runArtifactTargetSchema)
 type RunWorkflowArtifactTargetInput = Readonly<{
   workflow: z.infer<typeof runWorkflowSchema>;
   generationIntent: z.infer<typeof runGenerationIntentSchema> | null;
+  prdScreenPlan?: z.infer<typeof runPrdScreenPlanSchema>;
   artifactTargets: z.infer<typeof runArtifactTargetsSchema>;
   requestedArtifactKinds: readonly z.infer<typeof runtimeRequestedArtifactKindSchema>[];
 }>;
@@ -195,6 +206,20 @@ export function refineRunWorkflowArtifactTargets(
       message: "PRD can be requested alone or together with Prototype",
     });
   }
+
+  if (isPrdPrototypeIntent(request.generationIntent)) {
+    if (request.workflow !== "generate" || request.artifactTargets.length !== 1 || request.artifactTargets[0]?.screenIds.length !== 0) {
+      context.addIssue({ code: "custom", path: ["artifactTargets"], message: "PRD generation requires Generate and exactly one complete fixed PRD ArtifactVersion" });
+    }
+    if (request.requestedArtifactKinds.length !== 1 || request.requestedArtifactKinds[0] !== "prototype") {
+      context.addIssue({ code: "custom", path: ["requestedArtifactKinds"], message: "PRD generation creates only a Prototype; the source PRD is read-only" });
+    }
+    if (!request.prdScreenPlan || (request.generationIntent === "prd-prototype" ? request.prdScreenPlan.length !== 1 : request.prdScreenPlan.length < 2)) {
+      context.addIssue({ code: "custom", path: ["prdScreenPlan"], message: "PRD single-screen generation requires one planned screen; a flow requires 2–12 screens" });
+    }
+    return;
+  }
+  if (request.prdScreenPlan !== undefined) context.addIssue({ code: "custom", path: ["prdScreenPlan"], message: "A PRD screen plan requires an explicit PRD generation intent" });
 
   if (request.workflow === "edit") {
     if (request.generationIntent !== null) {
@@ -283,6 +308,7 @@ export const runSchema = z.object({
   modelId: z.string().min(1).max(128),
   workflow: runWorkflowSchema,
   generationIntent: runGenerationIntentSchema.nullable(),
+  prdScreenPlan: runPrdScreenPlanSchema.optional(),
   targetSurface: runTargetSurfaceSchema,
   designStyle: runDesignStyleSchema,
   artifactTargets: runArtifactTargetsSchema,
@@ -357,11 +383,23 @@ export const runListSchema = z.object({
   nextCursor: z.string().nullable(),
 }).strict();
 
+export const runOutputsSchema = z.object({
+  projectId: opaqueIdSchema, runId: opaqueIdSchema, status: runStatusSchema,
+  coverage: z.enum(["complete","window"]),
+  items: z.array(z.object({
+    kind: runtimeRequestedArtifactKindSchema,
+    state: z.enum(["pending","generating","ready","unpublished","failed","cancelled"]),
+    version: artifactRelationVersionSchema.nullable(),
+  }).strict()).max(32),
+}).strict();
+export type RunOutputs = z.infer<typeof runOutputsSchema>;
+
 export const startRunRequestObjectSchema = z.object({
   prompt: z.string().trim().min(1).max(50_000),
   modelId: z.string().min(1).max(128),
   workflow: runWorkflowSchema,
   generationIntent: runGenerationIntentSchema.nullable().default(null),
+  prdScreenPlan: runPrdScreenPlanSchema.optional(),
   targetSurface: runTargetSurfaceSchema,
   designStyle: runDesignStyleSchema,
   sourceIds: runSourceIdsSchema,

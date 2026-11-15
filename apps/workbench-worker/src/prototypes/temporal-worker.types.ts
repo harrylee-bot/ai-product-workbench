@@ -2,10 +2,11 @@ import type { PrototypeDocument, PrototypePage } from "@workbench/workbench-cont
 
 export type PrototypeGenerationInput = { projectId: string; planId: string; revisionId: string; prompt: string; title: string; createdById: string };
 export type PrototypeGenerationStartInput = { projectId: string; planId: string };
-export type PrototypeGenerationResult = { pages: PrototypePage[]; title: string; sourceDocument?: PrototypeDocument };
+export type PrototypeGenerationResult = { pages: PrototypePage[]; title: string; sourceDocument?: PrototypeDocument; sourceArtifactVersionId?: string };
 /** Bounded activity payload: document bodies are pinned in the revision row. */
 export type PrototypeDraftReference = {
   projectId: string; planId: string; revisionId: string; title: string;
+  sourceArtifactVersionId?: string;
   documentSha256: string; sourceDocumentSha256: string | null; pageCount: number; byteSize: number;
 };
 export type PrototypeBuiltDraftReference = PrototypeDraftReference & { artifactKey: string; htmlSha256: string; htmlByteSize: number; htmlMediaType: string };

@@ -7,6 +7,7 @@ import {
   createPrototypeShareRequestSchema,
   prototypeExportSchema,
   exportPreviewTokenResponseSchema,
+  prototypeRevisionRelationsSchema,
   prototypeFeedbackSchema,
   prototypePlanSchema,
   prototypeProgressSchema,
@@ -63,6 +64,11 @@ export class WorkbenchPrototypeV2Api {
   async getRevision(projectId: string, revisionId: string): Promise<Versioned<PrototypeRevision>> {
     const result = await this.api.GET("/projects/{projectId}/prototype-v2/revisions/{revisionId}", { params: { path: { projectId, revisionId } } });
     return versioned(prototypeRevisionSchema, result.data, result.response, "get prototype revision");
+  }
+
+  async revisionRelations(projectId:string,revisionId:string){
+    const result=await this.api.GET("/projects/{projectId}/prototype-v2/revisions/{revisionId}/relations",{params:{path:{projectId,revisionId}}});
+    return parseContract(prototypeRevisionRelationsSchema,result.data,"read frozen prototype relations");
   }
 
   async getRevisionDiff(projectId: string, revisionId: string) {
