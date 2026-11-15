@@ -116,7 +116,7 @@ async function runSmoke() {
     return { ok: true, modelId, externalThreadId: positive.externalThreadId, externalRunId: positive.externalRunId,
       artifactKind: positive.result.artifacts[0]?.kind, operation: positive.result.artifacts[0]?.operation.kind,
       knowledgeCalls: evidenceAfterPositive.knowledgeCalls.length, canvasCalls: evidenceAfterPositive.canvasCalls.length,
-      persistedNodesScanned: scannedNodes, historyEvidence, malformedScope, ordinaryCallerStatus };
+      persistedNodesScanned: scannedNodes, historyEvidence, malformedScope, ordinaryCallerStatus, rawProviderPartCount: positive.rawProviderPartCount, rawProviderStreamRedacted: true };
   } finally {
     cleanupEvidence = await cleanupOwnedRuns(internalClient(), ownedRuns);
   }
@@ -140,6 +140,7 @@ async function executePositive() {
     workbenchPrincipalId: principalId,
   });
   const events = [];
+  const rawProviderParts = [];
   let externalRunId = null;
   const result = await runtime.execute({
     runId,
@@ -184,8 +185,8 @@ async function executePositive() {
       registerOwnedRun(binding.externalThreadId, id);
     },
     isExternalEventProcessed: async () => false,
-    onExternalEvent: async (_part, effects) => events.push(...effects),
-    onExternalFinalization: async (_part, effects) => events.push(...effects),
+    onExternalEvent: async (part, effects) => { rawProviderParts.push(part); events.push(...effects); },
+    onExternalFinalization: async (part, effects) => { rawProviderParts.push(part); events.push(...effects); },
   });
   if (!externalRunId) throw new Error("SECRET_CHANNEL_EXTERNAL_RUN_MISSING");
   if (
@@ -203,7 +204,9 @@ async function executePositive() {
     .map((event) => event.delta)
     .join("");
   assertNoCapabilityLeak([{ label: "visible-events", value: visibleText }]);
-  return { externalThreadId: binding.externalThreadId, externalRunId, result };
+  assertNoCapabilityLeak([{ label: "raw-provider-events", value: rawProviderParts }]);
+  if (!rawProviderParts.length) throw new Error("SECRET_CHANNEL_RAW_STREAM_EVIDENCE_MISSING");
+  return { externalThreadId: binding.externalThreadId, externalRunId, result, rawProviderPartCount: rawProviderParts.length };
 }
 
 async function loadPersistedSurfaces(externalThreadId, externalRunId) {
@@ -215,38 +218,53 @@ async function loadPersistedSurfaces(externalThreadId, externalRunId) {
 async function executeMalformedScopeProbe(evidenceBefore) {
   const client = internalClient();
   const threadId = `secret-channel-negative-${randomUUID()}`;
-  await client.threads.create({
-    threadId,
-    metadata: { workbenchThreadId: threadId },
-  });
+  await client.threads.create({ threadId, metadata: { workbenchThreadId: threadId } });
+  const configuration = { configurable: { model_name: modelId, is_plan_mode: true, thinking_enabled: true } };
+  const input = {
+    messages: [{ role: "user", content: [
+      "/workbench", "<workbench_context>", JSON.stringify({ ...negativePromptContext(threadId), requestedArtifactKinds: ["document"] }),
+      "</workbench_context>",
+      'Create one document quoting the retrieved audit evidence. First call workbench_knowledge_retrieve exactly once with query "negative secret channel probe". You must retrieve the evidence before creating the document; do not fabricate it. Do not call other tools in that first batch or retry.',
+    ].join("\n") }],
+  };
+  let preparedRunId = null;
+  // Obtain a genuine model-generated call, pausing before the ToolNode can
+  // execute it. The fresh request below must re-authorize this pending call.
   for await (const part of client.runs.stream(threadId, "lead_agent", {
-      onRunCreated: ({ run_id }) => registerOwnedRun(threadId, run_id),
-      input: {
-        messages: [{
-          role: "user",
-          content: [
-            "/workbench",
-            "<workbench_context>",
-            JSON.stringify(negativePromptContext(threadId)),
-            "</workbench_context>",
-            'Call workbench_knowledge_retrieve once with query "negative secret channel probe". Do not retry.',
-          ].join("\n"),
-        }],
-      },
-      streamMode: ["messages-tuple", "values"],
-      context: {
-        workbench: { runId: "negative-run" },
-        secrets: { WORKBENCH_KNOWLEDGE_CAPABILITY: JSON.stringify(knowledgeTool) },
-      },
-      config: { configurable: { model_name: modelId, is_plan_mode: true, thinking_enabled: true } },
-      multitaskStrategy: "reject",
-    })) {
-      // Drain the actual run stream; authoritative refusal is checked below.
-    }
+    onRunCreated: ({ run_id }) => { preparedRunId = run_id; registerOwnedRun(threadId, run_id); },
+    input, streamMode: ["messages-tuple", "values"],
+    context: {
+      workbench: { runId: "negative-run", runtimeAttemptId: "negative-prepare-attempt", requestedArtifactKinds: ["document"], knowledgeEnabled: true, canvasTools: null, prototypePatchBaselines: [] },
+      secrets: { WORKBENCH_KNOWLEDGE_CAPABILITY: JSON.stringify(knowledgeTool) },
+    },
+    config: configuration, multitaskStrategy: "reject", interruptBefore: ["tools"],
+  })) assertNoCapabilityLeak([{ label: "negative-prepare-raw-stream", value: part }]);
+  const prepared = await client.threads.getState(threadId, undefined, { subgraphs: true });
+  assertNoCapabilityLeak([{ label: "negative-prepared-state", value: prepared }]);
+  const calls = (prepared.values?.messages ?? []).flatMap(message => message.tool_calls ?? []).filter(call => call.name === "workbench_knowledge_retrieve");
+  if (!preparedRunId || calls.length !== 1 || !prepared.next?.includes("tools")
+    || (prepared.values?.messages ?? []).some(message => message.type === "tool")) {
+    throw new Error("SECRET_CHANNEL_NEGATIVE_TOOL_NOT_SUSPENDED");
+  }
+  await assertEvidenceUnchanged(evidenceBefore, "malformed-scope-preparation");
+  let refusedRunId = null;
+  for await (const part of client.runs.stream(threadId, "lead_agent", {
+    onRunCreated: ({ run_id }) => { refusedRunId = run_id; registerOwnedRun(threadId, run_id); },
+    input: null, command: { resume: true }, streamMode: ["messages-tuple", "values"],
+    context: {
+      workbench: { runId: "negative-run" },
+      secrets: { WORKBENCH_KNOWLEDGE_CAPABILITY: JSON.stringify(knowledgeTool) },
+    },
+    config: configuration, multitaskStrategy: "reject", interruptAfter: ["tools"],
+  })) assertNoCapabilityLeak([{ label: "negative-refusal-raw-stream", value: part }]);
   const state = await client.threads.getState(threadId, undefined, { subgraphs: true });
+  assertNoCapabilityLeak([{ label: "negative-refusal-state", value: state }]);
   const refusal = assertMalformedScopeRefusal(state);
+  if (!refusedRunId) throw new Error("SECRET_CHANNEL_NEGATIVE_RUN_MISSING");
   await assertEvidenceUnchanged(evidenceBefore, "malformed-scope");
-  return refusal;
+  return { ...refusal, externalThreadId: threadId, preparedRunId, refusedRunId,
+    genuineModelToolCall: true, interruptedBeforeExecution: true, malformedScopeOnResume: true,
+    noAdditionalToolRequests: true };
 }
 
 function negativePromptContext(threadId) {
