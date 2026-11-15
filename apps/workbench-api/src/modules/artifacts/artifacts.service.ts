@@ -11,6 +11,7 @@ import {
   artifactVersionListSchema,
   canonicalJson,
   createArtifactRequestSchema,
+  createImageArtifactVersionRequestSchema,
   prdDocumentSchema,
   prototypeDocumentSchema,
   prototypeImageAssetSchema,
@@ -74,6 +75,7 @@ const currentVersionSelect = {
   createdAt: true,
 } as const;
 
+const imageBlobSelect = { id: true, mediaType: true, byteSize: true, sha256: true, status: true, deletedAt: true } as const;
 const editedVersionSelect = {
   id: true,
   artifactId: true,
@@ -82,6 +84,7 @@ const editedVersionSelect = {
   status: true,
   content: true,
   contentBlobId: true,
+  contentBlob: { select: imageBlobSelect },
   checksum: true,
   citations: true,
   createdByRunId: true,
@@ -245,50 +248,7 @@ export class ArtifactsService {
         if (duplicate) return resolveCreationReplay(duplicate, principalId, requestHash);
         if (await tx.sourcePrototypeCreationReceipt.findUnique({ where: { projectId_idempotencyKey: { projectId, idempotencyKey } } })) throw idempotencyConflictProblem();
 
-        const sourceFile = await tx.fileAsset.findFirst({
-          where: { id: command.source.fileAssetId, projectId },
-          select: {
-            id: true,
-            projectId: true,
-            blobId: true,
-            status: true,
-            detectedMediaType: true,
-            deletedAt: true,
-            blob: {
-              select: {
-                id: true,
-                sha256: true,
-                mediaType: true,
-                byteSize: true,
-                status: true,
-                deletedAt: true,
-              },
-            },
-          },
-        });
-        if (
-          !sourceFile
-          || sourceFile.status !== "ready"
-          || sourceFile.deletedAt !== null
-          || !sourceFile.blobId
-          || !sourceFile.blob
-          || sourceFile.blob.id !== sourceFile.blobId
-          || sourceFile.blob.status !== "ready"
-          || sourceFile.blob.deletedAt !== null
-          || sourceFile.detectedMediaType !== sourceFile.blob.mediaType
-        ) {
-          throw artifactCreationConflictProblem(
-            "ARTIFACT_SOURCE_FILE_NOT_READY",
-            "source.fileAssetId must identify a ready verified File in the target Project",
-          );
-        }
-        if (!prototypeImageAssetSchema.shape.mediaType.safeParse(sourceFile.detectedMediaType).success) {
-          throw artifactCreationConflictProblem(
-            "ARTIFACT_SOURCE_MEDIA_TYPE_UNSUPPORTED",
-            "Image Artifacts support image/png, image/jpeg, image/webp, or image/gif",
-          );
-        }
-        safeByteSize(sourceFile.blob.byteSize);
+        const sourceFile = await requireReadyImageFile(tx, projectId, command.source.fileAssetId);
 
         const artifact = await tx.artifact.create({
           data: { projectId, kind: "image", title: command.title },
@@ -386,6 +346,63 @@ export class ArtifactsService {
     }
   }
 
+  private async createImageVersion(
+    principalId: string, artifactId: string, expectedArtifactRevision: number,
+    idempotencyKey: string, input: Extract<CreateArtifactVersionRequest, {kind: "image"}>,
+  ): Promise<CreateArtifactVersionResult> {
+    const request = createImageArtifactVersionRequestSchema.parse(input);
+    const requestHash = hashRequest(request);
+    const replay = await this.findEditReceipt(artifactId, idempotencyKey);
+    if (replay) return resolveEditReplay(replay, principalId, requestHash);
+    try {
+      return await this.db.$transaction(async tx => {
+        const rows = await tx.$queryRaw<Array<{id: string; projectId: string; kind: string; revision: number; currentVersionId: string | null}>>(Prisma.sql`
+          SELECT artifact."id", artifact."project_id" AS "projectId", artifact."kind"::text AS "kind",
+            artifact."revision", artifact."current_version_id" AS "currentVersionId"
+          FROM "artifacts" artifact JOIN "projects" project ON project."id" = artifact."project_id"
+          WHERE artifact."id" = ${artifactId} AND project."status" = 'active' FOR UPDATE OF artifact
+        `);
+        const artifact = rows[0];
+        if (!artifact) throw notFoundProblem("Artifact");
+        await assertProjectCapability(tx, artifact.projectId, principalId, "edit");
+        const duplicate = await tx.artifactVersionEditReceipt.findUnique({
+          where: {artifactId_idempotencyKey: {artifactId, idempotencyKey}}, include: { resultVersion: {select: editedVersionSelect} },
+        });
+        if (duplicate) return resolveEditReplay(duplicate, principalId, requestHash);
+        if (artifact.revision !== expectedArtifactRevision) throw revisionConflictProblem();
+        if (artifact.kind !== "image") throw artifactVersionWriteConflictProblem("ARTIFACT_KIND_NOT_EDITABLE", "Image edits require an Image Artifact");
+        const base = await tx.artifactVersion.findUnique({
+          where: {id_artifactId: {id: request.baseArtifactVersionId, artifactId}},
+          include: {contentBlob: {select: imageBlobSelect}},
+        });
+        if (!base || base.id !== artifact.currentVersionId || base.projectId !== artifact.projectId
+          || base.status !== "ready" || base.schemaVersion !== 1 || base.content !== null
+          || !base.contentBlobId || base.contentBlob?.status !== "ready" || base.contentBlob.deletedAt !== null)
+          throw artifactVersionWriteConflictProblem("ARTIFACT_VERSION_BASE_NOT_CURRENT", "Image edits require the current ready Image version");
+        const file = await requireReadyImageFile(tx, artifact.projectId, request.source.fileAssetId);
+        const latest = await tx.artifactVersion.findFirst({where: {artifactId}, orderBy: {version: "desc"}, select: {version: true}});
+        const created = await tx.artifactVersion.create({data: {
+          artifactId, projectId: artifact.projectId, version: (latest?.version ?? 0)+1,
+          schemaVersion: 1, status: "staging", contentBlobId: file.blob.id, checksum: file.blob.sha256,
+          citations: base.citations as Prisma.InputJsonValue, knowledgeReleaseId: base.knowledgeReleaseId,
+        }});
+        const ready = await tx.artifactVersion.update({where: {id: created.id}, data: {status: "ready"}, select: editedVersionSelect});
+        const updated = await tx.artifact.update({where: {id: artifactId}, data: {currentVersionId: ready.id, revision: {increment: 1}}, select: {revision: true}});
+        await tx.artifactVersionEditReceipt.create({data: {
+          artifactId, baseArtifactVersionId: base.id, resultArtifactVersionId: ready.id,
+          expectedArtifactRevision, resultArtifactRevision: updated.revision, createdById: principalId, idempotencyKey, requestHash,
+        }});
+        return {detail: mapEditedArtifactVersion(ready), artifactRevision: updated.revision};
+      });
+    } catch (error) {
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+        const raced = await this.findEditReceipt(artifactId, idempotencyKey);
+        if (raced) return resolveEditReplay(raced, principalId, requestHash);
+      }
+      throw error;
+    }
+  }
+
   async createVersion(
     principalId: string,
     artifactId: string,
@@ -395,6 +412,7 @@ export class ArtifactsService {
   ): Promise<CreateArtifactVersionResult> {
     validateIdempotencyKey(idempotencyKey);
     await this.requireAuthorizedArtifact(principalId, artifactId, "edit");
+    if (request.kind === "image") return this.createImageVersion(principalId, artifactId, expectedArtifactRevision, idempotencyKey, request);
     const documentSchemaVersion = editableDocumentSchemaVersion(request);
     const requestHash = hashRequest(request);
     const replay = await this.findEditReceipt(artifactId, idempotencyKey);
@@ -1046,7 +1064,19 @@ function mapImageArtifactCreation(
   ) {
     throw new Error("Artifact creation receipt invariant violated");
   }
-  const detail = artifactVersionDetailSchema.parse({
+  const detail = mapImageVersion(version);
+  return artifactCreationSchema.parse({
+    artifact: mapArtifact(artifact),
+    artifactVersion: detail,
+  });
+}
+
+function mapImageVersion(version: Parameters<typeof mapEditedArtifactVersion>[0]): ArtifactVersionDetail {
+  if (version.artifact.kind !== "image" || version.content !== null || !version.contentBlobId
+    || !version.contentBlob || version.contentBlob.id !== version.contentBlobId || version.contentBlob.status !== "ready"
+    || version.contentBlob.deletedAt !== null || version.contentBlob.sha256 !== version.checksum)
+    throw new Error("Image version blob invariant violated");
+  return artifactVersionDetailSchema.parse({
     artifactId: version.artifactId,
     artifactVersionId: version.id,
     version: version.version,
@@ -1066,10 +1096,6 @@ function mapImageArtifactCreation(
       sha256: version.contentBlob.sha256,
       fileName: null,
     },
-  });
-  return artifactCreationSchema.parse({
-    artifact: mapArtifact(artifact),
-    artifactVersion: detail,
   });
 }
 
@@ -1100,6 +1126,7 @@ function mapEditedArtifactVersion(version: {
   status: string;
   content: unknown;
   contentBlobId: string | null;
+  contentBlob?: { id: string; mediaType: string; byteSize: bigint; sha256: string; status: string; deletedAt: Date | null } | null;
   checksum: string;
   citations: unknown;
   createdByRunId: string | null;
@@ -1108,6 +1135,7 @@ function mapEditedArtifactVersion(version: {
   createdAt: Date;
   artifact: { kind: string };
 }): ArtifactVersionDetail {
+  if (version.artifact.kind === "image") return mapImageVersion(version);
   if (
     (version.artifact.kind !== "prototype" && version.artifact.kind !== "prd")
     || version.contentBlobId !== null
@@ -1153,7 +1181,7 @@ function assertPrdEditContinuity(base: PrdDocument, next: PrdDocument) {
   }
 }
 
-function editableDocumentSchemaVersion(request: CreateArtifactVersionRequest): 1 | 2 | 3 {
+function editableDocumentSchemaVersion(request: Exclude<CreateArtifactVersionRequest, {kind: "image"}>): 1 | 2 | 3 {
   return request.kind === "prd" ? 3
     : request.document.protocol === "workbench.prototype-source-input.v1" ? 2 : 1;
 }
@@ -1309,4 +1337,53 @@ export function decodeArtifactVersionCursor(value: string): ArtifactVersionCurso
   } catch {
     throw validationProblem("The Artifact version cursor is invalid");
   }
+}
+
+async function requireReadyImageFile(tx: Prisma.TransactionClient, projectId: string, fileAssetId: string) {
+  const sourceFile = await tx.fileAsset.findFirst({
+          where: { id: fileAssetId, projectId },
+          select: {
+            id: true,
+            projectId: true,
+            blobId: true,
+            status: true,
+            detectedMediaType: true,
+            deletedAt: true,
+            blob: {
+              select: {
+                id: true,
+                sha256: true,
+                mediaType: true,
+                byteSize: true,
+                status: true,
+                deletedAt: true,
+              },
+            },
+          },
+        });
+        if (
+          !sourceFile
+          || sourceFile.status !== "ready"
+          || sourceFile.deletedAt !== null
+          || !sourceFile.blobId
+          || !sourceFile.blob
+          || sourceFile.blob.id !== sourceFile.blobId
+          || sourceFile.blob.status !== "ready"
+          || sourceFile.blob.deletedAt !== null
+          || sourceFile.detectedMediaType !== sourceFile.blob.mediaType
+        ) {
+          throw artifactCreationConflictProblem(
+            "ARTIFACT_SOURCE_FILE_NOT_READY",
+            "source.fileAssetId must identify a ready verified File in the target Project",
+          );
+        }
+        if (!prototypeImageAssetSchema.shape.mediaType.safeParse(sourceFile.detectedMediaType).success) {
+          throw artifactCreationConflictProblem(
+            "ARTIFACT_SOURCE_MEDIA_TYPE_UNSUPPORTED",
+            "Image Artifacts support image/png, image/jpeg, image/webp, or image/gif",
+          );
+        }
+        safeByteSize(sourceFile.blob.byteSize);
+
+  return {...sourceFile, blob: sourceFile.blob};
 }

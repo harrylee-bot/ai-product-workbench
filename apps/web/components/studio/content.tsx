@@ -217,7 +217,9 @@ export function VerifiedBlobContent({
   metadata,
   load,
   title,
+  actions,
 }: {
+  actions?: (blob: Blob) => ReactNode;
   cacheKey: readonly string[];
   metadata: { sha256: string; byteSize: number; fileName: string | null };
   load: () => Promise<Blob>;
@@ -248,11 +250,14 @@ export function VerifiedBlobContent({
     );
   if (!query.data) return <p role="status">正在读取并校验文件…</p>;
   return (
-    <BlobContent
-      blob={query.data}
-      title={title}
-      fileName={metadata.fileName ?? title}
-    />
+    <>
+      {actions?.(query.data)}
+      <BlobContent
+        blob={query.data}
+        title={title}
+        fileName={metadata.fileName ?? title}
+      />
+    </>
   );
 }
 

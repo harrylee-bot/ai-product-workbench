@@ -100,3 +100,13 @@ schemaVersion 1 使用服务端共享导出渲染器生成完整交互 HTML，�
 - `thread` 是运行视图的新路由参数。固定 Run 以其授权响应中的 threadId 为准；首批目录之外的对话先读取详情并核对 projectId，再请求该对话的运行与消息。切换对话更新地址并清除固定 Run。
 - 对话历史按服务 `afterSequence` 读取，每页 100 条，按 sequence 排序。完整展示当前对话中的用户输入、助手回复和状态；`producedByRunId: null` 的输入不能被丢弃或根据时间归入某一 Run。带明确关联的回复可跳转对应 Run。
 - 消息历史提供显式刷新；完成的历史列表不持续轮询所有页。资料仅在解析中、运行仅在活动状态轮询，失败保留已读目录并提供重试。产物生成终态会失效产物目录缓存。
+
+## 图片上传与版本编辑
+
+“文档与产物”提供添加图片，固定图片版本提供编辑入口。裁剪复用 `react-easy-crop`；文件上传使用现有 Uppy multipart、校验和检查点，不挂载原资料画布或其状态。PNG/JPEG/WebP/GIF 可保留原文件上传；裁剪明确输出静态 PNG，最大 32,000,000 像素。单文件遵循服务 25 MiB 上限。
+
+图片编辑沿用 `POST /artifacts/{artifactId}/versions`，新增 `kind: image`、固定 `baseArtifactVersionId` 和已校验同项目 `source.fileAssetId`。需要编辑权限、当前 ready 图片基线、If-Match 与幂等键；创建不可变 blob 版本并持久化 base/result 编辑收据。数据库迁移 `20261116010000_image_artifact_version_edits` 扩展收据约束，保留已有文档、原型和不可变保护。此功能需联动迁移、API、Contracts/OpenAPI 与 Web。
+
+一次保存意图内，文件完成后重试复用 fileAssetId 和写入键；改变裁剪范围后创建新文件意图，改变目标或名称后创建新写入意图。源历史版本只可另存新图片，不能覆盖当前版本链；另存暂不自动创建跨产物关系。取消等待 multipart abort 确认，校验或保存阶段不宣称上传仍可撤销。离开页面销毁本地控制器，迟到响应不得创建产物或更改导航。当前图片编辑草稿及写入意图仅在该编辑器打开期间保留，刷新恢复与跨产物关系仍需后续闭环。
+
+创建产物的幂等响应中，artifactVersion 始终表示该创建请求产生的固定版本；artifact.currentVersion 可因后续编辑指向更高版本。两者引用同一 artifact，版本号必须与各自身份一致，不能把创建重放误解为新建另一张图片。

@@ -22,6 +22,7 @@ import {
 } from "./content";
 import { workbenchQueryKeys } from "@/lib/workbench/query/keys";
 import { useStudioAction } from "./actions";
+import { ImageEditor } from "./image-editor";
 import { ArtifactRelations } from "./relations";
 const hidden = new Set([
   "protocol",
@@ -68,6 +69,7 @@ export function DocumentView({
   const api = useWorkbenchArtifactsApi(),
     client = useQueryClient(),
     action = useStudioAction();
+  const [editingImage, setEditingImage] = useState(false);
   const [selected, setSelected] = useState(initialVersionId ?? ""),
     [screenNames, setScreenNames] = useState(""),
     [draft, setDraft] = useState<JsonValue | null>(null),
@@ -362,6 +364,29 @@ export function DocumentView({
           metadata={value.blob}
           load={() => api.getArtifactVersionContent(artifact.id, versionId)}
           title={artifact.title}
+          actions={
+            canEdit && value.kind === "image"
+              ? (blob) =>
+                  editingImage ? (
+                    <ImageEditor
+                      key={versionId}
+                      projectId={artifact.projectId}
+                      source={{
+                        artifact,
+                        versionId,
+                        blob,
+                        fileName:
+                          value.blob.fileName ?? `${artifact.title}.png`,
+                      }}
+                      onClose={() => setEditingImage(false)}
+                    />
+                  ) : (
+                    <button onClick={() => setEditingImage(true)}>
+                      编辑图片
+                    </button>
+                  )
+              : undefined
+          }
         />
       )}
       {value?.kind === "prototype" &&

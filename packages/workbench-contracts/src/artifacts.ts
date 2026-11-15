@@ -404,6 +404,7 @@ export const artifactVersionFavoriteListSchema = z.object({
 }).strict();
 
 export type CreateArtifactVersionRequest =
+  | { kind: "image"; baseArtifactVersionId: string; source: { kind: "file"; fileAssetId: string } }
   | { kind: "prd"; baseArtifactVersionId: string; document: PrdDocumentV3 }
   | { kind: "prototype"; baseArtifactVersionId: string; document: PrototypeDocument }
   | { kind: "prototype"; baseArtifactVersionId: string; document: SourcePrototypeInput };
@@ -426,7 +427,14 @@ export const createSourcePrototypeArtifactVersionRequestSchema = z.object({
   document: sourcePrototypeInputSchema,
 }).strict();
 
+export const createImageArtifactVersionRequestSchema = z.object({
+  baseArtifactVersionId: opaqueIdSchema,
+  kind: z.literal("image"),
+  source: z.object({ kind: z.literal("file"), fileAssetId: opaqueIdSchema }).strict(),
+}).strict();
+
 export const createArtifactVersionRequestSchema: z.ZodType<CreateArtifactVersionRequest, unknown> = z.union([
+  createImageArtifactVersionRequestSchema,
   createPrdArtifactVersionRequestSchema,
   createPrototypeArtifactVersionRequestSchema,
   createSourcePrototypeArtifactVersionRequestSchema,
@@ -493,16 +501,16 @@ export const artifactCreationSchema = z.union([
     || version.artifactId !== creation.artifact.id
     || current === null
     || current.artifactId !== creation.artifact.id
-    || current.artifactVersionId !== version.artifactVersionId
-    || current.version !== version.version
+    || (current.artifactVersionId === version.artifactVersionId
+      ? current.version !== version.version || current.checksum !== version.checksum
+      : current.version <= version.version)
     || current.kind !== version.kind
     || current.schemaVersion !== version.schemaVersion
     || current.status !== version.status
-    || current.checksum !== version.checksum
   ) {
     context.addIssue({
       code: z.ZodIssueCode.custom,
-      message: "Artifact creation must return one ready artifact and its matching current version",
+      message: "Artifact creation must return its ready version with a matching current version or a strictly newer ready current pointer",
     });
   }
 });

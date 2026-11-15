@@ -47,6 +47,17 @@ describe("Artifact creation contract", () => {
       },
     })).toThrow();
   });
+  it("keeps the created version fixed when an idempotent replay returns an advanced current pointer", () => {
+    const response = imageCreation();
+    const advanced = {...response, artifact: {...response.artifact, revision: 2, currentVersion: {
+      ...response.artifact.currentVersion, artifactVersionId: "version_2", version: 2, checksum: "b".repeat(64),
+    }}};
+    expect(artifactCreationSchema.parse(advanced).artifactVersion.artifactVersionId).toBe("version_1");
+    expect(() => artifactCreationSchema.parse({...advanced, artifact: {...advanced.artifact,
+      currentVersion: {...advanced.artifact.currentVersion, artifactVersionId: "version_1"},
+    }})).toThrow();
+  });
+
 });
 
 function imageCreation() {

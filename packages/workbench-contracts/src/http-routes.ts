@@ -745,7 +745,7 @@ export const workbenchHttpRoutes = [
     method: "post", path: "/artifacts/{artifactId}/versions", operationId: "createArtifactVersion",
     requestHeaders: ["ifMatch", "idempotencyKey"],
     requestBody: named("CreateArtifactVersionRequest", createArtifactVersionRequestSchema),
-    response: response(201, "Immutable ready ArtifactVersion created from the current ready base", named("ArtifactVersionDetail", artifactVersionDetailSchema), ["etag", "location"]),
+    response: response(201, "Immutable ready PRD, Prototype, or Image version created from the current ready base; Image edits use a verified same-Project File", named("ArtifactVersionDetail", artifactVersionDetailSchema), ["etag", "location"]),
     problemStatuses: problems(400, 404, 409, 412, 428),
   },
   {

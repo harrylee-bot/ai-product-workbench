@@ -11696,6 +11696,37 @@ components:
       anyOf:
         - $ref: "#/components/schemas/CreateImageArtifactRequest"
         - $ref: "#/components/schemas/CreateSourcePrototypeArtifactRequest"
+    CreateImageArtifactVersionRequest:
+      type: object
+      properties:
+        baseArtifactVersionId:
+          type: string
+          minLength: 1
+          maxLength: 128
+        kind:
+          type: string
+          enum:
+            - image
+        source:
+          type: object
+          properties:
+            kind:
+              type: string
+              enum:
+                - file
+            fileAssetId:
+              type: string
+              minLength: 1
+              maxLength: 128
+          required:
+            - kind
+            - fileAssetId
+          additionalProperties: false
+      required:
+        - baseArtifactVersionId
+        - kind
+        - source
+      additionalProperties: false
     CreatePrdArtifactVersionRequest:
       type: object
       properties:
@@ -11752,6 +11783,7 @@ components:
       additionalProperties: false
     CreateArtifactVersionRequest:
       anyOf:
+        - $ref: "#/components/schemas/CreateImageArtifactVersionRequest"
         - $ref: "#/components/schemas/CreatePrdArtifactVersionRequest"
         - $ref: "#/components/schemas/CreatePrototypeArtifactVersionRequest"
         - $ref: "#/components/schemas/CreateSourcePrototypeArtifactVersionRequest"
@@ -26235,7 +26267,7 @@ paths:
           $ref: "#/components/responses/Problem"
     post:
       operationId: createArtifactVersion
-      summary: Immutable ready ArtifactVersion created from the current ready base
+      summary: Immutable ready PRD, Prototype, or Image version created from the current ready base; Image edits use a verified same-Project File
       parameters:
         - $ref: "#/components/parameters/ArtifactId"
         - $ref: "#/components/parameters/IfMatch"
@@ -26248,7 +26280,7 @@ paths:
               $ref: "#/components/schemas/CreateArtifactVersionRequest"
       responses:
         "201":
-          description: Immutable ready ArtifactVersion created from the current ready base
+          description: Immutable ready PRD, Prototype, or Image version created from the current ready base; Image edits use a verified same-Project File
           headers:
             ETag:
               $ref: "#/components/headers/ETag"

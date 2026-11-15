@@ -26,6 +26,7 @@ import { ContextImports, KnowledgeLibrary } from "./context-library";
 import { Streamdown } from "streamdown";
 import type { RunProjectionState } from "@/lib/workbench/run/reducer";
 import { isActiveRun, projectedRun } from "@/lib/studio/run";
+import { ImageEditor } from "./image-editor";
 import { DocumentView } from "./document-view";
 import { RunOutputs } from "./relations";
 import { ProjectMembers } from "./project-members";
@@ -273,6 +274,7 @@ function Documents({
   canEdit: boolean;
   onPrompt: (text: string, context?: StudioArtifactContext) => void;
 }) {
+  const [addingImage, setAddingImage] = useState(false);
   const params = useSearchParams(),
     selected = params.get("artifact") ?? "",
     requestedVersion = params.get("artifactVersion") ?? undefined;
@@ -319,6 +321,9 @@ function Documents({
     <>
       <div className="studio-view-heading">
         <h1>文档与产物</h1>
+        {canEdit && (
+          <button onClick={() => setAddingImage(true)}>添加图片</button>
+        )}
         <label>
           产物类型
           <select
@@ -377,6 +382,13 @@ function Documents({
             )}
         </select>
       </div>
+      {canEdit && addingImage && (
+        <ImageEditor
+          key={bootstrap.project.id}
+          projectId={bootstrap.project.id}
+          onClose={() => setAddingImage(false)}
+        />
+      )}
       {list.isPending && <p role="status">正在读取产物目录…</p>}
       {list.error && (
         <p role="alert">

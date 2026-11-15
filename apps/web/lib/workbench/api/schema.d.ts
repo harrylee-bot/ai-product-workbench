@@ -1063,7 +1063,7 @@ export interface paths {
         /** Immutable Artifact versions ordered newest first */
         get: operations["listArtifactVersions"];
         put?: never;
-        /** Immutable ready ArtifactVersion created from the current ready base */
+        /** Immutable ready PRD, Prototype, or Image version created from the current ready base; Image edits use a verified same-Project File */
         post: operations["createArtifactVersion"];
         delete?: never;
         options?: never;
@@ -5437,6 +5437,16 @@ export interface components {
             document: components["schemas"]["SourcePrototypeInput"];
         };
         CreateArtifactRequest: components["schemas"]["CreateImageArtifactRequest"] | components["schemas"]["CreateSourcePrototypeArtifactRequest"];
+        CreateImageArtifactVersionRequest: {
+            baseArtifactVersionId: string;
+            /** @enum {string} */
+            kind: "image";
+            source: {
+                /** @enum {string} */
+                kind: "file";
+                fileAssetId: string;
+            };
+        };
         CreatePrdArtifactVersionRequest: {
             baseArtifactVersionId: string;
             /** @enum {string} */
@@ -5455,7 +5465,7 @@ export interface components {
             kind: "prototype";
             document: components["schemas"]["SourcePrototypeInput"];
         };
-        CreateArtifactVersionRequest: components["schemas"]["CreatePrdArtifactVersionRequest"] | components["schemas"]["CreatePrototypeArtifactVersionRequest"] | components["schemas"]["CreateSourcePrototypeArtifactVersionRequest"];
+        CreateArtifactVersionRequest: components["schemas"]["CreateImageArtifactVersionRequest"] | components["schemas"]["CreatePrdArtifactVersionRequest"] | components["schemas"]["CreatePrototypeArtifactVersionRequest"] | components["schemas"]["CreateSourcePrototypeArtifactVersionRequest"];
         CreateDesignSystemRequest: {
             title: string;
             document: components["schemas"]["DesignSystemDocument"];
@@ -11315,7 +11325,7 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Immutable ready ArtifactVersion created from the current ready base */
+            /** @description Immutable ready PRD, Prototype, or Image version created from the current ready base; Image edits use a verified same-Project File */
             201: {
                 headers: {
                     ETag: components["headers"]["ETag"];
