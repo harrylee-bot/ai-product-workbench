@@ -569,12 +569,12 @@ export const workbenchHttpRoutes = [
   },
   {
     method: "post", path: "/artifacts/{artifactId}/versions/{artifactVersionId}/preview-token", operationId: "createSourcePrototypePreviewToken",
-    response: response(200, "Short-lived isolated preview for an authorized frozen source prototype", named("ExportPreviewTokenResponse", exportPreviewTokenResponseSchema)),
+    response: response(200, "Short-lived isolated preview for an authorized ready prototype version, supporting schemaVersion 1 and 2", named("ExportPreviewTokenResponse", exportPreviewTokenResponseSchema)),
     problemStatuses: problems(400, 404),
   },
   {
     method: "post", path: "/public/shares/{shareToken}/artifacts/{artifactId}/versions/{artifactVersionId}/preview-token", operationId: "createPublicSourcePrototypePreviewToken", public: true,
-    response: response(200, "Short-lived share-bound isolated preview, rechecked for revocation on every access", named("ExportPreviewTokenResponse", exportPreviewTokenResponseSchema)),
+    response: response(200, "Short-lived share-bound isolated prototype preview for schemaVersion 1 and 2, rechecked for revocation on every access", named("ExportPreviewTokenResponse", exportPreviewTokenResponseSchema)),
     problemStatuses: problems(400, 404),
   },
   {

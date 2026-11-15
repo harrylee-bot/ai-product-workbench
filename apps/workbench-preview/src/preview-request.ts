@@ -11,7 +11,7 @@ export async function preparePreviewResponse(
   },
   signal?: AbortSignal,
 ) {
-  const resolved = await service.resolve(input.token);
+  const resolved = await service.resolve(input.token, signal);
   if (entityTagMatches(input.ifNoneMatch, resolved.etag)) {
     return { status: 304 as const, etag: resolved.etag };
   }

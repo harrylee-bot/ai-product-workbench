@@ -15,7 +15,7 @@ function fixture(sourceHtml = html) {
     build: { renderer: "workbench.react-source.v1", reactVersion: "19.2.3", bundlerVersion: "0.28.1", sourceChecksum: "b".repeat(64), html: sourceHtml, htmlSha256: digest(sourceHtml) },
   };
   const checksum = digest(canonicalJson(content));
-  const version = { projectId: "project-1", content, checksum };
+  const version = { projectId: "project-1", schemaVersion: 2, assets: [], content, checksum };
   const db = { artifactVersion: { findFirst: vi.fn(async () => version) },
     projectMember: { findFirst: vi.fn(async () => ({ projectId: "project-1" })) },
     shareGrant: { findFirst: vi.fn(async () => ({ id: "share-1" })) } };

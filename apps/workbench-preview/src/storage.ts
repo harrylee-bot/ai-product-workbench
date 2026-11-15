@@ -123,11 +123,11 @@ export class PreviewStorage {
     });
   }
 
-  async stageHtml(identity: PreviewBlobIdentity, maximumBytes: number, signal?: AbortSignal) {
+  private async stageObject(identity: PreviewBlobIdentity, maximumBytes: number, signal?: AbortSignal) {
     if (identity.byteSize <= 0 || identity.byteSize > maximumBytes) {
       throw new Error("PREVIEW_BLOB_SIZE_INVALID");
     }
-    const verified = await stageReadyObject(identity, async (requestSignal) => {
+    return stageReadyObject(identity, async (requestSignal) => {
       const result = await this.client.send(
         new GetObjectCommand({ Bucket: this.config.s3Bucket, Key: identity.storageKey }),
         requestSignal ? { abortSignal: requestSignal } : undefined,
@@ -148,6 +148,24 @@ export class PreviewStorage {
       spoolDirectory: this.config.spoolDirectory,
       ...(signal ? { signal } : {}),
     });
+  }
+
+  async readAsset(identity: PreviewBlobIdentity, maximumBytes: number, signal?: AbortSignal) {
+    const verified = await this.stageObject(identity, maximumBytes, signal);
+    try {
+      const chunks: Buffer[] = [];
+      for await (const value of verified.body) {
+        assertNotAborted(signal);
+        chunks.push(Buffer.isBuffer(value) ? value : Buffer.from(value));
+      }
+      return Buffer.concat(chunks);
+    } finally {
+      verified.body.destroy();
+    }
+  }
+
+  async stageHtml(identity: PreviewBlobIdentity, maximumBytes: number, signal?: AbortSignal) {
+    const verified = await this.stageObject(identity, maximumBytes, signal);
     let directory: string | null = null;
     let filePath: string | null = null;
     let file: Awaited<ReturnType<typeof open>> | null = null;

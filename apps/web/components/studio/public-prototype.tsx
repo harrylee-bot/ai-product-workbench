@@ -61,7 +61,7 @@ function Content({ token }: { token: string }) {
           setPage(id);
           const url = new URL(window.location.href);
           url.searchParams.set("page", id);
-          window.history.replaceState(window.history.state, "", url);
+          window.history.replaceState(null, "", url);
         }}
         onSelection={() => {}}
         draftIdentity="public"

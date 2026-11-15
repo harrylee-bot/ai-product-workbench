@@ -1,12 +1,13 @@
 "use client";
 import { useEffect, useState, type ReactNode } from "react";
+import { useQuery } from "@tanstack/react-query";
 import type {
   JsonValue,
   ExportPreviewTokenResponse,
 } from "@workbench/workbench-contracts";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { saveBlob, useStudioAction } from "./actions";
+import { saveBlob, verifyDownload } from "./actions";
 
 const hidden = new Set([
   "protocol",
@@ -211,30 +212,98 @@ function fieldLabel(key: string) {
   );
 }
 
-export function BlobContent({ blob, title }: { blob: Blob; title: string }) {
-  const [url, setUrl] = useState(""),
-    [text, setText] = useState("");
+export function VerifiedBlobContent({
+  cacheKey,
+  metadata,
+  load,
+  title,
+}: {
+  cacheKey: readonly string[];
+  metadata: { sha256: string; byteSize: number; fileName: string | null };
+  load: () => Promise<Blob>;
+  title: string;
+}) {
+  const query = useQuery({
+    queryKey: [
+      "studio",
+      "verified-blob",
+      ...cacheKey,
+      metadata.sha256,
+      metadata.byteSize,
+    ],
+    queryFn: async () =>
+      verifyDownload(await load(), {
+        sha256: metadata.sha256,
+        size: metadata.byteSize,
+      }),
+    staleTime: Infinity,
+    retry: false,
+  });
+  if (query.error)
+    return (
+      <p role="alert">
+        文件未通过读取或完整性校验。
+        <button onClick={() => void query.refetch()}>重新读取文件</button>
+      </p>
+    );
+  if (!query.data) return <p role="status">正在读取并校验文件…</p>;
+  return (
+    <BlobContent
+      blob={query.data}
+      title={title}
+      fileName={metadata.fileName ?? title}
+    />
+  );
+}
+
+export function BlobContent({
+  blob,
+  title,
+  fileName = title,
+}: {
+  blob: Blob;
+  title: string;
+  fileName?: string;
+}) {
+  const [resource, setResource] = useState<{
+    blob: Blob;
+    url: string;
+    text: string;
+  } | null>(null);
   useEffect(() => {
     const url = URL.createObjectURL(blob);
-    setUrl(url);
+    setResource({ blob, url, text: "" });
     let active = true;
     if (
       (blob.type.startsWith("text/") || /json|xml/.test(blob.type)) &&
       blob.size <= 2 * 1024 * 1024
     )
       void blob.text().then((value) => {
-        if (active) setText(value);
+        if (active) setResource({ blob, url, text: value });
       });
     return () => {
       active = false;
       URL.revokeObjectURL(url);
     };
   }, [blob]);
+  // A changed version never reuses the previous version's object URL or text.
+  const url = resource?.blob === blob ? resource.url : "";
+  const text = resource?.blob === blob ? resource.text : "";
   return (
     <>
-      <button onClick={() => saveBlob(blob, title)}>下载原文件</button>
+      <button onClick={() => saveBlob(blob, fileName)}>下载原文件</button>
       {blob.type.startsWith("image/") && url ? (
         <img className="studio-media" src={url} alt={title} />
+      ) : blob.type.startsWith("video/") && url ? (
+        <video
+          className="studio-media"
+          src={url}
+          controls
+          preload="metadata"
+          aria-label={title}
+        />
+      ) : blob.type.startsWith("audio/") && url ? (
+        <audio src={url} controls preload="metadata" aria-label={title} />
       ) : blob.type === "application/pdf" && url ? (
         <iframe className="studio-document-frame" title={title} src={url} />
       ) : text ? (
@@ -246,46 +315,45 @@ export function BlobContent({ blob, title }: { blob: Blob; title: string }) {
   );
 }
 
-export function SourcePreview({
+export function PrototypeArtifactPreview({
   title,
+  cacheKey,
   create,
 }: {
   title: string;
+  cacheKey: readonly string[];
   create: () => Promise<ExportPreviewTokenResponse>;
 }) {
-  const action = useStudioAction(),
-    [preview, setPreview] = useState<ExportPreviewTokenResponse | null>(null);
-  const [expired, setExpired] = useState(false);
+  const query = useQuery({
+    queryKey: ["studio", "artifact-preview", ...cacheKey],
+    queryFn: create,
+    staleTime: 0,
+    gcTime: 0,
+    retry: false,
+    refetchOnWindowFocus: false,
+  });
+  const preview = query.data;
+  const [expiredUrl, setExpiredUrl] = useState<string | null>(null);
   useEffect(() => {
     if (!preview) return;
     const timer = setTimeout(
-      () => {
-        setExpired(true);
-        setPreview(null);
-      },
+      () => setExpiredUrl(preview.url),
       Math.max(0, Date.parse(preview.expiresAt) - Date.now()),
     );
     return () => clearTimeout(timer);
   }, [preview]);
+  const expired =
+    !!preview &&
+    (expiredUrl === preview.url || Date.parse(preview.expiresAt) <= Date.now());
   return (
     <div className="studio-source-preview">
-      {action.notice}
-      <button
-        disabled={action.busy}
-        onClick={() =>
-          void action.run(async () => {
-            setPreview(await create());
-            setExpired(false);
-          }, "预览已就绪")
-        }
-      >
-        {preview
-          ? "重新加载预览"
-          : expired
-            ? "预览已过期 · 重新打开"
-            : "打开交互预览"}
+      {query.isPending && <p role="status">正在准备交互预览…</p>}
+      {query.error && <p role="alert">暂时无法加载此版本的交互预览。</p>}
+      {expired && <p role="status">预览已过期，请重新打开。</p>}
+      <button disabled={query.isFetching} onClick={() => void query.refetch()}>
+        {query.error || expired ? "重新打开预览" : "重新加载预览"}
       </button>
-      {preview && (
+      {!query.error && preview && !expired && (
         <iframe
           title={title}
           src={preview.url}

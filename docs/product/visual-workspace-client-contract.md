@@ -83,3 +83,13 @@ API 验证源 PRD 属于当前项目、已就绪且为有效内联 PRD v3。Work
 原型修订和项目发布分享均周期性重新校验公开 capability。任何校验错误优先于已有缓存内容，移除旧 iframe 或发布视图；不继续显示已撤销、过期或当前无法验证的内容。原型分享使用完整视口的独立 Studio 外壳，匿名页面不依赖登录后布局提供高度，也不请求项目内部端点。
 
 未知 token 仍返回不含私有资源信息的 404。已识别 token 的撤销和过期状态分别返回 `SHARE_REVOKED`、`SHARE_EXPIRED`，HTTP 状态仍为 404；原型尚无可用预览返回 409 `SHARE_PREVIEW_UNAVAILABLE`。前端按受控错误码显示无效、过期、撤销、预览暂不可用、权限或服务失败，不显示任意服务端 detail。预览和临时故障可明确重试。OpenAPI 将原型分享 GET 标记为公开入口，并声明 404/409/503。
+
+## 固定产物的实际预览
+
+文档与产物和项目级匿名分享中的 prototype schemaVersion 1、2 均自动打开独立预览，不将原型结构对象递归显示成正文。沿用版本级 `preview-token` 入口；API 验证项目成员或有效公开分享，能力绑定 artifact/version/checksum 及 principal 或 share/revision。Preview 服务每次访问（含条件请求）重新校验授权，过期或撤销的 capability 不返回缓存的 304。
+
+schemaVersion 1 使用服务端共享导出渲染器生成完整交互 HTML，保留实际控件、变量、动作和跨屏导航。资源只从该版本固定清单解析，匹配 ready Blob 的身份、SHA、字节数、媒体类型并通过受控存储完整性读取；单次资源和最终 HTML 受预览大小上限约束。schemaVersion 2 继续读取并验证冻结构建。两条路径共用隔离来源、脚本哈希 CSP 和不含 same-origin 的 iframe；未引入旧 UI 或节点协议回退。Preview 服务的 export-core 运行依赖与 Docker 构建必须同步集成。
+
+原型 capability 的客户端查询按授权域及固定版本隔离，离开组件后不保留查询缓存；服务端凭证仍由权限和有效期约束，预览到期移除 iframe 并可重新打开。普通 blob 产物在校验字节数和 SHA 后显示图片、音视频、PDF 或文本；损坏内容不显示也不提供下载，重试不改变固定版本。切换资源及时撤销对象 URL，原文件下载使用服务给出的文件名。
+
+产物版本采用 30 项游标分页，未在当前页的固定版本仍显示其实际身份。Studio 的原生 History 更新传入 null，由 Next.js 维护内部历史数据并通知 useSearchParams；不得复制包含其内部导航标记的 window.history.state，否则地址栏变化不会同步文档或运行视图。前进后退及直达 URL 使用同一版本合同。

@@ -14,6 +14,16 @@ afterEach(async () => {
 });
 
 describe("PreviewStorage bounded staging", () => {
+  it("reads bounded asset bytes through the same integrity gate and removes staged files", async () => {
+    const source = Buffer.from("controlled binary asset");
+    const { storage, spoolDirectory } = await storageFor(source.length, Readable.from([source]));
+    expect(await storage.readAsset(identity(source), 1024)).toEqual(source);
+    expect(await readdir(spoolDirectory)).toEqual([]);
+    const corrupted = await storageFor(source.length, Readable.from([source]));
+    await expect(corrupted.storage.readAsset({ ...identity(source), sha256: "0".repeat(64) }, 1024)).rejects.toThrow("OBJECT_STORAGE_SHA256_MISMATCH");
+    expect(await readdir(corrupted.spoolDirectory)).toEqual([]);
+    await expect(storage.readAsset(identity(source), 1)).rejects.toThrow("PREVIEW_BLOB_SIZE_INVALID");
+  });
   it("verifies, inspects, injects, and removes a staged HTML object", async () => {
     const source = Buffer.from(
       "\uFEFF<!--产品--><!doctype html><html><head><style>body{color:#111}</style></head><body>产品工作台<script>window.ready=true</script></body></html>",

@@ -109,7 +109,7 @@ export function writePrototypeSelection(selection: Selection): void {
     if (value) url.searchParams.set(key!, value);
     else url.searchParams.delete(key!);
   }
-  window.history.replaceState(window.history.state, "", url);
+  window.history.replaceState(null, "", url);
 }
 
 export function StudioWorkspace({
@@ -163,7 +163,7 @@ export function StudioWorkspace({
   const setView = (next: StudioView) => {
     const url = new URL(window.location.href);
     url.searchParams.set("view", next);
-    window.history.pushState(window.history.state, "", url);
+    window.history.pushState(null, "", url);
     setViewState(next);
   };
   const [feedback, setFeedback] = useState("");
@@ -564,7 +564,7 @@ export function StudioWorkspace({
           setDirectRunId(accepted);
           const url = new URL(window.location.href);
           url.searchParams.set("run", accepted);
-          window.history.replaceState(window.history.state, "", url);
+          window.history.replaceState(null, "", url);
           setView("documents");
         }
         return accepted;
@@ -1342,7 +1342,7 @@ export function StudioWorkspace({
                       const url = new URL(window.location.href);
                       url.searchParams.set("run", next.id);
                       window.history.replaceState(
-                        window.history.state,
+                        null,
                         "",
                         url,
                       );
@@ -1386,7 +1386,7 @@ export function StudioWorkspace({
                   const next = { ...selection, pageId: id };
                   const url = new URL(window.location.href);
                   url.searchParams.set("page", id);
-                  window.history.pushState(window.history.state, "", url);
+                  window.history.pushState(null, "", url);
                   setSelection(next);
                 }}
                 onSelection={(next) => {

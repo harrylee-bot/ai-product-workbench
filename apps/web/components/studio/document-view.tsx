@@ -1,7 +1,11 @@
 "use client";
 import type { StudioArtifactContext } from "@/lib/studio/types";
 import { useState, type ReactNode } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  useInfiniteQuery,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query";
 import {
   prdDocumentSchema,
   runPrdScreenPlanSchema,
@@ -11,9 +15,13 @@ import {
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { useWorkbenchArtifactsApi } from "@/lib/studio/api";
-import { StructuredContent, SourcePreview } from "./content";
+import {
+  StructuredContent,
+  PrototypeArtifactPreview,
+  VerifiedBlobContent,
+} from "./content";
 import { workbenchQueryKeys } from "@/lib/workbench/query/keys";
-import { useStudioAction, saveBlob, verifyDownload } from "./actions";
+import { useStudioAction } from "./actions";
 import { ArtifactRelations } from "./relations";
 const hidden = new Set([
   "protocol",
@@ -64,10 +72,20 @@ export function DocumentView({
     [screenNames, setScreenNames] = useState(""),
     [draft, setDraft] = useState<JsonValue | null>(null),
     [editing, setEditing] = useState(false);
-  const versions = useQuery({
+  const versions = useInfiniteQuery({
     queryKey: ["studio", "artifact-versions", artifact.id],
-    queryFn: () => api.listArtifactVersions(artifact.id, { limit: 100 }),
+    initialPageParam: undefined as string | undefined,
+    queryFn: ({ pageParam }) =>
+      api.listArtifactVersions(artifact.id, { limit: 30, cursor: pageParam }),
+    getNextPageParam: (page) => page.nextCursor ?? undefined,
   });
+  const versionItems = [
+    ...new Map(
+      versions.data?.pages
+        .flatMap((page) => page.items)
+        .map((item) => [item.artifactVersionId, item]),
+    ).values(),
+  ];
   const versionId =
     selected || artifact.currentVersion?.artifactVersionId || "";
   const detail = useQuery({
@@ -79,12 +97,13 @@ export function DocumentView({
     queryFn: () => api.getArtifactVersion(artifact.id, versionId),
     enabled: Boolean(versionId),
   });
-  const value = detail.data?.value,
-    content =
-      draft ??
-      (value?.contentMode === "inline"
-        ? (value.content as unknown as JsonValue)
-        : null);
+  const value = detail.error ? undefined : detail.data?.value,
+    content = detail.error
+      ? null
+      : (draft ??
+        (value?.contentMode === "inline"
+          ? (value.content as unknown as JsonValue)
+          : null));
   const update = (path: (string | number)[], text: string) => {
     if (content === null) return;
     const copy = structuredClone(content);
@@ -148,18 +167,41 @@ export function DocumentView({
             const url = new URL(window.location.href);
             url.searchParams.set("artifact", artifact.id);
             url.searchParams.set("artifactVersion", e.target.value);
-            window.history.pushState(window.history.state, "", url);
+            window.history.pushState(null, "", url);
             setSelected(e.target.value);
             setDraft(null);
             setEditing(false);
           }}
         >
-          {versions.data?.items.map((v) => (
+          {versionId &&
+            !versionItems.some(
+              (item) => item.artifactVersionId === versionId,
+            ) && (
+              <option value={versionId}>固定版本 {value?.version ?? ""}</option>
+            )}
+          {versionItems.map((v) => (
             <option value={v.artifactVersionId} key={v.artifactVersionId}>
               版本 {v.version} · {v.status}
             </option>
           ))}
         </select>
+        <span>已载入 {versionItems.length} 个版本</span>
+        {versions.hasNextPage && (
+          <button
+            disabled={versions.isFetchingNextPage}
+            onClick={() => void versions.fetchNextPage()}
+          >
+            加载更多版本
+          </button>
+        )}
+        {versions.error && (
+          <p role="alert">
+            版本列表加载失败。
+            <button onClick={() => void versions.refetch()}>
+              重试版本列表
+            </button>
+          </p>
+        )}
         {value?.kind === "prd" && value.contentMode === "inline" && (
           <>
             <button
@@ -196,6 +238,11 @@ export function DocumentView({
                         artifact.projectId,
                       ),
                     });
+                    await client.invalidateQueries({
+                      queryKey: workbenchQueryKeys.artifactLists(
+                        artifact.projectId,
+                      ),
+                    });
                   }, "已保存为新版本")
                 }
               >
@@ -224,25 +271,6 @@ export function DocumentView({
         >
           继续完善此版本
         </button>
-        {value?.contentMode === "blob" && (
-          <button
-            onClick={() =>
-              void action.run(async () => {
-                const result = await api.getArtifactVersionContent(
-                  artifact.id,
-                  versionId,
-                );
-                await verifyDownload(result, {
-                  sha256: value.blob.sha256,
-                  size: value.blob.byteSize,
-                });
-                saveBlob(result, value.blob.fileName || artifact.title);
-              }, "已向浏览器发起下载")
-            }
-          >
-            下载原文件
-          </button>
-        )}
       </div>
       {value?.kind === "prd" && value.contentMode === "inline" && (
         <section className="studio-document">
@@ -328,8 +356,19 @@ export function DocumentView({
       )}
       {detail.error && <p role="alert">{detail.error.message}</p>}
       {detail.isPending && <p>正在加载文档…</p>}
-      {value?.kind === "prototype" && value.schemaVersion === 2 ? (
-        <SourcePreview
+      {value?.contentMode === "blob" && !detail.error && (
+        <VerifiedBlobContent
+          cacheKey={[artifact.projectId, artifact.id, versionId]}
+          metadata={value.blob}
+          load={() => api.getArtifactVersionContent(artifact.id, versionId)}
+          title={artifact.title}
+        />
+      )}
+      {value?.kind === "prototype" &&
+      value.contentMode === "inline" &&
+      !detail.error ? (
+        <PrototypeArtifactPreview
+          cacheKey={[artifact.projectId, artifact.id, versionId]}
           title={artifact.title}
           create={() =>
             api.createSourcePrototypePreviewToken(artifact.id, versionId)

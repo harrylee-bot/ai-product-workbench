@@ -720,7 +720,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Short-lived isolated preview for an authorized frozen source prototype */
+        /** Short-lived isolated preview for an authorized ready prototype version, supporting schemaVersion 1 and 2 */
         post: operations["createSourcePrototypePreviewToken"];
         delete?: never;
         options?: never;
@@ -737,7 +737,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Short-lived share-bound isolated preview, rechecked for revocation on every access */
+        /** Short-lived share-bound isolated prototype preview for schemaVersion 1 and 2, rechecked for revocation on every access */
         post: operations["createPublicSourcePrototypePreviewToken"];
         delete?: never;
         options?: never;
@@ -10575,7 +10575,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Short-lived isolated preview for an authorized frozen source prototype */
+            /** @description Short-lived isolated preview for an authorized ready prototype version, supporting schemaVersion 1 and 2 */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -10601,7 +10601,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Short-lived share-bound isolated preview, rechecked for revocation on every access */
+            /** @description Short-lived share-bound isolated prototype preview for schemaVersion 1 and 2, rechecked for revocation on every access */
             200: {
                 headers: {
                     [name: string]: unknown;

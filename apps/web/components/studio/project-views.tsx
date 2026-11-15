@@ -274,7 +274,7 @@ function Documents({
             const url = new URL(window.location.href);
             url.searchParams.set("artifact", e.target.value);
             url.searchParams.delete("artifactVersion");
-            window.history.pushState(window.history.state, "", url);
+            window.history.pushState(null, "", url);
           }}
         >
           {artifacts.map((a) => (
@@ -374,7 +374,7 @@ function Runs({
             setThread(e.target.value);
             const url = new URL(window.location.href);
             url.searchParams.delete("run");
-            window.history.pushState(window.history.state, "", url);
+            window.history.pushState(null, "", url);
           }}
         >
           {bootstrap.threads.map((t) => (
@@ -395,7 +395,7 @@ function Runs({
           onChange={(e) => {
             const url = new URL(window.location.href);
             url.searchParams.set("run", e.target.value);
-            window.history.pushState(window.history.state, "", url);
+            window.history.pushState(null, "", url);
           }}
         >
           {list.data?.items.map((r) => (

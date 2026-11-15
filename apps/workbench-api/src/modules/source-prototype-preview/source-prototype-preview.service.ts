@@ -18,7 +18,7 @@ export class SourcePrototypePreviewService {
 
   async createPrivate(principalId: string, artifactId: string, versionId: string) {
     const { detail } = await this.artifacts.getVersion(principalId, artifactId, versionId);
-    requireSource(detail);
+    requirePrototype(detail);
     return formatCapability(this.config.createSourceCapability({
       artifactId, artifactVersionId: versionId, checksum: detail.checksum, principalId,
     }));
@@ -26,7 +26,7 @@ export class SourcePrototypePreviewService {
 
   async createPublic(shareToken: string, artifactId: string, versionId: string) {
     const { detail } = await this.shares.getPublicArtifactVersion(shareToken, artifactId, versionId);
-    requireSource(detail);
+    requirePrototype(detail);
     const share = await this.db.shareGrant.findUnique({
       where: { tokenHash: createHash("sha256").update(shareToken, "utf8").digest("hex") },
       select: { id: true, revision: true, artifactVersionId: true, status: true, scope: true, expiresAt: true },
@@ -41,9 +41,9 @@ export class SourcePrototypePreviewService {
   }
 }
 
-function requireSource(detail: ArtifactVersionDetail | PublicArtifactVersionDetail) {
-  if (detail.kind !== "prototype" || detail.schemaVersion !== 2 || detail.status !== "ready" || detail.contentMode !== "inline") {
-    throw notFoundProblem("Ready source prototype");
+function requirePrototype(detail: ArtifactVersionDetail | PublicArtifactVersionDetail) {
+  if (detail.kind !== "prototype" || ![1, 2].includes(detail.schemaVersion) || detail.status !== "ready" || detail.contentMode !== "inline") {
+    throw notFoundProblem("Ready prototype");
   }
 }
 

@@ -1,12 +1,14 @@
 "use client";
 import { useState } from "react";
 import type { JsonValue, PublicShare } from "@workbench/workbench-contracts";
-import {
-  useWorkbenchPublicSharedArtifactVersion,
-  useWorkbenchPublicSharedArtifactContent,
-} from "@/lib/workbench/features/public-shares";
+import { useWorkbenchPublicSharedArtifactVersion } from "@/lib/workbench/features/public-shares";
 import { useWorkbenchPublicSharesApi } from "@/lib/studio/api";
-import { StructuredContent, BlobContent, SourcePreview } from "./content";
+import { publicShareTokenScope } from "@/lib/workbench/features/public-shares";
+import {
+  StructuredContent,
+  VerifiedBlobContent,
+  PrototypeArtifactPreview,
+} from "./content";
 
 export function PublicRelease({
   share,
@@ -28,7 +30,9 @@ export function PublicRelease({
         {pins.map((pin) => (
           <button
             key={pin.artifactVersionId}
-            aria-pressed={selected === pin.artifactVersionId}
+            aria-pressed={
+              (selected || pins[0]?.artifactVersionId) === pin.artifactVersionId
+            }
             onClick={() => setSelected(pin.artifactVersionId)}
           >
             {pin.title}
@@ -69,12 +73,6 @@ function PublicArtifact({
       versionId,
     ),
     value = query.data?.value;
-  const blob = useWorkbenchPublicSharedArtifactContent(
-    token,
-    artifactId,
-    versionId,
-    value?.contentMode === "blob",
-  );
   if (query.isPending) return <p role="status">正在加载…</p>;
   if (query.error || !value)
     return (
@@ -84,16 +82,34 @@ function PublicArtifact({
       </p>
     );
   if (value.contentMode === "blob")
-    return blob.data ? (
-      <BlobContent blob={blob.data} title={title} />
-    ) : (
-      <p role={blob.error ? "alert" : "status"}>
-        {blob.error ? "无法加载文件" : "正在加载文件…"}
-      </p>
-    );
-  if (value.kind === "prototype" && value.schemaVersion === 2)
     return (
-      <SourcePreview
+      <VerifiedBlobContent
+        cacheKey={[
+          "public",
+          publicShareTokenScope(token),
+          artifactId,
+          versionId,
+        ]}
+        metadata={value.blob}
+        load={() =>
+          api.getPublicSharedArtifactVersionContent(
+            token,
+            artifactId,
+            versionId,
+          )
+        }
+        title={title}
+      />
+    );
+  if (value.kind === "prototype" && value.contentMode === "inline")
+    return (
+      <PrototypeArtifactPreview
+        cacheKey={[
+          "public",
+          publicShareTokenScope(token),
+          artifactId,
+          versionId,
+        ]}
         title={title}
         create={() =>
           api.createSourcePrototypePreviewToken(token, artifactId, versionId)

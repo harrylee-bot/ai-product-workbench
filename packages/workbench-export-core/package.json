@@ -6,6 +6,10 @@
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "exports": {
+    "./html-renderer": {
+      "types": "./dist/html-renderer.d.ts",
+      "default": "./dist/html-renderer.js"
+    },
     ".": {
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"

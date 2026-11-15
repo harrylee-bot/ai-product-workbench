@@ -1,6 +1,8 @@
 import { createHash } from "node:crypto";
 import { Readable } from "node:stream";
-import { canonicalJson, sourcePrototypeDocumentSchema } from "@workbench/workbench-contracts";
+import { canonicalJson, prototypeDocumentSchema, sourcePrototypeDocumentSchema } from "@workbench/workbench-contracts";
+import { renderPrototypeDocumentHtml } from "@workbench/workbench-export-core/html-renderer";
+import type { ExportBinaryAsset } from "@workbench/workbench-export-core";
 import type { PrismaClient } from "@workbench/workbench-db";
 import { verifySourcePrototypePreviewToken, verifyPreviewToken } from "@workbench/workbench-preview-token";
 import type { PreviewConfig } from "./config.js";
@@ -15,8 +17,9 @@ export class PreviewService {
     private readonly config: Pick<PreviewConfig, "tokenSecret" | "tokenMaximumTtlSeconds" | "maximumHtmlBytes" | "webOrigin">,
   ) {}
 
-  async resolve(token: string) {
-    if (token.startsWith("wbsp1.")) return this.resolveSourcePrototype(token);
+  async resolve(token: string, signal?: AbortSignal) {
+    signal?.throwIfAborted();
+    if (token.startsWith("wbsp1.")) return this.resolveSourcePrototype(token, signal);
     const payload = verifyPreviewToken(token, this.config.tokenSecret, {
       maximumTtlSeconds: this.config.tokenMaximumTtlSeconds,
     });
@@ -91,7 +94,7 @@ export class PreviewService {
     };
   }
 
-  private async resolveSourcePrototype(token: string) {
+  private async resolveSourcePrototype(token: string, signal?: AbortSignal) {
     const payload = verifySourcePrototypePreviewToken(token, this.config.tokenSecret, {
       maximumTtlSeconds: this.config.tokenMaximumTtlSeconds,
     });
@@ -99,10 +102,13 @@ export class PreviewService {
     const version = await this.db.artifactVersion.findFirst({
       where: {
         id: payload.artifactVersionId, artifactId: payload.artifactId, checksum: payload.checksum,
-        status: "ready", schemaVersion: 2, contentBlobId: null,
+        status: "ready", schemaVersion: { in: [1, 2] }, contentBlobId: null,
         artifact: { kind: "prototype", project: { status: "active" } },
       },
-      select: { projectId: true, content: true, checksum: true },
+      select: { projectId: true, schemaVersion: true, content: true, checksum: true,
+        assets: { select: { assetId: true, kind: true, blobId: true, mediaType: true, byteSize: true, sha256: true,
+          blob: { select: { storageKey: true, status: true, deletedAt: true, sha256: true, byteSize: true, mediaType: true } } } },
+      },
     });
     if (!version) throw new Error("PREVIEW_NOT_FOUND");
     const authorization = payload.principalId
@@ -116,12 +122,36 @@ export class PreviewService {
             artifactVersionId: payload.artifactVersionId, scope: "view", status: "active",
             OR: [{ expiresAt: null }, { expiresAt: { gt: now } }],
             release: { status: "ready", project: { status: "active" }, artifactPins: {
-              some: { artifactId: payload.artifactId, artifactVersionId: payload.artifactVersionId },
+              some: { artifactId: payload.artifactId, artifactVersionId: payload.artifactVersionId, artifactVersion: { checksum: payload.checksum } },
             } },
           },
           select: { id: true },
         });
     if (!authorization) throw new Error("PREVIEW_NOT_FOUND");
+    if (version.schemaVersion === 1) {
+      const parsed = prototypeDocumentSchema.safeParse(version.content);
+      if (!parsed.success || digest(canonicalJson(parsed.data)) !== payload.checksum) throw new Error("PREVIEW_NOT_FOUND");
+      const assets: ExportBinaryAsset[] = [];
+      let assetBytes = 0;
+      for (const manifest of parsed.data.assets) {
+        if (manifest.kind === "icon") continue;
+        assetBytes += manifest.byteSize;
+        if (!Number.isSafeInteger(assetBytes) || assetBytes > this.config.maximumHtmlBytes) throw new Error("PREVIEW_NOT_FOUND");
+        const asset = version.assets.find(item => item.assetId === manifest.id);
+        if (!asset || asset.kind !== manifest.kind || asset.blobId !== manifest.blobId
+          || asset.sha256 !== manifest.sha256 || asset.mediaType !== manifest.mediaType || asset.byteSize !== BigInt(manifest.byteSize)
+          || asset.blob.status !== "ready" || asset.blob.deletedAt !== null || asset.blob.sha256 !== manifest.sha256
+          || asset.blob.byteSize !== BigInt(manifest.byteSize) || asset.blob.mediaType !== manifest.mediaType) throw new Error("PREVIEW_NOT_FOUND");
+        const bytes = await this.storage.readAsset({ storageKey: asset.blob.storageKey, sha256: manifest.sha256,
+          mediaType: manifest.mediaType, byteSize: manifest.byteSize }, this.config.maximumHtmlBytes, signal);
+        assets.push({ assetId: manifest.id, kind: manifest.kind, blobId: manifest.blobId,
+          sha256: manifest.sha256, mediaType: manifest.mediaType, byteSize: manifest.byteSize, bytes });
+      }
+      signal?.throwIfAborted();
+      const html = renderPrototypeDocumentHtml(parsed.data, { assets, revisionId: payload.artifactVersionId }).document;
+      if (Buffer.byteLength(html) > this.config.maximumHtmlBytes) throw new Error("PREVIEW_NOT_FOUND");
+      return { capabilityToken: token, sourceHtml: html, etag: previewRepresentationEtag(digest(html), this.config.webOrigin, token) };
+    }
     const parsed = sourcePrototypeDocumentSchema.safeParse(version.content);
     if (!parsed.success || digest(canonicalJson(parsed.data)) !== payload.checksum) throw new Error("PREVIEW_NOT_FOUND");
     const html = parsed.data.build.html;

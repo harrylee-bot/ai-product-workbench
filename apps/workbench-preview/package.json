@@ -15,6 +15,7 @@
     "@workbench/workbench-content-security": "1.0.0",
     "@workbench/workbench-contracts": "1.0.0",
     "@workbench/workbench-db": "1.0.0",
+    "@workbench/workbench-export-core": "1.0.0",
     "@workbench/workbench-preview-token": "1.0.0",
     "htmlparser2": "10.0.0",
     "parse5": "8.0.0",
