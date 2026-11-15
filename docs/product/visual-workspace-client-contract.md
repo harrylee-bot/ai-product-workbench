@@ -30,7 +30,9 @@
 
 业务反馈保存独立 `sourceRevisionId/pageId/nodeId` 锚点。`scope=node` 必须对应源 revision 文档中的同页稳定节点，`scope=page` 只绑定页面，null 表示整个版本；正文和锚点创建后不可改写。创建沿用服务幂等回执。旧 selector 仅通过一次性数据库迁移转换；不能明确转换的记录标记 unresolved，并保留正文和引文。运行时不再读取 selector。
 
-`GET projects/:projectId/prototype-v2/revisions/:revisionId/feedback-locations?sourceRevisionId=...` 按项目 viewer 权限，在同一家族内对照来源批注与目标版本；最多返回 100 条并在界面提示窗口限制。状态为 resolved/missing/version；只有相同 pageId/nodeId 才定位，节点或页面消失、源文档不可解析时保留原文并返回明确缺失原因。跨版本比较不改变批注的归属；批量改稿须返回来源版本。只读成员可定位，不能创建或解决批注。
+`GET projects/:projectId/prototype-v2/revisions/:revisionId/feedback-locations?sourceRevisionId=...` 按项目 viewer 权限，在同一家族内对照来源批注与目标版本。状态为 resolved/missing/version；只有相同 pageId/nodeId 才定位，节点或页面消失、源文档不可解析时保留原文并返回明确缺失原因。跨版本比较不改变批注的归属；批量改稿须返回来源版本。只读成员可定位，不能创建或解决批注。
+
+`feedback` 与 `feedback-locations` 都按 createdAt/id 降序进行有界游标分页，接受 limit（默认 50，最大 100）、status、pageId，返回 items/nextCursor；状态和页面筛选覆盖全部持久记录。游标固定项目、来源/目标版本及筛选条件，不能跨条件复用。界面提供加载更多、筛选与清空所选；选择跨分页/筛选保留，批量操作仍最多 100 条，服务重新校验未解决状态和源版本。保存成功切回当前版本的全部列表，新记录排在前面。保存失败保留正文；幂等意图按最终 revisionId/body/anchor 确定，相同请求复用键，明确更改范围/页面后创建新意图。定位请求只执行一次，不持续抢回用户随后选择的页面。
 
 新增进度、完整输入合同、OpenAPI、API 控制器／服务和 `20261115100000_prototype_plan_input`、`20261115120000_prototype_feedback_nodes` 迁移必须随前端集成，不替换 Temporal／DeerFlow。真实模型至少两次中间变化、完整交付、所有业务能力和性能验收以审计中的逐项状态为准。fixture 与真实 PostgreSQL 接口测试不能代替模型和生产集成验收。
 

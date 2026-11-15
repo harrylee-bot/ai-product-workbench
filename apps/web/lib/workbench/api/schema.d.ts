@@ -1648,7 +1648,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Read persisted prototype history */
+        /** Read filtered feedback in bounded newest-first pages */
         get: operations["listPrototypeFeedback"];
         put?: never;
         /** Create an anchored prototype feedback item */
@@ -7021,9 +7021,26 @@ export interface components {
             sourceRevisionId: string;
             targetRevisionId: string;
             items: components["schemas"]["PrototypeFeedbackLocation"][];
+            nextCursor: string | null;
         };
         PrototypeFeedbackLocationsQuery: {
+            cursor?: string;
+            /** @default 50 */
+            limit: number;
+            status?: components["schemas"]["PrototypeFeedbackStatus"];
+            pageId?: string;
             sourceRevisionId: string;
+        };
+        PrototypeFeedbackPage: {
+            items: components["schemas"]["PrototypeFeedbackList"];
+            nextCursor: string | null;
+        };
+        PrototypeFeedbackQuery: {
+            cursor?: string;
+            /** @default 50 */
+            limit: number;
+            status?: components["schemas"]["PrototypeFeedbackStatus"];
+            pageId?: string;
         };
         RuntimeDesignAsset: {
             id: string;
@@ -12372,6 +12389,10 @@ export interface operations {
     getPrototypeFeedbackLocations: {
         parameters: {
             query: {
+                cursor?: string;
+                limit?: number;
+                status?: components["schemas"]["PrototypeFeedbackStatus"];
+                pageId?: string;
                 sourceRevisionId: string;
             };
             header?: never;
@@ -12399,7 +12420,12 @@ export interface operations {
     };
     listPrototypeFeedback: {
         parameters: {
-            query?: never;
+            query?: {
+                cursor?: string;
+                limit?: number;
+                status?: components["schemas"]["PrototypeFeedbackStatus"];
+                pageId?: string;
+            };
             header?: never;
             path: {
                 projectId: components["parameters"]["ProjectId"];
@@ -12409,15 +12435,16 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Read persisted prototype history */
+            /** @description Read filtered feedback in bounded newest-first pages */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["PrototypeFeedbackList"];
+                    "application/json": components["schemas"]["PrototypeFeedbackPage"];
                 };
             };
+            400: components["responses"]["Problem"];
             403: components["responses"]["Problem"];
             404: components["responses"]["Problem"];
         };

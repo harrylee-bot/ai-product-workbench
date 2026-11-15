@@ -472,6 +472,7 @@ await context.route("**/api/v1/**", async (route) => {
       ),
       targetRevisionId: path.split("/").at(-2),
       items: [],
+      nextCursor: null,
     });
   if (path.endsWith("/diff"))
     return json(route, {

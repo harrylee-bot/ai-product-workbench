@@ -18,9 +18,11 @@ const secondRevisionId='visual-revision-2';
 const secondPages=pages.map((item,index)=>index===0?{...item,content:item.content.replace('data-wb-node="heading-0"','data-wb-node="heading-new-0"')}:item).map(item=>({...item,sha256:hash(item.content)}));
 const secondHtml=html.replace('data-wb-node="heading-0"','data-wb-node="heading-new-0"');
 const secondRevision={...revision,id:secondRevisionId,sourceRevisionId:revisionId,version:2,pages:secondPages,previewHtml:secondHtml,documentSha256:hash(secondHtml)};
-const feedback=[];const feedbackReceipts=new Map(),feedbackRequests=[];let viewer=false,lostAcknowledgement=false; const unknown=[],errors=[];
+const feedback=[];const feedbackReceipts=new Map(),feedbackRequests=[],revisionRequests=[],feedbackHashes=new Map(),lostAcknowledgements=new Set();let viewer=false; const unknown=[],errors=[];
 const browser=await chromium.launch({headless:true,executablePath:process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE});
 const context=await browser.newContext({viewport:{width:1440,height:900},recordVideo:{dir:new URL('video/',output).pathname,size:{width:1440,height:900}}});
+context.setDefaultTimeout(15000);
+context.setDefaultNavigationTimeout(60000);
 const json=(r,data,status=200)=>r.fulfill({status,contentType:'application/json',headers:{etag:'"1"'},body:JSON.stringify(data)});
 await context.addCookies([{name:'workbench.session_token',value:'fixture-visual-session',url:origin}]);
 await context.route('**/api/auth/**',r=>json(r,{session:{id:'fixture-session',token:'fixture-visual-session',userId:'principal-1',expiresAt:'2099-01-01T00:00:00Z',createdAt:now,updatedAt:now,ipAddress:null,userAgent:'Playwright'},user:{id:'principal-1',name:'界面验证',email:'fixture@example.test',emailVerified:true,image:null,createdAt:now,updatedAt:now}}));
@@ -40,18 +42,25 @@ await context.route('**/api/v1/**',async r=>{const u=new URL(r.request().url()),
  if(path.endsWith(`/revisions/${revisionId}`))return json(r,revision);
  if(path.endsWith(`/revisions/${secondRevisionId}`))return json(r,secondRevision);
  if(path.endsWith('/diff'))return json(r,{sourceRevisionId:null,pages:pages.map(p=>({pageId:p.id,change:'added'}))});
+ if(path.endsWith('/revise')&&method==='POST'){revisionRequests.push(r.request().postDataJSON());return json(r,{status:409,title:'批注已被其他成员更新，请核对所选批注'},409);}
  if(path.endsWith('/feedback-locations')){
    const sourceRevisionId=u.searchParams.get('sourceRevisionId'),targetRevisionId=path.split('/').at(-2);
-   return json(r,{sourceRevisionId,targetRevisionId,items:feedback.filter(item=>item.revisionId===sourceRevisionId).map(item=>{const missing=targetRevisionId===secondRevisionId&&item.anchor?.nodeId==='heading-0';return {feedback:item,targetRevisionId,status:missing?'missing':item.anchor?'resolved':'version',pageId:missing?null:item.anchor?.pageId??null,nodeId:missing?null:item.anchor?.nodeId??null,reason:missing?'node_missing':null};})});
+   const status=u.searchParams.get('status'),pageId=u.searchParams.get('pageId'),cursor=u.searchParams.get('cursor');
+   const filtered=feedback.filter(item=>item.revisionId===sourceRevisionId&&(!status||item.status===status)&&(!pageId||item.anchor?.pageId===pageId)).sort((a,b)=>b.createdAt.localeCompare(a.createdAt)||b.id.localeCompare(a.id));
+   const start=cursor?filtered.findIndex(item=>item.id===cursor)+1:0,limit=Number(u.searchParams.get('limit')||50),items=filtered.slice(start,start+limit);
+   return json(r,{sourceRevisionId,targetRevisionId,nextCursor:start+limit<filtered.length?items.at(-1).id:null,items:items.map(item=>{const missing=targetRevisionId===secondRevisionId&&item.anchor?.nodeId==='heading-0';return {feedback:item,targetRevisionId,status:missing?'missing':item.anchor?'resolved':'version',pageId:missing?null:item.anchor?.pageId??null,nodeId:missing?null:item.anchor?.nodeId??null,reason:missing?'node_missing':null};})});
  }
  if(path.endsWith('/feedback')){
    const targetRevisionId=path.split('/').at(-2);
    if(method==='POST'){
      if(viewer)return json(r,{title:'Read only',status:403},403);
      const request=r.request().postDataJSON(),key=r.request().headers()['idempotency-key'];feedbackRequests.push({key,revisionId:targetRevisionId,request});
+     const requestHash=hash(JSON.stringify({revisionId:targetRevisionId,...request}));
+     if(feedbackHashes.has(key)&&feedbackHashes.get(key)!==requestHash)return json(r,{status:409,title:'Idempotency key conflict',code:'IDEMPOTENCY_CONFLICT'},409);
+     feedbackHashes.set(key,requestHash);
      let item=feedbackReceipts.get(key);
      if(!item){item={id:`feedback-${feedback.length+1}`,projectId,revisionId:targetRevisionId,createdById:'principal-1',createdAt:now,updatedAt:now,revision:1,status:'open',resolvedAt:null,...request};feedback.push(item);feedbackReceipts.set(key,item);}
-     if(request.body==='断线后重试页面批注'&&!lostAcknowledgement){lostAcknowledgement=true;return json(r,{status:503,title:'批注回执暂时中断',detail:'请重试保存'},503);}
+     if(request.body.startsWith('断线后')&&!lostAcknowledgements.has(request.body)){lostAcknowledgements.add(request.body);return json(r,{status:503,title:'批注回执暂时中断',detail:'请重试保存'},503);}
      return json(r,item,201);
    }
    return json(r,feedback.filter(item=>item.revisionId===targetRevisionId));
@@ -65,6 +74,7 @@ await context.route('**/api/v1/**',async r=>{const u=new URL(r.request().url()),
 });
 const page=await context.newPage();page.on('pageerror',e=>errors.push(e.message));
 const results={evidence:'UI fixture; no real generation, share or export acceptance',checks:[],unknown,errors};
+results.checks.push=(...checks)=>{for(const check of checks)console.log(`PASS: ${check}`);return Array.prototype.push.apply(results.checks,checks);};
 try{
  await page.goto(`${origin}/studio/${projectId}?plan=${planId}&revision=${revisionId}&page=page-1`,{waitUntil:'networkidle'});
  await page.locator('.visual-paper iframe').waitFor({timeout:60000});
@@ -112,6 +122,43 @@ try{
  assert.equal(feedback.filter(item=>item.body==='断线后重试页面批注').length,1);
  assert.deepEqual(retryRequests[0].request.anchor,{scope:'page',sourceRevisionId:secondRevisionId,pageId:'page-1',quote:'账户概览'});
  results.checks.push('page feedback binds the current revision; acknowledgement loss retains text and reuses the same idempotency key');
+ // Changed semantics must use a different command key; strict fixture hash rejects reuse.
+ await page.getByRole('textbox',{name:'当前版本批注'}).fill('断线后更改范围');
+ await page.getByRole('button',{name:'保存批注',exact:true}).click();
+ await page.getByText(/批注回执暂时中断|请重试保存/).first().waitFor();
+ await page.getByRole('combobox',{name:'批注范围'}).selectOption('version');
+ await page.getByRole('button',{name:'保存批注',exact:true}).click();
+ await page.getByText('批注已保存到当前版本',{exact:true}).waitFor();
+ const scopeRequests=feedbackRequests.filter(item=>item.request.body==='断线后更改范围');
+ assert.equal(scopeRequests.length,2);assert.notEqual(scopeRequests[0].key,scopeRequests[1].key);assert.equal(scopeRequests[0].request.anchor.scope,'page');assert.equal(scopeRequests[1].request.anchor,null);
+ await page.getByRole('combobox',{name:'批注范围'}).selectOption('page');
+ await page.getByRole('textbox',{name:'当前版本批注'}).fill('断线后更改页面');
+ await page.getByRole('button',{name:'保存批注',exact:true}).click();await page.getByText(/批注回执暂时中断|请重试保存/).first().waitFor();
+ await page.getByRole('combobox',{name:'当前页面'}).selectOption('page-2');
+ await page.getByRole('button',{name:'保存批注',exact:true}).click();await page.getByText('批注已保存到当前版本',{exact:true}).waitFor();
+ const pageRequests=feedbackRequests.filter(item=>item.request.body==='断线后更改页面');
+ assert.equal(pageRequests.length,2);assert.notEqual(pageRequests[0].key,pageRequests[1].key);assert.equal(pageRequests[0].request.anchor.pageId,'page-1');assert.equal(pageRequests[1].request.anchor.pageId,'page-2');
+ results.checks.push('changed scope and changed page after lost acknowledgement create distinct intents while unchanged requests retain keys');
+ for(let i=0;i<125;i++)feedback.push({id:`older-feedback-${String(i).padStart(3,'0')}`,projectId,revisionId:secondRevisionId,createdById:'principal-1',createdAt:'2026-01-01T00:00:00.000Z',updatedAt:now,revision:1,status:'resolved',resolvedAt:now,body:`历史已解决批注 ${i}`,anchor:null});
+ await page.getByRole('textbox',{name:'当前版本批注'}).fill('第 101 条之后的新批注');await page.getByRole('button',{name:'保存批注',exact:true}).click();
+ await page.getByText('第 101 条之后的新批注',{exact:true}).waitFor();
+ await page.getByRole('combobox',{name:'批注筛选'}).selectOption('open');await page.getByText('第 101 条之后的新批注',{exact:true}).waitFor();
+ assert.equal(await page.getByText('历史已解决批注 124',{exact:true}).count(),0);
+ await page.getByText('第 101 条之后的新批注',{exact:true}).locator('xpath=ancestor::div[contains(@class,"visual-feedback")]').getByRole('checkbox').check();
+ await page.getByRole('combobox',{name:'批注筛选'}).selectOption('resolved');
+ await page.getByRole('button',{name:'加载更多批注',exact:true}).click();
+ await page.getByText('历史已解决批注 25',{exact:true}).waitFor();
+ await page.getByRole('button',{name:'加载更多批注',exact:true}).click();await page.getByText('历史已解决批注 0',{exact:true}).waitFor();
+ assert.equal(await page.getByRole('button',{name:'加载更多批注',exact:true}).count(),0);
+ assert.equal(await page.getByRole('button',{name:'使用所选 1 条批注生成新版本',exact:true}).isEnabled(),true);
+ await page.getByRole('button',{name:'使用所选 1 条批注生成新版本',exact:true}).click();
+ await page.getByText('状态已被其他操作更新，已重新加载。请核对最新内容后重试，输入文字仍保留。',{exact:true}).waitFor();
+ assert.deepEqual(revisionRequests.at(-1).feedbackIds,[feedback.find(item=>item.body==='第 101 条之后的新批注').id]);
+ assert.equal(await page.getByRole('button',{name:'使用所选 1 条批注生成新版本',exact:true}).isEnabled(),true);
+ await page.getByRole('combobox',{name:'批注筛选'}).selectOption('page');await page.getByText('第 101 条之后的新批注',{exact:true}).waitFor();
+ assert.equal(await page.getByText('断线后重试页面批注',{exact:true}).count(),0);
+ await page.reload({waitUntil:'networkidle'});await page.getByRole('button',{name:'批注',exact:true}).click();await page.getByText('第 101 条之后的新批注',{exact:true}).waitFor();
+ results.checks.push('more than 100 feedback items remain discoverable through server status/page filtering and bounded load-more; new saves are visible after refresh and selection survives filters');
  viewer=true;await page.reload({waitUntil:'networkidle'});
  await page.getByRole('button',{name:'批注',exact:true}).click();
  await page.getByRole('combobox',{name:'批注来源版本'}).selectOption(revisionId);

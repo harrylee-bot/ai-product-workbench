@@ -1,3 +1,4 @@
+import { feedbackPageQuery } from "./prototype-feedback-page.js";
 import { feedbackAnchorIndex, resolveFeedbackLocation } from "./prototype-feedback-location.js";
 import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { Inject, Injectable, Optional, type OnModuleInit, type OnModuleDestroy } from "@nestjs/common";
@@ -12,7 +13,7 @@ import {
   revisePrototypeRevisionRequestSchema,
   prototypeRevisionDiffSchema,
   prototypePlanListSchema,
-  prototypeFeedbackListSchema,
+  prototypeFeedbackPageSchema, type PrototypeFeedbackQuery,
   prototypeShareListSchema,
   prototypeExportListSchema,
   type RevisePrototypeRevisionRequest,
@@ -320,19 +321,22 @@ export class PrototypeV2Service implements OnModuleInit, OnModuleDestroy {
     await this.requireProjectMember(principal.id, projectId, "viewer");
     return this.requireRevisionWithPreview(projectId, revisionId);
   }
-  async listFeedback(principal: AuthenticatedPrincipal, projectId: string, revisionId: string) {
+  async listFeedback(principal: AuthenticatedPrincipal, projectId: string, revisionId: string, query: PrototypeFeedbackQuery = {}) {
     await this.requireProjectMember(principal.id, projectId, "viewer");
     if (!await this.db.prototypeRevision.findFirst({ where: { id: revisionId, projectId }, select: { id: true } })) throw notFoundProblem("Prototype revision");
-    return prototypeFeedbackListSchema.parse((await this.db.prototypeFeedback.findMany({ where: { projectId, revisionId }, orderBy: [{ createdAt: "asc" }, { id: "asc" }], take: 100 })).map(toFeedback));
+    const paging = feedbackPageQuery(projectId, revisionId, revisionId, query);
+    const page = paging.page(await this.db.prototypeFeedback.findMany(paging.args));
+    return prototypeFeedbackPageSchema.parse({ ...page, items: page.items.map(toFeedback) });
   }
-  async feedbackLocations(principal:AuthenticatedPrincipal,projectId:string,sourceRevisionId:string,targetRevisionId:string){
+  async feedbackLocations(principal:AuthenticatedPrincipal,projectId:string,sourceRevisionId:string,targetRevisionId:string,query:PrototypeFeedbackQuery={}){
     await this.requireProjectMember(principal.id,projectId,"viewer");
     return this.db.$transaction(async tx=>{
       const source=await tx.prototypeRevision.findFirst({where:{id:sourceRevisionId,projectId}}),target=await tx.prototypeRevision.findFirst({where:{id:targetRevisionId,projectId}});
       if(!source||!target||source.planId!==target.planId)throw notFoundProblem("Prototype revision family");
-      const feedback=await tx.prototypeFeedback.findMany({where:{projectId,revisionId:sourceRevisionId},orderBy:[{createdAt:"asc"},{id:"asc"}],take:100});
+      const paging=feedbackPageQuery(projectId,sourceRevisionId,targetRevisionId,query);
+      const page=paging.page(await tx.prototypeFeedback.findMany(paging.args));
       const index=feedbackAnchorIndex(target);
-      return prototypeFeedbackLocationsSchema.parse({sourceRevisionId,targetRevisionId,items:feedback.map(item=>resolveFeedbackLocation(toFeedback(item),targetRevisionId,index))});
+      return prototypeFeedbackLocationsSchema.parse({sourceRevisionId,targetRevisionId,nextCursor:page.nextCursor,items:page.items.map(item=>resolveFeedbackLocation(toFeedback(item),targetRevisionId,index))});
     },{isolationLevel:Prisma.TransactionIsolationLevel.RepeatableRead});
   }
 

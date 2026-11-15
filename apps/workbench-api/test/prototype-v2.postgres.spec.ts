@@ -150,8 +150,40 @@ describePg("Prototype V2 durable PostgreSQL lifecycle (workflow transport simula
     await expect(service.createFeedback(principal(), projectId, revision.id, { ...request, anchor: { pageId: "missing_page", sourceRevisionId: revision.id, scope: "page" as const } }, "feedback-invalid")).rejects.toMatchObject({ status: 404 });
     const resolved = await service.resolveFeedback(principal(), projectId, one.id, "resolve-feedback", '"0"', {});
     await expect(service.resolveFeedback(principal(), projectId, one.id, "resolve-feedback", '"0"', {})).resolves.toEqual(resolved);
-    expect(await service.listFeedback(principal(), projectId, revision.id)).toEqual([resolved]);
-    expect(await service.listFeedback(principal(), projectId, another.id)).toEqual([]);
+    expect(await service.listFeedback(principal(), projectId, revision.id)).toEqual({items:[resolved],nextCursor:null});
+    expect(await service.listFeedback(principal(), projectId, another.id)).toEqual({items:[],nextCursor:null});
+  });
+
+  it("pages all feedback with server filters, scoped cursors and stable ties; different anchors require a new command", async () => {
+    const plan = await makePlan(), source = await makeRevision(plan.id), target = await makeRevision(plan.id, 2, source.id);
+    const createdAt = new Date("2026-01-01T00:00:00Z");
+    await db.prototypeFeedback.createMany({data:Array.from({length:131},(_,index)=>({
+      id:`paging-${projectId}-${String(index).padStart(3,"0")}`, projectId, revisionId:source.id, createdById:ownerId,
+      body:`Stored feedback ${index}`, status:index<125?"resolved" as const:"open" as const,
+      createdAt, resolvedAt:index<125?createdAt:null, idempotencyKey:`paging-${index}`, requestHash:hash(`paging-${index}`),
+    }))});
+    const collected:string[]=[];let cursor:string|undefined;
+    do {
+      const result=await service.feedbackLocations(principal(),projectId,source.id,target.id,{limit:50,cursor});
+      expect(result.items.length).toBeLessThanOrEqual(50);collected.push(...result.items.map(item=>item.feedback.id));
+      cursor=result.nextCursor??undefined;
+    } while(cursor);
+    expect(collected).toHaveLength(131);expect(new Set(collected).size).toBe(131);
+    const open=await service.feedbackLocations(principal(),projectId,source.id,target.id,{status:"open"});expect(open.items).toHaveLength(6);
+    const first=await service.listFeedback(principal(),projectId,source.id,{limit:50});
+    await expect(service.listFeedback(principal(),projectId,source.id,{cursor:first.nextCursor!,status:"open"})).rejects.toMatchObject({status:400});
+    await expect(service.feedbackLocations(principal(),projectId,source.id,target.id,{cursor:first.nextCursor!})).rejects.toMatchObject({status:400});
+    await expect(service.listFeedback(principal(),projectId,source.id,{cursor:"invalid"})).rejects.toMatchObject({status:400});
+    const request={body:"New page review",anchor:{scope:"page" as const,sourceRevisionId:source.id,pageId:page.id}};
+    const saved=await service.createFeedback(principal(),projectId,source.id,request,"lost-page-response");
+    expect(await service.createFeedback(principal(),projectId,source.id,request,"lost-page-response")).toEqual(saved);
+    await expect(service.createFeedback(principal(),projectId,source.id,{...request,anchor:null},"lost-page-response")).rejects.toMatchObject({status:409});
+    const changed=await service.createFeedback(principal(),projectId,source.id,{...request,anchor:null},"new-whole-version-intent");
+    expect(changed.id).not.toBe(saved.id);
+    const filtered=await service.feedbackLocations(principal(),projectId,source.id,target.id,{pageId:page.id,status:"open"});
+    expect(filtered.items.map(item=>item.feedback.id)).toEqual([saved.id]);
+    const refreshed=await service.listFeedback(principal(),projectId,source.id,{status:"open"});
+    expect(refreshed.items.slice(0,2).map(item=>item.id)).toEqual([changed.id,saved.id]);
   });
 
   it("persists exact stable nodes, rejects forged scope, and resolves missing nodes without rebinding across versions", async () => {

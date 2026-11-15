@@ -2,7 +2,7 @@ import { Controller, Get, Query, HttpCode, Headers, Param, Post, Body, Res, Stre
 import type { Response } from "express";
 import { z } from "zod";
 import {
-  revisePrototypeRevisionRequestSchema, prototypeFeedbackLocationsQuerySchema,
+  revisePrototypeRevisionRequestSchema, prototypeFeedbackLocationsQuerySchema, prototypeFeedbackQuerySchema,
   updatePrototypePlanRequestSchema,createPrototypeRevisionPlanRequestSchema,
   createPrototypeExportRequestSchema,
   createPrototypeFeedbackRequestSchema,
@@ -46,11 +46,12 @@ export class PrototypeV2Controller {
   @Get("revisions/:revisionId/feedback-locations")
   async feedbackLocations(@CurrentPrincipal() principal: AuthenticatedPrincipal, @Param("projectId") projectId: string, @Param("revisionId") revisionId: string, @Query(body(prototypeFeedbackLocationsQuerySchema)) query: z.infer<typeof prototypeFeedbackLocationsQuerySchema>, @Res({ passthrough: true }) response: Response) {
     response.setHeader("Cache-Control", "private, no-store");
-    return this.service.feedbackLocations(principal, projectId, query.sourceRevisionId, revisionId);
+    const {sourceRevisionId,...pagination}=query;
+    return this.service.feedbackLocations(principal, projectId, sourceRevisionId, revisionId, pagination);
   }
 
   @Get("revisions/:revisionId/feedback")
-  listFeedback(@CurrentPrincipal() principal: AuthenticatedPrincipal, @Param("projectId") projectId: string, @Param("revisionId") revisionId: string) { return this.service.listFeedback(principal, projectId, revisionId); }
+  listFeedback(@CurrentPrincipal() principal: AuthenticatedPrincipal, @Param("projectId") projectId: string, @Param("revisionId") revisionId: string, @Query(body(prototypeFeedbackQuerySchema)) query: z.infer<typeof prototypeFeedbackQuerySchema>, @Res({ passthrough: true }) response: Response) { response.setHeader("Cache-Control", "private, no-store"); return this.service.listFeedback(principal, projectId, revisionId, query); }
 
   @Get("shares")
   listShares(@CurrentPrincipal() principal: AuthenticatedPrincipal, @Param("projectId") projectId: string) { return this.service.listShares(principal, projectId); }

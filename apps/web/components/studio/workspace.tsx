@@ -27,6 +27,7 @@ import type {
   PrototypeExport,
   PrototypeFeedback,
   PrototypeFeedbackLocation,
+  PrototypeFeedbackLocations,
   PrototypePlan,
   PrototypeShare,
 } from "@workbench/workbench-contracts";
@@ -51,7 +52,7 @@ import { DesignPanel } from "./onlook/design-panel";
 import { ProjectViews, RunDetails } from "./project-views";
 import Link from "next/link";
 import { useWorkbenchAuth } from "@/lib/auth/workbench-auth";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useInfiniteQuery, useQueryClient } from "@tanstack/react-query";
 import { isWorkbenchApiError } from "@/lib/workbench/api";
 import { workbenchQueryKeys } from "@/lib/workbench/query/keys";
 import {
@@ -253,22 +254,44 @@ export function StudioWorkspace({
   const selectedPage =
     pages.find((page) => page.id === selectedPageId) ?? pages[0];
   const feedbackRevisionId = feedbackSourceId || selectedRevision?.id || "";
-  const locationsQuery = useQuery({
+  const feedbackPageId =
+    feedbackFilter === "page" ? selectedPage?.id : undefined;
+  const feedbackStatus =
+    feedbackFilter === "open" || feedbackFilter === "resolved"
+      ? feedbackFilter
+      : undefined;
+  const locationsQuery = useInfiniteQuery({
     queryKey: [
       ...workbenchQueryKeys.prototypeV2(projectId),
       "feedback-locations",
       selectedRevisionId,
       feedbackRevisionId,
+      feedbackStatus,
+      feedbackPageId,
     ],
-    queryFn: () =>
-      api.feedbackLocations(projectId, selectedRevisionId, feedbackRevisionId),
+    initialPageParam: undefined as string | undefined,
+    getNextPageParam: (page: PrototypeFeedbackLocations) =>
+      page.nextCursor ?? undefined,
+    queryFn: ({ pageParam }) =>
+      api.feedbackLocations(projectId, selectedRevisionId, feedbackRevisionId, {
+        cursor: pageParam,
+        limit: 50,
+        status: feedbackStatus,
+        pageId: feedbackPageId,
+      }),
     enabled: Boolean(
       selectedRevisionId && feedbackRevisionId && panel === "feedback",
     ),
     refetchInterval: panel === "feedback" ? 3000 : false,
   });
+  const feedbackLocations =
+    locationsQuery.data?.pages.flatMap((page) => page.items) ?? [];
   const feedbackQuery = {
-    data: locationsQuery.data?.items.map((item) => item.feedback),
+    data: [
+      ...new Map(
+        feedbackLocations.map((item) => [item.feedback.id, item.feedback]),
+      ).values(),
+    ],
     error: locationsQuery.error,
   };
   const sharesQuery = useWorkbenchPrototypeV2Shares(projectId);
@@ -308,8 +331,6 @@ export function StudioWorkspace({
   const running = Boolean(
     plan && ["approved", "generating"].includes(plan.status),
   );
-  const openFeedback =
-    feedbackQuery.data?.filter((item) => item.status === "open") ?? [];
   const previousRevision = revisions.find(
     (revision) => revision.id === selectedRevision?.sourceRevisionId,
   );
@@ -585,16 +606,6 @@ export function StudioWorkspace({
   const addFeedback = () =>
     run(async () => {
       const pageId = interaction?.pageId || selectedPage?.id;
-      const signature = JSON.stringify({
-        revisionId: selectedRevision?.id,
-        feedback,
-        interaction,
-      });
-      if (pendingFeedback.current?.signature !== signature)
-        pendingFeedback.current = {
-          signature,
-          key: createIdempotencyKey("prototype-feedback"),
-        };
       const anchor =
         interaction && pageId
           ? {
@@ -612,10 +623,22 @@ export function StudioWorkspace({
                 quote: selectedPage.title,
               }
             : null;
+      const request = { body: feedback.trim(), anchor };
+      const signature = JSON.stringify({
+        revisionId: selectedRevision?.id,
+        request,
+      });
+      if (pendingFeedback.current?.signature !== signature)
+        pendingFeedback.current = {
+          signature,
+          key: createIdempotencyKey("prototype-feedback"),
+        };
       await createFeedback.mutateAsync({
         idempotencyKey: pendingFeedback.current.key,
-        request: { body: feedback.trim(), anchor },
+        request,
       });
+      setFeedbackFilter("all");
+      setFeedbackSourceId(selectedRevision?.id ?? "");
       setFeedback((current) => (current === feedback ? "" : current));
       pendingFeedback.current = null;
     }, "批注已保存到当前版本");
@@ -636,15 +659,7 @@ export function StudioWorkspace({
       pageId: "",
     });
   };
-  const selectedFeedback = openFeedback.filter((item) =>
-    feedbackIds.includes(item.id),
-  );
-  const visibleFeedback = (feedbackQuery.data ?? []).filter(
-    (item) =>
-      feedbackFilter === "all" ||
-      item.status === feedbackFilter ||
-      (feedbackFilter === "page" && item.anchor?.pageId === selectedPage?.id),
-  );
+  const visibleFeedback = feedbackQuery.data;
   const panelContent = (
     <div className="visual-context studio-panel-content">
       {" "}
@@ -953,6 +968,7 @@ export function StudioWorkspace({
               <label>
                 筛选
                 <select
+                  aria-label="批注筛选"
                   value={feedbackFilter}
                   onChange={(e) => setFeedbackFilter(e.target.value)}
                 >
@@ -962,11 +978,10 @@ export function StudioWorkspace({
                   <option value="resolved">已解决</option>
                 </select>
               </label>
-              {locationsQuery.data?.items.length === 100 && (
-                <p className="visual-muted">
-                  显示此来源版本的前 100 条批注，其他批注尚未载入。
-                </p>
-              )}
+              <p className="visual-muted">
+                已载入 {visibleFeedback.length}{" "}
+                条，按最新保存排序。筛选覆盖此来源版本的全部批注。
+              </p>
               {locationsQuery.isLoading && (
                 <p className="visual-muted" role="status">
                   正在读取批注…
@@ -985,6 +1000,8 @@ export function StudioWorkspace({
                       disabled={
                         !canEdit ||
                         item.status !== "open" ||
+                        (feedbackIds.length >= 100 &&
+                          !feedbackIds.includes(item.id)) ||
                         feedbackRevisionId !== selectedRevision.id
                       }
                       checked={feedbackIds.includes(item.id)}
@@ -1002,7 +1019,7 @@ export function StudioWorkspace({
                     item={item}
                     canEdit={canEdit}
                     run={run}
-                    location={locationsQuery.data?.items.find(
+                    location={feedbackLocations.find(
                       (location) => location.feedback.id === item.id,
                     )}
                     onLocate={(location) => {
@@ -1020,13 +1037,37 @@ export function StudioWorkspace({
                   />
                 </div>
               ))}
+              {locationsQuery.hasNextPage && (
+                <button
+                  type="button"
+                  disabled={locationsQuery.isFetchingNextPage}
+                  onClick={() => void locationsQuery.fetchNextPage()}
+                >
+                  {locationsQuery.isFetchingNextPage
+                    ? "正在载入…"
+                    : "加载更多批注"}
+                </button>
+              )}
+              {locationsQuery.error && (
+                <button
+                  type="button"
+                  onClick={() => void locationsQuery.refetch()}
+                >
+                  重试读取批注
+                </button>
+              )}
+              {feedbackIds.length > 0 && (
+                <button type="button" onClick={() => setFeedbackIds([])}>
+                  清空所选批注（{feedbackIds.length} 条，含其他筛选结果）
+                </button>
+              )}
               <button
                 type="button"
                 disabled={
                   !canEdit ||
                   feedbackRevisionId !== selectedRevision.id ||
-                  !selectedFeedback.length ||
-                  selectedFeedback.length > 100 ||
+                  !feedbackIds.length ||
+                  feedbackIds.length > 100 ||
                   running ||
                   reviseRevision.isPending
                 }
@@ -1035,10 +1076,11 @@ export function StudioWorkspace({
                     const next = await reviseRevision.mutateAsync({
                       ifMatch: etag(selectedRevision),
                       request: {
-                        feedbackIds: selectedFeedback.map((item) => item.id),
+                        feedbackIds,
                       },
                     });
                     awaitingPlan.current = next.value.id;
+                    setFeedbackIds([]);
                     setFollowRun(true);
                     setSelection((current) => ({
                       ...current,
@@ -1047,7 +1089,7 @@ export function StudioWorkspace({
                   }, "已根据所选批注开始生成新版本")
                 }
               >
-                使用所选 {selectedFeedback.length} 条批注生成新版本
+                使用所选 {feedbackIds.length} 条批注生成新版本
               </button>
               <p className="visual-muted">
                 一次最多 100

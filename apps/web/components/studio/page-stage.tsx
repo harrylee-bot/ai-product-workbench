@@ -227,14 +227,22 @@ export function PageStage({
     window.addEventListener("message", receive);
     return () => window.removeEventListener("message", receive);
   }, [pageId, pages, revisionId, sessionId, onPage, onSelection]);
+  const appliedLocation = useRef<string | null>(null);
   useEffect(() => {
-    if (!locate || locate.revisionId !== revisionId || showDraft) return;
+    if (
+      !locate ||
+      appliedLocation.current === locate.requestId ||
+      locate.revisionId !== revisionId ||
+      showDraft
+    )
+      return;
     setOverview(false);
     if (locate.pageId !== pageId) {
       onPage(locate.pageId);
       return;
     }
     if (!loaded) return;
+    appliedLocation.current = locate.requestId;
     const nextMode = locate.nodeId ? "select" : "browse";
     setMode(nextMode);
     command("page");

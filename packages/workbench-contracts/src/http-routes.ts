@@ -147,7 +147,7 @@ import {
   revisePrototypeRevisionRequestSchema,
   prototypeRevisionDiffSchema,
   prototypePlanListSchema,
-  prototypeFeedbackListSchema, prototypeFeedbackLocationsSchema, prototypeFeedbackLocationsQuerySchema,
+  prototypeFeedbackPageSchema, prototypeFeedbackQuerySchema, prototypeFeedbackLocationsSchema, prototypeFeedbackLocationsQuerySchema,
   prototypeShareListSchema,
   prototypeExportListSchema,
   createPrototypeExportRequestSchema,
@@ -1013,8 +1013,9 @@ export const workbenchHttpRoutes = [
   },
   {
     method: "get", path: "/projects/{projectId}/prototype-v2/revisions/{revisionId}/feedback", operationId: "listPrototypeFeedback",
-    response: response(200, "Read persisted prototype history", named("PrototypeFeedbackList", prototypeFeedbackListSchema)),
-    problemStatuses: problems(403, 404),
+    query: prototypeFeedbackQuerySchema,
+    response: response(200, "Read filtered feedback in bounded newest-first pages", named("PrototypeFeedbackPage", prototypeFeedbackPageSchema)),
+    problemStatuses: problems(400, 403, 404),
   },
   {
     method: "get", path: "/projects/{projectId}/prototype-v2/shares", operationId: "listPrototypeShares",

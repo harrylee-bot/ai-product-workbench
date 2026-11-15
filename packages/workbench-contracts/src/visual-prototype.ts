@@ -248,7 +248,15 @@ export type CreatePrototypeRevisionPlanRequest=z.infer<typeof createPrototypeRev
 export const prototypeRevisionInputSchema = prototypePlanInputSchema.extend({ modificationRequest: startRunRequestSchema });
 export type PrototypeRevisionInput = z.infer<typeof prototypeRevisionInputSchema>;
 
-export const prototypeFeedbackLocationsQuerySchema = z.object({ sourceRevisionId: opaqueIdSchema }).strict();
+export const prototypeFeedbackQuerySchema = z.object({
+  cursor: z.string().min(1).max(2048).optional(),
+  limit: z.coerce.number().int().min(1).max(100).default(50),
+  status: prototypeFeedbackStatusSchema.optional(),
+  pageId: opaqueIdSchema.optional(),
+}).strict();
+export type PrototypeFeedbackQuery = Partial<z.infer<typeof prototypeFeedbackQuerySchema>>;
+export const prototypeFeedbackPageSchema = z.object({ items: prototypeFeedbackListSchema, nextCursor: z.string().nullable() }).strict();
+export const prototypeFeedbackLocationsQuerySchema = prototypeFeedbackQuerySchema.extend({ sourceRevisionId: opaqueIdSchema });
 export const prototypeFeedbackLocationSchema = z.object({
   feedback: prototypeFeedbackSchema,
   targetRevisionId: opaqueIdSchema,
@@ -257,5 +265,6 @@ export const prototypeFeedbackLocationSchema = z.object({
   nodeId: artifactIrIdSchema.nullable(),
   reason: z.enum(["page_missing", "node_missing", "unidentified_node", "source_unavailable"]).nullable(),
 }).strict();
-export const prototypeFeedbackLocationsSchema = z.object({sourceRevisionId:opaqueIdSchema,targetRevisionId:opaqueIdSchema,items:z.array(prototypeFeedbackLocationSchema).max(100)}).strict();
+export const prototypeFeedbackLocationsSchema = z.object({sourceRevisionId:opaqueIdSchema,targetRevisionId:opaqueIdSchema,items:z.array(prototypeFeedbackLocationSchema).max(100),nextCursor:z.string().nullable()}).strict();
+export type PrototypeFeedbackLocations = z.infer<typeof prototypeFeedbackLocationsSchema>;
 export type PrototypeFeedbackLocation = z.infer<typeof prototypeFeedbackLocationSchema>;

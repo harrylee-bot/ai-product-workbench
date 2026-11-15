@@ -13,7 +13,7 @@ import {
   prototypePlanInputSchema,prototypeRevisionInputSchema,updatePrototypePlanRequestSchema,createPrototypeRevisionPlanRequestSchema,
   type UpdatePrototypePlanRequest,type CreatePrototypeRevisionPlanRequest,
   prototypePlanListSchema,
-  prototypeFeedbackListSchema, prototypeFeedbackLocationsSchema,
+  prototypeFeedbackPageSchema, type PrototypeFeedbackQuery, prototypeFeedbackLocationsSchema,
   prototypeShareListSchema,
   prototypeExportListSchema,
   revisePrototypeRevisionRequestSchema,
@@ -70,14 +70,14 @@ export class WorkbenchPrototypeV2Api {
     return parseContract(prototypeRevisionDiffSchema, result.data, "compare prototype revisions");
   }
 
-  async feedbackLocations(projectId: string, revisionId: string, sourceRevisionId: string) {
-    const result=await this.api.GET("/projects/{projectId}/prototype-v2/revisions/{revisionId}/feedback-locations",{params:{path:{projectId,revisionId},query:{sourceRevisionId}}});
+  async feedbackLocations(projectId: string, revisionId: string, sourceRevisionId: string, query: PrototypeFeedbackQuery = {}) {
+    const result=await this.api.GET("/projects/{projectId}/prototype-v2/revisions/{revisionId}/feedback-locations",{params:{path:{projectId,revisionId},query:{...query,sourceRevisionId}}});
     return parseContract(prototypeFeedbackLocationsSchema,result.data,"resolve prototype feedback locations");
   }
 
   async listFeedback(projectId: string, revisionId: string) {
     const result = await this.api.GET("/projects/{projectId}/prototype-v2/revisions/{revisionId}/feedback", { params: { path: { projectId, revisionId } } });
-    return parseContract(prototypeFeedbackListSchema, result.data, "list prototype feedback");
+    return parseContract(prototypeFeedbackPageSchema, result.data, "list prototype feedback").items;
   }
 
   async listShares(projectId: string) {

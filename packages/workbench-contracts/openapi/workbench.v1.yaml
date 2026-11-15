@@ -17048,20 +17048,72 @@ components:
           items:
             $ref: "#/components/schemas/PrototypeFeedbackLocation"
           maxItems: 100
+        nextCursor:
+          type:
+            - string
+            - "null"
       required:
         - sourceRevisionId
         - targetRevisionId
         - items
+        - nextCursor
       additionalProperties: false
     PrototypeFeedbackLocationsQuery:
       type: object
       properties:
+        cursor:
+          type: string
+          minLength: 1
+          maxLength: 2048
+        limit:
+          type: integer
+          minimum: 1
+          maximum: 100
+          default: 50
+        status:
+          $ref: "#/components/schemas/PrototypeFeedbackStatus"
+        pageId:
+          type: string
+          minLength: 1
+          maxLength: 128
         sourceRevisionId:
           type: string
           minLength: 1
           maxLength: 128
       required:
         - sourceRevisionId
+      additionalProperties: false
+    PrototypeFeedbackPage:
+      type: object
+      properties:
+        items:
+          $ref: "#/components/schemas/PrototypeFeedbackList"
+        nextCursor:
+          type:
+            - string
+            - "null"
+      required:
+        - items
+        - nextCursor
+      additionalProperties: false
+    PrototypeFeedbackQuery:
+      type: object
+      properties:
+        cursor:
+          type: string
+          minLength: 1
+          maxLength: 2048
+        limit:
+          type: integer
+          minimum: 1
+          maximum: 100
+          default: 50
+        status:
+          $ref: "#/components/schemas/PrototypeFeedbackStatus"
+        pageId:
+          type: string
+          minLength: 1
+          maxLength: 128
       additionalProperties: false
     RuntimeDesignAsset:
       type: object
@@ -26716,6 +26768,33 @@ paths:
         - schema:
             type: string
             minLength: 1
+            maxLength: 2048
+          required: false
+          name: cursor
+          in: query
+        - schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 50
+          required: false
+          name: limit
+          in: query
+        - schema:
+            $ref: "#/components/schemas/PrototypeFeedbackStatus"
+          required: false
+          name: status
+          in: query
+        - schema:
+            type: string
+            minLength: 1
+            maxLength: 128
+          required: false
+          name: pageId
+          in: query
+        - schema:
+            type: string
+            minLength: 1
             maxLength: 128
           required: true
           name: sourceRevisionId
@@ -26736,17 +26815,46 @@ paths:
   /projects/{projectId}/prototype-v2/revisions/{revisionId}/feedback:
     get:
       operationId: listPrototypeFeedback
-      summary: Read persisted prototype history
+      summary: Read filtered feedback in bounded newest-first pages
       parameters:
         - $ref: "#/components/parameters/ProjectId"
         - $ref: "#/components/parameters/PrototypeRevisionId"
+        - schema:
+            type: string
+            minLength: 1
+            maxLength: 2048
+          required: false
+          name: cursor
+          in: query
+        - schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 50
+          required: false
+          name: limit
+          in: query
+        - schema:
+            $ref: "#/components/schemas/PrototypeFeedbackStatus"
+          required: false
+          name: status
+          in: query
+        - schema:
+            type: string
+            minLength: 1
+            maxLength: 128
+          required: false
+          name: pageId
+          in: query
       responses:
         "200":
-          description: Read persisted prototype history
+          description: Read filtered feedback in bounded newest-first pages
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/PrototypeFeedbackList"
+                $ref: "#/components/schemas/PrototypeFeedbackPage"
+        "400":
+          $ref: "#/components/responses/Problem"
         "403":
           $ref: "#/components/responses/Problem"
         "404":
