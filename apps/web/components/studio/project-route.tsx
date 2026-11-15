@@ -34,6 +34,9 @@ export function StudioProject({ projectId }: { projectId: string }) {
       projectId={projectId}
       canEdit={canEdit}
       bootstrap={data}
+      submissionNotice={submission.recoveryNotice}
+      recoveryTitle={submission.recoveryTitle}
+      onRecoverSubmission={submission.recover}
       onCreatePlan={submission.create}
       onSaveInput={submission.saveInput}
       composer={{

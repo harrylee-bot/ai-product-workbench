@@ -1,5 +1,11 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
+import { z } from "zod";
+import { useWorkbenchAuth } from "@/lib/auth/workbench-auth";
+import {
+  studioRecordKey,
+  useStudioStoredRecord,
+} from "@/lib/studio/stored-record";
 import Cropper, { type Area } from "react-easy-crop";
 import { useQueryClient } from "@tanstack/react-query";
 import {
@@ -16,6 +22,26 @@ import { workbenchQueryKeys } from "@/lib/workbench/query/keys";
 import { isWorkbenchApiError } from "@/lib/workbench/api";
 import { cropStudioImage } from "@/lib/studio/image-edit";
 import type { WorkbenchUploadSnapshot } from "@/lib/workbench/files/uppy-multipart";
+
+const imageWriteRecordSchema = z
+  .object({
+    version: z.literal(1),
+    key: z.string().min(1),
+    fileAssetId: z.string().min(1),
+    target: z.discriminatedUnion("kind", [
+      z.object({ kind: z.literal("new"), title: z.string().min(1) }).strict(),
+      z
+        .object({
+          kind: z.literal("version"),
+          artifactId: z.string().min(1),
+          baseVersionId: z.string().min(1),
+          etag: z.string().min(1),
+        })
+        .strict(),
+    ]),
+  })
+  .strict();
+type ImageWriteRecord = z.infer<typeof imageWriteRecordSchema>;
 
 export function ImageEditor({
   projectId,
@@ -34,6 +60,17 @@ export function ImageEditor({
   const api = useWorkbenchArtifactsApi(),
     service = useWorkbenchFileTransferService(),
     client = useQueryClient();
+  const { user } = useWorkbenchAuth();
+  const local = useStudioStoredRecord(
+    studioRecordKey(
+      user?.id,
+      projectId,
+      "image-write",
+      source?.artifact.id ?? "new",
+      source?.versionId ?? "new",
+    ),
+    imageWriteRecordSchema,
+  );
   const [file, setFile] = useState<File | null>(() =>
     source
       ? new File([source.blob], source.fileName, { type: source.blob.type })
@@ -77,7 +114,10 @@ export function ImageEditor({
   );
   useEffect(() => {
     alive.current = true;
+    const trigger = document.activeElement;
     return () => {
+      if (trigger instanceof HTMLElement && trigger.isConnected)
+        trigger.focus();
       alive.current = false;
       controller.current?.destroy();
       controller.current = null;
@@ -89,6 +129,85 @@ export function ImageEditor({
     setResource({ file, url });
     return () => URL.revokeObjectURL(url);
   }, [file]);
+  const write = async (command: ImageWriteRecord) => {
+    if (!alive.current || !local.isCurrent()) return;
+    const target = command.target;
+    if (
+      target.kind === "version" &&
+      (target.artifactId !== source?.artifact.id ||
+        target.baseVersionId !== source.versionId)
+    )
+      throw new Error("保存记录与当前图片版本不匹配，请重新打开原版本");
+    const result =
+      target.kind === "version"
+        ? {
+            artifactId: target.artifactId,
+            versionId: (
+              await api.createArtifactVersion(
+                target.artifactId,
+                {
+                  kind: "image",
+                  baseArtifactVersionId: target.baseVersionId,
+                  source: { kind: "file", fileAssetId: command.fileAssetId },
+                },
+                target.etag,
+                command.key,
+              )
+            ).value.artifactVersionId,
+          }
+        : await api
+            .createArtifact(
+              projectId,
+              {
+                kind: "image",
+                title: target.title,
+                source: { kind: "file", fileAssetId: command.fileAssetId },
+              },
+              command.key,
+            )
+            .then((value) => ({
+              artifactId: value.artifact.id,
+              versionId: value.artifactVersion.artifactVersionId,
+            }));
+    if (!alive.current || !local.isCurrent()) return;
+    local.clear();
+    setSaved(result);
+    setPhase("图片已保存");
+    controller.current?.destroy();
+    controller.current = null;
+    await Promise.all([
+      client.invalidateQueries({
+        queryKey: workbenchQueryKeys.artifacts(projectId),
+      }),
+      client.invalidateQueries({
+        queryKey: workbenchQueryKeys.bootstraps(projectId),
+      }),
+      client.invalidateQueries({
+        queryKey: ["studio", "artifact-versions", result.artifactId],
+      }),
+      client.invalidateQueries({
+        queryKey: ["studio", "pinned-artifact", projectId, result.artifactId],
+      }),
+    ]);
+  };
+  const recover = async () => {
+    if (!local.value || working.current) return;
+    working.current = true;
+    setBusy(true);
+    setError("");
+    setPhase("正在确认上次图片保存");
+    try {
+      await write(local.value);
+    } catch (cause) {
+      if (alive.current && local.isCurrent()) {
+        setError(cause instanceof Error ? cause.message : "确认失败，请重试");
+        setPhase("");
+      }
+    } finally {
+      working.current = false;
+      if (alive.current) setBusy(false);
+    }
+  };
   const save = async (asVersion: boolean) => {
     if (!file || working.current || saved) return;
     working.current = true;
@@ -110,7 +229,8 @@ export function ImageEditor({
         controller.current?.destroy();
         controller.current = null;
         const output = cropping ? await cropStudioImage(file, area!) : file;
-        if (!alive.current || cancelRequested.current) return;
+        if (!alive.current || !local.isCurrent() || cancelRequested.current)
+          return;
         pending.current = {
           identity,
           fileIdentity,
@@ -134,7 +254,7 @@ export function ImageEditor({
             service,
             requestExtraction: false,
           });
-          if (!alive.current || cancelRequested.current) {
+          if (!alive.current || !local.isCurrent() || cancelRequested.current) {
             upload.destroy();
             return;
           }
@@ -148,66 +268,35 @@ export function ImageEditor({
         const result = await (upload.getSnapshot().phase === "failed"
           ? upload.retry()
           : upload.start());
-        if (!alive.current || cancelRequested.current) return;
+        if (!alive.current || !local.isCurrent() || cancelRequested.current)
+          return;
         if (result.phase !== "ready" || !result.fileAssetId)
           throw new Error(result.error?.message ?? "图片尚未完成上传校验");
         intent.fileAssetId = result.fileAssetId;
       }
-      if (!alive.current || cancelRequested.current) return;
+      if (!alive.current || !local.isCurrent() || cancelRequested.current)
+        return;
       setPhase("正在保存图片版本");
       intent.writeStarted = true;
-      const result =
-        asVersion && source && expected.current
-          ? {
-              artifactId: source.artifact.id,
-              versionId: (
-                await api.createArtifactVersion(
-                  source.artifact.id,
-                  {
-                    kind: "image",
-                    baseArtifactVersionId: expected.current.versionId,
-                    source: { kind: "file", fileAssetId: intent.fileAssetId },
-                  },
-                  `"${expected.current.revision}"`,
-                  intent.key,
-                )
-              ).value.artifactVersionId,
-            }
-          : await api
-              .createArtifact(
-                projectId,
-                {
-                  kind: "image",
-                  title: title.trim(),
-                  source: { kind: "file", fileAssetId: intent.fileAssetId },
-                },
-                intent.key,
-              )
-              .then((value) => ({
-                artifactId: value.artifact.id,
-                versionId: value.artifactVersion.artifactVersionId,
-              }));
-      if (!alive.current) return;
-      setSaved(result);
-      setPhase("图片已保存");
-      controller.current?.destroy();
-      controller.current = null;
-      await Promise.all([
-        client.invalidateQueries({
-          queryKey: workbenchQueryKeys.artifacts(projectId),
-        }),
-        client.invalidateQueries({
-          queryKey: workbenchQueryKeys.bootstraps(projectId),
-        }),
-        client.invalidateQueries({
-          queryKey: ["studio", "artifact-versions", result.artifactId],
-        }),
-        client.invalidateQueries({
-          queryKey: ["studio", "pinned-artifact", projectId, result.artifactId],
-        }),
-      ]);
+      const command: ImageWriteRecord = {
+        version: 1,
+        key: intent.key,
+        fileAssetId: intent.fileAssetId,
+        target:
+          asVersion && source && expected.current
+            ? {
+                kind: "version",
+                artifactId: source.artifact.id,
+                baseVersionId: expected.current.versionId,
+                etag: `"${expected.current.revision}"`,
+              }
+            : { kind: "new", title: title.trim() },
+      };
+      local.save(command);
+      await write(command);
     } catch (cause) {
-      if (!alive.current || cancelRequested.current) return;
+      if (!alive.current || !local.isCurrent() || cancelRequested.current)
+        return;
       if (isWorkbenchApiError(cause) && [409, 412].includes(cause.status)) {
         setError(
           "图片版本或文件状态已变化。已保留当前编辑，请刷新版本信息后核对；也可另存为新图片。",
@@ -245,6 +334,7 @@ export function ImageEditor({
       }
     }
   };
+  const recoveryOnly = !!local.value && !pending.current;
   const url = resource?.file === file ? resource.url : "";
   const replayVersionWrite =
     pending.current?.writeStarted &&
@@ -276,7 +366,7 @@ export function ImageEditor({
             aria-label="选择图片文件"
             type="file"
             accept="image/png,image/jpeg,image/webp,image/gif"
-            disabled={busy || !!saved}
+            disabled={busy || !!saved || recoveryOnly}
             onChange={(e) => {
               const next = e.target.files?.[0];
               if (!next) return;
@@ -315,7 +405,7 @@ export function ImageEditor({
           aria-label="图片名称"
           value={title}
           maxLength={240}
-          disabled={busy || !!saved}
+          disabled={busy || !!saved || recoveryOnly}
           onChange={(e) => setTitle(e.target.value)}
         />
       </label>
@@ -325,7 +415,7 @@ export function ImageEditor({
             <input
               type="checkbox"
               checked={cropping}
-              disabled={busy || !!saved}
+              disabled={busy || !!saved || recoveryOnly}
               onChange={(e) => setCropping(e.target.checked)}
             />
             裁剪图片
@@ -341,10 +431,10 @@ export function ImageEditor({
                     zoom={zoom}
                     aspect={aspect}
                     onCropChange={(value) => {
-                      if (!busy && !saved) setCrop(value);
+                      if (!busy && !saved && !recoveryOnly) setCrop(value);
                     }}
                     onZoomChange={(value) => {
-                      if (!busy && !saved) setZoom(value);
+                      if (!busy && !saved && !recoveryOnly) setZoom(value);
                     }}
                     onCropComplete={(_, pixels) => setArea(pixels)}
                   />
@@ -355,7 +445,7 @@ export function ImageEditor({
                 <select
                   aria-label="裁剪比例"
                   value={aspect}
-                  disabled={busy || !!saved}
+                  disabled={busy || !!saved || recoveryOnly}
                   onChange={(e) => setAspect(Number(e.target.value))}
                 >
                   <option value={1}>正方形</option>
@@ -373,7 +463,7 @@ export function ImageEditor({
                   max="3"
                   step="0.05"
                   value={zoom}
-                  disabled={busy || !!saved}
+                  disabled={busy || !!saved || recoveryOnly}
                   onChange={(e) => setZoom(Number(e.target.value))}
                 />
               </label>
@@ -388,6 +478,28 @@ export function ImageEditor({
             url && <img className="studio-media" src={url} alt="待保存的图片" />
           )}
         </>
+      )}
+      {local.error && <p role="alert">{local.error}</p>}
+      {local.value && !saved && (
+        <div role="status">
+          <p>
+            上次保存的图片已完成上传校验。可以确认同一次保存，无需重新上传；服务器可能已经保存成功。
+          </p>
+          <button disabled={busy} onClick={() => void recover()}>
+            确认上次图片保存
+          </button>
+          <button
+            disabled={busy}
+            onClick={() => {
+              local.clear();
+              pending.current = null;
+              setError("");
+            }}
+          >
+            清除本地恢复记录
+          </button>
+          <p>清除记录不会删除服务器上的图片；重新保存会发起一次新的操作。</p>
+        </div>
       )}
       {error && <p role="alert">{error}</p>}
       {phase && <p role="status">{phase}</p>}
@@ -416,7 +528,7 @@ export function ImageEditor({
         {!saved && (
           <>
             <button
-              disabled={busy || !file || !title.trim()}
+              disabled={busy || recoveryOnly || !file || !title.trim()}
               onClick={() => void save(false)}
             >
               {source ? "另存为新图片" : "保存图片"}
@@ -425,6 +537,7 @@ export function ImageEditor({
               <button
                 disabled={
                   busy ||
+                  recoveryOnly ||
                   !file ||
                   expected.current?.versionId !== source.versionId ||
                   (source.artifact.currentVersion?.artifactVersionId !==

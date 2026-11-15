@@ -12,8 +12,14 @@ import {
   signUploadPartResponseSchema,
   completeFileUploadResponseSchema,
 } from "@workbench/workbench-contracts";
+const recovery = process.env.WORKBENCH_E2E_MEDIA_RECOVERY === "1";
 const origin = process.env.WORKBENCH_E2E_WEB_ORIGIN ?? "http://127.0.0.1:18930",
-  output = new URL("../../output/audit/1.0.0/studio-media/", import.meta.url);
+  output = new URL(
+    recovery
+      ? "../../output/audit/1.0.0/studio-media-recovery/"
+      : "../../output/audit/1.0.0/studio-media/",
+    import.meta.url,
+  );
 await mkdir(output, { recursive: true });
 const now = "2026-11-16T00:00:00Z",
   projectId = "media-project",
@@ -462,7 +468,25 @@ try {
   );
   await page.getByRole("button", { name: "保存图片", exact: true }).click();
   await page.getByRole("alert").filter({ hasText: "Response lost" }).waitFor();
-  await page.getByRole("button", { name: "保存图片", exact: true }).click();
+  if (recovery) {
+    await page
+      .getByRole("button", { name: "关闭图片编辑", exact: true })
+      .click();
+    await page.reload({ waitUntil: "networkidle" });
+    await page.getByRole("button", { name: "添加图片", exact: true }).click();
+    assert(
+      await page
+        .getByRole("button", { name: "保存图片", exact: true })
+        .isDisabled(),
+    );
+    await page
+      .getByRole("button", { name: "确认上次图片保存", exact: true })
+      .click();
+    results.checks.push(
+      "new image recovery survives close and reload, needs no file reselection or second upload",
+    );
+  } else
+    await page.getByRole("button", { name: "保存图片", exact: true }).click();
   await page
     .getByRole("link", { name: "查看已保存图片", exact: true })
     .waitFor();
@@ -477,7 +501,7 @@ try {
   results.checks.push(
     "real selected PNG decodes and crops to 80×80, uploads actual multipart bytes and creates one image despite lost response; retry reuses uploaded File and idempotency key",
   );
-  await page.setViewportSize({width:1440,height:900});
+  await page.setViewportSize({ width: 1440, height: 900 });
   await page.getByRole("link", { name: "查看已保存图片", exact: true }).click();
   await page.getByRole("button", { name: "编辑图片", exact: true }).click();
   await page.getByRole("checkbox", { name: "裁剪图片", exact: true }).check();
@@ -485,7 +509,19 @@ try {
   await page.getByText("保存尺寸：80 × 45 像素", { exact: true }).waitFor();
   await page.getByRole("button", { name: "保存为新版本", exact: true }).click();
   await page.getByRole("alert").filter({ hasText: "Response lost" }).waitFor();
-  await page.getByRole("button", { name: "保存为新版本", exact: true }).click();
+  if (recovery) {
+    await page.reload({ waitUntil: "networkidle" });
+    await page.getByRole("button", { name: "编辑图片", exact: true }).click();
+    await page
+      .getByRole("button", { name: "确认上次图片保存", exact: true })
+      .click();
+    results.checks.push(
+      "version recovery replays fixed base/ETag/key after reload even when current version has advanced",
+    );
+  } else
+    await page
+      .getByRole("button", { name: "保存为新版本", exact: true })
+      .click();
   await page
     .getByRole("link", { name: "查看已保存图片", exact: true })
     .waitFor();

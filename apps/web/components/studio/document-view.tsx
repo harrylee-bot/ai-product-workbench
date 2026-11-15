@@ -1,6 +1,6 @@
 "use client";
 import type { StudioArtifactContext } from "@/lib/studio/types";
-import { useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import {
   useInfiniteQuery,
   useQuery,
@@ -8,10 +8,18 @@ import {
 } from "@tanstack/react-query";
 import {
   prdDocumentSchema,
+  jsonValueSchema,
+  canonicalJson,
   runPrdScreenPlanSchema,
   type Artifact,
   type JsonValue,
 } from "@workbench/workbench-contracts";
+import { z } from "zod";
+import { useWorkbenchAuth } from "@/lib/auth/workbench-auth";
+import {
+  studioRecordKey,
+  useStudioStoredRecord,
+} from "@/lib/studio/stored-record";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { useWorkbenchArtifactsApi } from "@/lib/studio/api";
@@ -24,6 +32,22 @@ import { workbenchQueryKeys } from "@/lib/workbench/query/keys";
 import { useStudioAction } from "./actions";
 import { ImageEditor } from "./image-editor";
 import { ArtifactRelations } from "./relations";
+const documentDraftRecordSchema = z
+  .object({
+    version: z.literal(1),
+    baseChecksum: z.string(),
+    draft: jsonValueSchema,
+    prepared: z
+      .object({
+        signature: z.string(),
+        key: z.string(),
+        etag: z.string(),
+        document: prdDocumentSchema,
+      })
+      .strict()
+      .nullable(),
+  })
+  .strict();
 const hidden = new Set([
   "protocol",
   "schemaVersion",
@@ -69,8 +93,18 @@ export function DocumentView({
   const api = useWorkbenchArtifactsApi(),
     client = useQueryClient(),
     action = useStudioAction();
+  const { user } = useWorkbenchAuth();
+  const alive = useRef(true);
+  useEffect(() => {
+    alive.current = true;
+    return () => {
+      alive.current = false;
+    };
+  }, []);
   const [editingImage, setEditingImage] = useState(false);
-  const [selected, setSelected] = useState(initialVersionId ?? ""),
+  const [selected, setSelected] = useState(
+      initialVersionId ?? artifact.currentVersion?.artifactVersionId ?? "",
+    ),
     [screenNames, setScreenNames] = useState(""),
     [draft, setDraft] = useState<JsonValue | null>(null),
     [editing, setEditing] = useState(false);
@@ -90,6 +124,19 @@ export function DocumentView({
   ];
   const versionId =
     selected || artifact.currentVersion?.artifactVersionId || "";
+  useEffect(() => {
+    if (!versionId) return;
+    const url = new URL(window.location.href);
+    const requested = url.searchParams.get("artifact");
+    if (
+      (requested && requested !== artifact.id) ||
+      url.searchParams.has("artifactVersion")
+    )
+      return;
+    url.searchParams.set("artifact", artifact.id);
+    url.searchParams.set("artifactVersion", versionId);
+    window.history.replaceState(null, "", url);
+  }, [artifact.id, versionId]);
   const detail = useQuery({
     queryKey: workbenchQueryKeys.artifactVersion(
       artifact.projectId,
@@ -99,6 +146,16 @@ export function DocumentView({
     queryFn: () => api.getArtifactVersion(artifact.id, versionId),
     enabled: Boolean(versionId),
   });
+  const recordKey = studioRecordKey(
+    user?.id,
+    artifact.projectId,
+    "document-edit",
+    artifact.id,
+    versionId,
+  );
+  const currentKey = useRef(recordKey);
+  currentKey.current = recordKey;
+  const local = useStudioStoredRecord(recordKey, documentDraftRecordSchema);
   const value = detail.error ? undefined : detail.data?.value,
     content = detail.error
       ? null
@@ -114,6 +171,13 @@ export function DocumentView({
       parent = parent[part] as Record<string, unknown>;
     parent[path.at(-1)!] = text;
     setDraft(copy);
+    if (value?.kind === "prd")
+      local.save({
+        version: 1,
+        baseChecksum: value.checksum,
+        draft: copy,
+        prepared: null,
+      });
   };
   const render = (
     data: JsonValue,
@@ -127,6 +191,7 @@ export function DocumentView({
           key={path.join(".")}
           aria-label={`编辑 ${path.join(" / ")}`}
           value={data}
+          disabled={!canEdit || action.busy}
           onChange={(e) => update(path, e.target.value)}
         />
       ) : (
@@ -165,6 +230,7 @@ export function DocumentView({
         <select
           aria-label="文档版本"
           value={versionId}
+          disabled={action.busy}
           onChange={(e) => {
             const url = new URL(window.location.href);
             url.searchParams.set("artifact", artifact.id);
@@ -209,28 +275,127 @@ export function DocumentView({
             <button
               disabled={!canEdit || action.busy}
               onClick={() => {
-                setDraft(value.content as unknown as JsonValue);
-                setEditing(!editing);
+                if (editing) {
+                  setEditing(false);
+                  setDraft(null);
+                  return;
+                }
+                const restored =
+                  local.value?.baseChecksum === value.checksum
+                    ? local.value.draft
+                    : (value.content as unknown as JsonValue);
+                setDraft(restored);
+                local.save(
+                  local.value?.baseChecksum === value.checksum
+                    ? local.value
+                    : {
+                        version: 1,
+                        baseChecksum: value.checksum,
+                        draft: restored,
+                        prepared: null,
+                      },
+                );
+                setEditing(true);
               }}
             >
-              编辑文档
+              {editing
+                ? "退出编辑并保留草稿"
+                : local.value
+                  ? "恢复文档编辑"
+                  : "编辑文档"}
             </button>
+            {local.value && (
+              <button
+                disabled={!canEdit || action.busy}
+                onClick={() => {
+                  local.clear();
+                  setDraft(null);
+                  setEditing(false);
+                }}
+              >
+                放弃文档草稿
+              </button>
+            )}
             {editing && (
               <button
                 disabled={!canEdit || action.busy}
                 onClick={() =>
                   void action.run(async () => {
-                    const current = await api.getArtifact(artifact.id);
-                    const document = prdDocumentSchema.parse(content);
+                    const operationKey = recordKey;
+                    const signature = canonicalJson(content);
+                    let prepared =
+                      local.value?.prepared?.signature === signature
+                        ? local.value.prepared
+                        : null;
+                    if (!prepared) {
+                      const document = prdDocumentSchema.parse(content);
+                      const baseline = prdDocumentSchema.parse(value.content);
+                      const current = await api.getArtifact(artifact.id);
+                      if (
+                        !alive.current ||
+                        !local.isCurrent() ||
+                        currentKey.current !== operationKey
+                      )
+                        return;
+                      if (current.value.projectId !== artifact.projectId)
+                        throw new Error("文档不属于当前项目");
+                      prepared = {
+                        signature,
+                        key: `studio-prd:${crypto.randomUUID()}`,
+                        etag: current.etag,
+                        document: prdDocumentSchema.parse({
+                          ...document,
+                          revision: {
+                            ...document.revision,
+                            number:
+                              Math.max(
+                                document.revision.number,
+                                baseline.revision.number,
+                              ) + 1,
+                            status: "draft",
+                            changedAt: new Date().toISOString(),
+                            changedById: null,
+                            summary: "手动编辑需求文档",
+                          },
+                        }),
+                      };
+                      local.save({
+                        version: 1,
+                        baseChecksum: value.checksum,
+                        draft: content!,
+                        prepared,
+                      });
+                    }
+                    if (
+                      !alive.current ||
+                      !local.isCurrent() ||
+                      currentKey.current !== operationKey
+                    )
+                      return;
                     const next = await api.createArtifactVersion(
                       artifact.id,
                       {
                         kind: "prd",
                         baseArtifactVersionId: versionId,
-                        document,
+                        document: prepared.document,
                       },
-                      current.etag,
+                      prepared.etag,
+                      prepared.key,
                     );
+                    if (
+                      !alive.current ||
+                      !local.isCurrent() ||
+                      currentKey.current !== operationKey
+                    )
+                      return;
+                    local.clear();
+                    const url = new URL(window.location.href);
+                    url.searchParams.set("artifact", artifact.id);
+                    url.searchParams.set(
+                      "artifactVersion",
+                      next.value.artifactVersionId,
+                    );
+                    window.history.replaceState(null, "", url);
                     setSelected(next.value.artifactVersionId);
                     setDraft(null);
                     setEditing(false);
@@ -241,7 +406,7 @@ export function DocumentView({
                       ),
                     });
                     await client.invalidateQueries({
-                      queryKey: workbenchQueryKeys.artifactLists(
+                      queryKey: workbenchQueryKeys.artifacts(
                         artifact.projectId,
                       ),
                     });
@@ -347,6 +512,12 @@ export function DocumentView({
             ))}
           </div>
         </section>
+      )}
+      {local.error && <p role="alert">{local.error}</p>}
+      {!editing && local.value && value?.kind === "prd" && (
+        <p role="status">
+          此版本有本地文档草稿，可恢复编辑。已保存版本尚未改变。
+        </p>
       )}
       {action.notice}
       {value && (value.kind === "prd" || value.kind === "prototype") && (

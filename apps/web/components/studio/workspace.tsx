@@ -81,6 +81,9 @@ type StudioWorkspaceProps = {
     StudioComposerProps,
     "prompt" | "setPrompt" | "draft" | "updateDraft"
   >;
+  submissionNotice?: string;
+  recoveryTitle?: string;
+  onRecoverSubmission?: () => Promise<PrototypePlan | string | null>;
   onCreatePlan: PrototypePlanSubmit;
   onSaveInput: (
     input: StudioSubmission,
@@ -119,6 +122,9 @@ export function StudioWorkspace({
   onCreatePlan,
   onSaveInput,
   bootstrap,
+  submissionNotice,
+  recoveryTitle,
+  onRecoverSubmission,
 }: StudioWorkspaceProps) {
   const api = useWorkbenchPrototypeV2Api();
   const [selection, setSelection] = useState<Selection>(() =>
@@ -1341,11 +1347,7 @@ export function StudioWorkspace({
                       setDirectRunId(next.id);
                       const url = new URL(window.location.href);
                       url.searchParams.set("run", next.id);
-                      window.history.replaceState(
-                        null,
-                        "",
-                        url,
-                      );
+                      window.history.replaceState(null, "", url);
                     }}
                   />
                 )}
@@ -1539,6 +1541,38 @@ export function StudioWorkspace({
                     }}
                   >
                     保留我的调整并继续
+                  </button>
+                </div>
+              )}
+              {submissionNotice && (
+                <p role="status" className="studio-muted">
+                  {submissionNotice}
+                </p>
+              )}
+              {recoveryTitle && onRecoverSubmission && (
+                <div>
+                  <p>待确认：{recoveryTitle}。恢复此提交会保留当前输入。</p>
+                  <button
+                    disabled={!canEdit || composer.busy}
+                    onClick={() =>
+                      void run(async () => {
+                        const result = await onRecoverSubmission();
+                        if (!result) return;
+                        if (typeof result === "string") {
+                          setDirectRunId(result);
+                          const url = new URL(window.location.href);
+                          url.searchParams.set("run", result);
+                          window.history.replaceState(null, "", url);
+                          setView("documents");
+                        } else {
+                          selectPlan(result);
+                          setView("pages");
+                          setPanel("plan");
+                        }
+                      }, "上次提交已确认，当前输入保持不变")
+                    }
+                  >
+                    确认上次提交
                   </button>
                 </div>
               )}
