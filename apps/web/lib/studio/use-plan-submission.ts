@@ -11,7 +11,7 @@ import {
 } from "@/lib/workbench/features/files";
 import { workbenchQueryKeys } from "@/lib/workbench/query/keys";
 import { createIdempotencyKey } from "@/lib/workbench/transport/contracts";
-import type { StudioSubmission } from "./types";
+import type { StudioSubmission, StudioPlanTarget } from "./types";
 export function usePlanSubmission(projectId: string) {
   const api = useWorkbenchPrototypeV2Api(),
     sources = useWorkbenchImportSourcesApi(),
@@ -29,10 +29,11 @@ export function usePlanSubmission(projectId: string) {
   } | null>(null);
   const fileSources = useRef(new WeakMap<File, Promise<string>>());
   const fileIdentity = useRef(new WeakMap<File, string>());
-  const prepare = async (input: StudioSubmission) => {
+  const prepare = async (input: StudioSubmission, target: string) => {
     const signature = JSON.stringify({
       ...input,
       projectId,
+      target,
       files: input.files.map((f) => {
         if (!fileIdentity.current.has(f))
           fileIdentity.current.set(f, crypto.randomUUID());
@@ -59,11 +60,18 @@ export function usePlanSubmission(projectId: string) {
           fileSources.current.set(file, result);
           result.catch(() => fileSources.current.delete(file));
         }
-        ids.push(await result);
+        const sourceId = await result;
+        input.onFileSource?.(file, sourceId);
+        ids.push(sourceId);
+        await client.invalidateQueries({
+          queryKey: workbenchQueryKeys.importSources(projectId),
+        });
       }
       const sourceIds = [...new Set([...input.sourceIds, ...ids])];
       const resolved = await Promise.all(
-        sourceIds.map((id) => sources.getImportSource(id)),
+        sourceIds
+          .filter((id) => !input.pinnedSourceIds?.includes(id))
+          .map((id) => sources.getImportSource(id)),
       );
       if (resolved.some((s) => s.value.status !== "ready"))
         throw new Error(
@@ -97,7 +105,7 @@ export function usePlanSubmission(projectId: string) {
     busy.current = true;
     setPending(true);
     try {
-      const request = await prepare(input);
+      const request = await prepare(input, "new");
       const result = await api.createPlan(
         projectId,
         request.request,
@@ -117,13 +125,55 @@ export function usePlanSubmission(projectId: string) {
       setPending(false);
     }
   };
+  const saveInput = async (
+    input: StudioSubmission,
+    target: StudioPlanTarget,
+  ) => {
+    if (busy.current) return null;
+    busy.current = true;
+    setPending(true);
+    try {
+      const command = await prepare(input, JSON.stringify(target));
+      const result =
+        target.kind === "draft"
+          ? await api.updatePlanInput(
+              projectId,
+              target.id,
+              target.etag,
+              command.request,
+              command.key,
+            )
+          : await api.createRevisionPlan(
+              projectId,
+              target.id,
+              target.etag,
+              { ...command.request, feedbackIds: target.feedbackIds ?? [] },
+              command.key,
+            );
+      prepared.current = null;
+      client.setQueryData(
+        workbenchQueryKeys.prototypeV2Plan(projectId, result.value.id),
+        result,
+      );
+      await client.invalidateQueries({
+        queryKey: workbenchQueryKeys.prototypeV2(projectId),
+      });
+      await client.invalidateQueries({
+        queryKey: ["studio", "plan-input", projectId],
+      });
+      return result.value;
+    } finally {
+      busy.current = false;
+      setPending(false);
+    }
+  };
   const submitRun = async (input: StudioSubmission, threadId: string) => {
     if (busy.current) return null;
     if (!threadId) throw new Error("项目尚未创建对话");
     busy.current = true;
     setPending(true);
     try {
-      const command = await prepare(input);
+      const command = await prepare(input, `thread:${threadId}`);
       const intent = await intents.createSubmissionIntent(
         threadId,
         { request: command.request.generationRequest!, attachments: [] },
@@ -144,5 +194,5 @@ export function usePlanSubmission(projectId: string) {
       setPending(false);
     }
   };
-  return { create, submitRun, pending, uploads: registry.uploads };
+  return { create, saveInput, submitRun, pending, uploads: registry.uploads };
 }

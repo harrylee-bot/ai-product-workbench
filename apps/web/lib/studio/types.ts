@@ -11,6 +11,8 @@ export type StudioSubmission = {
   designStyle: RunDesignStyle;
   sourceIds: string[];
   files: File[];
+  onFileSource?: (file: File, sourceId: string) => void;
+  pinnedSourceIds?: string[];
   requestedArtifactKinds: StartRunRequest["requestedArtifactKinds"];
   artifactTargets: StartRunRequest["artifactTargets"];
   generationIntent: StartRunRequest["generationIntent"];
@@ -29,4 +31,11 @@ export type StudioArtifactContext = {
   workflow: "edit";
   artifactTargets: StartRunRequest["artifactTargets"];
   requestedArtifactKinds: StartRunRequest["requestedArtifactKinds"];
+};
+
+export type StudioPlanTarget = {
+  kind: "draft" | "revision";
+  id: string;
+  etag: string;
+  feedbackIds?: string[];
 };

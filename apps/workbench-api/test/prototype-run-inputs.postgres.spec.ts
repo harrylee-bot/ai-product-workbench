@@ -21,6 +21,49 @@ const url = process.env.WORKBENCH_TEST_DATABASE_URL;
     const rollback = new Error("ROLLBACK_PROTOTYPE_INPUT_FIXTURE");
     await expect(db.$transaction(async tx => { await action(tx, await seed(tx)); throw rollback; }, { timeout: 60000 })).rejects.toBe(rollback);
   }
+  it("adjusts complete draft input with CAS, keeps snapshots after source removal, and freezes approved input", async()=>fixture(async(tx,f)=>{
+    const {api,principal}=prototypeApi(tx,f),projectId=f.input.projectId;
+    const request={...f.input.request,canvasSnapshot:null};
+    const plan=await api.createPlan(principal,projectId,{title:"Draft input",prompt:request.prompt,generationRequest:request},"draft-complete-create");
+    const before=await api.getPlanInput(principal,projectId,plan.id);
+    expect(before.snapshot?.sources[0]).toMatchObject({sourceId:f.sourceId,checksum:f.sha256});
+    expect(before.snapshot?.designStyle.snapshotSha256).toMatch(/^[a-f0-9]{64}$/);
+    await tx.importSource.update({where:{id:f.sourceId},data:{status:"deleted",deletedAt:new Date(),revision:{increment:1}}});
+    const adjusted={title:"Adjusted title",prompt:"Add purchase approval and reporting",generationRequest:{...request,prompt:"Add purchase approval and reporting",targetSurface:"web" as const,modelId:"another-model"}};
+    const saved=await api.updatePlan(principal,projectId,plan.id,adjusted,"draft-complete-save",'"0"');
+    expect(saved).toMatchObject({status:"draft",revision:1,title:adjusted.title});
+    await expect(api.updatePlan(principal,projectId,plan.id,adjusted,"draft-complete-save",'"0"')).resolves.toEqual(saved);
+    await expect(api.updatePlan(principal,projectId,plan.id,{...adjusted,title:"Conflict"},"draft-complete-conflict",'"0"')).rejects.toMatchObject({status:412});
+    const after=await api.getPlanInput(principal,projectId,plan.id);
+    expect(after.request).toEqual(adjusted.generationRequest);expect(after.snapshot).toEqual(before.snapshot);expect(after.sha256).not.toBe(before.sha256);
+    await expect(api.updatePlan({id:"outsider"} as never,projectId,plan.id,adjusted,"draft-unauthorized",'"1"')).rejects.toMatchObject({status:403});
+    await api.approvePlan(principal,projectId,plan.id,"draft-complete-approve",'"1"',{});
+    const bound=await tx.prototypePlan.findUniqueOrThrow({where:{id:plan.id}}),run=await tx.run.findUniqueOrThrow({where:{id:bound.runtimeRunId!},include:{sourceSnapshots:true}});
+    expect(run.request).toEqual(adjusted.generationRequest);expect(run.sourceSnapshots[0]?.checksum).toBe(f.sha256);expect(run.designStyleSnapshotSha256).toBe(before.snapshot?.designStyle.snapshotSha256);
+    await expect(api.updatePlan(principal,projectId,plan.id,adjusted,"draft-after-approve",'"2"')).rejects.toMatchObject({status:409});
+    await tx.$executeRawUnsafe("SAVEPOINT immutable_approved_input");
+    await expect(tx.prototypePlan.update({where:{id:plan.id},data:{prompt:"Forbidden rewrite",revision:{increment:1}}})).rejects.toThrow(/immutable/);
+    await tx.$executeRawUnsafe("ROLLBACK TO SAVEPOINT immutable_approved_input");await tx.$executeRawUnsafe("RELEASE SAVEPOINT immutable_approved_input");
+  }),90000);
+
+  it("inherits the selected child version rather than the root when creating an adjusted modification plan",async()=>fixture(async(tx,f)=>{
+    const {api,principal}=prototypeApi(tx,f),projectId=f.input.projectId;
+    const request={...f.input.request,canvasSnapshot:null};
+    const root=await api.createPlan(principal,projectId,{title:"Root",prompt:request.prompt,generationRequest:request},"lineage-root-create");
+    await api.approvePlan(principal,projectId,root.id,"lineage-root-approve",'"0"',{});
+    const first=await finishPlan(tx,f,root.id,root.id,1);
+    const changed={...request,prompt:"Use the updated design",modelId:"child-model",designStyle:{kind:"automatic" as const}};
+    const child=await api.createRevisionPlan(principal,projectId,first.revision.id,{title:"Child",prompt:changed.prompt,generationRequest:changed,feedbackIds:[]},"lineage-child-create",'"1"');
+    expect(child).toMatchObject({rootPlanId:root.id,sourceRevisionId:first.revision.id,contentVersion:2,status:"draft"});
+    await api.approvePlan(principal,projectId,child.id,"lineage-child-approve",'"0"',{});
+    const second=await finishPlan(tx,f,child.id,root.id,2,first.revision.id,first.artifactId),actual=await api.getRevisionInput(principal,projectId,second.revision.id);
+    expect(actual.plan.id).toBe(child.id);expect(actual.request.modelId).toBe("child-model");expect(actual.snapshot?.designStyle.snapshot).toBeNull();
+    const third=await api.createRevisionPlan(principal,projectId,second.revision.id,{title:"Grandchild",prompt:changed.prompt,generationRequest:actual.request,feedbackIds:[]},"lineage-grandchild",'"1"');
+    expect(third).toMatchObject({rootPlanId:root.id,sourceRevisionId:second.revision.id,contentVersion:3});
+    expect((await api.getPlanInput(principal,projectId,third.id)).request).toMatchObject({modelId:"child-model",designStyle:{kind:"automatic"},artifactTargets:[{artifactId:second.artifactId,artifactVersionId:second.versionId,screenIds:[]}]});
+    await expect(api.createRevisionPlan(principal,projectId,second.revision.id,{title:"Conflict",prompt:changed.prompt,generationRequest:actual.request,feedbackIds:[]},"lineage-conflict",'"0"')).rejects.toMatchObject({status:412});
+  }),90000);
+
   it("pins model, attachment, design preset, canvas and knowledge using normal Run validation", async () => fixture(async (tx, f) => {
     const runId = await f.runs.preparePrototypeRun(tx, f.input);
     const run = await tx.run.findUniqueOrThrow({ where: { id: runId }, include: { sourceSnapshots: true } });
@@ -148,10 +191,21 @@ const url = process.env.WORKBENCH_TEST_DATABASE_URL;
     expect(retryRun.request).toEqual(run.request);
     expect(retryRow.feedbackIds).toEqual(childRow.feedbackIds);
     expect(retryRow.sourceRevisionId).toBe(source.id);
+    const originalFile=await tx.fileAsset.findFirstOrThrow({where:{projectId:f.input.projectId}});
+    const addedFile=await tx.fileAsset.create({data:{projectId:f.input.projectId,blobId:f.blobId,uploadedById:f.input.principalId,originalName:"added-context.md",declaredMediaType:"text/markdown",detectedMediaType:"text/markdown",byteSize:originalFile.byteSize,status:"ready",verifiedAt:new Date()}});
+    const extra=await new ImportSourcesService(scopedDb as never,new AccessService(tx as never),f.queue as never).create(f.input.principalId,f.input.projectId,"modified-extra-source",{kind:"file",fileAssetId:addedFile.id});
+    const adjustedRequest=startRunRequestSchema.parse({...f.input.request,prompt:"Revise with the new model and design",sourceIds:[f.sourceId,extra.id],canvasSnapshot:null,modelId:"adjusted-model",designStyle:{kind:"automatic"}});
+    const draft=await api.createRevisionPlan(principal,f.input.projectId,source.id,{title:"Adjusted source version",prompt:adjustedRequest.prompt,generationRequest:adjustedRequest,feedbackIds:[]},"api-adjusted-revision-plan",'"3"');
+    expect(draft).toMatchObject({rootPlanId:plan.id,sourceRevisionId:source.id,status:"draft",contentVersion:4});
+    await api.approvePlan(principal,f.input.projectId,draft.id,"api-adjusted-revision-approve",'"0"',{});
+    const adjustedRow=await tx.prototypePlan.findUniqueOrThrow({where:{id:draft.id}}),adjustedRun=await tx.run.findUniqueOrThrow({where:{id:adjustedRow.runtimeRunId!},include:{sourceSnapshots:true}});
+    expect(adjustedRun.request).toMatchObject({modelId:"adjusted-model",workflow:"edit",designStyle:{kind:"automatic"},artifactTargets:[{artifactId:artifact.id,artifactVersionId:version.id,screenIds:[]}]});
+    expect(adjustedRun.sourceSnapshots[0]?.checksum).toBe(f.sha256);
+    expect(adjustedRun.sourceSnapshots.toSorted((a,b)=>a.position-b.position).map(source=>source.sourceId)).toEqual([f.sourceId,extra.id]);
     const newer = await tx.artifactVersion.create({ data: { artifactId: artifact.id, projectId: f.input.projectId, version: 2, schemaVersion: 1, status: "ready", content: document as never, checksum: createHash("sha256").update(canonicalJson(document)).digest("hex"), citations, knowledgeReleaseId: sourceRun.knowledgeReleaseId } });
     await tx.artifact.update({ where: { id: artifact.id }, data: { currentVersionId: newer.id } });
     await expect(api.revise(principal, f.input.projectId, source.id, { feedbackIds: [feedback.id] }, "api-revise-old-base", '"3"')).rejects.toMatchObject({ status: 409 });
-    expect(await tx.prototypeWorkflowCommand.count({ where: { projectId: f.input.projectId, kind: "plan_start" } })).toBe(3);
+    expect(await tx.prototypeWorkflowCommand.count({ where: { projectId: f.input.projectId, kind: "plan_start" } })).toBe(4);
   }), 90000);
 
   it("approves a fixed Canvas context after expiry and Board changes without rewriting the original input", async () => fixture(async (tx, f) => {
@@ -300,4 +354,20 @@ async function attachCanvasPrototype(tx: Prisma.TransactionClient, f: Awaited<Re
   const reference = { boardNodeId: node.nodeKey, artifactId: artifact.id, artifactVersionId: version.id, screenId: screen.id };
   f.input.request = startRunRequestSchema.parse({ ...f.input.request, canvasSnapshot: { ...f.input.request.canvasSnapshot!, boardRevision: board.revision, screens: [{ reference, name: screen.name, route: screen.route, phase: "complete", viewport: screen.viewport }], visibleScreens: [reference], selectedScreens: [reference] } });
   return { artifact, version, node, document };
+}
+
+async function finishPlan(tx:Prisma.TransactionClient,f:Awaited<ReturnType<typeof seed>>,planId:string,rootPlanId:string,number:number,sourceRevisionId?:string,existingArtifactId?:string){
+  const plan=await tx.prototypePlan.findUniqueOrThrow({where:{id:planId}});
+  const run=await tx.run.update({where:{id:plan.runtimeRunId!},data:{status:"running",attempt:1,startedAt:new Date()}});
+  const binding=await tx.runtimeBinding.create({data:{threadId:run.threadId,adapter:"deerflow",externalThreadId:`external-${run.id}`,metadata:{}}});
+  const attempt=await tx.runtimeAttempt.create({data:{runId:run.id,runtimeBindingId:binding.id,attempt:1,adapter:"deerflow",externalThreadId:binding.externalThreadId}});
+  await tx.runtimeAttempt.update({where:{id:attempt.id},data:{status:"submitting",startedAt:new Date(),providerIdempotencyKey:`wbrt:${createHash("sha256").update(attempt.id).digest("hex")}`}});
+  const citations=await seedKnowledgeReceipt(tx,attempt.id);await tx.run.update({where:{id:run.id},data:{status:"succeeded",finishedAt:new Date()}});
+  const document=prototypeDocumentFixture(),projectId=f.input.projectId;
+  const artifactId=existingArtifactId??(await tx.artifact.create({data:{projectId,kind:"prototype",title:"Lineage source"}})).id;
+  const version=await tx.artifactVersion.create({data:{artifactId,projectId,version:number,schemaVersion:1,status:"ready",content:document as never,checksum:sha(document),citations,knowledgeReleaseId:run.knowledgeReleaseId,createdByRunId:run.id}});
+  await tx.artifact.update({where:{id:artifactId},data:{currentVersionId:version.id}});
+  const content="<main>Version</main>";
+  const revision=await tx.prototypeRevision.create({data:{projectId,planId:rootPlanId,createdById:f.input.principalId,version:number,sourceRevisionId,status:"ready",title:`Version ${number}`,sourceDocument:document as never,pages:[{id:document.screens[0]!.id,slug:"home",title:"Home",route:"/",order:0,content,sha256:sha(content)}],documentSha256:sha(document),idempotencyKey:`fixture-revision-${number}`,requestHash:sha(number)}});
+  return {artifactId,versionId:version.id,revision};
 }

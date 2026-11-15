@@ -1,7 +1,10 @@
 "use client";
-import { useState, useRef, type ReactNode } from "react";
+import { useState, useRef, useEffect, type ReactNode } from "react";
+import type { ComposerDraft } from "@/lib/studio/composer-session";
 import type {
   ProjectBootstrap,
+  StartRunRequest,
+  PrototypeInputSnapshot,
   RunDesignStyle,
   RunTargetSurface,
 } from "@workbench/workbench-contracts";
@@ -22,7 +25,13 @@ export type StudioComposerProps = {
   busy: boolean;
   disabled: boolean;
   uploads?: WorkbenchUploadItemViewModel[];
+  draft: ComposerDraft;
+  updateDraft: (transform: (draft: ComposerDraft) => ComposerDraft) => void;
   locked?: boolean;
+  outputLocked?: boolean;
+  initialInput?: StartRunRequest;
+  pinnedSources?: PrototypeInputSnapshot["sources"];
+  pinnedDesign?: PrototypeInputSnapshot["designStyle"];
   intentControl?: ReactNode;
   artifactContext?: StudioArtifactContext;
   onSubmit: (value: StudioSubmission) => Promise<string | null>;
@@ -35,7 +44,13 @@ export function StudioComposer({
   busy,
   disabled,
   uploads = [],
+  draft,
+  updateDraft,
   locked = false,
+  outputLocked = false,
+  initialInput,
+  pinnedSources = [],
+  pinnedDesign,
   intentControl,
   artifactContext,
   onSubmit,
@@ -43,25 +58,57 @@ export function StudioComposer({
   const models = useWorkbenchRuntimeModels(),
     presets = useWorkbenchDesignPresets(),
     sources = useWorkbenchImportSources(projectId);
-  const [files, setFiles] = useState<File[]>([]),
-    [sourceIds, setSourceIds] = useState<string[]>([]),
-    [model, setModel] = useState(""),
-    [output, setOutput] = useState("both"),
-    [surface, setSurface] = useState<RunTargetSurface>("web"),
-    [design, setDesign] = useState("automatic"),
-    [error, setError] = useState(""),
+  const {
+    files,
+    sourceIds,
+    modelId: model,
+    targetSurface: surface,
+    designStyle: designReference,
+  } = draft;
+  const output =
+    draft.requestedArtifactKinds.length > 1
+      ? "both"
+      : (draft.requestedArtifactKinds[0] ?? "prototype");
+  const design =
+    designReference.kind === "preset"
+      ? presetValue(designReference)
+      : designReference.kind === "artifact"
+        ? `artifact:${designReference.artifactVersionId}`
+        : "automatic";
+  const setFiles = (transform: (files: File[]) => File[]) =>
+    updateDraft((current) => ({ ...current, files: transform(current.files) }));
+  const setSourceIds = (transform: (ids: string[]) => string[]) =>
+    updateDraft((current) => ({
+      ...current,
+      sourceIds: transform(current.sourceIds),
+    }));
+  const [error, setError] = useState(""),
     [contextOpen, setContextOpen] = useState(false);
   const sourceLabels = useRef(new Map<string, string>());
   for (const source of sources.data?.items ?? [])
     sourceLabels.current.set(source.id, source.label);
-  const promptRef = useRef(prompt);
-  promptRef.current = prompt;
+  for (const source of pinnedSources)
+    sourceLabels.current.set(source.sourceId, source.label);
   const available =
     models.data?.items.filter((m) =>
-      m.supportedWorkflows.includes(artifactContext?.workflow ?? "generate"),
+      m.supportedWorkflows.includes(
+        artifactContext?.workflow ?? initialInput?.workflow ?? "generate",
+      ),
     ) ?? [];
-  const modelId =
-    available.find((m) => m.id === model)?.id ?? available[0]?.id ?? "";
+  useEffect(() => {
+    if (!model && available[0])
+      updateDraft((current) =>
+        current.modelId ? current : { ...current, modelId: available[0]!.id },
+      );
+  }, [model, available, updateDraft]);
+  const designArtifacts = bootstrap.artifacts.filter(
+    (artifact) =>
+      artifact.kind === "design_system" &&
+      artifact.currentVersion?.status === "ready",
+  );
+  const modelId = model
+    ? (available.find((m) => m.id === model)?.id ?? "")
+    : (available[0]?.id ?? "");
   const addFiles = (incoming: File[]) => {
     if (locked) {
       setError("修改版本沿用源资料。选择“新建计划”后可添加附件。");
@@ -78,6 +125,18 @@ export function StudioComposer({
           ) === index,
       ),
     );
+    updateDraft((current) => ({
+      ...current,
+      missingFiles: current.missingFiles.filter(
+        (item) =>
+          !incoming.some(
+            (file) =>
+              file.name === item.name &&
+              file.size === item.size &&
+              file.type === item.type,
+          ),
+      ),
+    }));
   };
   const screenshot = async () => {
     try {
@@ -109,23 +168,15 @@ export function StudioComposer({
   const send = async () => {
     setError("");
     try {
-      const preset = presets.data?.items.find((p) => p.presetId === design);
-      const designStyle: RunDesignStyle = design.startsWith("artifact:")
-        ? { kind: "artifact", artifactVersionId: design.slice(9) }
-        : preset
-          ? {
-              kind: "preset",
-              presetId: preset.presetId,
-              version: preset.version,
-              checksum: preset.checksum,
-            }
-          : { kind: "automatic" };
+      if (!designAvailable)
+        throw new Error("所选设计已失效，请重新选择固定版本");
+      const designStyle = designReference;
       const text = prompt;
-      const submittedFiles = files;
-      const accepted = await onSubmit({
+      await onSubmit({
         prompt: text,
         modelId,
-        workflow: artifactContext?.workflow ?? "generate",
+        workflow:
+          artifactContext?.workflow ?? initialInput?.workflow ?? "generate",
         requestedArtifactKinds:
           artifactContext?.requestedArtifactKinds ??
           (output === "both"
@@ -136,29 +187,49 @@ export function StudioComposer({
         targetSurface: surface,
         designStyle,
         sourceIds: locked ? [] : sourceIds,
+        pinnedSourceIds: pinnedSources.map((source) => source.sourceId),
         files: locked ? [] : files,
-        artifactTargets: artifactContext?.artifactTargets ?? [],
-        generationIntent: null,
+        artifactTargets:
+          artifactContext?.artifactTargets ??
+          initialInput?.artifactTargets ??
+          [],
+        generationIntent: initialInput?.generationIntent ?? null,
       });
-      if (accepted) {
-        if (promptRef.current === text) setPrompt("");
-        setFiles((current) =>
-          current.filter((f) => !submittedFiles.includes(f)),
-        );
-        setSourceIds([]);
-      }
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "提交失败，请重试");
     }
   };
   const invalidSources = sourceIds.filter(
     (id) =>
-      sources.isError ||
-      !sources.data?.items.some(
-        (item) => item.id === id && item.status === "ready",
-      ),
+      !pinnedSources.some((source) => source.sourceId === id) &&
+      (sources.isError ||
+        !sources.data?.items.some(
+          (item) => item.id === id && item.status === "ready",
+        )),
   );
   const readySources = invalidSources.length === 0;
+  const designAvailable =
+    design === "automatic" ||
+    (design.startsWith("artifact:") &&
+      designArtifacts.some(
+        (a) =>
+          a.kind === "design_system" &&
+          a.currentVersion?.status === "ready" &&
+          a.currentVersion.artifactVersionId === design.slice(9),
+      )) ||
+    presets.data?.items.some(
+      (p) =>
+        designReference.kind === "preset" &&
+        p.presetId === designReference.presetId &&
+        p.version === designReference.version &&
+        p.checksum === designReference.checksum,
+    ) ||
+    Boolean(
+      pinnedDesign?.snapshot &&
+        initialInput &&
+        JSON.stringify(initialInput.designStyle) ===
+          JSON.stringify(designReference),
+    );
   return (
     <ChatInput
       value={prompt}
@@ -167,7 +238,13 @@ export function StudioComposer({
       onFiles={addFiles}
       onScreenshot={screenshot}
       isStreaming={busy}
-      disabled={disabled || !modelId || !readySources}
+      disabled={
+        disabled ||
+        !modelId ||
+        !readySources ||
+        !designAvailable ||
+        draft.missingFiles.length > 0
+      }
       context={
         <>
           {intentControl}
@@ -176,14 +253,41 @@ export function StudioComposer({
       }
       error={
         error ||
-        (!readySources
-          ? "引用资料尚未就绪、已删除或无权限。请移除失效引用或重新加载资料。"
-          : !models.isPending && !modelId
-            ? "没有可用模型，请重试加载"
-            : "")
+        (draft.missingFiles.length
+          ? "附件内容尚未恢复，请重新选择本机文件或移除后再提交"
+          : !designAvailable
+            ? "所选设计不可用，请重载或明确选择其他设计"
+            : !readySources
+              ? "引用资料尚未就绪、已删除或无权限。请移除失效引用或重新加载资料。"
+              : !models.isPending && !modelId
+                ? "没有可用模型，请重试加载"
+                : "")
       }
       attachments={
         <>
+          {draft.missingFiles.length > 0 && (
+            <div className="studio-chips" aria-label="待恢复附件">
+              {draft.missingFiles.map((file, index) => (
+                <span key={`${file.name}-${index}`}>
+                  {file.name} · 需重新选择本机文件
+                  <button
+                    type="button"
+                    aria-label={`移除待恢复附件 ${file.name}`}
+                    onClick={() =>
+                      updateDraft((current) => ({
+                        ...current,
+                        missingFiles: current.missingFiles.filter(
+                          (_, position) => position !== index,
+                        ),
+                      }))
+                    }
+                  >
+                    ×
+                  </button>
+                </span>
+              ))}
+            </div>
+          )}
           {sourceIds.length > 0 && (
             <div className="studio-chips" aria-label="已引用资料">
               {sourceIds.map((id) => (
@@ -268,9 +372,17 @@ export function StudioComposer({
           <select
             aria-label="模型"
             value={modelId}
-            onChange={(e) => setModel(e.target.value)}
+            onChange={(e) =>
+              updateDraft((current) => ({
+                ...current,
+                modelId: e.target.value,
+              }))
+            }
             disabled={locked}
           >
+            {model && !available.some((m) => m.id === model) && (
+              <option value="">所选模型不可用</option>
+            )}
             {available.map((m) => (
               <option key={m.id} value={m.id}>
                 {m.displayName}
@@ -287,8 +399,18 @@ export function StudioComposer({
                 ? artifactContext.requestedArtifactKinds.join("+")
                 : output
             }
-            onChange={(e) => setOutput(e.target.value)}
-            disabled={locked || !!artifactContext}
+            onChange={(e) =>
+              updateDraft((current) => ({
+                ...current,
+                requestedArtifactKinds:
+                  e.target.value === "both"
+                    ? ["prd", "prototype"]
+                    : e.target.value === "prd"
+                      ? ["prd"]
+                      : ["prototype"],
+              }))
+            }
+            disabled={locked || outputLocked || !!artifactContext}
           >
             {artifactContext &&
               !["prd", "prototype"].includes(
@@ -307,7 +429,12 @@ export function StudioComposer({
           <select
             aria-label="目标终端"
             value={surface}
-            onChange={(e) => setSurface(e.target.value as RunTargetSurface)}
+            onChange={(e) =>
+              updateDraft((current) => ({
+                ...current,
+                targetSurface: e.target.value as RunTargetSurface,
+              }))
+            }
             disabled={locked}
           >
             <option value="web">Web</option>
@@ -316,25 +443,52 @@ export function StudioComposer({
           <select
             aria-label="设计风格"
             value={design}
-            onChange={(e) => setDesign(e.target.value)}
+            onChange={(e) => {
+              const value = e.target.value;
+              const preset = presets.data?.items.find(
+                (p) => presetValue(p) === value,
+              );
+              const designStyle: RunDesignStyle =
+                value === "automatic"
+                  ? { kind: "automatic" }
+                  : value.startsWith("artifact:")
+                    ? { kind: "artifact", artifactVersionId: value.slice(9) }
+                    : preset
+                      ? {
+                          kind: "preset",
+                          presetId: preset.presetId,
+                          version: preset.version,
+                          checksum: preset.checksum,
+                        }
+                      : designReference;
+              updateDraft((current) => ({ ...current, designStyle }));
+            }}
             disabled={locked}
           >
             <option value="automatic">自动设计</option>
+            {design !== "automatic" &&
+              !presets.data?.items.some((p) => presetValue(p) === design) &&
+              !designArtifacts.some(
+                (a) =>
+                  `artifact:${a.currentVersion?.artifactVersionId}` === design,
+              ) && (
+                <option value={design}>
+                  {designAvailable ? "沿用固定设计快照" : "所选设计不可用"}
+                </option>
+              )}
             {presets.data?.items.map((p) => (
-              <option key={p.presetId} value={p.presetId}>
-                {p.label}
+              <option key={p.presetId} value={presetValue(p)}>
+                {p.label} · {p.version}
               </option>
             ))}
-            {bootstrap.artifacts
-              .filter((a) => a.kind === "design_system" && a.currentVersion)
-              .map((a) => (
-                <option
-                  key={a.id}
-                  value={`artifact:${a.currentVersion!.artifactVersionId}`}
-                >
-                  {a.title}
-                </option>
-              ))}
+            {designArtifacts.map((a) => (
+              <option
+                key={a.id}
+                value={`artifact:${a.currentVersion!.artifactVersionId}`}
+              >
+                {a.title}
+              </option>
+            ))}
           </select>
           {presets.error && (
             <button onClick={() => void presets.refetch()}>重载设计</button>
@@ -350,4 +504,12 @@ export function StudioComposer({
       }
     />
   );
+}
+
+function presetValue(value: {
+  presetId: string;
+  version: number;
+  checksum: string;
+}) {
+  return `preset:${value.presetId}:${value.version}:${value.checksum}`;
 }

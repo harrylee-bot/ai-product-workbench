@@ -3,6 +3,8 @@ import { Inject, Injectable, Optional, type OnModuleInit, type OnModuleDestroy }
 import { ConfigService } from "@nestjs/config";
 import {
   canonicalJson,
+  prototypePlanInputSchema, prototypeInputSnapshotSchema, updatePrototypePlanRequestSchema, createPrototypeRevisionPlanRequestSchema,
+  type UpdatePrototypePlanRequest, type CreatePrototypeRevisionPlanRequest,
   prototypeProgressSchema,
   runEventSchema,
   startRunRequestSchema,
@@ -169,8 +171,8 @@ export class PrototypeV2Service implements OnModuleInit, OnModuleDestroy {
       if (existing) { assertRequestHash(existing.requestHash, requestHash); return toPlan(existing); }
       if (request.generationRequest && request.generationRequest.prompt !== request.prompt) throw new ProblemException({ title: "Conflicting prompt", status: 400, detail: "The plan prompt must match its generation request", code: "PROTOTYPE_PROMPT_MISMATCH" });
       if (!this.runs) throw temporalUnavailable();
-      await this.runs.validatePrototypePlanCanvas(tx, projectId, request.generationRequest);
-      const row = await tx.prototypePlan.create({ data: { id: `plan_${randomBytes(12).toString("hex")}`, projectId, createdById: principal.id, title: request.title, prompt: request.prompt, generationRequest: request.generationRequest as Prisma.InputJsonValue | undefined, status: "draft", revision: 0, idempotencyKey, requestHash } });
+      const inputSnapshot=await this.runs.capturePrototypeInput(tx,projectId,request.generationRequest);
+      const row = await tx.prototypePlan.create({ data: { id: `plan_${randomBytes(12).toString("hex")}`, projectId, createdById: principal.id, title: request.title, prompt: request.prompt, generationRequest: request.generationRequest as Prisma.InputJsonValue | undefined, inputSnapshot:inputSnapshot as Prisma.InputJsonValue, status: "draft", revision: 0, idempotencyKey, requestHash } });
       return toPlan(row);
     });
   }
@@ -178,6 +180,91 @@ export class PrototypeV2Service implements OnModuleInit, OnModuleDestroy {
   async getPlanSnapshot(principal: AuthenticatedPrincipal, projectId: string, planId: string): Promise<PrototypePlan> {
     await this.requireProjectMember(principal.id, projectId, "viewer");
     return toPlan(await this.getPlan(projectId, planId));
+  }
+
+  async getPlanInput(principal:AuthenticatedPrincipal,projectId:string,planId:string){
+    await this.requireProjectMember(principal.id,projectId,"viewer");
+    return this.db.$transaction(async tx=>{
+      const plan=await tx.prototypePlan.findFirst({where:{id:planId,projectId}});
+      if(!plan)throw notFoundProblem("Prototype plan");
+      return this.readPlanInput(tx,plan);
+    },{isolationLevel:Prisma.TransactionIsolationLevel.RepeatableRead});
+  }
+
+  async getRevisionInput(principal:AuthenticatedPrincipal,projectId:string,revisionId:string){
+    await this.requireProjectMember(principal.id,projectId,"viewer");
+    return this.db.$transaction(async tx=>{
+      const source=await tx.prototypeRevision.findFirst({where:{id:revisionId,projectId}});
+      if(!source)throw notFoundProblem("Prototype revision");
+      return this.readPlanInput(tx,await this.sourceGenerationPlan(tx,source));
+    },{isolationLevel:Prisma.TransactionIsolationLevel.RepeatableRead});
+  }
+
+  async updatePlan(principal:AuthenticatedPrincipal,projectId:string,planId:string,request:UpdatePrototypePlanRequest,key:string,ifMatch?:string){
+    request=updatePrototypePlanRequestSchema.parse(request);
+    await this.requireProjectMember(principal.id,projectId,"editor");
+    return this.mutate(projectId,planId,principal.id,"plan_update",key,request,async tx=>{
+      const plan=await tx.prototypePlan.findFirst({where:{id:planId,projectId}});
+      if(!plan)throw notFoundProblem("Prototype plan");
+      assertIfMatch(ifMatch,plan.revision);
+      if(plan.status!=="draft"||plan.runtimeRunId)throw new ProblemException({title:"Plan input is frozen",status:409,code:"PROTOTYPE_PLAN_INPUT_FROZEN"});
+      if(request.prompt!==request.generationRequest.prompt)throw new ProblemException({title:"Conflicting prompt",status:400,code:"PROTOTYPE_PROMPT_MISMATCH"});
+      if(plan.sourceRevisionId&&canonicalJson(request.generationRequest.requestedArtifactKinds)!==canonicalJson(["prototype"]))throw new ProblemException({title:"Modification output must be prototype",status:400,code:"PROTOTYPE_REVISION_OUTPUT_MISMATCH"});
+      if(!this.runs)throw temporalUnavailable();
+      const previous=await this.readPlanInput(tx,plan);
+      const effective=plan.sourceRevisionId?await this.runs.resolvePrototypeRevisionRequest(tx,projectId,plan.sourceRevisionId,request.generationRequest):request.generationRequest;
+      const inputSnapshot=await this.runs.capturePrototypeInput(tx,projectId,effective,previous);
+      const generationRequest=await this.withPlanFeedback(tx,projectId,plan.sourceRevisionId,plan.feedbackIds,effective);
+      const updated=await tx.prototypePlan.updateMany({where:{id:planId,projectId,status:"draft",revision:plan.revision,runtimeRunId:null},data:{title:request.title,prompt:request.prompt,generationRequest:generationRequest as Prisma.InputJsonValue,inputSnapshot:inputSnapshot as Prisma.InputJsonValue,revision:{increment:1}}});
+      if(updated.count!==1)throw revisionConflictProblem();
+      return toPlan(await tx.prototypePlan.findUniqueOrThrow({where:{id:planId}}));
+    });
+  }
+
+  async createRevisionPlan(principal:AuthenticatedPrincipal,projectId:string,revisionId:string,request:CreatePrototypeRevisionPlanRequest,key:string,ifMatch?:string){
+    request=createPrototypeRevisionPlanRequestSchema.parse(request);
+    await this.requireProjectMember(principal.id,projectId,"editor");
+    return this.mutate(projectId,revisionId,principal.id,"revision_plan",key,request,async(tx,requestHash)=>{
+      const source=await tx.prototypeRevision.findFirst({where:{id:revisionId,projectId}});
+      if(!source)throw notFoundProblem("Prototype revision");
+      assertIfMatch(ifMatch,source.revision);
+      if(!["ready","confirmed","rejected"].includes(source.status))throw revisionConflictProblem();
+      if(request.prompt!==request.generationRequest.prompt)throw new ProblemException({title:"Conflicting prompt",status:400,code:"PROTOTYPE_PROMPT_MISMATCH"});
+      await tx.$queryRaw(Prisma.sql`SELECT id FROM prototype_plans WHERE id = ${source.planId} AND project_id = ${projectId} FOR UPDATE`);
+      if(canonicalJson(request.generationRequest.requestedArtifactKinds)!==canonicalJson(["prototype"]))throw new ProblemException({title:"Modification output must be prototype",status:400,code:"PROTOTYPE_REVISION_OUTPUT_MISMATCH"});
+      const original=await this.sourceGenerationPlan(tx,source),previous=await this.readPlanInput(tx,original);
+      if(!this.runs)throw temporalUnavailable();
+      const selected=await tx.prototypeFeedback.findMany({where:{id:{in:request.feedbackIds},projectId,revisionId,status:"open"}});
+      if(selected.length!==request.feedbackIds.length)throw notFoundProblem("Open feedback on source revision");
+      const effective=await this.runs.resolvePrototypeRevisionRequest(tx,projectId,revisionId,request.generationRequest);
+      const inputSnapshot=await this.runs.capturePrototypeInput(tx,projectId,effective,previous);
+      const latest=await tx.prototypePlan.aggregate({where:{projectId,OR:[{id:source.planId},{rootPlanId:source.planId}]},_max:{contentVersion:true}});
+      const latestRevision=await tx.prototypeRevision.aggregate({where:{projectId,planId:source.planId},_max:{version:true}});
+      const generationRequest=await this.withPlanFeedback(tx,projectId,revisionId,request.feedbackIds,effective);
+      const row=await tx.prototypePlan.create({data:{id:`plan_${randomBytes(12).toString("hex")}`,projectId,createdById:principal.id,rootPlanId:source.planId,sourceRevisionId:revisionId,contentVersion:Math.max(latest._max.contentVersion??1,latestRevision._max.version??1)+1,title:request.title,prompt:request.prompt,feedbackIds:request.feedbackIds,generationRequest:generationRequest as Prisma.InputJsonValue,inputSnapshot:inputSnapshot as Prisma.InputJsonValue,status:"draft",revision:0,idempotencyKey:`revision-plan:${hashRequest({principalId:principal.id,revisionId,key}).slice(0,48)}`,requestHash}});
+      return toPlan(row);
+    });
+  }
+
+  private async withPlanFeedback(tx:Prisma.TransactionClient,projectId:string,revisionId:string|null,feedbackIds:Prisma.JsonValue,request:import("@workbench/workbench-contracts").StartRunRequest){
+    if(!revisionId||!Array.isArray(feedbackIds)||!feedbackIds.length)return request;
+    const feedback=await tx.prototypeFeedback.findMany({where:{id:{in:feedbackIds as string[]},projectId,revisionId},orderBy:[{createdAt:"asc"},{id:"asc"}]});
+    return startRunRequestSchema.parse({...request,prompt:[request.prompt,...feedback.map(item=>`Review ${item.id}: ${item.body} ${item.anchor?canonicalJson(item.anchor):""}`)].join("\n")});
+  }
+
+  private async sourceGenerationPlan(tx:Prisma.TransactionClient,source:{projectId:string;planId:string;version:number}){
+    const plan=await tx.prototypePlan.findFirst({where:{projectId:source.projectId,contentVersion:source.version,OR:[{id:source.planId},{rootPlanId:source.planId}]}});
+    if(!plan)throw notFoundProblem("Source generation plan");
+    return plan;
+  }
+
+  private async readPlanInput(tx:Prisma.TransactionClient,plan:Prisma.PrototypePlanGetPayload<{}>){
+    if(!plan.generationRequest)throw new ProblemException({title:"Generation context unavailable",status:409,code:"PROTOTYPE_PLAN_CONTEXT_MISSING"});
+    const runId=plan.runtimeRunId??plan.reusedRunId;
+    const bound=runId&&this.runs?await this.runs.prototypeInputFromRun(tx,plan.projectId,runId):null;
+    const request=bound?.request??startRunRequestSchema.parse(plan.generationRequest);
+    const snapshot=bound?.snapshot??(plan.inputSnapshot?prototypeInputSnapshotSchema.parse(plan.inputSnapshot):null);
+    return prototypePlanInputSchema.parse({plan:toPlan(plan),request,snapshot,sha256:hashRequest({request,snapshot})});
   }
 
   async getProgress(principal: AuthenticatedPrincipal, projectId: string, planId: string) {
@@ -339,9 +426,11 @@ export class PrototypeV2Service implements OnModuleInit, OnModuleDestroy {
       const contentVersion = Math.max(lastPlan?.contentVersion ?? 1, lastRevision?.version ?? 1) + 1;
       const prompt = [request.prompt ?? "Revise the prototype according to the following review feedback. Preserve unrelated screens and interactions.", ...feedback.map((item) => JSON.stringify({ id: item.id, body: item.body, anchor: item.anchor }))].join("\n");
       if (prompt.length > 20_000) throw new ProblemException({ title: "Feedback selection too large", status: 400, detail: "Choose fewer comments so the revision request fits 20,000 characters", code: "PROTOTYPE_REVISION_PROMPT_TOO_LARGE" });
-      if (!root.generationRequest) throw new ProblemException({ title: "Generation context unavailable", status: 409, detail: "This revision has no pinned generation context", code: "PROTOTYPE_REVISION_CONTEXT_MISSING" });
-      const generationRequest = root.generationRequest ? { ...startRunRequestSchema.parse(root.generationRequest), prompt } : undefined;
-      const plan = await tx.prototypePlan.create({ data: { id: `plan_${randomBytes(12).toString("hex")}`, projectId, createdById: principal.id, rootPlanId: root.id, sourceRevisionId: revisionId, feedbackIds: request.feedbackIds, contentVersion, title: source.title, prompt: formatPrototypeReviewPrompt(request.prompt, feedback, source.pages), generationRequest: generationRequest as Prisma.InputJsonValue | undefined, status: "approved", revision: 0, idempotencyKey: `revise:${hashRequest({ principalId: principal.id, revisionId, idempotencyKey }).slice(0, 48)}`, requestHash } });
+      const sourcePlan=await this.sourceGenerationPlan(tx,source);
+      const sourceInput=await this.readPlanInput(tx,sourcePlan);
+      if (!sourcePlan.generationRequest) throw new ProblemException({ title: "Generation context unavailable", status: 409, detail: "This revision has no pinned generation context", code: "PROTOTYPE_REVISION_CONTEXT_MISSING" });
+      const generationRequest = { ...sourceInput.request, prompt };
+      const plan = await tx.prototypePlan.create({ data: { id: `plan_${randomBytes(12).toString("hex")}`, projectId, createdById: principal.id, rootPlanId: root.id, sourceRevisionId: revisionId, feedbackIds: request.feedbackIds, contentVersion, title: source.title, prompt: formatPrototypeReviewPrompt(request.prompt, feedback, source.pages), generationRequest: generationRequest as Prisma.InputJsonValue | undefined, inputSnapshot:(sourceInput.snapshot??undefined) as Prisma.InputJsonValue|undefined, status: "approved", revision: 0, idempotencyKey: `revise:${hashRequest({ principalId: principal.id, revisionId, idempotencyKey }).slice(0, 48)}`, requestHash } });
       await this.prepareRun(tx, plan);
       await enqueuePrototypeCommand(tx, projectId, plan.id, "plan_start", { principalId: principal.id });
       return toPlan(plan);
@@ -584,10 +673,11 @@ export class PrototypeV2Service implements OnModuleInit, OnModuleDestroy {
     });
   }
 
-  private async prepareRun(tx: Prisma.TransactionClient, plan: { id: string; projectId: string; createdById: string; title: string; generationRequest: Prisma.JsonValue | null; sourceRevisionId: string | null }): Promise<void> {
+  private async prepareRun(tx: Prisma.TransactionClient, plan: { id: string; projectId: string; createdById: string; title: string; generationRequest: Prisma.JsonValue | null; sourceRevisionId: string | null; inputSnapshot?:Prisma.JsonValue|null; feedbackIds?:Prisma.JsonValue }): Promise<void> {
     if (!plan.generationRequest) throw new ProblemException({ title: "Generation context unavailable", status: 409, detail: "This plan has no pinned generation request", code: "PROTOTYPE_PLAN_CONTEXT_MISSING" });
     if (!this.runs) throw temporalUnavailable();
-    const runId = await this.runs.preparePrototypeRun(tx, { projectId: plan.projectId, principalId: plan.createdById, planId: plan.id, title: plan.title, request: startRunRequestSchema.parse(plan.generationRequest), sourceRevisionId: plan.sourceRevisionId });
+    const request=startRunRequestSchema.parse(plan.generationRequest);
+    const runId = await this.runs.preparePrototypeRun(tx, { projectId: plan.projectId, principalId: plan.createdById, planId: plan.id, title: plan.title, request, sourceRevisionId: plan.sourceRevisionId,inputSnapshot:plan.inputSnapshot?prototypeInputSnapshotSchema.parse(plan.inputSnapshot):null });
     await tx.prototypePlan.update({ where: { id: plan.id }, data: { runtimeRunId: runId } });
   }
 

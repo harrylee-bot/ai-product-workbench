@@ -3,6 +3,7 @@ import type { Response } from "express";
 import { z } from "zod";
 import {
   revisePrototypeRevisionRequestSchema,
+  updatePrototypePlanRequestSchema,createPrototypeRevisionPlanRequestSchema,
   createPrototypeExportRequestSchema,
   createPrototypeFeedbackRequestSchema,
   createPrototypePlanRequestSchema,
@@ -82,6 +83,25 @@ export class PrototypeV2Controller {
     const result = await this.service.getPlanSnapshot(principal, projectId, planId);
     response.setHeader("ETag", revisionEtag(result.revision));
     return result;
+  }
+
+  @Get("plans/:planId/input")
+  async getPlanInput(@CurrentPrincipal() principal:AuthenticatedPrincipal,@Param("projectId") projectId:string,@Param("planId") planId:string,@Res({passthrough:true}) response:Response){
+    response.setHeader("Cache-Control","private, no-store");const value=await this.service.getPlanInput(principal,projectId,planId);response.setHeader("ETag",revisionEtag(value.plan.revision));return value;
+  }
+  @Get("revisions/:revisionId/input")
+  async getRevisionInput(@CurrentPrincipal() principal:AuthenticatedPrincipal,@Param("projectId") projectId:string,@Param("revisionId") revisionId:string,@Res({passthrough:true}) response:Response){
+    response.setHeader("Cache-Control","private, no-store");return this.service.getRevisionInput(principal,projectId,revisionId);
+  }
+  @Post("plans/:planId/input")
+  @HttpCode(200)
+  async updatePlan(@CurrentPrincipal() principal:AuthenticatedPrincipal,@Param("projectId") projectId:string,@Param("planId") planId:string,@Headers("idempotency-key") key:string|undefined,@Headers("if-match") ifMatch:string|undefined,@Body(body(updatePrototypePlanRequestSchema)) request:z.infer<typeof updatePrototypePlanRequestSchema>,@Res({passthrough:true}) response:Response){
+    const value=await this.service.updatePlan(principal,projectId,planId,request,requireHeader(key,"Idempotency-Key"),ifMatch);response.setHeader("ETag",revisionEtag(value.revision));return value;
+  }
+  @Post("revisions/:revisionId/plans")
+  @HttpCode(201)
+  async createRevisionPlan(@CurrentPrincipal() principal:AuthenticatedPrincipal,@Param("projectId") projectId:string,@Param("revisionId") revisionId:string,@Headers("idempotency-key") key:string|undefined,@Headers("if-match") ifMatch:string|undefined,@Body(body(createPrototypeRevisionPlanRequestSchema)) request:z.infer<typeof createPrototypeRevisionPlanRequestSchema>,@Res({passthrough:true}) response:Response){
+    const value=await this.service.createRevisionPlan(principal,projectId,revisionId,request,requireHeader(key,"Idempotency-Key"),ifMatch);response.setHeader("ETag",revisionEtag(value.revision));return value;
   }
 
   @Get("plans/:planId/progress")

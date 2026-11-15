@@ -274,6 +274,7 @@ const server = createServer(async (req, res) => {
   if (path.endsWith("/prototype-v2/plans"))
     return json(res, mode === "plan" ? [plan] : []);
   if (path.endsWith(`/plans/${planId}`)) return json(res, plan);
+  if(path.endsWith('/input'))return json(res,{plan,request:{prompt:plan.prompt,modelId:run.modelId,workflow:'generate',targetSurface:'web',designStyle:{kind:'automatic'},sourceIds:[],artifactTargets:[],requestedArtifactKinds:['prototype'],generationIntent:null,canvasSnapshot:null},snapshot:{sources:[],designStyle:{artifactVersionId:null,snapshot:null,snapshotSha256:null},knowledgeReleaseId:null},sha256:'a'.repeat(64)});
   if (path.endsWith("/progress")) {
     progressReads++;
     return json(res, {

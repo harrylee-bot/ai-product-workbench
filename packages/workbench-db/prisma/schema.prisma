@@ -225,6 +225,8 @@ enum PrototypeExportStatus {
 }
 
 enum PrototypeMutationKind {
+  plan_update
+  revision_plan
   plan_create
   plan_approve
   plan_cancel
@@ -2565,6 +2567,7 @@ model PrototypePlan {
   contentVersion Int               @default(1) @map("content_version")
   feedbackIds    Json              @default("[]") @map("feedback_ids")
   generationRequest Json?          @map("generation_request")
+  inputSnapshot Json?              @map("input_snapshot")
   runtimeRunId   String?            @unique @map("runtime_run_id")
   runtimeRun     Run?               @relation("PrototypePlanOwnedRun", fields: [runtimeRunId, projectId], references: [id, projectId], onDelete: Restrict, onUpdate: Restrict, map: "prototype_plans_runtime_run_project_fkey")
   id             String             @id @default(cuid())

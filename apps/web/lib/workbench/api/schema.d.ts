@@ -1746,6 +1746,58 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/projects/{projectId}/prototype-v2/plans/{planId}/input": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Read complete fixed plan input */
+        get: operations["getPrototypePlanInput"];
+        put?: never;
+        /** Adjust draft input atomically and preserve fixed context */
+        post: operations["updatePrototypePlanInput"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/projects/{projectId}/prototype-v2/revisions/{revisionId}/input": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Read the selected revision's actual generation input */
+        get: operations["getPrototypeRevisionInput"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/projects/{projectId}/prototype-v2/revisions/{revisionId}/plans": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Create a reviewable modification plan in the source version family */
+        post: operations["createPrototypeRevisionPlan"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/projects/{projectId}/prototype-v2/plans/{planId}/progress": {
         parameters: {
             query?: never;
@@ -5523,6 +5575,14 @@ export interface components {
             title: string;
             generationRequest: components["schemas"]["StartRunRequest"];
         };
+        /** @description Selected feedback ids are unique; transactional validation binds them to the exact source revision and editor permission. */
+        CreatePrototypeRevisionPlanRequest: {
+            prompt: string;
+            title: string;
+            generationRequest: components["schemas"]["StartRunRequest"];
+            /** @default [] */
+            feedbackIds: string[];
+        };
         CreatePrototypeShareRequest: {
             revisionId: string;
             /** Format: date-time */
@@ -6877,6 +6937,109 @@ export interface components {
             resolvedAt: string | null;
         };
         PrototypeFeedbackList: components["schemas"]["PrototypeFeedback"][];
+        RuntimeDesignAsset: {
+            id: string;
+            name: string;
+            /** @enum {string} */
+            kind: "image" | "font";
+            artifactVersionId: string;
+            blobId: string;
+            mediaType: string;
+            byteSize: number;
+            sha256: string;
+        };
+        RuntimeDesignToken: {
+            id: string;
+            path: string;
+            type: components["schemas"]["DesignSystemTokenType"];
+            value: components["schemas"]["JsonValue"];
+            description: string | null;
+        };
+        RuntimeDesignStyleSnapshot: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            protocol: "workbench.runtime.design-style.v1";
+            source: {
+                projectId: string;
+                artifactId: string;
+                artifactVersionId: string;
+                checksum: string;
+            };
+            documentId: string;
+            title: string;
+            tokens: components["schemas"]["RuntimeDesignToken"][];
+            assets: components["schemas"]["RuntimeDesignAsset"][];
+            principles: components["schemas"]["DesignSystemPrinciple"][];
+            guidelines: components["schemas"]["DesignSystemGuideline"][];
+            components: components["schemas"]["DesignSystemComponent"][];
+        };
+        RuntimePresetDesignStyleSnapshot: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            protocol: "workbench.runtime.design-preset.v1";
+            source: components["schemas"]["DesignPresetReference"];
+            label: string;
+            swatch: components["schemas"]["DesignPresetSwatch"];
+            description: string;
+            directives: components["schemas"]["DesignPresetDirectives"];
+            tokens: components["schemas"]["DesignPresetTokens"];
+        };
+        RuntimeMaterializedDesignStyleSnapshot: components["schemas"]["RuntimeDesignStyleSnapshot"] | components["schemas"]["RuntimePresetDesignStyleSnapshot"];
+        PrototypeInputSnapshot: {
+            sources: {
+                sourceId: string;
+                kind: components["schemas"]["ImportSourceKind"];
+                label: string;
+                checksum: string;
+                descriptor: {
+                    /** @enum {string} */
+                    kind: "file";
+                    fileAssetId: string;
+                    originalName: components["schemas"]["FileName"];
+                    mediaType: string;
+                } | {
+                    /** @enum {string} */
+                    kind: "design_md";
+                    fileAssetId: string;
+                    originalName: components["schemas"]["FileName"];
+                    mediaType: string;
+                } | {
+                    /** @enum {string} */
+                    kind: "url_snapshot";
+                    /**
+                     * Format: uri
+                     * @description Import source locators use HTTP(S); DNS, redirect and private-network checks are enforced by the Import Worker before fetching.
+                     */
+                    sourceUrl: string;
+                    /**
+                     * Format: uri
+                     * @description Import source locators use HTTP(S); DNS, redirect and private-network checks are enforced by the Import Worker before fetching.
+                     */
+                    resolvedUrl: string | null;
+                } | {
+                    /** @enum {string} */
+                    kind: "github_snapshot";
+                    repository: string;
+                    commitSha: string;
+                } | {
+                    /** @enum {string} */
+                    kind: "figma_snapshot";
+                    fileKey: string;
+                    versionId: string;
+                };
+                snapshot: components["schemas"]["RunSourceSnapshotManifest"];
+            }[];
+            designStyle: {
+                artifactVersionId: string | null;
+                snapshot: components["schemas"]["RuntimeDesignStyleSnapshot"] | components["schemas"]["RuntimePresetDesignStyleSnapshot"] | null;
+                snapshotSha256: string | null;
+            };
+            knowledgeReleaseId: string | null;
+        };
         PrototypeInsertNodeOperation: {
             /**
              * @description discriminator enum property added by openapi-typescript
@@ -7072,6 +7235,62 @@ export interface components {
                 code: string;
                 detail: string;
             } | null;
+        };
+        PrototypePlanInput: {
+            plan: components["schemas"]["PrototypePlan"];
+            request: components["schemas"]["StartRunRequest"];
+            snapshot: {
+                sources: {
+                    sourceId: string;
+                    kind: components["schemas"]["ImportSourceKind"];
+                    label: string;
+                    checksum: string;
+                    descriptor: {
+                        /** @enum {string} */
+                        kind: "file";
+                        fileAssetId: string;
+                        originalName: components["schemas"]["FileName"];
+                        mediaType: string;
+                    } | {
+                        /** @enum {string} */
+                        kind: "design_md";
+                        fileAssetId: string;
+                        originalName: components["schemas"]["FileName"];
+                        mediaType: string;
+                    } | {
+                        /** @enum {string} */
+                        kind: "url_snapshot";
+                        /**
+                         * Format: uri
+                         * @description Import source locators use HTTP(S); DNS, redirect and private-network checks are enforced by the Import Worker before fetching.
+                         */
+                        sourceUrl: string;
+                        /**
+                         * Format: uri
+                         * @description Import source locators use HTTP(S); DNS, redirect and private-network checks are enforced by the Import Worker before fetching.
+                         */
+                        resolvedUrl: string | null;
+                    } | {
+                        /** @enum {string} */
+                        kind: "github_snapshot";
+                        repository: string;
+                        commitSha: string;
+                    } | {
+                        /** @enum {string} */
+                        kind: "figma_snapshot";
+                        fileKey: string;
+                        versionId: string;
+                    };
+                    snapshot: components["schemas"]["RunSourceSnapshotManifest"];
+                }[];
+                designStyle: {
+                    artifactVersionId: string | null;
+                    snapshot: components["schemas"]["RuntimeDesignStyleSnapshot"] | components["schemas"]["RuntimePresetDesignStyleSnapshot"] | null;
+                    snapshotSha256: string | null;
+                };
+                knowledgeReleaseId: string | null;
+            } | null;
+            sha256: string;
         };
         PrototypePlanList: components["schemas"]["PrototypePlan"][];
         /** @enum {string} */
@@ -8128,58 +8347,6 @@ export interface components {
         };
         /** @description A PRD draft's top-level citations exactly match its content citations; enforced by the runtime Zod contract. */
         RuntimeArtifactDraft: components["schemas"]["RuntimeArtifactDraftPrd"] | components["schemas"]["RuntimeArtifactDraftPrototype"] | components["schemas"]["RuntimeArtifactDraftImage"] | components["schemas"]["RuntimeArtifactDraftCode"] | components["schemas"]["RuntimeArtifactDraftDocument"] | components["schemas"]["RuntimeArtifactDraftData"];
-        RuntimeDesignAsset: {
-            id: string;
-            name: string;
-            /** @enum {string} */
-            kind: "image" | "font";
-            artifactVersionId: string;
-            blobId: string;
-            mediaType: string;
-            byteSize: number;
-            sha256: string;
-        };
-        RuntimeDesignToken: {
-            id: string;
-            path: string;
-            type: components["schemas"]["DesignSystemTokenType"];
-            value: components["schemas"]["JsonValue"];
-            description: string | null;
-        };
-        RuntimeDesignStyleSnapshot: {
-            /**
-             * @description discriminator enum property added by openapi-typescript
-             * @enum {string}
-             */
-            protocol: "workbench.runtime.design-style.v1";
-            source: {
-                projectId: string;
-                artifactId: string;
-                artifactVersionId: string;
-                checksum: string;
-            };
-            documentId: string;
-            title: string;
-            tokens: components["schemas"]["RuntimeDesignToken"][];
-            assets: components["schemas"]["RuntimeDesignAsset"][];
-            principles: components["schemas"]["DesignSystemPrinciple"][];
-            guidelines: components["schemas"]["DesignSystemGuideline"][];
-            components: components["schemas"]["DesignSystemComponent"][];
-        };
-        RuntimePresetDesignStyleSnapshot: {
-            /**
-             * @description discriminator enum property added by openapi-typescript
-             * @enum {string}
-             */
-            protocol: "workbench.runtime.design-preset.v1";
-            source: components["schemas"]["DesignPresetReference"];
-            label: string;
-            swatch: components["schemas"]["DesignPresetSwatch"];
-            description: string;
-            directives: components["schemas"]["DesignPresetDirectives"];
-            tokens: components["schemas"]["DesignPresetTokens"];
-        };
-        RuntimeMaterializedDesignStyleSnapshot: components["schemas"]["RuntimeDesignStyleSnapshot"] | components["schemas"]["RuntimePresetDesignStyleSnapshot"];
         /** @description Unique Workbench workflows accepted for this runtime model */
         RuntimeModelSupportedWorkflows: components["schemas"]["RunWorkflow"][];
         RuntimeModel: {
@@ -8426,6 +8593,11 @@ export interface components {
         UpdateProjectRequest: {
             title?: string;
             summary?: string;
+        };
+        UpdatePrototypePlanRequest: {
+            prompt: string;
+            title: string;
+            generationRequest: components["schemas"]["StartRunRequest"];
         };
         UpdateThreadRequest: {
             title: string;
@@ -12360,6 +12532,135 @@ export interface operations {
                     "application/json": components["schemas"]["PrototypePlan"];
                 };
             };
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            409: components["responses"]["Problem"];
+            412: components["responses"]["Problem"];
+            428: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    getPrototypePlanInput: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectId: components["parameters"]["ProjectId"];
+                planId: components["parameters"]["PlanId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Read complete fixed plan input */
+            200: {
+                headers: {
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PrototypePlanInput"];
+                };
+            };
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            409: components["responses"]["Problem"];
+        };
+    };
+    updatePrototypePlanInput: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                "If-Match": components["parameters"]["IfMatch"];
+            };
+            path: {
+                projectId: components["parameters"]["ProjectId"];
+                planId: components["parameters"]["PlanId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdatePrototypePlanRequest"];
+            };
+        };
+        responses: {
+            /** @description Adjust draft input atomically and preserve fixed context */
+            200: {
+                headers: {
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PrototypePlan"];
+                };
+            };
+            400: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            409: components["responses"]["Problem"];
+            412: components["responses"]["Problem"];
+            428: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    getPrototypeRevisionInput: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectId: components["parameters"]["ProjectId"];
+                revisionId: components["parameters"]["PrototypeRevisionId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Read the selected revision's actual generation input */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PrototypePlanInput"];
+                };
+            };
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            409: components["responses"]["Problem"];
+        };
+    };
+    createPrototypeRevisionPlan: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                "If-Match": components["parameters"]["IfMatch"];
+            };
+            path: {
+                projectId: components["parameters"]["ProjectId"];
+                revisionId: components["parameters"]["PrototypeRevisionId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreatePrototypeRevisionPlanRequest"];
+            };
+        };
+        responses: {
+            /** @description Create a reviewable modification plan in the source version family */
+            201: {
+                headers: {
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PrototypePlan"];
+                };
+            };
+            400: components["responses"]["Problem"];
             403: components["responses"]["Problem"];
             404: components["responses"]["Problem"];
             409: components["responses"]["Problem"];

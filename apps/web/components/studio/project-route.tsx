@@ -1,6 +1,4 @@
 "use client";
-import { useWorkbenchAuth } from "@/lib/auth/workbench-auth";
-import { useStudioDraft } from "@/lib/studio/draft";
 import Link from "next/link";
 import { isWorkbenchApiError } from "@/lib/workbench/api";
 import { useWorkbenchProjectBootstrap } from "@/lib/workbench/features/projects";
@@ -9,8 +7,6 @@ import { StudioWorkspace } from "./workspace";
 export function StudioProject({ projectId }: { projectId: string }) {
   const query = useWorkbenchProjectBootstrap(projectId),
     submission = usePlanSubmission(projectId);
-  const { user } = useWorkbenchAuth();
-  const [prompt, setPrompt] = useStudioDraft(user?.id ?? "", projectId);
   if (query.isPending)
     return (
       <main className="studio-loading" role="status">
@@ -39,11 +35,10 @@ export function StudioProject({ projectId }: { projectId: string }) {
       canEdit={canEdit}
       bootstrap={data}
       onCreatePlan={submission.create}
+      onSaveInput={submission.saveInput}
       composer={{
         projectId,
         bootstrap: data,
-        prompt,
-        setPrompt,
         busy: submission.pending,
         uploads: submission.uploads,
         disabled: !canEdit,

@@ -10,6 +10,8 @@ import {
   prototypeFeedbackSchema,
   prototypePlanSchema,
   prototypeProgressSchema,
+  prototypePlanInputSchema,updatePrototypePlanRequestSchema,createPrototypeRevisionPlanRequestSchema,
+  type UpdatePrototypePlanRequest,type CreatePrototypeRevisionPlanRequest,
   prototypePlanListSchema,
   prototypeFeedbackListSchema,
   prototypeShareListSchema,
@@ -102,6 +104,23 @@ export class WorkbenchPrototypeV2Api {
   async getPlan(projectId: string, planId: string): Promise<Versioned<PrototypePlan>> {
     const result = await this.api.GET("/projects/{projectId}/prototype-v2/plans/{planId}", { params: { path: { projectId, planId } } });
     return versioned(prototypePlanSchema, result.data, result.response, "get prototype plan");
+  }
+
+  async getPlanInput(projectId:string,planId:string){
+    const result=await this.api.GET("/projects/{projectId}/prototype-v2/plans/{planId}/input",{params:{path:{projectId,planId}}});
+    return parseContract(prototypePlanInputSchema,result.data,"read fixed plan input");
+  }
+  async getRevisionInput(projectId:string,revisionId:string){
+    const result=await this.api.GET("/projects/{projectId}/prototype-v2/revisions/{revisionId}/input",{params:{path:{projectId,revisionId}}});
+    return parseContract(prototypePlanInputSchema,result.data,"read source revision input");
+  }
+  async updatePlanInput(projectId:string,planId:string,ifMatch:string,request:UpdatePrototypePlanRequest,idempotencyKey=createIdempotencyKey("studio-input")){
+    const result=await this.api.POST("/projects/{projectId}/prototype-v2/plans/{planId}/input",{params:{path:{projectId,planId},header:{"If-Match":normalizeEtag(ifMatch),"Idempotency-Key":normalizeIdempotencyKey(idempotencyKey)}},body:updatePrototypePlanRequestSchema.parse(request)});
+    return versioned(prototypePlanSchema,result.data,result.response,"adjust draft plan input");
+  }
+  async createRevisionPlan(projectId:string,revisionId:string,ifMatch:string,request:CreatePrototypeRevisionPlanRequest,idempotencyKey=createIdempotencyKey("studio-revision-plan")){
+    const result=await this.api.POST("/projects/{projectId}/prototype-v2/revisions/{revisionId}/plans",{params:{path:{projectId,revisionId},header:{"If-Match":normalizeEtag(ifMatch),"Idempotency-Key":normalizeIdempotencyKey(idempotencyKey)}},body:createPrototypeRevisionPlanRequestSchema.parse(request)});
+    return versioned(prototypePlanSchema,result.data,result.response,"create modification plan");
   }
 
   async getProgress(projectId: string, planId: string) {

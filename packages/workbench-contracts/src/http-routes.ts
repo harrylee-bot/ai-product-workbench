@@ -158,6 +158,7 @@ import {
   prototypeFeedbackSchema,
   prototypePlanSchema,
   prototypeProgressSchema,
+  prototypePlanInputSchema,updatePrototypePlanRequestSchema,createPrototypeRevisionPlanRequestSchema,
   prototypePublicShareSchema,
   prototypeRevisionSchema,
   prototypeRevisionListSchema,
@@ -1047,6 +1048,22 @@ export const workbenchHttpRoutes = [
     requestHeaders: ["idempotencyKey", "ifMatch"], requestBody: named("PrototypeWorkflowActionRequest", prototypeWorkflowActionRequestSchema),
     response: response(202, "Approve a plan and enqueue the Temporal generation workflow", named("PrototypePlan", prototypePlanSchema), ["etag", "location"]),
     problemStatuses: problems(403, 404, 409, 412, 428, 503),
+  },
+  {
+    method:"get",path:"/projects/{projectId}/prototype-v2/plans/{planId}/input",operationId:"getPrototypePlanInput",
+    response:response(200,"Read complete fixed plan input",named("PrototypePlanInput",prototypePlanInputSchema),["etag"]),problemStatuses:problems(403,404,409),
+  },
+  {
+    method:"get",path:"/projects/{projectId}/prototype-v2/revisions/{revisionId}/input",operationId:"getPrototypeRevisionInput",
+    response:response(200,"Read the selected revision's actual generation input",named("PrototypePlanInput",prototypePlanInputSchema)),problemStatuses:problems(403,404,409),
+  },
+  {
+    method:"post",path:"/projects/{projectId}/prototype-v2/plans/{planId}/input",operationId:"updatePrototypePlanInput",requestHeaders:["idempotencyKey","ifMatch"],requestBody:named("UpdatePrototypePlanRequest",updatePrototypePlanRequestSchema),
+    response:response(200,"Adjust draft input atomically and preserve fixed context",named("PrototypePlan",prototypePlanSchema),["etag"]),problemStatuses:problems(400,403,404,409,412,428,503),
+  },
+  {
+    method:"post",path:"/projects/{projectId}/prototype-v2/revisions/{revisionId}/plans",operationId:"createPrototypeRevisionPlan",requestHeaders:["idempotencyKey","ifMatch"],requestBody:named("CreatePrototypeRevisionPlanRequest",createPrototypeRevisionPlanRequestSchema),
+    response:response(201,"Create a reviewable modification plan in the source version family",named("PrototypePlan",prototypePlanSchema),["etag"]),problemStatuses:problems(400,403,404,409,412,428,503),
   },
   {
     method: "get", path: "/projects/{projectId}/prototype-v2/plans/{planId}/progress", operationId: "getPrototypeProgress",

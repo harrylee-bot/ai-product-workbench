@@ -1,5 +1,7 @@
 import { z } from "zod";
 import { startRunRequestSchema, runSchema, runEventSchema } from "./runs.js";
+import { runtimeMaterializedDesignStyleSnapshotSchema } from "./design-systems.js";
+import { importSourceKindSchema, importSourceDescriptorSchema, runSourceSnapshotManifestSchema } from "./import-sources.js";
 import { sha256Schema } from "./files.js";
 import { isoDateTimeSchema, opaqueIdSchema, revisionSchema } from "./common.js";
 
@@ -218,3 +220,17 @@ export const prototypeProgressSchema = z.object({
   }
 });
 export type PrototypeProgress = z.infer<typeof prototypeProgressSchema>;
+
+/** Immutable context captured when a draft is created or explicitly adjusted. */
+export const prototypeInputSnapshotSchema = z.object({
+  sources: z.array(z.object({sourceId:opaqueIdSchema,kind:importSourceKindSchema,label:shortText(240),checksum:sha256Schema,descriptor:importSourceDescriptorSchema,snapshot:runSourceSnapshotManifestSchema}).strict()).max(50),
+  designStyle: z.object({artifactVersionId:opaqueIdSchema.nullable(),snapshot:runtimeMaterializedDesignStyleSnapshotSchema.nullable(),snapshotSha256:sha256Schema.nullable()}).strict(),
+  knowledgeReleaseId:opaqueIdSchema.nullable(),
+}).strict();
+export const prototypePlanInputSchema = z.object({plan:prototypePlanSchema,request:startRunRequestSchema,snapshot:prototypeInputSnapshotSchema.nullable(),sha256:sha256Schema}).strict();
+export const updatePrototypePlanRequestSchema=createPrototypePlanRequestSchema;
+export const createPrototypeRevisionPlanRequestSchema=createPrototypePlanRequestSchema.extend({feedbackIds:z.array(opaqueIdSchema).max(100).default([])}).refine(value=>new Set(value.feedbackIds).size===value.feedbackIds.length,"Feedback ids must be unique");
+export type PrototypeInputSnapshot=z.infer<typeof prototypeInputSnapshotSchema>;
+export type PrototypePlanInput=z.infer<typeof prototypePlanInputSchema>;
+export type UpdatePrototypePlanRequest=z.infer<typeof updatePrototypePlanRequestSchema>;
+export type CreatePrototypeRevisionPlanRequest=z.infer<typeof createPrototypeRevisionPlanRequestSchema>;
