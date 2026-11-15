@@ -4,7 +4,7 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useEffect } from "react";
 import { Toaster } from "sonner";
 
-import { WorkbenchRuntimeProvider } from "@/components/workbench/workbench-runtime";
+
 import { useWorkbenchAuth } from "@/lib/auth/workbench-auth";
 import { authRouteWithReturnPath, safeAuthReturnPath } from "@/lib/auth/auth-return-path";
 import { WorkbenchQueryProvider } from "@/lib/workbench/query";
@@ -15,7 +15,6 @@ export default function Layout({ children }: { children: React.ReactNode }) {
     <WorkbenchDataProviders>
       <Suspense fallback={<div className="flex h-dvh bg-background" />}>
         <WorkbenchAuthenticatedShell>
-          <WorkbenchRuntimeProvider />
           {children}
         </WorkbenchAuthenticatedShell>
       </Suspense>
@@ -53,16 +52,16 @@ function WorkbenchAuthenticatedShell({ children }: { children: React.ReactNode }
   }
 
   return (
-    <div className="h-dvh w-full overflow-hidden bg-[#131314] text-white">
+    <div className="h-dvh w-full overflow-hidden bg-[#f4f5f7] text-slate-900">
       <Toaster
         position="top-center"
-        theme="dark"
+        theme="light"
         toastOptions={{
           className:
             "!bg-card !text-foreground !border-border/70 !shadow-[var(--shadow-float)] !backdrop-blur-xl",
         }}
       />
-      <div className="h-full w-full overflow-hidden bg-[#131314]">
+      <div className="h-full w-full overflow-hidden bg-[#f4f5f7]">
         {children}
       </div>
     </div>

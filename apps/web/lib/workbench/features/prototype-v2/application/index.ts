@@ -213,3 +213,5 @@ function usePrototypeMutation<TData, TVariables extends PrototypeMutationVariabl
     },
   });
 }
+
+export { useWorkbenchPrototypeProgress } from "./progress";

@@ -1,0 +1,32 @@
+import type {
+  RunDesignStyle,
+  RunTargetSurface,
+  StartRunRequest,
+} from "@workbench/workbench-contracts";
+export type StudioSubmission = {
+  prompt: string;
+  modelId: string;
+  workflow: StartRunRequest["workflow"];
+  targetSurface: RunTargetSurface;
+  designStyle: RunDesignStyle;
+  sourceIds: string[];
+  files: File[];
+  requestedArtifactKinds: StartRunRequest["requestedArtifactKinds"];
+  artifactTargets: StartRunRequest["artifactTargets"];
+  generationIntent: StartRunRequest["generationIntent"];
+};
+export type StudioView =
+  | "pages"
+  | "documents"
+  | "resources"
+  | "knowledge"
+  | "runs"
+  | "publishing"
+  | "project";
+
+export type StudioArtifactContext = {
+  title: string;
+  workflow: "edit";
+  artifactTargets: StartRunRequest["artifactTargets"];
+  requestedArtifactKinds: StartRunRequest["requestedArtifactKinds"];
+};

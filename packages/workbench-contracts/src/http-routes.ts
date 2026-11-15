@@ -157,6 +157,7 @@ import {
   prototypeExportSchema,
   prototypeFeedbackSchema,
   prototypePlanSchema,
+  prototypeProgressSchema,
   prototypePublicShareSchema,
   prototypeRevisionSchema,
   prototypeRevisionListSchema,
@@ -1046,6 +1047,11 @@ export const workbenchHttpRoutes = [
     requestHeaders: ["idempotencyKey", "ifMatch"], requestBody: named("PrototypeWorkflowActionRequest", prototypeWorkflowActionRequestSchema),
     response: response(202, "Approve a plan and enqueue the Temporal generation workflow", named("PrototypePlan", prototypePlanSchema), ["etag", "location"]),
     problemStatuses: problems(403, 404, 409, 412, 428, 503),
+  },
+  {
+    method: "get", path: "/projects/{projectId}/prototype-v2/plans/{planId}/progress", operationId: "getPrototypeProgress",
+    response: response(200, "Authorized plan Run binding and bounded recovery snapshot", named("PrototypeProgress", prototypeProgressSchema)),
+    problemStatuses: problems(403, 404),
   },
   {
     method: "get", path: "/projects/{projectId}/prototype-v2/plans/{planId}", operationId: "getPrototypePlan",

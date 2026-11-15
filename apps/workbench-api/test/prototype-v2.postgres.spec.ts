@@ -68,6 +68,36 @@ describePg("Prototype V2 durable PostgreSQL lifecycle (workflow transport simula
     await db.$disconnect();
   });
 
+  it("recovers bounded latest previews from only the bound Run and current attempt", async () => {
+    const plan = await makePlan();
+    await service.approvePlan(principal(), projectId, plan.id, "progress-approve", '\"0\"', {});
+    const row = await db.prototypePlan.findUniqueOrThrow({ where: { id: plan.id } });
+    const runId = row.runtimeRunId!;
+    const store = new RunEventStore();
+    const preview = (title: string) => ({ artifactIndex: 0, kind: "prototype", title, markdown: "", screens: [] });
+    await db.$transaction(async tx => {
+      await tx.run.update({ where: { id: runId }, data: { attempt: 1 } });
+      await store.append(tx, runId, "run.started", { attempt: 1 });
+      await store.append(tx, runId, "artifact.preview.updated", { attempt: 1, preview: preview("first content") });
+      await store.append(tx, runId, "artifact.preview.updated", { attempt: 1, preview: preview("second content") });
+    });
+    const first = await service.getProgress(principal(), projectId, plan.id);
+    expect(first.run?.id).toBe(runId);
+    expect(first.events.filter(event => event.type === "artifact.preview.updated")).toHaveLength(1);
+    expect(first.events.at(-1)?.payload).toMatchObject({ preview: { title: "second content" } });
+    await db.$transaction(async tx => {
+      await tx.run.update({ where: { id: runId }, data: { attempt: 2 } });
+      await store.append(tx, runId, "run.started", { attempt: 2 });
+      await store.append(tx, runId, "artifact.preview.updated", { attempt: 2, preview: preview("current attempt") });
+      await store.append(tx, runId, "artifact.preview.updated", { attempt: 1, preview: preview("late stale content") });
+      for (let index = 0; index < 70; index++) await store.append(tx, runId, "activity.changed", {activityId: `activity-${index}`,status:"running",label:"Processing",detail:null});
+    });
+    const recovered = await service.getProgress(principal(), projectId, plan.id);
+    expect(recovered.events).toHaveLength(64);
+    expect(recovered.events.find(event => event.type === "artifact.preview.updated")?.payload).toMatchObject({attempt:2,preview:{title:"current attempt"}});
+    expect(recovered.events.every(event => event.sequence <= recovered.run!.lastEventSequence)).toBe(true);
+  });
+
   it("serializes simultaneous creates, rejects changed hashes and replays the original snapshot", async () => {
     const request = { title: "Plan", prompt: "A prototype", generationRequest: generationRequest("A prototype") };
     const results = await Promise.all(Array.from({ length: 6 }, () => service.createPlan(principal(), projectId, request, "create-concurrent")));

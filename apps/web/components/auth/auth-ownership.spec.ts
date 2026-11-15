@@ -44,7 +44,6 @@ describe("authentication UI ownership", () => {
       "@/components/auth/auth-toast",
     ]);
     await expectImports("app/(auth)/layout.tsx", [
-      "@/components/auth/auth-spotlight-shell",
       "@/components/auth/auth-toast",
     ]);
   });

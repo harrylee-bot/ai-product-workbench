@@ -1,0 +1,124 @@
+{
+  "repository": "https://github.com/onlook-dev/onlook",
+  "commit": "423e2e924366419e418ee049093872d535eea41a",
+  "license": "Apache-2.0",
+  "files": [
+    {
+      "path": "apps/web/client/src/app/project/[id]/_components/main.tsx",
+      "sha256": "290e4b6e4f199f2c0532fe1ecb84a938f656b8c0fa5880682b8d1e6dfbc1cc6e"
+    },
+    {
+      "path": "apps/web/client/src/app/project/[id]/_components/canvas/index.tsx",
+      "sha256": "3d38400172586fa0504c4fe3d468f67ea844961a01ca4e1c63847d39e27432a9"
+    },
+    {
+      "path": "apps/web/client/src/app/project/[id]/_components/canvas/overlay/pan.tsx",
+      "sha256": "8e7df721be0e9bf1f012b713f63361c0953ba20dfbe6b81ac8fedc8bfaa89ac7"
+    },
+    {
+      "path": "apps/web/client/src/app/project/[id]/_components/canvas/overlay/elements/rect/base.tsx",
+      "sha256": "1d490d58a077c0e1c0a2d041aacef8edfe03c83d16647c6020d22c0de226da25"
+    },
+    {
+      "path": "apps/web/client/src/app/project/[id]/_components/canvas/overlay/elements/rect/hover.tsx",
+      "sha256": "8b8320db8181e430f759841834b074c59f042fc7852e28e878af14f2c27f4a09"
+    },
+    {
+      "path": "apps/web/client/src/app/project/[id]/_components/left-panel/design-panel/index.tsx",
+      "sha256": "791db7c537c4bfe05a10439eb1b33da003e7667c24779e202e9e82811eeec741"
+    },
+    {
+      "path": "apps/web/client/src/app/project/[id]/_components/left-panel/design-panel/layers-tab/tree/tree-row.tsx",
+      "sha256": "0fa5283fc1291602695fe337beb3a45d6842bdb3fd3316812a1b9fe7b49de185"
+    },
+    {
+      "path": "apps/web/client/src/app/project/[id]/_components/editor-bar/frame-selected/device-selector.tsx",
+      "sha256": "6622d5097a01bf51fa1c6a99192641d82e51dc2e24cc3c22576e41a03e1b280e"
+    },
+    {
+      "path": "apps/web/client/src/app/project/[id]/_components/right-panel/chat-tab/chat-input/index.tsx",
+      "sha256": "9e77ebaad1b638df3a41180c6a688c3a9a866b9b35cf051035dbc05e50d210e3"
+    },
+    {
+      "path": "apps/web/client/src/app/project/[id]/_components/right-panel/chat-tab/chat-input/action-buttons.tsx",
+      "sha256": "f4effd637195bb7a029a8fcbea6a84215ccdcaad76f48c59c044d9bca9aeb6da"
+    },
+    {
+      "path": "apps/web/client/src/app/project/[id]/_hooks/use-panel-measure.tsx",
+      "sha256": "e4385830e83362900958de58133811df6dfad969c9c4fbe01aa737e0596db8ab"
+    },
+    {
+      "path": "packages/constants/src/frame.ts",
+      "sha256": "5cc7c12e719c9888c13bde115459b284ef87b74f3c2679ab03491a935749cb75"
+    },
+    {
+      "path": "apps/web/client/src/app/projects/_components/select/project-card-presentation.tsx",
+      "sha256": "66092a3d03662d202d4798fb06df3ca33faba3e378f8be041e2aea77c6f8800a"
+    },
+    {
+      "path": "packages/ui/src/components/draftable-input.tsx",
+      "sha256": "b0bbc8b0e34c1dd3c31bc23c6013f61ba058312a722795481b8a5955a63702c5"
+    },
+    {
+      "path": "packages/ui/src/components/input.tsx",
+      "sha256": "9b9b3c177406c82460c065d949628cbdd2810d72c687b981d8a8a6dfdd411696"
+    }
+  ],
+  "derivatives": [
+    {
+      "source": "apps/web/client/src/app/project/[id]/_components/main.tsx",
+      "target": "apps/web/components/studio/onlook/main.tsx",
+      "runtime": true
+    },
+    {
+      "source": "apps/web/client/src/app/project/[id]/_components/left-panel/design-panel/index.tsx",
+      "target": "apps/web/components/studio/onlook/design-panel.tsx",
+      "runtime": true
+    },
+    {
+      "source": "apps/web/client/src/app/project/[id]/_components/canvas/index.tsx",
+      "target": "apps/web/components/studio/onlook/canvas.tsx",
+      "runtime": true
+    },
+    {
+      "source": "apps/web/client/src/app/project/[id]/_components/canvas/overlay/elements/rect/base.tsx",
+      "target": "apps/web/components/studio/onlook/base-rect.tsx",
+      "runtime": true
+    },
+    {
+      "source": "apps/web/client/src/app/project/[id]/_components/canvas/overlay/elements/rect/hover.tsx",
+      "target": "apps/web/components/studio/onlook/hover-rect.tsx",
+      "runtime": false
+    },
+    {
+      "source": "apps/web/client/src/app/project/[id]/_components/right-panel/chat-tab/chat-input/index.tsx",
+      "target": "apps/web/components/studio/onlook/chat-input.tsx",
+      "runtime": true
+    },
+    {
+      "source": "apps/web/client/src/app/projects/_components/select/project-card-presentation.tsx",
+      "target": "apps/web/components/studio/onlook/project-card.tsx",
+      "runtime": true
+    },
+    {
+      "source": "packages/constants/src/frame.ts",
+      "target": "apps/web/components/studio/onlook/devices.ts",
+      "runtime": true
+    },
+    {
+      "source": "apps/web/client/src/app/project/[id]/_components/editor-bar/frame-selected/device-selector.tsx",
+      "target": "apps/web/components/studio/onlook/device-selector.tsx",
+      "runtime": true
+    },
+    {
+      "source": "packages/ui/src/components/draftable-input.tsx",
+      "target": "apps/web/components/studio/onlook/draftable-input.tsx",
+      "runtime": true
+    },
+    {
+      "source": "packages/ui/src/components/input.tsx",
+      "target": "apps/web/components/studio/onlook/input.tsx",
+      "runtime": true
+    }
+  ]
+}

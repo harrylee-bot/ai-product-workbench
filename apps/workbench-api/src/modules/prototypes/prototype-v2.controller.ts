@@ -84,6 +84,12 @@ export class PrototypeV2Controller {
     return result;
   }
 
+  @Get("plans/:planId/progress")
+  getProgress(@CurrentPrincipal() principal: AuthenticatedPrincipal, @Param("projectId") projectId: string, @Param("planId") planId: string, @Res({ passthrough: true }) response: Response) {
+    response.setHeader("Cache-Control", "private, no-store");
+    return this.service.getProgress(principal, projectId, planId);
+  }
+
   @Get("plans/:planId/revisions")
   listRevisions(@CurrentPrincipal() principal: AuthenticatedPrincipal, @Param("projectId") projectId: string, @Param("planId") planId: string) {
     return this.service.listRevisions(principal, projectId, planId);

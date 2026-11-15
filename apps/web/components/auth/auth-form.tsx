@@ -8,7 +8,7 @@ import {
   useState,
 } from "react";
 
-import { Input } from "@/components/ui/input";
+import { Input } from "@/components/studio/onlook/input";
 import { Label } from "@/components/ui/label";
 
 import { authToast } from "./auth-toast";

@@ -9,6 +9,7 @@ import {
   exportPreviewTokenResponseSchema,
   prototypeFeedbackSchema,
   prototypePlanSchema,
+  prototypeProgressSchema,
   prototypePlanListSchema,
   prototypeFeedbackListSchema,
   prototypeShareListSchema,
@@ -101,6 +102,11 @@ export class WorkbenchPrototypeV2Api {
   async getPlan(projectId: string, planId: string): Promise<Versioned<PrototypePlan>> {
     const result = await this.api.GET("/projects/{projectId}/prototype-v2/plans/{planId}", { params: { path: { projectId, planId } } });
     return versioned(prototypePlanSchema, result.data, result.response, "get prototype plan");
+  }
+
+  async getProgress(projectId: string, planId: string) {
+    const result = await this.api.GET("/projects/{projectId}/prototype-v2/plans/{planId}/progress", { params: { path: { projectId, planId } } });
+    return parseContract(prototypeProgressSchema, result.data, "get prototype progress");
   }
 
   async listRevisions(projectId: string, planId: string): Promise<PrototypeRevisionList> {

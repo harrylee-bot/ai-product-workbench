@@ -9,25 +9,22 @@ import { describe, expect, it } from "vitest";
 const webRoot = fileURLToPath(new URL("../../", import.meta.url));
 
 describe("Workbench route ownership", () => {
-  it("keeps Next pages as URL boundaries and gives the persistent Scene one visual owner", async () => {
+  it("mounts the new Onlook Studio at explicit route boundaries", async () => {
     const appEntries = await readdir(path.join(webRoot, "app"));
     const homePageSource = await readFile(path.join(webRoot, "app/(workbench)/page.tsx"), "utf8");
     const projectPageSource = await readFile(
-      path.join(webRoot, "app/(workbench)/projects/[projectId]/page.tsx"),
+      path.join(webRoot, "app/(workbench)/studio/[projectId]/page.tsx"),
       "utf8",
     );
     const layoutSource = await readFile(path.join(webRoot, "app/(workbench)/layout.tsx"), "utf8");
 
     expect(appEntries).toContain("(workbench)");
     expect(appEntries).not.toContain("(chat)");
-    expect(homePageSource).toContain("return null");
-    expect(homePageSource).not.toContain("WorkbenchHomeRoute");
-    expect(projectPageSource).toContain("return null");
-    expect(projectPageSource).not.toContain("WorkbenchProjectRoute");
-    expect(layoutSource).toContain("<WorkbenchRuntimeProvider />");
-    expect(layoutSource).not.toContain("project.css");
-    expect(layoutSource).not.toContain("WorkbenchProjectRoute");
-    expect(layoutSource).not.toContain("WorkbenchHomeRoute");
+    expect(homePageSource).toContain("StudioHome");
+    expect(projectPageSource).toContain("StudioProject");
+    expect(layoutSource).not.toContain("WorkbenchRuntimeProvider");
+    expect(existsSync(path.join(webRoot,"app/(workbench)/projects/[projectId]/page.tsx"))).toBe(false);
+
   });
 
   it("keeps Project UI and editor runtimes out of the Home static module graph", () => {
@@ -63,69 +60,15 @@ describe("Workbench route ownership", () => {
     expect([...homeGraph.packages].some((name) => name.startsWith("@tiptap/"))).toBe(false);
   });
 
-  it("uses one awaitable dynamic edge to the Project route and scopes its CSS to that page", async () => {
-    const runtimeSource = await readFile(
-      path.join(webRoot, "components/workbench/workbench-runtime.tsx"),
-      "utf8",
-    );
-    const homeRouteSource = await readFile(
-      path.join(webRoot, "components/workbench/workbench-home-route.tsx"),
-      "utf8",
-    );
-    const projectRouteSource = await readFile(
-      path.join(webRoot, "components/workbench/workbench-project-route.tsx"),
-      "utf8",
-    );
-    const sceneSource = await readFile(
-      path.join(webRoot, "components/workbench/workbench-scene.tsx"),
-      "utf8",
-    );
-    const loaderSource = await readFile(
-      path.join(webRoot, "components/workbench/workbench-project-route-loader.ts"),
-      "utf8",
-    );
-    const globalCss = await readFile(path.join(webRoot, "app/globals.css"), "utf8");
-    const projectCss = await readFile(
-      path.join(webRoot, "components/workbench/workbench-project.css"),
-      "utf8",
-    );
-    const prdEditorSource = await readFile(
-      path.join(webRoot, "components/workbench/workbench-prd-editor.tsx"),
-      "utf8",
-    );
-
-    expect(runtimeSource).toContain("prepareProjectRoute: preloadWorkbenchProjectRoute");
-    expect(runtimeSource).toContain("item.href === currentHref");
-    expect(runtimeSource).toContain("workbenchRouteIsCommitted(nextHref)");
-    expect(runtimeSource).toContain("workbenchRouteIsCommitted(pending.href)");
-    expect(runtimeSource).not.toContain("destination.pathname === pathnameRef.current");
-    expect(runtimeSource).not.toContain('from "./workbench-project-route"');
-    expect(runtimeSource).toContain("onExitComplete={finalizeSceneExit}");
-    expect(sceneSource).not.toContain("lazy(");
-    expect(sceneSource).toContain("readWorkbenchProjectRoute()");
-    expect(sceneSource).toContain("throw preloadWorkbenchProjectRoute()");
-    expect(sceneSource).toContain("return <ProjectRoute />");
-    expect(sceneSource).toContain("<WorkbenchRouteTransition");
-    expect(sceneSource).toContain(
-      "onExitComplete={() => onExitComplete(contextValue.workbench.selectedProjectId)}",
-    );
-    expect(sceneSource).toContain("routeView={routeView}");
-    expect(homeRouteSource).not.toContain("WorkbenchRouteTransition");
-    expect(projectRouteSource).not.toContain("WorkbenchRouteTransition");
-    expect(projectRouteSource).toContain('import "./workbench-project.css"');
-    expect(loaderSource.match(/\?\?= import\("\.\/workbench-project-route"\)/g)).toHaveLength(1);
-    const navigationSource = await readFile(path.join(webRoot, "lib/workbench/features/workbench-project-navigation.ts"), "utf8");
-    expect(navigationSource).toContain("await callbacksRef.current.prepareProjectRoute(");
-    expect(globalCss).not.toContain('@import "@xyflow/react/dist/style.css"');
-    expect(globalCss).not.toMatch(/@import\s+url\(/u);
-    expect(globalCss).not.toContain("fonts.googleapis.com");
-    expect(globalCss).not.toContain(".react-flow__");
-    expect(globalCss).not.toContain("--xy-");
-    expect(projectCss).toContain('@import "@xyflow/react/dist/style.css"');
-    expect(projectCss).toContain(".ProseMirror");
-    expect(projectCss).toContain(".workbench-prd-editor-content .tiptap");
-    expect(prdEditorSource).toContain("workbench-prd-editor-content");
-    expect(prdEditorSource).not.toContain("[&_.tiptap");
+  it("keeps the retired workbench and React Flow outside all new app entry graphs", () => {
+    const graph=collectStaticModuleGraph([
+      path.join(webRoot,"app/(workbench)/studio/[projectId]/page.tsx"),
+      path.join(webRoot,"app/prototype-share/[token]/page.tsx"),
+      path.join(webRoot,"app/share/[token]/page.tsx"),
+    ]);
+    expect([...graph.files].filter(file=>file.includes("/components/workbench/"))).toEqual([]);
+    expect([...graph.packages]).not.toContain("@xyflow/react");
+    expect([...graph.files].some(file=>file.endsWith("/studio/onlook/canvas.tsx"))).toBe(true);
   });
 
   it("does not publish or protect a legacy conversation URL", async () => {

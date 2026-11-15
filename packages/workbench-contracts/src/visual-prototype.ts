@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { startRunRequestSchema } from "./runs.js";
+import { startRunRequestSchema, runSchema, runEventSchema } from "./runs.js";
 import { sha256Schema } from "./files.js";
 import { isoDateTimeSchema, opaqueIdSchema, revisionSchema } from "./common.js";
 
@@ -193,3 +193,28 @@ export type RevisePrototypeRevisionRequest = z.infer<typeof revisePrototypeRevis
 
 export const prototypeRevisionDiffSchema = z.object({ sourceRevisionId: opaqueIdSchema.nullable(), pages: z.array(z.object({ pageId: opaqueIdSchema, change: z.enum(["added", "removed", "changed", "unchanged"]) }).strict()).max(100) }).strict();
 export type PrototypeRevisionDiff = z.infer<typeof prototypeRevisionDiffSchema>;
+
+/** Authorized recovery point; events are compact state seeds, not a contiguous replay. */
+export const prototypeProgressSchema = z.object({
+  projectId: opaqueIdSchema,
+  planId: opaqueIdSchema,
+  status: prototypePlanStatusSchema,
+  input: z.object({
+    requestedArtifactKinds: z.array(z.string().max(80)).max(12),
+    modelId: z.string().max(128).nullable(),
+    targetSurface: z.string().max(80).nullable(),
+    sourceIds: z.array(opaqueIdSchema).max(50),
+    designStyle: z.string().max(160).nullable(),
+  }).strict(),
+  run: runSchema.nullable(),
+  events: z.array(runEventSchema).max(64),
+  coverage: z.literal("window"),
+  finalRevisionId: opaqueIdSchema.nullable(),
+}).strict().superRefine((value, ctx) => {
+  if (value.run && value.run.projectId !== value.projectId) ctx.addIssue({ code: "custom", message: "Run project mismatch" });
+  for (const event of value.events) {
+    if (!value.run || event.runId !== value.run.id || event.projectId !== value.projectId || event.requestId !== value.run.requestId || event.threadId !== value.run.threadId || event.sequence > value.run.lastEventSequence) ctx.addIssue({ code: "custom", message: "Snapshot event identity or cursor mismatch" });
+    if (value.run && "attempt" in event.payload && event.payload.attempt !== value.run.attempt) ctx.addIssue({ code: "custom", message: "Snapshot attempt mismatch" });
+  }
+});
+export type PrototypeProgress = z.infer<typeof prototypeProgressSchema>;

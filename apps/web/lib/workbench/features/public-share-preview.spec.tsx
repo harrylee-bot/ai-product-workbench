@@ -8,14 +8,15 @@ import type {
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { ShareView } from "@/components/share/share-view";
+import { PublicRelease as ShareView } from "@/components/studio/public-release";
 import { publicSharePreviewEntries } from "./public-share-preview";
 
-vi.mock("@/components/workbench/workbench-artifact-content", () => ({
-  WorkbenchArtifactContent: ({ reference }: { reference: unknown }) => (
-    <output data-testid="artifact-reference">{JSON.stringify(reference)}</output>
-  ),
+const queries=vi.hoisted(()=>({version:vi.fn(),content:vi.fn()}));
+vi.mock("@/lib/workbench/features/public-shares",()=>({
+ useWorkbenchPublicSharedArtifactVersion:(...args:unknown[])=>{queries.version(...args);return {data:{value:{kind:'data',contentMode:'inline',content:{text:'Public artifact'}}}};},
+ useWorkbenchPublicSharedArtifactContent:(...args:unknown[])=>{queries.content(...args);return {};},
 }));
+vi.mock("@/lib/studio/api",()=>({useWorkbenchPublicSharesApi:()=>({})}));
 
 afterEach(cleanup);
 
@@ -48,32 +49,14 @@ describe("Public Share screen selection", () => {
     ]);
   });
 
-  it("passes the selected Board screen to the token-authorized public renderer", () => {
+  it("selects only pinned immutable artifacts through token-authorized public queries", () => {
     render(<ShareView share={share()} token="wbs_public_token" />);
-
-    expect(reference()).toMatchObject({
-      artifactId: "artifact-prototype",
-      artifactVersionId: "version-prototype",
-      screenId: "screen-home",
-      shareToken: "wbs_public_token",
-    });
-
-    fireEvent.click(screen.getByRole("button", { name: "Success screen" }));
-
-    expect(reference()).toMatchObject({
-      artifactId: "artifact-prototype",
-      artifactVersionId: "version-prototype",
-      screenId: "screen-success",
-      shareToken: "wbs_public_token",
-    });
+    expect(queries.version).toHaveBeenLastCalledWith("wbs_public_token","artifact-prototype","version-prototype");
+    fireEvent.click(screen.getByRole("button",{name:"Metrics"}));
+    expect(queries.version).toHaveBeenLastCalledWith("wbs_public_token","artifact-data","version-data");
+    expect(screen.queryByRole("button",{name:/发送|编辑|运行/})).toBeNull();
   });
-
-
 });
-
-function reference() {
-  return JSON.parse(screen.getByTestId("artifact-reference").textContent ?? "null") as Record<string, unknown>;
-}
 
 function share(): PublicShare {
   return {

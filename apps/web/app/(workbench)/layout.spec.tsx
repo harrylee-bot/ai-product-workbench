@@ -6,8 +6,8 @@ import Layout from "./layout";
 const mocks = vi.hoisted(() => ({ replace: vi.fn(), loading: false, user: null as { id: string } | null }));
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ replace: mocks.replace }),
-  usePathname: () => "/projects/project-1",
-  useSearchParams: () => new URLSearchParams("node=prd-1&view=document"),
+  usePathname: () => "/studio/project-1",
+  useSearchParams: () => new URLSearchParams("plan=plan-1&revision=revision-1&page=page-1&view=documents"),
 }));
 vi.mock("@/lib/auth/workbench-auth", () => ({ useWorkbenchAuth: () => mocks }));
 vi.mock("@/components/workbench/workbench-runtime", () => ({ WorkbenchRuntimeProvider: () => null }));
@@ -20,7 +20,7 @@ describe("expired workbench sessions", () => {
   it("retains the complete project URL as the login return path", async () => {
     render(<Layout><div>项目</div></Layout>);
     await waitFor(() => expect(mocks.replace).toHaveBeenCalledWith(
-      `/login?next=${encodeURIComponent("/projects/project-1?node=prd-1&view=document")}`,
+      `/login?next=${encodeURIComponent("/studio/project-1?plan=plan-1&revision=revision-1&page=page-1&view=documents")}`,
     ));
   });
 });

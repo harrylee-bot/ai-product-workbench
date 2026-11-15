@@ -22,8 +22,8 @@ vi.mock("@/lib/workbench/transport", () => ({
   WorkbenchTransportProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
 }));
 
-vi.mock("./share-view", () => ({
-  ShareView: () => <div>分享内容</div>,
+vi.mock("@/components/studio/public-release", () => ({
+  PublicRelease: () => <div>分享内容</div>,
 }));
 
 beforeEach(() => {

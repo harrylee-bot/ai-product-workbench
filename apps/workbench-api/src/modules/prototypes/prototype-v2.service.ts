@@ -3,6 +3,8 @@ import { Inject, Injectable, Optional, type OnModuleInit, type OnModuleDestroy }
 import { ConfigService } from "@nestjs/config";
 import {
   canonicalJson,
+  prototypeProgressSchema,
+  runEventSchema,
   startRunRequestSchema,
   revisePrototypeRevisionRequestSchema,
   prototypeRevisionDiffSchema,
@@ -45,6 +47,7 @@ import type { AuthenticatedPrincipal } from "../identity/identity.types.js";
 import { lockActiveProject } from "../projects/project-lock.js";
 import { prototypeRevisionPageDifferences } from "./prototype-revision-diff.js";
 import { formatPrototypeReviewPrompt, prototypePlanDisplayPrompt } from "./prototype-plan-presentation.js";
+import { mapRun, orderedRunSourceSnapshots } from "../runs/run.mapper.js";
 import { RunsService } from "../runs/runs.service.js";
 import { enqueuePrototypeCommand, PrototypeWorkflowDispatcher } from "./prototype-workflow-dispatcher.js";
 import { PrototypeArtifactStorageReader } from "./prototype-artifact-storage.reader.js";
@@ -175,6 +178,40 @@ export class PrototypeV2Service implements OnModuleInit, OnModuleDestroy {
   async getPlanSnapshot(principal: AuthenticatedPrincipal, projectId: string, planId: string): Promise<PrototypePlan> {
     await this.requireProjectMember(principal.id, projectId, "viewer");
     return toPlan(await this.getPlan(projectId, planId));
+  }
+
+  async getProgress(principal: AuthenticatedPrincipal, projectId: string, planId: string) {
+    await this.requireProjectMember(principal.id, projectId, "viewer");
+    return this.db.$transaction(async (tx) => {
+      const plan = await tx.prototypePlan.findFirst({ where: { id: planId, projectId } });
+      if (!plan) throw notFoundProblem("Prototype plan");
+      const request = plan.generationRequest ? startRunRequestSchema.safeParse(plan.generationRequest) : null;
+      const input = request?.success ? request.data : null;
+      const runId = plan.runtimeRunId ?? plan.reusedRunId;
+      const row = runId ? await tx.run.findFirst({ where: { id: runId, projectId }, include: { sourceSnapshots: orderedRunSourceSnapshots } }) : null;
+      if (runId && !row) throw notFoundProblem("Prototype run");
+      const run = row ? mapRun(row) : null;
+      const seeds = row ? await tx.$queryRaw<Array<{ id: string; sequence: number; type: string; payload: unknown; occurredAt: Date }>>(Prisma.sql`
+        SELECT id, sequence, type, payload, occurred_at AS "occurredAt" FROM (
+          SELECT DISTINCT ON (type, COALESCE(payload->'preview'->>'artifactIndex', payload->>'artifactIndex', payload->>'activityId', ''))
+            id, sequence, type, payload, occurred_at
+          FROM run_events WHERE run_id = ${row.id} AND sequence <= ${row.eventSequence}
+            AND sequence >= COALESCE((SELECT MAX(sequence) FROM run_events WHERE run_id = ${row.id} AND type = 'run.started' AND payload->>'attempt' = ${String(row.attempt)} AND sequence <= ${row.eventSequence}), 0)
+            AND type IN ('artifact.preview.updated', 'artifact.draft.created', 'run.generation.stage.changed', 'activity.changed')
+            AND (payload->>'attempt' IS NULL OR payload->>'attempt' = ${String(row.attempt)})
+          ORDER BY type, COALESCE(payload->'preview'->>'artifactIndex', payload->>'artifactIndex', payload->>'activityId', ''), sequence DESC
+        ) latest ORDER BY CASE WHEN type = 'activity.changed' THEN 1 ELSE 0 END, sequence DESC LIMIT 64
+      `) : [];
+      const events = row ? seeds.map((event) => runEventSchema.parse({ ...event, occurredAt: event.occurredAt.toISOString(), protocol: "workbench.run.v1", runId: row.id, projectId, threadId: row.threadId, requestId: row.requestId, traceId: row.traceId })).sort((a, b) => a.sequence - b.sequence) : [];
+      const revision = await tx.prototypeRevision.findFirst({ where: { projectId, planId: plan.rootPlanId ?? plan.id, version: plan.contentVersion }, select: { id: true } });
+      return prototypeProgressSchema.parse({ projectId, planId, status: plan.status, input: {
+        requestedArtifactKinds: input?.requestedArtifactKinds ?? run?.requestedArtifactKinds ?? [],
+        modelId: input?.modelId ?? run?.modelId ?? null,
+        targetSurface: input?.targetSurface ?? run?.targetSurface ?? null,
+        sourceIds: input?.sourceIds ?? [],
+        designStyle: input?.designStyle ? JSON.stringify(input.designStyle).slice(0, 160) : null,
+      }, run, events, coverage: "window", finalRevisionId: revision?.id ?? null });
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead });
   }
 
   async listRevisions(principal: AuthenticatedPrincipal, projectId: string, planId: string) {

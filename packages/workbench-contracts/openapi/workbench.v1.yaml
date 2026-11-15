@@ -17345,6 +17345,1664 @@ components:
       items:
         $ref: "#/components/schemas/PrototypePlan"
       maxItems: 100
+    RunGenerationStage:
+      type: string
+      enum:
+        - thinking
+        - collecting-prd-context
+        - structuring-prd
+        - drafting-prd
+        - validating-prd
+        - design-system
+        - mapping-components
+        - creating-flows
+        - generating-ui
+        - screen-streaming
+        - summarizing
+        - screen-stable
+    PrototypeProgress:
+      type: object
+      properties:
+        projectId:
+          type: string
+          minLength: 1
+          maxLength: 128
+        planId:
+          type: string
+          minLength: 1
+          maxLength: 128
+        status:
+          $ref: "#/components/schemas/PrototypePlanStatus"
+        input:
+          type: object
+          properties:
+            requestedArtifactKinds:
+              type: array
+              items:
+                type: string
+                maxLength: 80
+              maxItems: 12
+            modelId:
+              type:
+                - string
+                - "null"
+              maxLength: 128
+            targetSurface:
+              type:
+                - string
+                - "null"
+              maxLength: 80
+            sourceIds:
+              type: array
+              items:
+                type: string
+                minLength: 1
+                maxLength: 128
+              maxItems: 50
+            designStyle:
+              type:
+                - string
+                - "null"
+              maxLength: 160
+          required:
+            - requestedArtifactKinds
+            - modelId
+            - targetSurface
+            - sourceIds
+            - designStyle
+          additionalProperties: false
+        run:
+          type:
+            - object
+            - "null"
+          properties:
+            id:
+              type: string
+              minLength: 1
+              maxLength: 128
+            requestId:
+              type: string
+              minLength: 1
+              maxLength: 128
+            projectId:
+              type: string
+              minLength: 1
+              maxLength: 128
+            threadId:
+              type: string
+              minLength: 1
+              maxLength: 128
+            retryOfRunId:
+              type:
+                - string
+                - "null"
+              minLength: 1
+              maxLength: 128
+            status:
+              $ref: "#/components/schemas/RunStatus"
+            modelId:
+              type: string
+              minLength: 1
+              maxLength: 128
+            workflow:
+              $ref: "#/components/schemas/RunWorkflow"
+            generationIntent:
+              type:
+                - string
+                - "null"
+              enum:
+                - followup-design
+                - interactive-prototype
+                - null
+            targetSurface:
+              $ref: "#/components/schemas/RunTargetSurface"
+            designStyle:
+              $ref: "#/components/schemas/RunDesignStyle"
+            artifactTargets:
+              $ref: "#/components/schemas/RunArtifactTargets"
+            requestedArtifactKinds:
+              type: array
+              items:
+                $ref: "#/components/schemas/RuntimeRequestedArtifactKind"
+              maxItems: 12
+            sources:
+              type: array
+              items:
+                $ref: "#/components/schemas/RunSourceSnapshot"
+              maxItems: 50
+              description: Immutable Import Source snapshots ordered by contiguous zero-based position
+            knowledgeReleaseId:
+              type:
+                - string
+                - "null"
+              minLength: 1
+              maxLength: 128
+            phase:
+              type:
+                - string
+                - "null"
+              enum:
+                - understanding
+                - retrieving_knowledge
+                - planning
+                - generating
+                - validating
+                - publishing
+                - null
+            phaseLabel:
+              type:
+                - string
+                - "null"
+              minLength: 1
+              maxLength: 240
+            progress:
+              type:
+                - number
+                - "null"
+              minimum: 0
+              maximum: 1
+            attempt:
+              type: integer
+              minimum: 0
+            lastEventSequence:
+              type: integer
+              minimum: 0
+            cancelRequestedAt:
+              type:
+                - string
+                - "null"
+              format: date-time
+            failure:
+              type:
+                - object
+                - "null"
+              properties:
+                code:
+                  type: string
+                  minLength: 1
+                  maxLength: 120
+                message:
+                  type: string
+                  minLength: 1
+                  maxLength: 2000
+                retryable:
+                  type: boolean
+              required:
+                - code
+                - message
+                - retryable
+              additionalProperties: false
+            cancellationReason:
+              type:
+                - string
+                - "null"
+              maxLength: 1000
+            createdAt:
+              type: string
+              format: date-time
+            startedAt:
+              type:
+                - string
+                - "null"
+              format: date-time
+            finishedAt:
+              type:
+                - string
+                - "null"
+              format: date-time
+          required:
+            - id
+            - requestId
+            - projectId
+            - threadId
+            - retryOfRunId
+            - status
+            - modelId
+            - workflow
+            - generationIntent
+            - targetSurface
+            - designStyle
+            - artifactTargets
+            - requestedArtifactKinds
+            - sources
+            - knowledgeReleaseId
+            - phase
+            - phaseLabel
+            - progress
+            - attempt
+            - lastEventSequence
+            - cancelRequestedAt
+            - failure
+            - cancellationReason
+            - createdAt
+            - startedAt
+            - finishedAt
+          additionalProperties: false
+          description: Run Import Source snapshots belong to the Run and Project, preserve immutable manifests, and use contiguous request positions; enforced by the runtime Zod contract.
+        events:
+          type: array
+          items:
+            oneOf:
+              - type: object
+                properties:
+                  protocol:
+                    type: string
+                    enum:
+                      - workbench.run.v1
+                  id:
+                    type: string
+                    minLength: 1
+                    maxLength: 128
+                  projectId:
+                    type: string
+                    minLength: 1
+                    maxLength: 128
+                  threadId:
+                    type: string
+                    minLength: 1
+                    maxLength: 128
+                  runId:
+                    type: string
+                    minLength: 1
+                    maxLength: 128
+                  requestId:
+                    type: string
+                    minLength: 1
+                    maxLength: 128
+                  sequence:
+                    type: integer
+                    exclusiveMinimum: 0
+                  occurredAt:
+                    type: string
+                    format: date-time
+                  traceId:
+                    type: string
+                    minLength: 1
+                    maxLength: 128
+                  type:
+                    type: string
+                    enum:
+                      - run.queued
+                  payload:
+                    type: object
+                    properties:
+                      position:
+                        type:
+                          - integer
+                          - "null"
+                        minimum: 0
+                    required:
+                      - position
+                required:
+                  - protocol
+                  - id
+                  - projectId
+                  - threadId
+                  - runId
+                  - requestId
+                  - sequence
+                  - occurredAt
+                  - traceId
+                  - type
+                  - payload
+              - type: object
+                properties:
+                  protocol:
+                    type: string
+                    enum:
+                      - workbench.run.v1
+                  id:
+                    type: string
+                    minLength: 1
+                    maxLength: 128
+                  projectId:
+                    type: string
+                    minLength: 1
+                    maxLength: 128
+                  threadId:
+                    type: string
+                    minLength: 1
+                    maxLength: 128
+                  runId:
+                    type: string
+                    minLength: 1
+                    maxLength: 128
+                  requestId:
+                    type: string
+                    minLength: 1
+                    maxLength: 128
+                  sequence:
+                    type: integer
+                    exclusiveMinimum: 0
+                  occurredAt:
+                    type: string
+                    format: date-time
+                  traceId:
+                    type: string
+                    minLength: 1
+                    maxLength: 128
+                  type:
+                    type: string
+                    enum:
+                      - run.started
+                  payload:
+                    type: object
+                    properties:
+                      attempt:
+                        type: integer
+                        exclusiveMinimum: 0
+                    required:
+                      - attempt
+                required:
+                  - protocol
+                  - id
+                  - projectId
+                  - threadId
+                  - runId
+                  - requestId
+                  - sequence
+                  - occurredAt
+                  - traceId
+                  - type
+                  - payload
+              - type: object
+                properties:
+                  protocol:
+                    type: string
+                    enum:
+                      - workbench.run.v1
+                  id:
+                    type: string
+                    minLength: 1
+                    maxLength: 128
+                  projectId:
+                    type: string
+                    minLength: 1
+                    maxLength: 128
+                  threadId:
+                    type: string
+                    minLength: 1
+                    maxLength: 128
+                  runId:
+                    type: string
+                    minLength: 1
+                    maxLength: 128
+                  requestId:
+                    type: string
+                    minLength: 1
+                    maxLength: 128
+                  sequence:
+                    type: integer
+                    exclusiveMinimum: 0
+                  occurredAt:
+                    type: string
+                    format: date-time
+                  traceId:
+                    type: string
+                    minLength: 1
+                    maxLength: 128
+                  type:
+                    type: string
+                    enum:
+                      - run.generation.stage.changed
+                  payload:
+                    type: object
+                    properties:
+                      attempt:
+                        type: integer
+                        exclusiveMinimum: 0
+                      stage:
+                        $ref: "#/components/schemas/RunGenerationStage"
+                    required:
+                      - attempt
+                      - stage
+                required:
+                  - protocol
+                  - id
+                  - projectId
+                  - threadId
+                  - runId
+                  - requestId
+                  - sequence
+                  - occurredAt
+                  - traceId
+                  - type
+                  - payload
+              - type: object
+                properties:
+                  protocol:
+                    type: string
+                    enum:
+                      - workbench.run.v1
+                  id:
+                    type: string
+                    minLength: 1
+                    maxLength: 128
+                  projectId:
+                    type: string
+                    minLength: 1
+                    maxLength: 128
+                  threadId:
+                    type: string
+                    minLength: 1
+                    maxLength: 128
+                  runId:
+                    type: string
+                    minLength: 1
+                    maxLength: 128
+                  requestId:
+                    type: string
+                    minLength: 1
+                    maxLength: 128
+                  sequence:
+                    type: integer
+                    exclusiveMinimum: 0
+                  occurredAt:
+                    type: string
+                    format: date-time
+                  traceId:
+                    type: string
+                    minLength: 1
+                    maxLength: 128
+                  type:
+                    type: string
+                    enum:
+                      - run.phase.changed
+                  payload:
+                    type: object
+                    properties:
+                      phase:
+                        type: string
+                        enum:
+                          - understanding
+                          - retrieving_knowledge
+                          - planning
+                          - generating
+                          - validating
+                          - publishing
+                      label:
+                        type: string
+                        minLength: 1
+                        maxLength: 240
+                      progress:
+                        type:
+                          - number
+                          - "null"
+                        minimum: 0
+                        maximum: 1
+                    required:
+                      - phase
+                      - label
+                      - progress
+                required:
+                  - protocol
+                  - id
+                  - projectId
+                  - threadId
+                  - runId
+                  - requestId
+                  - sequence
+                  - occurredAt
+                  - traceId
+                  - type
+                  - payload
+              - type: object
+                properties:
+                  protocol:
+                    type: string
+                    enum:
+                      - workbench.run.v1
+                  id:
+                    type: string
+                    minLength: 1
+                    maxLength: 128
+                  projectId:
+                    type: string
+                    minLength: 1
+                    maxLength: 128
+                  threadId:
+                    type: string
+                    minLength: 1
+                    maxLength: 128
+                  runId:
+                    type: string
+                    minLength: 1
+                    maxLength: 128
+                  requestId:
+                    type: string
+                    minLength: 1
+                    maxLength: 128
+                  sequence:
+                    type: integer
+                    exclusiveMinimum: 0
+                  occurredAt:
+                    type: string
+                    format: date-time
+                  traceId:
+                    type: string
+                    minLength: 1
+                    maxLength: 128
+                  type:
+                    type: string
+                    enum:
+                      - run.input.required
+                  payload:
+                    type: object
+                    properties:
+                      approvalId:
+                        type: string
+                        minLength: 1
+                        maxLength: 128
+                      kind:
+                        type: string
+                        minLength: 1
+                        maxLength: 80
+                      prompt:
+                        type: string
+                        minLength: 1
+                        maxLength: 4000
+                      options:
+                        $ref: "#/components/schemas/ApprovalOptions"
+                      attempt:
+                        type: integer
+                        minimum: 0
+                    required:
+                      - approvalId
+                      - kind
+                      - prompt
+                      - options
+                      - attempt
+                required:
+                  - protocol
+                  - id
+                  - projectId
+                  - threadId
+                  - runId
+                  - requestId
+                  - sequence
+                  - occurredAt
+                  - traceId
+                  - type
+                  - payload
+              - type: object
+                properties:
+                  protocol:
+                    type: string
+                    enum:
+                      - workbench.run.v1
+                  id:
+                    type: string
+                    minLength: 1
+                    maxLength: 128
+                  projectId:
+                    type: string
+                    minLength: 1
+                    maxLength: 128
+                  threadId:
+                    type: string
+                    minLength: 1
+                    maxLength: 128
+                  runId:
+                    type: string
+                    minLength: 1
+                    maxLength: 128
+                  requestId:
+                    type: string
+                    minLength: 1
+                    maxLength: 128
+                  sequence:
+                    type: integer
+                    exclusiveMinimum: 0
+                  occurredAt:
+                    type: string
+                    format: date-time
+                  traceId:
+                    type: string
+                    minLength: 1
+                    maxLength: 128
+                  type:
+                    type: string
+                    enum:
+                      - run.input.submitted
+                  payload:
+                    type: object
+                    properties:
+                      approvalId:
+                        type: string
+                        minLength: 1
+                        maxLength: 128
+                      decision:
+                        type: string
+                        enum:
+                          - approve
+                          - reject
+                          - submit
+                    required:
+                      - approvalId
+                      - decision
+                required:
+                  - protocol
+                  - id
+                  - projectId
+                  - threadId
+                  - runId
+                  - requestId
+                  - sequence
+                  - occurredAt
+                  - traceId
+                  - type
+                  - payload
+              - type: object
+                properties:
+                  protocol:
+                    type: string
+                    enum:
+                      - workbench.run.v1
+                  id:
+                    type: string
+                    minLength: 1
+                    maxLength: 128
+                  projectId:
+                    type: string
+                    minLength: 1
+                    maxLength: 128
+                  threadId:
+                    type: string
+                    minLength: 1
+                    maxLength: 128
+                  runId:
+                    type: string
+                    minLength: 1
+                    maxLength: 128
+                  requestId:
+                    type: string
+                    minLength: 1
+                    maxLength: 128
+                  sequence:
+                    type: integer
+                    exclusiveMinimum: 0
+                  occurredAt:
+                    type: string
+                    format: date-time
+                  traceId:
+                    type: string
+                    minLength: 1
+                    maxLength: 128
+                  type:
+                    type: string
+                    enum:
+                      - message.started
+                  payload:
+                    type: object
+                    properties:
+                      entryId:
+                        type: string
+                        minLength: 1
+                        maxLength: 128
+                    required:
+                      - entryId
+                required:
+                  - protocol
+                  - id
+                  - projectId
+                  - threadId
+                  - runId
+                  - requestId
+                  - sequence
+                  - occurredAt
+                  - traceId
+                  - type
+                  - payload
+              - type: object
+                properties:
+                  protocol:
+                    type: string
+                    enum:
+                      - workbench.run.v1
+                  id:
+                    type: string
+                    minLength: 1
+                    maxLength: 128
+                  projectId:
+                    type: string
+                    minLength: 1
+                    maxLength: 128
+                  threadId:
+                    type: string
+                    minLength: 1
+                    maxLength: 128
+                  runId:
+                    type: string
+                    minLength: 1
+                    maxLength: 128
+                  requestId:
+                    type: string
+                    minLength: 1
+                    maxLength: 128
+                  sequence:
+                    type: integer
+                    exclusiveMinimum: 0
+                  occurredAt:
+                    type: string
+                    format: date-time
+                  traceId:
+                    type: string
+                    minLength: 1
+                    maxLength: 128
+                  type:
+                    type: string
+                    enum:
+                      - message.delta
+                  payload:
+                    type: object
+                    properties:
+                      entryId:
+                        type: string
+                        minLength: 1
+                        maxLength: 128
+                      delta:
+                        type: string
+                        maxLength: 32000
+                    required:
+                      - entryId
+                      - delta
+                required:
+                  - protocol
+                  - id
+                  - projectId
+                  - threadId
+                  - runId
+                  - requestId
+                  - sequence
+                  - occurredAt
+                  - traceId
+                  - type
+                  - payload
+              - type: object
+                properties:
+                  protocol:
+                    type: string
+                    enum:
+                      - workbench.run.v1
+                  id:
+                    type: string
+                    minLength: 1
+                    maxLength: 128
+                  projectId:
+                    type: string
+                    minLength: 1
+                    maxLength: 128
+                  threadId:
+                    type: string
+                    minLength: 1
+                    maxLength: 128
+                  runId:
+                    type: string
+                    minLength: 1
+                    maxLength: 128
+                  requestId:
+                    type: string
+                    minLength: 1
+                    maxLength: 128
+                  sequence:
+                    type: integer
+                    exclusiveMinimum: 0
+                  occurredAt:
+                    type: string
+                    format: date-time
+                  traceId:
+                    type: string
+                    minLength: 1
+                    maxLength: 128
+                  type:
+                    type: string
+                    enum:
+                      - message.completed
+                  payload:
+                    type: object
+                    properties:
+                      entryId:
+                        type: string
+                        minLength: 1
+                        maxLength: 128
+                    required:
+                      - entryId
+                required:
+                  - protocol
+                  - id
+                  - projectId
+                  - threadId
+                  - runId
+                  - requestId
+                  - sequence
+                  - occurredAt
+                  - traceId
+                  - type
+                  - payload
+              - type: object
+                properties:
+                  protocol:
+                    type: string
+                    enum:
+                      - workbench.run.v1
+                  id:
+                    type: string
+                    minLength: 1
+                    maxLength: 128
+                  projectId:
+                    type: string
+                    minLength: 1
+                    maxLength: 128
+                  threadId:
+                    type: string
+                    minLength: 1
+                    maxLength: 128
+                  runId:
+                    type: string
+                    minLength: 1
+                    maxLength: 128
+                  requestId:
+                    type: string
+                    minLength: 1
+                    maxLength: 128
+                  sequence:
+                    type: integer
+                    exclusiveMinimum: 0
+                  occurredAt:
+                    type: string
+                    format: date-time
+                  traceId:
+                    type: string
+                    minLength: 1
+                    maxLength: 128
+                  type:
+                    type: string
+                    enum:
+                      - activity.changed
+                  payload:
+                    type: object
+                    properties:
+                      activityId:
+                        type: string
+                        minLength: 1
+                        maxLength: 128
+                      status:
+                        type: string
+                        enum:
+                          - pending
+                          - running
+                          - succeeded
+                          - failed
+                          - cancelled
+                      label:
+                        type: string
+                        minLength: 1
+                        maxLength: 240
+                      detail:
+                        type:
+                          - string
+                          - "null"
+                        maxLength: 2000
+                    required:
+                      - activityId
+                      - status
+                      - label
+                      - detail
+                required:
+                  - protocol
+                  - id
+                  - projectId
+                  - threadId
+                  - runId
+                  - requestId
+                  - sequence
+                  - occurredAt
+                  - traceId
+                  - type
+                  - payload
+              - type: object
+                properties:
+                  protocol:
+                    type: string
+                    enum:
+                      - workbench.run.v1
+                  id:
+                    type: string
+                    minLength: 1
+                    maxLength: 128
+                  projectId:
+                    type: string
+                    minLength: 1
+                    maxLength: 128
+                  threadId:
+                    type: string
+                    minLength: 1
+                    maxLength: 128
+                  runId:
+                    type: string
+                    minLength: 1
+                    maxLength: 128
+                  requestId:
+                    type: string
+                    minLength: 1
+                    maxLength: 128
+                  sequence:
+                    type: integer
+                    exclusiveMinimum: 0
+                  occurredAt:
+                    type: string
+                    format: date-time
+                  traceId:
+                    type: string
+                    minLength: 1
+                    maxLength: 128
+                  type:
+                    type: string
+                    enum:
+                      - artifact.draft.created
+                  payload:
+                    type: object
+                    properties:
+                      attempt:
+                        type: integer
+                        exclusiveMinimum: 0
+                      artifactIndex:
+                        type: integer
+                        minimum: 0
+                      artifactId:
+                        type: string
+                        minLength: 1
+                        maxLength: 128
+                      artifactVersionId:
+                        type: string
+                        minLength: 1
+                        maxLength: 128
+                      kind:
+                        $ref: "#/components/schemas/RuntimeRequestedArtifactKind"
+                      checksum:
+                        type: string
+                        pattern: ^[a-f0-9]{64}$
+                      draftChecksum:
+                        type: string
+                        pattern: ^[a-f0-9]{64}$
+                      screens:
+                        type: array
+                        items:
+                          $ref: "#/components/schemas/ArtifactDraftScreen"
+                        maxItems: 500
+                    required:
+                      - attempt
+                      - artifactIndex
+                      - artifactId
+                      - artifactVersionId
+                      - kind
+                      - checksum
+                      - draftChecksum
+                      - screens
+                    additionalProperties: false
+                    description: Prototype draft events contain at least one uniquely identified screen, while every non-Prototype draft event contains no screens.
+                required:
+                  - protocol
+                  - id
+                  - projectId
+                  - threadId
+                  - runId
+                  - requestId
+                  - sequence
+                  - occurredAt
+                  - traceId
+                  - type
+                  - payload
+              - type: object
+                properties:
+                  protocol:
+                    type: string
+                    enum:
+                      - workbench.run.v1
+                  id:
+                    type: string
+                    minLength: 1
+                    maxLength: 128
+                  projectId:
+                    type: string
+                    minLength: 1
+                    maxLength: 128
+                  threadId:
+                    type: string
+                    minLength: 1
+                    maxLength: 128
+                  runId:
+                    type: string
+                    minLength: 1
+                    maxLength: 128
+                  requestId:
+                    type: string
+                    minLength: 1
+                    maxLength: 128
+                  sequence:
+                    type: integer
+                    exclusiveMinimum: 0
+                  occurredAt:
+                    type: string
+                    format: date-time
+                  traceId:
+                    type: string
+                    minLength: 1
+                    maxLength: 128
+                  type:
+                    type: string
+                    enum:
+                      - artifact.preview.updated
+                  payload:
+                    type: object
+                    properties:
+                      attempt:
+                        type: integer
+                        exclusiveMinimum: 0
+                      preview:
+                        type: object
+                        properties:
+                          artifactIndex:
+                            type: integer
+                            minimum: 0
+                            maximum: 19
+                          kind:
+                            type: string
+                            enum:
+                              - prd
+                              - prototype
+                          title:
+                            type: string
+                            minLength: 1
+                            maxLength: 240
+                          markdown:
+                            type: string
+                            maxLength: 48000
+                          screens:
+                            type: array
+                            items:
+                              type: object
+                              properties:
+                                id:
+                                  type: string
+                                  minLength: 1
+                                  maxLength: 160
+                                name:
+                                  type: string
+                                  maxLength: 240
+                                width:
+                                  type: number
+                                  minimum: 0
+                                  maximum: 16384
+                                  exclusiveMinimum: 0
+                                height:
+                                  type: number
+                                  minimum: 0
+                                  maximum: 16384
+                                  exclusiveMinimum: 0
+                                nodes:
+                                  type: array
+                                  items:
+                                    type: object
+                                    properties:
+                                      id:
+                                        type: string
+                                        minLength: 1
+                                        maxLength: 160
+                                      parentId:
+                                        type:
+                                          - string
+                                          - "null"
+                                        maxLength: 160
+                                      kind:
+                                        type: string
+                                        enum:
+                                          - frame
+                                          - form
+                                          - text
+                                          - button
+                                          - input
+                                          - image
+                                          - shape
+                                          - icon
+                                      text:
+                                        type: string
+                                        maxLength: 2000
+                                      x:
+                                        type: number
+                                        minimum: -16384
+                                        maximum: 16384
+                                      y:
+                                        type: number
+                                        minimum: -16384
+                                        maximum: 16384
+                                      width:
+                                        type:
+                                          - number
+                                          - "null"
+                                        minimum: 0
+                                        maximum: 16384
+                                      height:
+                                        type:
+                                          - number
+                                          - "null"
+                                        minimum: 0
+                                        maximum: 16384
+                                      absolute:
+                                        type: boolean
+                                      direction:
+                                        type: string
+                                        enum:
+                                          - row
+                                          - column
+                                      gap:
+                                        type: number
+                                        minimum: 0
+                                        maximum: 16384
+                                      padding:
+                                        type: number
+                                        minimum: 0
+                                        maximum: 16384
+                                      fill:
+                                        type:
+                                          - string
+                                          - "null"
+                                        pattern: ^(?:#[a-fA-F0-9]{3,8}|transparent|white|black)$
+                                      color:
+                                        type:
+                                          - string
+                                          - "null"
+                                        pattern: ^(?:#[a-fA-F0-9]{3,8}|transparent|white|black)$
+                                      fontSize:
+                                        type:
+                                          - number
+                                          - "null"
+                                        minimum: 1
+                                        maximum: 120
+                                      radius:
+                                        type: number
+                                        minimum: 0
+                                        maximum: 16384
+                                    required:
+                                      - id
+                                      - parentId
+                                      - kind
+                                      - text
+                                      - x
+                                      - y
+                                      - width
+                                      - height
+                                      - absolute
+                                      - direction
+                                      - gap
+                                      - padding
+                                      - fill
+                                      - color
+                                      - fontSize
+                                      - radius
+                                    additionalProperties: false
+                                  maxItems: 120
+                              required:
+                                - id
+                                - name
+                                - width
+                                - height
+                                - nodes
+                              additionalProperties: false
+                            maxItems: 4
+                        required:
+                          - artifactIndex
+                          - kind
+                          - title
+                          - markdown
+                          - screens
+                        additionalProperties: false
+                    required:
+                      - attempt
+                      - preview
+                    additionalProperties: false
+                required:
+                  - protocol
+                  - id
+                  - projectId
+                  - threadId
+                  - runId
+                  - requestId
+                  - sequence
+                  - occurredAt
+                  - traceId
+                  - type
+                  - payload
+              - type: object
+                properties:
+                  protocol:
+                    type: string
+                    enum:
+                      - workbench.run.v1
+                  id:
+                    type: string
+                    minLength: 1
+                    maxLength: 128
+                  projectId:
+                    type: string
+                    minLength: 1
+                    maxLength: 128
+                  threadId:
+                    type: string
+                    minLength: 1
+                    maxLength: 128
+                  runId:
+                    type: string
+                    minLength: 1
+                    maxLength: 128
+                  requestId:
+                    type: string
+                    minLength: 1
+                    maxLength: 128
+                  sequence:
+                    type: integer
+                    exclusiveMinimum: 0
+                  occurredAt:
+                    type: string
+                    format: date-time
+                  traceId:
+                    type: string
+                    minLength: 1
+                    maxLength: 128
+                  type:
+                    type: string
+                    enum:
+                      - artifact.prototype.patch.created
+                  payload:
+                    $ref: "#/components/schemas/PrototypePatchEventPayload"
+                required:
+                  - protocol
+                  - id
+                  - projectId
+                  - threadId
+                  - runId
+                  - requestId
+                  - sequence
+                  - occurredAt
+                  - traceId
+                  - type
+                  - payload
+              - type: object
+                properties:
+                  protocol:
+                    type: string
+                    enum:
+                      - workbench.run.v1
+                  id:
+                    type: string
+                    minLength: 1
+                    maxLength: 128
+                  projectId:
+                    type: string
+                    minLength: 1
+                    maxLength: 128
+                  threadId:
+                    type: string
+                    minLength: 1
+                    maxLength: 128
+                  runId:
+                    type: string
+                    minLength: 1
+                    maxLength: 128
+                  requestId:
+                    type: string
+                    minLength: 1
+                    maxLength: 128
+                  sequence:
+                    type: integer
+                    exclusiveMinimum: 0
+                  occurredAt:
+                    type: string
+                    format: date-time
+                  traceId:
+                    type: string
+                    minLength: 1
+                    maxLength: 128
+                  type:
+                    type: string
+                    enum:
+                      - artifact.prototype.patch.degraded
+                  payload:
+                    $ref: "#/components/schemas/PrototypePatchDegradedEventPayload"
+                required:
+                  - protocol
+                  - id
+                  - projectId
+                  - threadId
+                  - runId
+                  - requestId
+                  - sequence
+                  - occurredAt
+                  - traceId
+                  - type
+                  - payload
+              - type: object
+                properties:
+                  protocol:
+                    type: string
+                    enum:
+                      - workbench.run.v1
+                  id:
+                    type: string
+                    minLength: 1
+                    maxLength: 128
+                  projectId:
+                    type: string
+                    minLength: 1
+                    maxLength: 128
+                  threadId:
+                    type: string
+                    minLength: 1
+                    maxLength: 128
+                  runId:
+                    type: string
+                    minLength: 1
+                    maxLength: 128
+                  requestId:
+                    type: string
+                    minLength: 1
+                    maxLength: 128
+                  sequence:
+                    type: integer
+                    exclusiveMinimum: 0
+                  occurredAt:
+                    type: string
+                    format: date-time
+                  traceId:
+                    type: string
+                    minLength: 1
+                    maxLength: 128
+                  type:
+                    type: string
+                    enum:
+                      - artifact.version.created
+                  payload:
+                    $ref: "#/components/schemas/ArtifactVersionReference"
+                required:
+                  - protocol
+                  - id
+                  - projectId
+                  - threadId
+                  - runId
+                  - requestId
+                  - sequence
+                  - occurredAt
+                  - traceId
+                  - type
+                  - payload
+              - type: object
+                properties:
+                  protocol:
+                    type: string
+                    enum:
+                      - workbench.run.v1
+                  id:
+                    type: string
+                    minLength: 1
+                    maxLength: 128
+                  projectId:
+                    type: string
+                    minLength: 1
+                    maxLength: 128
+                  threadId:
+                    type: string
+                    minLength: 1
+                    maxLength: 128
+                  runId:
+                    type: string
+                    minLength: 1
+                    maxLength: 128
+                  requestId:
+                    type: string
+                    minLength: 1
+                    maxLength: 128
+                  sequence:
+                    type: integer
+                    exclusiveMinimum: 0
+                  occurredAt:
+                    type: string
+                    format: date-time
+                  traceId:
+                    type: string
+                    minLength: 1
+                    maxLength: 128
+                  type:
+                    type: string
+                    enum:
+                      - run.cancel.requested
+                  payload:
+                    type: object
+                    properties: {}
+                required:
+                  - protocol
+                  - id
+                  - projectId
+                  - threadId
+                  - runId
+                  - requestId
+                  - sequence
+                  - occurredAt
+                  - traceId
+                  - type
+                  - payload
+              - type: object
+                properties:
+                  protocol:
+                    type: string
+                    enum:
+                      - workbench.run.v1
+                  id:
+                    type: string
+                    minLength: 1
+                    maxLength: 128
+                  projectId:
+                    type: string
+                    minLength: 1
+                    maxLength: 128
+                  threadId:
+                    type: string
+                    minLength: 1
+                    maxLength: 128
+                  runId:
+                    type: string
+                    minLength: 1
+                    maxLength: 128
+                  requestId:
+                    type: string
+                    minLength: 1
+                    maxLength: 128
+                  sequence:
+                    type: integer
+                    exclusiveMinimum: 0
+                  occurredAt:
+                    type: string
+                    format: date-time
+                  traceId:
+                    type: string
+                    minLength: 1
+                    maxLength: 128
+                  type:
+                    type: string
+                    enum:
+                      - run.cancelled
+                  payload:
+                    type: object
+                    properties:
+                      reason:
+                        type:
+                          - string
+                          - "null"
+                        maxLength: 1000
+                    required:
+                      - reason
+                required:
+                  - protocol
+                  - id
+                  - projectId
+                  - threadId
+                  - runId
+                  - requestId
+                  - sequence
+                  - occurredAt
+                  - traceId
+                  - type
+                  - payload
+              - type: object
+                properties:
+                  protocol:
+                    type: string
+                    enum:
+                      - workbench.run.v1
+                  id:
+                    type: string
+                    minLength: 1
+                    maxLength: 128
+                  projectId:
+                    type: string
+                    minLength: 1
+                    maxLength: 128
+                  threadId:
+                    type: string
+                    minLength: 1
+                    maxLength: 128
+                  runId:
+                    type: string
+                    minLength: 1
+                    maxLength: 128
+                  requestId:
+                    type: string
+                    minLength: 1
+                    maxLength: 128
+                  sequence:
+                    type: integer
+                    exclusiveMinimum: 0
+                  occurredAt:
+                    type: string
+                    format: date-time
+                  traceId:
+                    type: string
+                    minLength: 1
+                    maxLength: 128
+                  type:
+                    type: string
+                    enum:
+                      - run.completed
+                  payload:
+                    type: object
+                    properties:
+                      artifactCount:
+                        type: integer
+                        minimum: 0
+                    required:
+                      - artifactCount
+                required:
+                  - protocol
+                  - id
+                  - projectId
+                  - threadId
+                  - runId
+                  - requestId
+                  - sequence
+                  - occurredAt
+                  - traceId
+                  - type
+                  - payload
+              - type: object
+                properties:
+                  protocol:
+                    type: string
+                    enum:
+                      - workbench.run.v1
+                  id:
+                    type: string
+                    minLength: 1
+                    maxLength: 128
+                  projectId:
+                    type: string
+                    minLength: 1
+                    maxLength: 128
+                  threadId:
+                    type: string
+                    minLength: 1
+                    maxLength: 128
+                  runId:
+                    type: string
+                    minLength: 1
+                    maxLength: 128
+                  requestId:
+                    type: string
+                    minLength: 1
+                    maxLength: 128
+                  sequence:
+                    type: integer
+                    exclusiveMinimum: 0
+                  occurredAt:
+                    type: string
+                    format: date-time
+                  traceId:
+                    type: string
+                    minLength: 1
+                    maxLength: 128
+                  type:
+                    type: string
+                    enum:
+                      - run.failed
+                  payload:
+                    type: object
+                    properties:
+                      code:
+                        type: string
+                        minLength: 1
+                        maxLength: 120
+                      message:
+                        type: string
+                        minLength: 1
+                        maxLength: 2000
+                      retryable:
+                        type: boolean
+                    required:
+                      - code
+                      - message
+                      - retryable
+                required:
+                  - protocol
+                  - id
+                  - projectId
+                  - threadId
+                  - runId
+                  - requestId
+                  - sequence
+                  - occurredAt
+                  - traceId
+                  - type
+                  - payload
+          maxItems: 64
+        coverage:
+          type: string
+          enum:
+            - window
+        finalRevisionId:
+          type:
+            - string
+            - "null"
+          minLength: 1
+          maxLength: 128
+      required:
+        - projectId
+        - planId
+        - status
+        - input
+        - run
+        - events
+        - coverage
+        - finalRevisionId
+      additionalProperties: false
+      description: Snapshot Run and seed events must share project, request, thread and current attempt; seed cursors cannot exceed the authoritative Run cursor.
     PrototypeRevisionStatus:
       type: string
       enum:
@@ -18894,21 +20552,6 @@ components:
             $ref: "#/components/schemas/RunApproval"
       required:
         - items
-    RunGenerationStage:
-      type: string
-      enum:
-        - thinking
-        - collecting-prd-context
-        - structuring-prd
-        - drafting-prd
-        - validating-prd
-        - design-system
-        - mapping-components
-        - creating-flows
-        - generating-ui
-        - screen-streaming
-        - summarizing
-        - screen-stable
     RunList:
       type: object
       properties:
@@ -24464,6 +26107,24 @@ paths:
         "428":
           $ref: "#/components/responses/Problem"
         "503":
+          $ref: "#/components/responses/Problem"
+  /projects/{projectId}/prototype-v2/plans/{planId}/progress:
+    get:
+      operationId: getPrototypeProgress
+      summary: Authorized plan Run binding and bounded recovery snapshot
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/PlanId"
+      responses:
+        "200":
+          description: Authorized plan Run binding and bounded recovery snapshot
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PrototypeProgress"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
           $ref: "#/components/responses/Problem"
   /projects/{projectId}/prototype-v2/plans/{planId}:
     get:

@@ -1,0 +1,8 @@
+Onlook
+Copyright 2024 On Off, Inc.
+Licensed under the Apache License, Version 2.0.
+
+This product includes modified Onlook frontend source.
+The upstream has no separate NOTICE file at the pinned commit.
+Original source and hashes are retained in upstream/ and manifest.json.
+Modifications are identified in each derived source and documented in README.md.

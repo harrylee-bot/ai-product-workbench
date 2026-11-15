@@ -12,8 +12,8 @@
     "typegen": "node ../../scripts/workbench-web-typegen.mjs",
     "typecheck": "npm run typegen && tsc -p tsconfig.json --noEmit",
     "lint": "eslint .",
-    "lint:workbench": "eslint 'app/(auth)' 'app/(invitation)' 'app/(workbench)' app/share app/prototype-share components/auth components/share components/prototype-share components/workbench lib/workbench",
-    "architecture:workbench": "depcruise --config ../../.dependency-cruiser.cjs 'app/(auth)' 'app/(invitation)' 'app/(workbench)' app/share app/prototype-share components/auth components/share components/prototype-share components/workbench lib/workbench"
+    "lint:workbench": "eslint 'app/(auth)' 'app/(invitation)' 'app/(workbench)' app/share app/prototype-share components/auth components/share components/workbench components/studio lib/studio lib/workbench",
+    "architecture:workbench": "depcruise --config ../../.dependency-cruiser.cjs 'app/(auth)' 'app/(invitation)' 'app/(workbench)' app/share app/prototype-share components/auth components/share components/workbench components/studio lib/studio lib/workbench"
   },
   "dependencies": {
     "@codemirror/merge": "6.12.2",

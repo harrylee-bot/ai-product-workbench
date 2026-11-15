@@ -63,11 +63,11 @@ function requiresPositiveInteger(schema) {
 
 if (contract.openapi !== "3.1.0") throw new Error("The Workbench contract must use OpenAPI 3.1.0");
 if (!contract.paths || Object.keys(contract.paths).length === 0) throw new Error("The Workbench contract has no paths");
-assert(Object.keys(contract.paths).length === 115, "Workbench v1 must expose exactly 115 resource paths including source and visual prototype previews");
+assert(Object.keys(contract.paths).length === 116, "Workbench v1 must expose exactly 116 resource paths including source and visual prototype previews");
 const operationCount = Object.values(contract.paths).reduce((count, pathItem) => (
   count + ["get", "post", "put", "patch", "delete"].filter((method) => pathItem?.[method]).length
 ), 0);
-assert(operationCount === 140, "Workbench v1 must expose exactly 140 generated operations including source and visual prototype previews");
+assert(operationCount === 141, "Workbench v1 must expose exactly 141 generated operations including source and visual prototype previews");
 for (const [path, methods] of [
   ["/artifacts/{artifactId}/versions/{artifactVersionId}/finalization", ["get", "post"]],
   ["/artifacts/{artifactId}/versions/{artifactVersionId}/finalization/retry", ["post"]],

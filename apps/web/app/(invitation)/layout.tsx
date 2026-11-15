@@ -54,11 +54,11 @@ function AuthenticatedInvitationLayout({ children }: { children: React.ReactNode
     router.replace(`/login?next=${encodeURIComponent(next)}`);
   }, [loading, pathname, router, searchParams, user]);
 
-  if (loading || !user) return <div className="h-screen bg-[#131314]" />;
+  if (loading || !user) return <div className="h-screen bg-slate-50" />;
 
   return (
-    <div className="min-h-screen bg-[#131314] text-[#f1f3f4]">
-      <Toaster position="top-center" theme="dark" />
+    <div className="min-h-screen bg-slate-50 text-slate-900">
+      <Toaster position="top-center" theme="light" />
       {children}
     </div>
   );

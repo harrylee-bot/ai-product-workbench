@@ -149,7 +149,7 @@ export default function ProjectInvitationAcceptPage() {
           {projectId ? (
             <button
               className="inline-flex h-[36px] items-center gap-[7px] rounded-[8px] bg-[#e8eaed] px-[13px] text-[12px] font-semibold text-[#202124] hover:bg-white"
-              onClick={() => window.location.assign(`/projects/${projectId}`)}
+              onClick={() => window.location.assign(`/studio/${projectId}`)}
               type="button"
             >
               进入项目

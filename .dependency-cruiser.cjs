@@ -3,7 +3,7 @@ const {
   layeredWorkbenchFeatures,
 } = require("./apps/web/workbench-feature-boundaries.cjs");
 
-const workbenchSourcePath = "^(?:app/(?:[(](?:auth|invitation|workbench)[)]|share)/|components/(?:auth|share|workbench)/|lib/workbench/)";
+const workbenchSourcePath = "^(?:app/(?:[(](?:auth|invitation|workbench)[)]|share)/|components/(?:auth|share|workbench|studio)/|lib/(?:workbench|studio)/)";
 
 const layeredFeatureRules = layeredWorkbenchFeatures.flatMap((feature) => {
   const escapedFeature = feature.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -17,7 +17,7 @@ const layeredFeatureRules = layeredWorkbenchFeatures.flatMap((feature) => {
       comment: `Consumers must import ${feature} through its public entry, never its internal layers.`,
       from: {
         path: workbenchSourcePath,
-        pathNot: `^lib/workbench/features/${escapedFeature}(?:[.]ts|/)`,
+        pathNot: `^(?:lib/workbench/features/${escapedFeature}(?:[.]ts|/)|lib/studio/api[.]ts$)`,
       },
       to: {
         path: usesDirectoryEntry
@@ -65,6 +65,7 @@ const directoryEntryAdapterRules = directoryEntryWorkbenchFeatures.map((feature)
 /** @type {import('dependency-cruiser').IConfiguration} */
 module.exports = {
   forbidden: [
+    {name:"studio-does-not-mount-retired-workbench",severity:"error",from:{path:"^(?:components/studio/|lib/studio/|app/[(]workbench[)]/)"},to:{path:"^components/workbench/|node_modules/@xyflow/",reachable:true}},
     ...layeredFeatureRules,
     ...directoryEntryAdapterRules,
     {

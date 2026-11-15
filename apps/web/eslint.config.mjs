@@ -11,6 +11,8 @@ const {
 
 const workbenchLintFiles = [
   "components/share/**/*.{ts,tsx}",
+  "components/studio/**/*.{ts,tsx}",
+  "lib/studio/**/*.{ts,tsx}",
   "components/workbench/**/*.{ts,tsx}",
   "lib/workbench/**/*.{ts,tsx}",
 ];
@@ -229,10 +231,10 @@ export default tseslint.config(
   },
   {
     files: workbenchLintFiles,
-    ignores: layeredWorkbenchFeatures.flatMap((feature) => [
+    ignores: ["lib/studio/api.ts", ...layeredWorkbenchFeatures.flatMap((feature) => [
       `lib/workbench/features/${feature}.ts`,
       `lib/workbench/features/${feature}/**/*.{ts,tsx}`,
-    ]),
+    ])],
     rules: {
       "no-restricted-imports": [
         "error",

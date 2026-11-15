@@ -87,6 +87,8 @@ export function WorkbenchAuthProvider({ children }: { children: ReactNode }) {
   const logout = useCallback(async () => {
     const result = await workbenchAuthClient.signOut();
     if (result.error) throw new Error(result.error.message || "Sign-out failed");
+    window.dispatchEvent(new Event("workbench:logout"));
+    try { for (const key of Object.keys(sessionStorage)) if (key.startsWith("workbench:studio:")) sessionStorage.removeItem(key); } catch { /* Storage can be disabled; auth sign-out still completes. */ }
     await session.refetch();
   }, [session]);
 

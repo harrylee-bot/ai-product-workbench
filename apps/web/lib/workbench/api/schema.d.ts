@@ -1746,6 +1746,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/projects/{projectId}/prototype-v2/plans/{planId}/progress": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Authorized plan Run binding and bounded recovery snapshot */
+        get: operations["getPrototypeProgress"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/projects/{projectId}/prototype-v2/plans/{planId}": {
         parameters: {
             query?: never;
@@ -7058,6 +7075,438 @@ export interface components {
         };
         PrototypePlanList: components["schemas"]["PrototypePlan"][];
         /** @enum {string} */
+        RunGenerationStage: "thinking" | "collecting-prd-context" | "structuring-prd" | "drafting-prd" | "validating-prd" | "design-system" | "mapping-components" | "creating-flows" | "generating-ui" | "screen-streaming" | "summarizing" | "screen-stable";
+        /** @description Snapshot Run and seed events must share project, request, thread and current attempt; seed cursors cannot exceed the authoritative Run cursor. */
+        PrototypeProgress: {
+            projectId: string;
+            planId: string;
+            status: components["schemas"]["PrototypePlanStatus"];
+            input: {
+                requestedArtifactKinds: string[];
+                modelId: string | null;
+                targetSurface: string | null;
+                sourceIds: string[];
+                designStyle: string | null;
+            };
+            /** @description Run Import Source snapshots belong to the Run and Project, preserve immutable manifests, and use contiguous request positions; enforced by the runtime Zod contract. */
+            run: {
+                id: string;
+                requestId: string;
+                projectId: string;
+                threadId: string;
+                retryOfRunId: string | null;
+                status: components["schemas"]["RunStatus"];
+                modelId: string;
+                workflow: components["schemas"]["RunWorkflow"];
+                /** @enum {string|null} */
+                generationIntent: "followup-design" | "interactive-prototype" | null;
+                targetSurface: components["schemas"]["RunTargetSurface"];
+                designStyle: components["schemas"]["RunDesignStyle"];
+                artifactTargets: components["schemas"]["RunArtifactTargets"];
+                requestedArtifactKinds: components["schemas"]["RuntimeRequestedArtifactKind"][];
+                /** @description Immutable Import Source snapshots ordered by contiguous zero-based position */
+                sources: components["schemas"]["RunSourceSnapshot"][];
+                knowledgeReleaseId: string | null;
+                /** @enum {string|null} */
+                phase: "understanding" | "retrieving_knowledge" | "planning" | "generating" | "validating" | "publishing" | null;
+                phaseLabel: string | null;
+                progress: number | null;
+                attempt: number;
+                lastEventSequence: number;
+                /** Format: date-time */
+                cancelRequestedAt: string | null;
+                failure: {
+                    code: string;
+                    message: string;
+                    retryable: boolean;
+                } | null;
+                cancellationReason: string | null;
+                /** Format: date-time */
+                createdAt: string;
+                /** Format: date-time */
+                startedAt: string | null;
+                /** Format: date-time */
+                finishedAt: string | null;
+            } | null;
+            events: ({
+                /** @enum {string} */
+                protocol: "workbench.run.v1";
+                id: string;
+                projectId: string;
+                threadId: string;
+                runId: string;
+                requestId: string;
+                sequence: number;
+                /** Format: date-time */
+                occurredAt: string;
+                traceId: string;
+                /** @enum {string} */
+                type: "run.queued";
+                payload: {
+                    position: number | null;
+                };
+            } | {
+                /** @enum {string} */
+                protocol: "workbench.run.v1";
+                id: string;
+                projectId: string;
+                threadId: string;
+                runId: string;
+                requestId: string;
+                sequence: number;
+                /** Format: date-time */
+                occurredAt: string;
+                traceId: string;
+                /** @enum {string} */
+                type: "run.started";
+                payload: {
+                    attempt: number;
+                };
+            } | {
+                /** @enum {string} */
+                protocol: "workbench.run.v1";
+                id: string;
+                projectId: string;
+                threadId: string;
+                runId: string;
+                requestId: string;
+                sequence: number;
+                /** Format: date-time */
+                occurredAt: string;
+                traceId: string;
+                /** @enum {string} */
+                type: "run.generation.stage.changed";
+                payload: {
+                    attempt: number;
+                    stage: components["schemas"]["RunGenerationStage"];
+                };
+            } | {
+                /** @enum {string} */
+                protocol: "workbench.run.v1";
+                id: string;
+                projectId: string;
+                threadId: string;
+                runId: string;
+                requestId: string;
+                sequence: number;
+                /** Format: date-time */
+                occurredAt: string;
+                traceId: string;
+                /** @enum {string} */
+                type: "run.phase.changed";
+                payload: {
+                    /** @enum {string} */
+                    phase: "understanding" | "retrieving_knowledge" | "planning" | "generating" | "validating" | "publishing";
+                    label: string;
+                    progress: number | null;
+                };
+            } | {
+                /** @enum {string} */
+                protocol: "workbench.run.v1";
+                id: string;
+                projectId: string;
+                threadId: string;
+                runId: string;
+                requestId: string;
+                sequence: number;
+                /** Format: date-time */
+                occurredAt: string;
+                traceId: string;
+                /** @enum {string} */
+                type: "run.input.required";
+                payload: {
+                    approvalId: string;
+                    kind: string;
+                    prompt: string;
+                    options: components["schemas"]["ApprovalOptions"];
+                    attempt: number;
+                };
+            } | {
+                /** @enum {string} */
+                protocol: "workbench.run.v1";
+                id: string;
+                projectId: string;
+                threadId: string;
+                runId: string;
+                requestId: string;
+                sequence: number;
+                /** Format: date-time */
+                occurredAt: string;
+                traceId: string;
+                /** @enum {string} */
+                type: "run.input.submitted";
+                payload: {
+                    approvalId: string;
+                    /** @enum {string} */
+                    decision: "approve" | "reject" | "submit";
+                };
+            } | {
+                /** @enum {string} */
+                protocol: "workbench.run.v1";
+                id: string;
+                projectId: string;
+                threadId: string;
+                runId: string;
+                requestId: string;
+                sequence: number;
+                /** Format: date-time */
+                occurredAt: string;
+                traceId: string;
+                /** @enum {string} */
+                type: "message.started";
+                payload: {
+                    entryId: string;
+                };
+            } | {
+                /** @enum {string} */
+                protocol: "workbench.run.v1";
+                id: string;
+                projectId: string;
+                threadId: string;
+                runId: string;
+                requestId: string;
+                sequence: number;
+                /** Format: date-time */
+                occurredAt: string;
+                traceId: string;
+                /** @enum {string} */
+                type: "message.delta";
+                payload: {
+                    entryId: string;
+                    delta: string;
+                };
+            } | {
+                /** @enum {string} */
+                protocol: "workbench.run.v1";
+                id: string;
+                projectId: string;
+                threadId: string;
+                runId: string;
+                requestId: string;
+                sequence: number;
+                /** Format: date-time */
+                occurredAt: string;
+                traceId: string;
+                /** @enum {string} */
+                type: "message.completed";
+                payload: {
+                    entryId: string;
+                };
+            } | {
+                /** @enum {string} */
+                protocol: "workbench.run.v1";
+                id: string;
+                projectId: string;
+                threadId: string;
+                runId: string;
+                requestId: string;
+                sequence: number;
+                /** Format: date-time */
+                occurredAt: string;
+                traceId: string;
+                /** @enum {string} */
+                type: "activity.changed";
+                payload: {
+                    activityId: string;
+                    /** @enum {string} */
+                    status: "pending" | "running" | "succeeded" | "failed" | "cancelled";
+                    label: string;
+                    detail: string | null;
+                };
+            } | {
+                /** @enum {string} */
+                protocol: "workbench.run.v1";
+                id: string;
+                projectId: string;
+                threadId: string;
+                runId: string;
+                requestId: string;
+                sequence: number;
+                /** Format: date-time */
+                occurredAt: string;
+                traceId: string;
+                /** @enum {string} */
+                type: "artifact.draft.created";
+                /** @description Prototype draft events contain at least one uniquely identified screen, while every non-Prototype draft event contains no screens. */
+                payload: {
+                    attempt: number;
+                    artifactIndex: number;
+                    artifactId: string;
+                    artifactVersionId: string;
+                    kind: components["schemas"]["RuntimeRequestedArtifactKind"];
+                    checksum: string;
+                    draftChecksum: string;
+                    screens: components["schemas"]["ArtifactDraftScreen"][];
+                };
+            } | {
+                /** @enum {string} */
+                protocol: "workbench.run.v1";
+                id: string;
+                projectId: string;
+                threadId: string;
+                runId: string;
+                requestId: string;
+                sequence: number;
+                /** Format: date-time */
+                occurredAt: string;
+                traceId: string;
+                /** @enum {string} */
+                type: "artifact.preview.updated";
+                payload: {
+                    attempt: number;
+                    preview: {
+                        artifactIndex: number;
+                        /** @enum {string} */
+                        kind: "prd" | "prototype";
+                        title: string;
+                        markdown: string;
+                        screens: {
+                            id: string;
+                            name: string;
+                            width: number;
+                            height: number;
+                            nodes: {
+                                id: string;
+                                parentId: string | null;
+                                /** @enum {string} */
+                                kind: "frame" | "form" | "text" | "button" | "input" | "image" | "shape" | "icon";
+                                text: string;
+                                x: number;
+                                y: number;
+                                width: number | null;
+                                height: number | null;
+                                absolute: boolean;
+                                /** @enum {string} */
+                                direction: "row" | "column";
+                                gap: number;
+                                padding: number;
+                                fill: string | null;
+                                color: string | null;
+                                fontSize: number | null;
+                                radius: number;
+                            }[];
+                        }[];
+                    };
+                };
+            } | {
+                /** @enum {string} */
+                protocol: "workbench.run.v1";
+                id: string;
+                projectId: string;
+                threadId: string;
+                runId: string;
+                requestId: string;
+                sequence: number;
+                /** Format: date-time */
+                occurredAt: string;
+                traceId: string;
+                /** @enum {string} */
+                type: "artifact.prototype.patch.created";
+                payload: components["schemas"]["PrototypePatchEventPayload"];
+            } | {
+                /** @enum {string} */
+                protocol: "workbench.run.v1";
+                id: string;
+                projectId: string;
+                threadId: string;
+                runId: string;
+                requestId: string;
+                sequence: number;
+                /** Format: date-time */
+                occurredAt: string;
+                traceId: string;
+                /** @enum {string} */
+                type: "artifact.prototype.patch.degraded";
+                payload: components["schemas"]["PrototypePatchDegradedEventPayload"];
+            } | {
+                /** @enum {string} */
+                protocol: "workbench.run.v1";
+                id: string;
+                projectId: string;
+                threadId: string;
+                runId: string;
+                requestId: string;
+                sequence: number;
+                /** Format: date-time */
+                occurredAt: string;
+                traceId: string;
+                /** @enum {string} */
+                type: "artifact.version.created";
+                payload: components["schemas"]["ArtifactVersionReference"];
+            } | {
+                /** @enum {string} */
+                protocol: "workbench.run.v1";
+                id: string;
+                projectId: string;
+                threadId: string;
+                runId: string;
+                requestId: string;
+                sequence: number;
+                /** Format: date-time */
+                occurredAt: string;
+                traceId: string;
+                /** @enum {string} */
+                type: "run.cancel.requested";
+                payload: Record<string, never>;
+            } | {
+                /** @enum {string} */
+                protocol: "workbench.run.v1";
+                id: string;
+                projectId: string;
+                threadId: string;
+                runId: string;
+                requestId: string;
+                sequence: number;
+                /** Format: date-time */
+                occurredAt: string;
+                traceId: string;
+                /** @enum {string} */
+                type: "run.cancelled";
+                payload: {
+                    reason: string | null;
+                };
+            } | {
+                /** @enum {string} */
+                protocol: "workbench.run.v1";
+                id: string;
+                projectId: string;
+                threadId: string;
+                runId: string;
+                requestId: string;
+                sequence: number;
+                /** Format: date-time */
+                occurredAt: string;
+                traceId: string;
+                /** @enum {string} */
+                type: "run.completed";
+                payload: {
+                    artifactCount: number;
+                };
+            } | {
+                /** @enum {string} */
+                protocol: "workbench.run.v1";
+                id: string;
+                projectId: string;
+                threadId: string;
+                runId: string;
+                requestId: string;
+                sequence: number;
+                /** Format: date-time */
+                occurredAt: string;
+                traceId: string;
+                /** @enum {string} */
+                type: "run.failed";
+                payload: {
+                    code: string;
+                    message: string;
+                    retryable: boolean;
+                };
+            })[];
+            /** @enum {string} */
+            coverage: "window";
+            finalRevisionId: string | null;
+        };
+        /** @enum {string} */
         PrototypeRevisionStatus: "queued" | "generating" | "ready" | "confirmed" | "rejected" | "failed" | "cancelled";
         PrototypePublicRevision: {
             id: string;
@@ -7511,8 +7960,6 @@ export interface components {
         RunApprovalList: {
             items: components["schemas"]["RunApproval"][];
         };
-        /** @enum {string} */
-        RunGenerationStage: "thinking" | "collecting-prd-context" | "structuring-prd" | "drafting-prd" | "validating-prd" | "design-system" | "mapping-components" | "creating-flows" | "generating-ui" | "screen-streaming" | "summarizing" | "screen-stable";
         RunList: {
             items: {
                 id: string;
@@ -11919,6 +12366,31 @@ export interface operations {
             412: components["responses"]["Problem"];
             428: components["responses"]["Problem"];
             503: components["responses"]["Problem"];
+        };
+    };
+    getPrototypeProgress: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectId: components["parameters"]["ProjectId"];
+                planId: components["parameters"]["PlanId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Authorized plan Run binding and bounded recovery snapshot */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PrototypeProgress"];
+                };
+            };
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
         };
     };
     getPrototypePlan: {
