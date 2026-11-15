@@ -1879,6 +1879,11 @@ textarea:focus-visible {
 .studio-resource-list h2 {margin:0;}
 .studio-resource-list p {font-size:12px;}
 .studio-card {border:1px solid var(--studio-line);background:white;padding:18px;border-radius:12px;margin:14px 0;}
+.studio-card,.studio-copy-link {overflow-wrap:anywhere;min-width:0;}
+.studio-copy-link {display:flex;align-items:end;flex-wrap:wrap;gap:8px;margin:12px 0;}
+.studio-copy-link label {display:grid;gap:4px;flex:1;min-width:0;}
+.studio-copy-link input {width:100%;min-width:0;}
+.studio-view select,.studio-view input {max-width:100%;}
 .studio-document {background:white;max-width:980px;margin:20px auto;padding:clamp(20px,4vw,64px);box-shadow:0 8px 32px #17223408;line-height:1.9;border-radius:8px;font-size:15px;overflow-wrap:anywhere;}
 .studio-document-section {margin-bottom:25px;}
 .studio-document h2 {font-size:22px;color:#202938;}

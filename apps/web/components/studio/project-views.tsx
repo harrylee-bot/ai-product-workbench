@@ -8,8 +8,6 @@ import type {
   Run,
 } from "@workbench/workbench-contracts";
 import { useWorkbenchImportSourcesApi } from "@/lib/studio/api";
-import { useWorkbenchReleasesApi } from "@/lib/studio/api";
-import { useWorkbenchExportsApi } from "@/lib/studio/api";
 import { useWorkbenchProjectsApi } from "@/lib/studio/api";
 import { useWorkbenchRunsApi } from "@/lib/studio/api";
 import { useWorkbenchArtifactsApi } from "@/lib/studio/api";
@@ -17,13 +15,15 @@ import { useWorkbenchRunActions } from "@/lib/workbench/features/workbench-run-a
 import { useWorkbenchRunController } from "@/lib/workbench/features/run-controller";
 import { workbenchQueryKeys } from "@/lib/workbench/query/keys";
 import type { StudioArtifactContext, StudioView } from "@/lib/studio/types";
-import { useStudioAction, saveBlob } from "./actions";
+import { useStudioAction } from "./actions";
+import { ProjectPublishing } from "./project-publishing";
 import { ContextImports, KnowledgeLibrary } from "./context-library";
 import { Streamdown } from "streamdown";
 import type { RunProjectionState } from "@/lib/workbench/run/reducer";
 import { projectedRun } from "@/lib/studio/run";
 import { DocumentView } from "./document-view";
 import { RunOutputs } from "./relations";
+import { ProjectMembers } from "./project-members";
 const etag = (v: { revision: number }) => `"${v.revision}"`;
 export function ProjectViews({
   activeRunId,
@@ -66,7 +66,11 @@ export function ProjectViews({
       ) : view === "runs" ? (
         <Runs bootstrap={bootstrap} canEdit={canEdit} />
       ) : view === "publishing" ? (
-        <Publishing bootstrap={bootstrap} canEdit={canEdit} />
+        <ProjectPublishing
+          key={bootstrap.project.id}
+          bootstrap={bootstrap}
+          canEdit={canEdit}
+        />
       ) : (
         <ProjectSettings bootstrap={bootstrap} canEdit={canEdit} />
       )}
@@ -587,115 +591,6 @@ function RunDetailsContent({
     </section>
   );
 }
-function Publishing({
-  bootstrap,
-  canEdit,
-}: {
-  bootstrap: ProjectBootstrap;
-  canEdit: boolean;
-}) {
-  const api = useWorkbenchReleasesApi(),
-    exports = useWorkbenchExportsApi(),
-    action = useStudioAction();
-  const projectId = bootstrap.project.id;
-  const releases = useQuery({
-    queryKey: ["studio", "releases", projectId],
-    queryFn: () => api.listProjectReleases(projectId, { limit: 100 }),
-    refetchInterval: 5000,
-  });
-  const jobs = useQuery({
-    queryKey: ["studio", "export-jobs", projectId],
-    queryFn: () => exports.listExportJobs(projectId, { limit: 100 }),
-    refetchInterval: 3000,
-  });
-  return (
-    <>
-      <h1>项目发布</h1>
-      <p>
-        将当前成果冻结成项目发布记录，再导出文档或完整项目。原型版本的分享与
-        HTML / React 导出位于“交付”。
-      </p>
-      <button
-        disabled={!canEdit || action.busy}
-        onClick={() =>
-          void action.run(async () => {
-            await api.createProjectRelease(
-              projectId,
-              {
-                boardId: bootstrap.board.id,
-                boardRevision: bootstrap.board.revision,
-              },
-              etag(bootstrap.board),
-            );
-            await releases.refetch();
-          }, "发布记录已创建")
-        }
-      >
-        创建项目发布
-      </button>
-      {action.notice}
-      {releases.data?.items.map((release) => (
-        <article className="studio-card" key={release.id}>
-          <h2>发布 {release.id.slice(-8)}</h2>
-          <p>
-            {release.status} · {new Date(release.createdAt).toLocaleString()}
-          </p>
-          {release.status === "ready" &&
-            release.artifactPins
-              .filter((a) => a.kind === "prd")
-              .map((artifact) => (
-                <div key={artifact.artifactId}>
-                  <span>{artifact.title}</span>
-                  {(["docx", "pdf"] as const).map((format) => (
-                    <button
-                      key={format}
-                      disabled={!canEdit || action.busy}
-                      onClick={() =>
-                        void action.run(async () => {
-                          await exports.createExportJob(projectId, {
-                            releaseId: release.id,
-                            format,
-                            packaging: "single_file",
-                            selection: {
-                              kind: "artifact",
-                              artifactId: artifact.artifactId,
-                              artifactVersionId: artifact.artifactVersionId,
-                            },
-                            options: {},
-                          });
-                          await jobs.refetch();
-                        }, "导出已排队")
-                      }
-                    >
-                      导出 {format.toUpperCase()}
-                    </button>
-                  ))}
-                </div>
-              ))}
-        </article>
-      ))}
-      <h2>导出任务</h2>
-      {jobs.data?.items.map((job) => (
-        <div className="studio-card" key={job.id}>
-          {job.format.toUpperCase()} · {job.status}
-          {job.status === "succeeded" && (
-            <button
-              onClick={() =>
-                void action.run(async () => {
-                  const result = await exports.getExportContent(job.id);
-                  saveBlob(result.value, `workbench-${job.id}.${job.format}`);
-                }, "已向浏览器发起下载")
-              }
-            >
-              下载
-            </button>
-          )}
-          {job.failure && <p>{job.failure.detail}</p>}
-        </div>
-      ))}
-    </>
-  );
-}
 function ProjectSettings({
   bootstrap,
   canEdit,
@@ -708,13 +603,7 @@ function ProjectSettings({
     router = useRouter(),
     action = useStudioAction(),
     project = bootstrap.project;
-  const [title, setTitle] = useState(project.title),
-    [email, setEmail] = useState(""),
-    [role, setRole] = useState<"editor" | "viewer">("viewer");
-  const members = useQuery({
-    queryKey: ["studio", "members", project.id],
-    queryFn: () => api.listProjectMembers(project.id),
-  });
+  const [title, setTitle] = useState(project.title);
   const refresh = () =>
     client.invalidateQueries({
       queryKey: workbenchQueryKeys.bootstraps(project.id),
@@ -747,7 +636,7 @@ function ProjectSettings({
           保存名称
         </button>
         <button
-          disabled={!canEdit || action.busy}
+          disabled={action.busy}
           onClick={() =>
             void action.run(async () => {
               const result = await api.duplicateProject(project.id);
@@ -774,44 +663,7 @@ function ProjectSettings({
         </details>
       </div>
       {action.notice}
-      <h2>成员</h2>
-      {members.data?.items.map((m) => (
-        <p key={m.principalId}>
-          {m.displayName || m.email || m.principalId} · {m.role}
-        </p>
-      ))}
-      {bootstrap.access.role === "owner" && (
-        <form
-          className="studio-inline-form"
-          onSubmit={(e) => {
-            e.preventDefault();
-            void action.run(async () => {
-              await api.createProjectInvitation(
-                project.id,
-                { email, role },
-                etag(project),
-              );
-              setEmail("");
-            }, "邀请已创建");
-          }}
-        >
-          <input
-            type="email"
-            aria-label="邀请邮箱"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            required
-          />
-          <select
-            value={role}
-            onChange={(e) => setRole(e.target.value as typeof role)}
-          >
-            <option value="viewer">只读成员</option>
-            <option value="editor">编辑成员</option>
-          </select>
-          <button disabled={action.busy}>邀请</button>
-        </form>
-      )}
+      <ProjectMembers key={project.id} bootstrap={bootstrap} />
     </>
   );
 }

@@ -13,7 +13,7 @@ import remarkGfm from "remark-gfm";
 import { useWorkbenchArtifactsApi } from "@/lib/studio/api";
 import { StructuredContent, SourcePreview } from "./content";
 import { workbenchQueryKeys } from "@/lib/workbench/query/keys";
-import { useStudioAction, saveBlob } from "./actions";
+import { useStudioAction, saveBlob, verifyDownload } from "./actions";
 import { ArtifactRelations } from "./relations";
 const hidden = new Set([
   "protocol",
@@ -232,7 +232,11 @@ export function DocumentView({
                   artifact.id,
                   versionId,
                 );
-                saveBlob(result, artifact.title);
+                await verifyDownload(result, {
+                  sha256: value.blob.sha256,
+                  size: value.blob.byteSize,
+                });
+                saveBlob(result, value.blob.fileName || artifact.title);
               }, "已向浏览器发起下载")
             }
           >

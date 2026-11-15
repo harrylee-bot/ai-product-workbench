@@ -7,5 +7,6 @@ export { useWorkbenchProjectsApi } from "@/lib/workbench/features/projects/api-a
 export { useWorkbenchPrototypeV2Api } from "@/lib/workbench/features/prototype-v2/api-adapter";
 export { useWorkbenchPublicSharesApi } from "@/lib/workbench/features/public-shares/api-adapter";
 export { useWorkbenchReleasesApi } from "@/lib/workbench/features/releases/api-adapter";
+export { useWorkbenchSharesApi } from "@/lib/workbench/features/shares/api-adapter";
 export { useWorkbenchRunsApi } from "@/lib/workbench/features/runs/api-adapter";
 export { useWorkbenchSubmissionIntentsApi } from "@/lib/workbench/features/submission-intents/api-adapter";
