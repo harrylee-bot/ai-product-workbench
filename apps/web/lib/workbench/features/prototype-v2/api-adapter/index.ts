@@ -10,10 +10,10 @@ import {
   prototypeFeedbackSchema,
   prototypePlanSchema,
   prototypeProgressSchema,
-  prototypePlanInputSchema,updatePrototypePlanRequestSchema,createPrototypeRevisionPlanRequestSchema,
+  prototypePlanInputSchema,prototypeRevisionInputSchema,updatePrototypePlanRequestSchema,createPrototypeRevisionPlanRequestSchema,
   type UpdatePrototypePlanRequest,type CreatePrototypeRevisionPlanRequest,
   prototypePlanListSchema,
-  prototypeFeedbackListSchema,
+  prototypeFeedbackListSchema, prototypeFeedbackLocationsSchema,
   prototypeShareListSchema,
   prototypeExportListSchema,
   revisePrototypeRevisionRequestSchema,
@@ -70,6 +70,11 @@ export class WorkbenchPrototypeV2Api {
     return parseContract(prototypeRevisionDiffSchema, result.data, "compare prototype revisions");
   }
 
+  async feedbackLocations(projectId: string, revisionId: string, sourceRevisionId: string) {
+    const result=await this.api.GET("/projects/{projectId}/prototype-v2/revisions/{revisionId}/feedback-locations",{params:{path:{projectId,revisionId},query:{sourceRevisionId}}});
+    return parseContract(prototypeFeedbackLocationsSchema,result.data,"resolve prototype feedback locations");
+  }
+
   async listFeedback(projectId: string, revisionId: string) {
     const result = await this.api.GET("/projects/{projectId}/prototype-v2/revisions/{revisionId}/feedback", { params: { path: { projectId, revisionId } } });
     return parseContract(prototypeFeedbackListSchema, result.data, "list prototype feedback");
@@ -112,7 +117,7 @@ export class WorkbenchPrototypeV2Api {
   }
   async getRevisionInput(projectId:string,revisionId:string){
     const result=await this.api.GET("/projects/{projectId}/prototype-v2/revisions/{revisionId}/input",{params:{path:{projectId,revisionId}}});
-    return parseContract(prototypePlanInputSchema,result.data,"read source revision input");
+    return parseContract(prototypeRevisionInputSchema,result.data,"read source revision input");
   }
   async updatePlanInput(projectId:string,planId:string,ifMatch:string,request:UpdatePrototypePlanRequest,idempotencyKey=createIdempotencyKey("studio-input")){
     const result=await this.api.POST("/projects/{projectId}/prototype-v2/plans/{planId}/input",{params:{path:{projectId,planId},header:{"If-Match":normalizeEtag(ifMatch),"Idempotency-Key":normalizeIdempotencyKey(idempotencyKey)}},body:updatePrototypePlanRequestSchema.parse(request)});

@@ -11890,25 +11890,58 @@ components:
         - revisionId
         - format
       additionalProperties: false
-    PrototypeFeedbackAnchor:
-      type: object
-      properties:
-        pageId:
-          type: string
-          minLength: 1
-          maxLength: 128
-        selector:
-          type: string
-          minLength: 1
-          maxLength: 500
-          pattern: ^[A-Za-z][A-Za-z0-9_.:#\- >\[\]="']*$
-        quote:
-          type: string
-          maxLength: 1000
-      required:
-        - pageId
-        - selector
-      additionalProperties: false
+    CreatePrototypeFeedbackAnchor:
+      oneOf:
+        - type: object
+          properties:
+            sourceRevisionId:
+              type: string
+              minLength: 1
+              maxLength: 128
+            pageId:
+              type: string
+              minLength: 1
+              maxLength: 128
+            quote:
+              type: string
+              maxLength: 1000
+            scope:
+              type: string
+              enum:
+                - page
+          required:
+            - sourceRevisionId
+            - pageId
+            - scope
+          additionalProperties: false
+        - type: object
+          properties:
+            sourceRevisionId:
+              type: string
+              minLength: 1
+              maxLength: 128
+            pageId:
+              type: string
+              minLength: 1
+              maxLength: 128
+            quote:
+              type: string
+              maxLength: 1000
+            scope:
+              type: string
+              enum:
+                - node
+            nodeId:
+              type: string
+              minLength: 1
+              maxLength: 96
+              pattern: ^[A-Za-z][A-Za-z0-9]*(?:[-_.:][A-Za-z0-9]+)*$
+          required:
+            - sourceRevisionId
+            - pageId
+            - scope
+            - nodeId
+          additionalProperties: false
     CreatePrototypeFeedbackRequest:
       type: object
       properties:
@@ -11917,26 +11950,58 @@ components:
           minLength: 1
           maxLength: 4000
         anchor:
-          type:
-            - object
-            - "null"
-          properties:
-            pageId:
-              type: string
-              minLength: 1
-              maxLength: 128
-            selector:
-              type: string
-              minLength: 1
-              maxLength: 500
-              pattern: ^[A-Za-z][A-Za-z0-9_.:#\- >\[\]="']*$
-            quote:
-              type: string
-              maxLength: 1000
-          required:
-            - pageId
-            - selector
-          additionalProperties: false
+          oneOf:
+            - type: object
+              properties:
+                sourceRevisionId:
+                  type: string
+                  minLength: 1
+                  maxLength: 128
+                pageId:
+                  type: string
+                  minLength: 1
+                  maxLength: 128
+                quote:
+                  type: string
+                  maxLength: 1000
+                scope:
+                  type: string
+                  enum:
+                    - page
+              required:
+                - sourceRevisionId
+                - pageId
+                - scope
+              additionalProperties: false
+            - type: object
+              properties:
+                sourceRevisionId:
+                  type: string
+                  minLength: 1
+                  maxLength: 128
+                pageId:
+                  type: string
+                  minLength: 1
+                  maxLength: 128
+                quote:
+                  type: string
+                  maxLength: 1000
+                scope:
+                  type: string
+                  enum:
+                    - node
+                nodeId:
+                  type: string
+                  minLength: 1
+                  maxLength: 96
+                  pattern: ^[A-Za-z][A-Za-z0-9]*(?:[-_.:][A-Za-z0-9]+)*$
+              required:
+                - sourceRevisionId
+                - pageId
+                - scope
+                - nodeId
+              additionalProperties: false
+            - type: "null"
       required:
         - body
       additionalProperties: false
@@ -16711,6 +16776,80 @@ components:
       items:
         $ref: "#/components/schemas/PrototypeExport"
       maxItems: 100
+    PrototypeFeedbackAnchor:
+      oneOf:
+        - type: object
+          properties:
+            sourceRevisionId:
+              type: string
+              minLength: 1
+              maxLength: 128
+            pageId:
+              type: string
+              minLength: 1
+              maxLength: 128
+            quote:
+              type: string
+              maxLength: 1000
+            scope:
+              type: string
+              enum:
+                - page
+          required:
+            - sourceRevisionId
+            - pageId
+            - scope
+          additionalProperties: false
+        - type: object
+          properties:
+            sourceRevisionId:
+              type: string
+              minLength: 1
+              maxLength: 128
+            pageId:
+              type: string
+              minLength: 1
+              maxLength: 128
+            quote:
+              type: string
+              maxLength: 1000
+            scope:
+              type: string
+              enum:
+                - node
+            nodeId:
+              type: string
+              minLength: 1
+              maxLength: 96
+              pattern: ^[A-Za-z][A-Za-z0-9]*(?:[-_.:][A-Za-z0-9]+)*$
+          required:
+            - sourceRevisionId
+            - pageId
+            - scope
+            - nodeId
+          additionalProperties: false
+        - type: object
+          properties:
+            sourceRevisionId:
+              type: string
+              minLength: 1
+              maxLength: 128
+            pageId:
+              type: string
+              minLength: 1
+              maxLength: 128
+            quote:
+              type: string
+              maxLength: 1000
+            scope:
+              type: string
+              enum:
+                - unresolved
+          required:
+            - sourceRevisionId
+            - pageId
+            - scope
+          additionalProperties: false
     PrototypeFeedbackStatus:
       type: string
       enum:
@@ -16740,26 +16879,80 @@ components:
           minLength: 1
           maxLength: 4000
         anchor:
-          type:
-            - object
-            - "null"
-          properties:
-            pageId:
-              type: string
-              minLength: 1
-              maxLength: 128
-            selector:
-              type: string
-              minLength: 1
-              maxLength: 500
-              pattern: ^[A-Za-z][A-Za-z0-9_.:#\- >\[\]="']*$
-            quote:
-              type: string
-              maxLength: 1000
-          required:
-            - pageId
-            - selector
-          additionalProperties: false
+          oneOf:
+            - type: object
+              properties:
+                sourceRevisionId:
+                  type: string
+                  minLength: 1
+                  maxLength: 128
+                pageId:
+                  type: string
+                  minLength: 1
+                  maxLength: 128
+                quote:
+                  type: string
+                  maxLength: 1000
+                scope:
+                  type: string
+                  enum:
+                    - page
+              required:
+                - sourceRevisionId
+                - pageId
+                - scope
+              additionalProperties: false
+            - type: object
+              properties:
+                sourceRevisionId:
+                  type: string
+                  minLength: 1
+                  maxLength: 128
+                pageId:
+                  type: string
+                  minLength: 1
+                  maxLength: 128
+                quote:
+                  type: string
+                  maxLength: 1000
+                scope:
+                  type: string
+                  enum:
+                    - node
+                nodeId:
+                  type: string
+                  minLength: 1
+                  maxLength: 96
+                  pattern: ^[A-Za-z][A-Za-z0-9]*(?:[-_.:][A-Za-z0-9]+)*$
+              required:
+                - sourceRevisionId
+                - pageId
+                - scope
+                - nodeId
+              additionalProperties: false
+            - type: object
+              properties:
+                sourceRevisionId:
+                  type: string
+                  minLength: 1
+                  maxLength: 128
+                pageId:
+                  type: string
+                  minLength: 1
+                  maxLength: 128
+                quote:
+                  type: string
+                  maxLength: 1000
+                scope:
+                  type: string
+                  enum:
+                    - unresolved
+              required:
+                - sourceRevisionId
+                - pageId
+                - scope
+              additionalProperties: false
+            - type: "null"
         status:
           $ref: "#/components/schemas/PrototypeFeedbackStatus"
         revision:
@@ -16793,6 +16986,83 @@ components:
       items:
         $ref: "#/components/schemas/PrototypeFeedback"
       maxItems: 100
+    PrototypeFeedbackLocation:
+      type: object
+      properties:
+        feedback:
+          $ref: "#/components/schemas/PrototypeFeedback"
+        targetRevisionId:
+          type: string
+          minLength: 1
+          maxLength: 128
+        status:
+          type: string
+          enum:
+            - resolved
+            - missing
+            - version
+        pageId:
+          type:
+            - string
+            - "null"
+          minLength: 1
+          maxLength: 128
+        nodeId:
+          type:
+            - string
+            - "null"
+          minLength: 1
+          maxLength: 96
+          pattern: ^[A-Za-z][A-Za-z0-9]*(?:[-_.:][A-Za-z0-9]+)*$
+        reason:
+          type:
+            - string
+            - "null"
+          enum:
+            - page_missing
+            - node_missing
+            - unidentified_node
+            - source_unavailable
+            - null
+      required:
+        - feedback
+        - targetRevisionId
+        - status
+        - pageId
+        - nodeId
+        - reason
+      additionalProperties: false
+    PrototypeFeedbackLocations:
+      type: object
+      properties:
+        sourceRevisionId:
+          type: string
+          minLength: 1
+          maxLength: 128
+        targetRevisionId:
+          type: string
+          minLength: 1
+          maxLength: 128
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/PrototypeFeedbackLocation"
+          maxItems: 100
+      required:
+        - sourceRevisionId
+        - targetRevisionId
+        - items
+      additionalProperties: false
+    PrototypeFeedbackLocationsQuery:
+      type: object
+      properties:
+        sourceRevisionId:
+          type: string
+          minLength: 1
+          maxLength: 128
+      required:
+        - sourceRevisionId
+      additionalProperties: false
     RuntimeDesignAsset:
       type: object
       properties:
@@ -19881,6 +20151,205 @@ components:
       required:
         - sourceRevisionId
         - pages
+      additionalProperties: false
+    PrototypeRevisionInput:
+      type: object
+      properties:
+        plan:
+          $ref: "#/components/schemas/PrototypePlan"
+        request:
+          $ref: "#/components/schemas/StartRunRequest"
+        snapshot:
+          type:
+            - object
+            - "null"
+          properties:
+            sources:
+              type: array
+              items:
+                type: object
+                properties:
+                  sourceId:
+                    type: string
+                    minLength: 1
+                    maxLength: 128
+                  kind:
+                    $ref: "#/components/schemas/ImportSourceKind"
+                  label:
+                    type: string
+                    minLength: 1
+                    maxLength: 240
+                  checksum:
+                    type: string
+                    pattern: ^[a-f0-9]{64}$
+                  descriptor:
+                    oneOf:
+                      - type: object
+                        properties:
+                          kind:
+                            type: string
+                            enum:
+                              - file
+                          fileAssetId:
+                            type: string
+                            minLength: 1
+                            maxLength: 128
+                          originalName:
+                            $ref: "#/components/schemas/FileName"
+                          mediaType:
+                            type: string
+                            minLength: 3
+                            maxLength: 255
+                            pattern: ^[a-z0-9][a-z0-9!#$&^_.+-]*\/[a-z0-9][a-z0-9!#$&^_.+-]*$
+                        required:
+                          - kind
+                          - fileAssetId
+                          - originalName
+                          - mediaType
+                        additionalProperties: false
+                      - type: object
+                        properties:
+                          kind:
+                            type: string
+                            enum:
+                              - design_md
+                          fileAssetId:
+                            type: string
+                            minLength: 1
+                            maxLength: 128
+                          originalName:
+                            $ref: "#/components/schemas/FileName"
+                          mediaType:
+                            type: string
+                            minLength: 3
+                            maxLength: 255
+                            pattern: ^[a-z0-9][a-z0-9!#$&^_.+-]*\/[a-z0-9][a-z0-9!#$&^_.+-]*$
+                        required:
+                          - kind
+                          - fileAssetId
+                          - originalName
+                          - mediaType
+                        additionalProperties: false
+                      - type: object
+                        properties:
+                          kind:
+                            type: string
+                            enum:
+                              - url_snapshot
+                          sourceUrl:
+                            type: string
+                            maxLength: 2048
+                            format: uri
+                            description: Import source locators use HTTP(S); DNS, redirect and private-network checks are enforced by the Import Worker before fetching.
+                          resolvedUrl:
+                            type:
+                              - string
+                              - "null"
+                            maxLength: 2048
+                            format: uri
+                            description: Import source locators use HTTP(S); DNS, redirect and private-network checks are enforced by the Import Worker before fetching.
+                        required:
+                          - kind
+                          - sourceUrl
+                          - resolvedUrl
+                        additionalProperties: false
+                      - type: object
+                        properties:
+                          kind:
+                            type: string
+                            enum:
+                              - github_snapshot
+                          repository:
+                            type: string
+                            minLength: 3
+                            maxLength: 255
+                            pattern: ^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$
+                          commitSha:
+                            type: string
+                            pattern: ^[0-9a-f]{40}$
+                        required:
+                          - kind
+                          - repository
+                          - commitSha
+                        additionalProperties: false
+                      - type: object
+                        properties:
+                          kind:
+                            type: string
+                            enum:
+                              - figma_snapshot
+                          fileKey:
+                            type: string
+                            minLength: 1
+                            maxLength: 128
+                            pattern: ^[A-Za-z0-9_-]+$
+                          versionId:
+                            type: string
+                            minLength: 1
+                            maxLength: 128
+                            pattern: ^[A-Za-z0-9._:-]+$
+                        required:
+                          - kind
+                          - fileKey
+                          - versionId
+                        additionalProperties: false
+                  snapshot:
+                    $ref: "#/components/schemas/RunSourceSnapshotManifest"
+                required:
+                  - sourceId
+                  - kind
+                  - label
+                  - checksum
+                  - descriptor
+                  - snapshot
+                additionalProperties: false
+              maxItems: 50
+            designStyle:
+              type: object
+              properties:
+                artifactVersionId:
+                  type:
+                    - string
+                    - "null"
+                  minLength: 1
+                  maxLength: 128
+                snapshot:
+                  oneOf:
+                    - $ref: "#/components/schemas/RuntimeDesignStyleSnapshot"
+                    - $ref: "#/components/schemas/RuntimePresetDesignStyleSnapshot"
+                    - type: "null"
+                snapshotSha256:
+                  type:
+                    - string
+                    - "null"
+                  pattern: ^[a-f0-9]{64}$
+              required:
+                - artifactVersionId
+                - snapshot
+                - snapshotSha256
+              additionalProperties: false
+            knowledgeReleaseId:
+              type:
+                - string
+                - "null"
+              minLength: 1
+              maxLength: 128
+          required:
+            - sources
+            - designStyle
+            - knowledgeReleaseId
+          additionalProperties: false
+        sha256:
+          type: string
+          pattern: ^[a-f0-9]{64}$
+        modificationRequest:
+          $ref: "#/components/schemas/StartRunRequest"
+      required:
+        - plan
+        - request
+        - snapshot
+        - sha256
+        - modificationRequest
       additionalProperties: false
     PrototypeRevisionSummary:
       type: object
@@ -26237,6 +26706,33 @@ paths:
           $ref: "#/components/responses/Problem"
         "404":
           $ref: "#/components/responses/Problem"
+  /projects/{projectId}/prototype-v2/revisions/{revisionId}/feedback-locations:
+    get:
+      operationId: getPrototypeFeedbackLocations
+      summary: Resolve exact source feedback anchors against a revision in the same family
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/PrototypeRevisionId"
+        - schema:
+            type: string
+            minLength: 1
+            maxLength: 128
+          required: true
+          name: sourceRevisionId
+          in: query
+      responses:
+        "200":
+          description: Resolve exact source feedback anchors against a revision in the same family
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PrototypeFeedbackLocations"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
   /projects/{projectId}/prototype-v2/revisions/{revisionId}/feedback:
     get:
       operationId: listPrototypeFeedback
@@ -26601,7 +27097,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/PrototypePlanInput"
+                $ref: "#/components/schemas/PrototypeRevisionInput"
         "403":
           $ref: "#/components/responses/Problem"
         "404":

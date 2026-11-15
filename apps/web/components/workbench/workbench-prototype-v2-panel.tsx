@@ -156,7 +156,7 @@ export function WorkbenchPrototypeV2Panel({ projectId, canEdit, composer, onCrea
       if (editingCurrent && selectedRevision) {
         if (submission.files?.length || submission.sourceIds?.length || submission.designSystemProvision) throw new Error("修改当前版本沿用原有资料和设计上下文。请移除新附件，或选择“新建计划”使用这些输入。");
         const pageId = interaction?.pageId || selectedPage?.id;
-        const anchor = pageId ? { pageId, selector: interaction?.target ?? `main[data-wb-screen="${pageId}"]`, quote: interaction?.label ?? selectedPage?.title ?? "" } : null;
+        const anchor = pageId ? { pageId, sourceRevisionId: selectedRevision.id, scope: "page" as const, quote: interaction?.label ?? selectedPage?.title ?? "" } : null;
         const signature = JSON.stringify({ revisionId: selectedRevision.id, prompt: submission.prompt.trim(), anchor });
         if (pendingComposerRevision.current?.signature !== signature) pendingComposerRevision.current = { signature, feedbackKey: createIdempotencyKey("prototype-feedback"), reviseKey: createIdempotencyKey("prototype-revise") };
         const command = pendingComposerRevision.current;
@@ -184,7 +184,7 @@ export function WorkbenchPrototypeV2Panel({ projectId, canEdit, composer, onCrea
   };
   const addFeedback = () => run(async () => {
     const pageId = interaction?.pageId || selectedPage?.id;
-    const anchor = interaction && pageId ? { pageId, selector: interaction.target, quote: interaction.label } : null;
+    const anchor = interaction && pageId ? { pageId, sourceRevisionId: selectedRevision!.id, scope: "page" as const, quote: interaction.label } : null;
     await createFeedback.mutateAsync({ request: { body: feedback.trim(), anchor } }); setFeedback("");
   }, "批注已保存到当前版本");
 
@@ -258,7 +258,7 @@ function statusLabel(status: string): string { return ({ draft: "待审批", app
 
 function FeedbackRow({ item, canEdit, run }: { item: PrototypeFeedback; canEdit: boolean; run: Operation }) {
   const resolve = useResolveWorkbenchPrototypeV2Feedback(item.projectId, item.id);
-  return <div className="mt-2 rounded border border-white/[0.1] p-2 text-xs"><p className="whitespace-pre-wrap">{item.body}</p>{item.anchor && <p className="mt-1 text-[#9aa0a6]">{item.anchor.pageId} · {item.anchor.quote || item.anchor.selector}</p>}<p className="mt-1 text-[#9aa0a6]">{statusLabel(item.status)}</p>{item.status === "open" && <button type="button" disabled={!canEdit || resolve.isPending} onClick={() => void run(() => resolve.mutateAsync({ ifMatch: etag(item), request: {} }), "批注已解决")} className={`${buttonClass} mt-1`}>解决</button>}</div>;
+  return <div className="mt-2 rounded border border-white/[0.1] p-2 text-xs"><p className="whitespace-pre-wrap">{item.body}</p>{item.anchor && <p className="mt-1 text-[#9aa0a6]">{item.anchor.pageId} · {item.anchor.quote || (item.anchor.scope === "node" ? item.anchor.nodeId : "页面")}</p>}<p className="mt-1 text-[#9aa0a6]">{statusLabel(item.status)}</p>{item.status === "open" && <button type="button" disabled={!canEdit || resolve.isPending} onClick={() => void run(() => resolve.mutateAsync({ ifMatch: etag(item), request: {} }), "批注已解决")} className={`${buttonClass} mt-1`}>解决</button>}</div>;
 }
 function ShareRow({ item, projectId, canEdit, run }: { item: PrototypeShare; projectId: string; canEdit: boolean; run: Operation }) {
   const revoke = useRevokeWorkbenchPrototypeV2Share(projectId, item.id);

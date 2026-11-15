@@ -17,7 +17,6 @@ import {
   useWorkbenchPrototypeV2Revision,
   useWorkbenchPrototypeV2Revisions,
   useWorkbenchPrototypeV2RevisionDiff,
-  useWorkbenchPrototypeV2Feedback,
   useWorkbenchPrototypeV2Shares,
   useWorkbenchPrototypeV2Exports,
   useReviseWorkbenchPrototypeV2Revision,
@@ -27,6 +26,7 @@ import {
 import type {
   PrototypeExport,
   PrototypeFeedback,
+  PrototypeFeedbackLocation,
   PrototypePlan,
   PrototypeShare,
 } from "@workbench/workbench-contracts";
@@ -51,7 +51,7 @@ import { DesignPanel } from "./onlook/design-panel";
 import { ProjectViews, RunDetails } from "./project-views";
 import Link from "next/link";
 import { useWorkbenchAuth } from "@/lib/auth/workbench-auth";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { isWorkbenchApiError } from "@/lib/workbench/api";
 import { workbenchQueryKeys } from "@/lib/workbench/query/keys";
 import {
@@ -165,6 +165,16 @@ export function StudioWorkspace({
     setViewState(next);
   };
   const [feedback, setFeedback] = useState("");
+  const [feedbackScope, setFeedbackScope] = useState<"page" | "version">(
+    "version",
+  );
+  const [feedbackSourceId, setFeedbackSourceId] = useState("");
+  const [feedbackLocation, setFeedbackLocation] = useState<{
+    revisionId: string;
+    pageId: string;
+    nodeId: string | null;
+    requestId: string;
+  }>();
   const [panel, setPanel] = useState<
     "plan" | "versions" | "feedback" | "delivery" | null
   >(null);
@@ -242,10 +252,25 @@ export function StudioWorkspace({
   );
   const selectedPage =
     pages.find((page) => page.id === selectedPageId) ?? pages[0];
-  const feedbackQuery = useWorkbenchPrototypeV2Feedback(
-    projectId,
-    selectedRevision?.id ?? "",
-  );
+  const feedbackRevisionId = feedbackSourceId || selectedRevision?.id || "";
+  const locationsQuery = useQuery({
+    queryKey: [
+      ...workbenchQueryKeys.prototypeV2(projectId),
+      "feedback-locations",
+      selectedRevisionId,
+      feedbackRevisionId,
+    ],
+    queryFn: () =>
+      api.feedbackLocations(projectId, selectedRevisionId, feedbackRevisionId),
+    enabled: Boolean(
+      selectedRevisionId && feedbackRevisionId && panel === "feedback",
+    ),
+    refetchInterval: panel === "feedback" ? 3000 : false,
+  });
+  const feedbackQuery = {
+    data: locationsQuery.data?.items.map((item) => item.feedback),
+    error: locationsQuery.error,
+  };
   const sharesQuery = useWorkbenchPrototypeV2Shares(projectId);
   const exportsQuery = useWorkbenchPrototypeV2Exports(projectId);
   const createPreviewToken = useCreateWorkbenchPrototypeV2PreviewToken(
@@ -309,6 +334,9 @@ export function StudioWorkspace({
   }, [running]);
   useEffect(() => {
     setFeedbackIds([]);
+    setFeedbackSourceId("");
+    setFeedbackScope("version");
+    setFeedbackLocation(undefined);
     setFeedback("");
     setInteraction(undefined);
   }, [selectedRevisionId]);
@@ -460,7 +488,7 @@ export function StudioWorkspace({
         if (
           target.kind === "revision" &&
           target.id === selectedRevision?.id &&
-          interaction
+          interaction?.revisionId === target.id
         ) {
           const signature = JSON.stringify({
             revisionId: target.id,
@@ -477,8 +505,10 @@ export function StudioWorkspace({
             request: {
               body: submission.prompt,
               anchor: {
+                sourceRevisionId: interaction.revisionId,
+                scope: "node",
                 pageId: interaction.pageId,
-                selector: interaction.target,
+                nodeId: interaction.nodeId,
                 quote: interaction.label,
               },
             },
@@ -567,8 +597,21 @@ export function StudioWorkspace({
         };
       const anchor =
         interaction && pageId
-          ? { pageId, selector: interaction.target, quote: interaction.label }
-          : null;
+          ? {
+              scope: "node" as const,
+              sourceRevisionId: interaction.revisionId,
+              pageId,
+              nodeId: interaction.nodeId,
+              quote: interaction.label,
+            }
+          : feedbackScope === "page" && selectedPage && selectedRevision
+            ? {
+                scope: "page" as const,
+                sourceRevisionId: selectedRevision.id,
+                pageId: selectedPage.id,
+                quote: selectedPage.title,
+              }
+            : null;
       await createFeedback.mutateAsync({
         idempotencyKey: pendingFeedback.current.key,
         request: { body: feedback.trim(), anchor },
@@ -829,9 +872,31 @@ export function StudioWorkspace({
           {selectedRevision ? (
             <>
               <p>
-                绑定版本 {selectedRevision.version} ·{" "}
-                {interaction?.label || "普通批注"}
+                新批注绑定版本 {selectedRevision.version} ·{" "}
+                {interaction?.label ||
+                  (feedbackScope === "page" ? selectedPage?.title : "版本整体")}
               </p>
+              <label>
+                批注范围
+                <select
+                  aria-label="批注范围"
+                  value={interaction ? "node" : feedbackScope}
+                  onChange={(event) => {
+                    if (event.target.value !== "node") {
+                      setInteraction(undefined);
+                      setFeedbackScope(
+                        event.target.value as "page" | "version",
+                      );
+                    }
+                  }}
+                >
+                  <option value="version">版本整体</option>
+                  <option value="page" disabled={!selectedPage}>
+                    当前页面
+                  </option>
+                  {interaction && <option value="node">选中元素</option>}
+                </select>
+              </label>
               <textarea
                 aria-label="当前版本批注"
                 maxLength={4000}
@@ -860,6 +925,32 @@ export function StudioWorkspace({
                 )}
               </div>
               <label>
+                查看批注来源
+                <select
+                  aria-label="批注来源版本"
+                  value={feedbackRevisionId}
+                  onChange={(event) => {
+                    setFeedbackSourceId(event.target.value);
+                    setFeedbackIds([]);
+                  }}
+                >
+                  {revisions.map((revision) => (
+                    <option key={revision.id} value={revision.id}>
+                      版本 {revision.version}
+                      {revision.id === selectedRevision.id ? "（当前）" : ""}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              {feedbackRevisionId !== selectedRevision.id && (
+                <p>
+                  正在对照来源版本的批注；正文与源锚点保持原样。
+                  <button onClick={() => chooseRevision(feedbackRevisionId)}>
+                    打开批注来源版本
+                  </button>
+                </p>
+              )}
+              <label>
                 筛选
                 <select
                   value={feedbackFilter}
@@ -871,15 +962,31 @@ export function StudioWorkspace({
                   <option value="resolved">已解决</option>
                 </select>
               </label>
-              {visibleFeedback.length === 0 && (
-                <p className="visual-muted">暂无批注</p>
+              {locationsQuery.data?.items.length === 100 && (
+                <p className="visual-muted">
+                  显示此来源版本的前 100 条批注，其他批注尚未载入。
+                </p>
               )}
+              {locationsQuery.isLoading && (
+                <p className="visual-muted" role="status">
+                  正在读取批注…
+                </p>
+              )}
+              {!locationsQuery.isLoading &&
+                !locationsQuery.error &&
+                visibleFeedback.length === 0 && (
+                  <p className="visual-muted">暂无批注</p>
+                )}
               {visibleFeedback.map((item) => (
                 <div key={item.id} className="visual-feedback">
                   <label>
                     <input
                       type="checkbox"
-                      disabled={!canEdit || item.status !== "open"}
+                      disabled={
+                        !canEdit ||
+                        item.status !== "open" ||
+                        feedbackRevisionId !== selectedRevision.id
+                      }
                       checked={feedbackIds.includes(item.id)}
                       onChange={(e) =>
                         setFeedbackIds((ids) =>
@@ -891,17 +998,33 @@ export function StudioWorkspace({
                     />
                     用于本次修改
                   </label>
-                  <FeedbackRow item={item} canEdit={canEdit} run={run} />
-                  {item.anchor &&
-                    !pages.some((p) => p.id === item.anchor?.pageId) && (
-                      <p>原页面/元素未找到，正文已保留</p>
+                  <FeedbackRow
+                    item={item}
+                    canEdit={canEdit}
+                    run={run}
+                    location={locationsQuery.data?.items.find(
+                      (location) => location.feedback.id === item.id,
                     )}
+                    onLocate={(location) => {
+                      if (location.status !== "resolved" || !location.pageId)
+                        return;
+                      setFollowRun(false);
+                      setView("pages");
+                      setFeedbackLocation({
+                        revisionId: location.targetRevisionId,
+                        pageId: location.pageId,
+                        nodeId: location.nodeId,
+                        requestId: crypto.randomUUID(),
+                      });
+                    }}
+                  />
                 </div>
               ))}
               <button
                 type="button"
                 disabled={
                   !canEdit ||
+                  feedbackRevisionId !== selectedRevision.id ||
                   !selectedFeedback.length ||
                   selectedFeedback.length > 100 ||
                   running ||
@@ -1200,6 +1323,7 @@ export function StudioWorkspace({
             {view === "pages" ? (
               <PageStage
                 storageScope={`${user?.id ?? ""}:${projectId}`}
+                locate={feedbackLocation}
                 draftIdentity={`${planId}:${progress.projection?.attempt ?? 0}`}
                 revisionId={selectedRevision?.id ?? "pending"}
                 title={selectedRevision?.title ?? "原型页面"}
@@ -1311,6 +1435,12 @@ export function StudioWorkspace({
               {focused ? "展开输入框" : "专注预览"}
             </button>
             <div hidden={focused}>
+              {inputContext?.target.kind === "revision" &&
+                !inputContext.operationRequest && (
+                  <p role="alert">
+                    源版本操作输入需重新载入，请点击“修改版本”核对后继续；草稿仍保留。
+                  </p>
+                )}
               {composerSession.storageError && (
                 <p role="alert">{composerSession.storageError}</p>
               )}
@@ -1373,7 +1503,10 @@ export function StudioWorkspace({
                       prompt,
                     }))
                   }
-                  initialInput={inputContext?.input.request}
+                  initialInput={
+                    inputContext?.operationRequest ??
+                    inputContext?.input.request
+                  }
                   pinnedSources={inputContext?.input.snapshot?.sources}
                   pinnedDesign={inputContext?.input.snapshot?.designStyle}
                   artifactContext={artifactContext}
@@ -1415,13 +1548,12 @@ export function StudioWorkspace({
                                   feedbackIds,
                                 },
                                 input: {
-                                  ...input,
-                                  request: {
-                                    ...input.request,
-                                    prompt: composerEntry.draft.prompt,
-                                    requestedArtifactKinds: ["prototype"],
-                                  },
+                                  plan: input.plan,
+                                  request: input.request,
+                                  snapshot: input.snapshot,
+                                  sha256: input.sha256,
                                 },
+                                operationRequest: input.modificationRequest,
                                 version: selectedRevision.version,
                               },
                               "",
@@ -1459,6 +1591,8 @@ export function StudioWorkspace({
                   }
                   busy={composer.busy || submitting || running || directRunning}
                   disabled={
+                    (inputContext?.target.kind === "revision" &&
+                      !inputContext.operationRequest) ||
                     composer.disabled ||
                     !canEdit ||
                     !!conflictingInput ||
@@ -1514,10 +1648,14 @@ function FeedbackRow({
   item,
   canEdit,
   run,
+  location,
+  onLocate,
 }: {
   item: PrototypeFeedback;
   canEdit: boolean;
   run: Operation;
+  location?: PrototypeFeedbackLocation;
+  onLocate: (location: PrototypeFeedbackLocation) => void;
 }) {
   const resolve = useResolveWorkbenchPrototypeV2Feedback(
     item.projectId,
@@ -1528,8 +1666,18 @@ function FeedbackRow({
       <p className="whitespace-pre-wrap">{item.body}</p>
       {item.anchor && (
         <p className="mt-1 visual-muted">
-          {item.anchor.pageId} · {item.anchor.quote || item.anchor.selector}
+          {item.anchor.pageId} ·{" "}
+          {item.anchor.quote ||
+            (item.anchor.scope === "node" ? item.anchor.nodeId : "页面")}
         </p>
+      )}
+      {location?.status === "missing" && (
+        <p role="status">原元素未找到，原页面、引文与正文已保留。</p>
+      )}
+      {location?.status === "resolved" && (
+        <button type="button" onClick={() => onLocate(location)}>
+          在当前版本定位
+        </button>
       )}
       <p className="mt-1 visual-muted">{statusLabel(item.status)}</p>
       {item.status === "open" && (

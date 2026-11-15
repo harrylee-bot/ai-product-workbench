@@ -4,9 +4,12 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import assert from "node:assert/strict";
 import { prdDocumentV3Example } from "@workbench/workbench-contracts/test-fixtures";
+const splitModels = process.env.WORKBENCH_E2E_SPLIT_MODEL_CAPABILITIES === "1";
 const origin = process.env.WORKBENCH_E2E_WEB_ORIGIN ?? "http://127.0.0.1:18930";
 const output = new URL(
-  "../../output/audit/1.0.0/studio-input/",
+  splitModels
+    ? "../../output/audit/1.0.0/studio-revision-models/"
+    : "../../output/audit/1.0.0/studio-input/",
   import.meta.url,
 );
 await mkdir(output, { recursive: true });
@@ -285,7 +288,9 @@ await context.route("**/api/v1/**", async (route) => {
         id,
         displayName: id,
         description: null,
-        supportedWorkflows: ["generate", "edit"],
+        supportedWorkflows: splitModels
+          ? [id === "model-a" ? "generate" : "edit"]
+          : ["generate", "edit"],
         supportsThinking: true,
         supportsReasoningEffort: false,
       })),
@@ -338,9 +343,39 @@ await context.route("**/api/v1/**", async (route) => {
     );
   }
   if (path.endsWith(`/revisions/${secondRevision.id}/input`))
-    return json(route, input(secondPlan));
+    return json(route, {
+      ...input(secondPlan),
+      modificationRequest: {
+        ...requests.get(secondPlan.id),
+        workflow: "edit",
+        generationIntent: null,
+        requestedArtifactKinds: ["prototype"],
+        artifactTargets: [
+          {
+            artifactId: "source-prototype",
+            artifactVersionId: "source-version-2",
+            screenIds: [],
+          },
+        ],
+      },
+    });
   if (path.endsWith(`/revisions/${revisionId}/input`))
-    return json(route, input(root));
+    return json(route, {
+      ...input(root),
+      modificationRequest: {
+        ...requests.get(root.id),
+        workflow: "edit",
+        generationIntent: null,
+        requestedArtifactKinds: ["prototype"],
+        artifactTargets: [
+          {
+            artifactId: "source-prototype",
+            artifactVersionId: "source-version-1",
+            screenIds: [],
+          },
+        ],
+      },
+    });
   if (path.endsWith(`/revisions/${revisionId}/plans`) && method === "POST") {
     const body = route.request().postDataJSON();
     assert.equal(route.request().headers()["if-match"], '"1"');
@@ -430,6 +465,14 @@ await context.route("**/api/v1/**", async (route) => {
   if (path.endsWith(`/revisions/${revisionId}`)) return json(route, revision);
   if (path.endsWith(`/revisions/${secondRevision.id}`))
     return json(route, secondRevision);
+  if (path.endsWith("/feedback-locations"))
+    return json(route, {
+      sourceRevisionId: new URL(route.request().url()).searchParams.get(
+        "sourceRevisionId",
+      ),
+      targetRevisionId: path.split("/").at(-2),
+      items: [],
+    });
   if (path.endsWith("/diff"))
     return json(route, {
       sourceRevisionId: null,
@@ -462,8 +505,31 @@ try {
     await page
       .getByRole("combobox", { name: "模型", exact: true })
       .inputValue(),
-    "model-a",
+    splitModels ? "" : "model-a",
   );
+  if (splitModels) {
+    await page.getByText("所选模型不支持当前操作，请选择可用模型").waitFor();
+    assert.equal(
+      await page
+        .getByRole("button", { name: "发送需求", exact: true })
+        .isDisabled(),
+      true,
+    );
+    assert.equal(
+      await page
+        .getByRole("combobox", { name: "模型", exact: true })
+        .getByRole("option", { name: "model-b", exact: true })
+        .count(),
+      1,
+    );
+    assert.equal(
+      await page
+        .getByRole("combobox", { name: "模型", exact: true })
+        .getByRole("option", { name: "model-a", exact: true })
+        .count(),
+      0,
+    );
+  }
   await page
     .getByRole("textbox", { name: "描述需求或修改" })
     .fill("增加审批流程，并调整设计");
@@ -479,6 +545,27 @@ try {
   await page.getByRole("button", { name: /^资料\s*1$/ }).click();
   await page.getByRole("checkbox", { name: /新增参考/ }).check();
   await page.getByRole("button", { name: /^资料\s*2$/ }).click();
+  if (splitModels) {
+    await page.reload({ waitUntil: "networkidle" });
+    await page.getByText(/源版本 1/).waitFor();
+    assert.equal(
+      await page
+        .getByRole("combobox", { name: "模型", exact: true })
+        .inputValue(),
+      "model-b",
+    );
+    assert.equal(
+      await page
+        .getByRole("combobox", { name: "模型", exact: true })
+        .getByRole("option", { name: "model-a", exact: true })
+        .count(),
+      0,
+    );
+    assert.equal(
+      await page.getByRole("textbox", { name: "描述需求或修改" }).inputValue(),
+      "增加审批流程，并调整设计",
+    );
+  }
   await page.getByRole("button", { name: "发送需求", exact: true }).click();
   await page
     .getByRole("button", { name: "调整完整输入", exact: true })
@@ -489,6 +576,20 @@ try {
     "source-2",
   ]);
   assert.equal(commands[0].body.generationRequest.modelId, "model-b");
+  assert.equal(commands[0].body.generationRequest.workflow, "edit");
+  assert.deepEqual(commands[0].body.generationRequest.artifactTargets, [
+    {
+      artifactId: "source-prototype",
+      artifactVersionId: "source-version-1",
+      screenIds: [],
+    },
+  ]);
+  assert.equal(requests.get(root.id).workflow, "generate");
+  assert.equal(requests.get(root.id).modelId, "model-a");
+  if (splitModels)
+    results.checks.push(
+      "initial revision and restored revision offer only edit-capable models; unsupported historical model remains explicit, and submitted edit request leaves historical generate input unchanged",
+    );
   assert.equal(commands[0].body.generationRequest.targetSurface, "app");
   assert.deepEqual(commands[0].body.generationRequest.designStyle, {
     kind: "artifact",
@@ -595,6 +696,11 @@ try {
   await page
     .getByRole("textbox", { name: "描述需求或修改" })
     .fill("修改版本一，浏览版本二");
+  await page.getByText(/源版本 1/).waitFor();
+  if (splitModels)
+    await page
+      .getByRole("combobox", { name: "模型", exact: true })
+      .selectOption("model-b");
   await page.getByRole("button", { name: "版本", exact: true }).first().click();
   await page.getByRole("button", { name: /^版本 2 ·/ }).click();
   await page.getByText(/源版本 1 · 仍绑定原来源/).waitFor();
@@ -715,13 +821,11 @@ try {
       },
     ],
   });
-  await page
-    .locator('input[type="file"]')
-    .setInputFiles({
-      name: "待恢复.txt",
-      mimeType: "text/plain",
-      buffer: Buffer.from("attachment survives reload"),
-    });
+  await page.locator('input[type="file"]').setInputFiles({
+    name: "待恢复.txt",
+    mimeType: "text/plain",
+    buffer: Buffer.from("attachment survives reload"),
+  });
   await page
     .getByRole("button", { name: "移除 待恢复.txt", exact: true })
     .waitFor();

@@ -1624,6 +1624,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/projects/{projectId}/prototype-v2/revisions/{revisionId}/feedback-locations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Resolve exact source feedback anchors against a revision in the same family */
+        get: operations["getPrototypeFeedbackLocations"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/projects/{projectId}/prototype-v2/revisions/{revisionId}/feedback": {
         parameters: {
             query?: never;
@@ -5458,17 +5475,35 @@ export interface components {
             revisionId: string;
             format: components["schemas"]["PrototypeExportFormat"];
         };
-        PrototypeFeedbackAnchor: {
+        CreatePrototypeFeedbackAnchor: {
+            sourceRevisionId: string;
             pageId: string;
-            selector: string;
             quote?: string;
+            /** @enum {string} */
+            scope: "page";
+        } | {
+            sourceRevisionId: string;
+            pageId: string;
+            quote?: string;
+            /** @enum {string} */
+            scope: "node";
+            nodeId: string;
         };
         CreatePrototypeFeedbackRequest: {
             body: string;
             anchor?: {
+                sourceRevisionId: string;
                 pageId: string;
-                selector: string;
                 quote?: string;
+                /** @enum {string} */
+                scope: "page";
+            } | {
+                sourceRevisionId: string;
+                pageId: string;
+                quote?: string;
+                /** @enum {string} */
+                scope: "node";
+                nodeId: string;
             } | null;
         };
         RunArtifactTarget: {
@@ -6914,6 +6949,26 @@ export interface components {
             finishedAt: string | null;
         };
         PrototypeExportList: components["schemas"]["PrototypeExport"][];
+        PrototypeFeedbackAnchor: {
+            sourceRevisionId: string;
+            pageId: string;
+            quote?: string;
+            /** @enum {string} */
+            scope: "page";
+        } | {
+            sourceRevisionId: string;
+            pageId: string;
+            quote?: string;
+            /** @enum {string} */
+            scope: "node";
+            nodeId: string;
+        } | {
+            sourceRevisionId: string;
+            pageId: string;
+            quote?: string;
+            /** @enum {string} */
+            scope: "unresolved";
+        };
         /** @enum {string} */
         PrototypeFeedbackStatus: "open" | "resolved";
         PrototypeFeedback: {
@@ -6923,9 +6978,24 @@ export interface components {
             createdById: string;
             body: string;
             anchor: {
+                sourceRevisionId: string;
                 pageId: string;
-                selector: string;
                 quote?: string;
+                /** @enum {string} */
+                scope: "page";
+            } | {
+                sourceRevisionId: string;
+                pageId: string;
+                quote?: string;
+                /** @enum {string} */
+                scope: "node";
+                nodeId: string;
+            } | {
+                sourceRevisionId: string;
+                pageId: string;
+                quote?: string;
+                /** @enum {string} */
+                scope: "unresolved";
             } | null;
             status: components["schemas"]["PrototypeFeedbackStatus"];
             revision: components["schemas"]["Revision"];
@@ -6937,6 +7007,24 @@ export interface components {
             resolvedAt: string | null;
         };
         PrototypeFeedbackList: components["schemas"]["PrototypeFeedback"][];
+        PrototypeFeedbackLocation: {
+            feedback: components["schemas"]["PrototypeFeedback"];
+            targetRevisionId: string;
+            /** @enum {string} */
+            status: "resolved" | "missing" | "version";
+            pageId: string | null;
+            nodeId: string | null;
+            /** @enum {string|null} */
+            reason: "page_missing" | "node_missing" | "unidentified_node" | "source_unavailable" | null;
+        };
+        PrototypeFeedbackLocations: {
+            sourceRevisionId: string;
+            targetRevisionId: string;
+            items: components["schemas"]["PrototypeFeedbackLocation"][];
+        };
+        PrototypeFeedbackLocationsQuery: {
+            sourceRevisionId: string;
+        };
         RuntimeDesignAsset: {
             id: string;
             name: string;
@@ -7811,6 +7899,63 @@ export interface components {
                 /** @enum {string} */
                 change: "added" | "removed" | "changed" | "unchanged";
             }[];
+        };
+        PrototypeRevisionInput: {
+            plan: components["schemas"]["PrototypePlan"];
+            request: components["schemas"]["StartRunRequest"];
+            snapshot: {
+                sources: {
+                    sourceId: string;
+                    kind: components["schemas"]["ImportSourceKind"];
+                    label: string;
+                    checksum: string;
+                    descriptor: {
+                        /** @enum {string} */
+                        kind: "file";
+                        fileAssetId: string;
+                        originalName: components["schemas"]["FileName"];
+                        mediaType: string;
+                    } | {
+                        /** @enum {string} */
+                        kind: "design_md";
+                        fileAssetId: string;
+                        originalName: components["schemas"]["FileName"];
+                        mediaType: string;
+                    } | {
+                        /** @enum {string} */
+                        kind: "url_snapshot";
+                        /**
+                         * Format: uri
+                         * @description Import source locators use HTTP(S); DNS, redirect and private-network checks are enforced by the Import Worker before fetching.
+                         */
+                        sourceUrl: string;
+                        /**
+                         * Format: uri
+                         * @description Import source locators use HTTP(S); DNS, redirect and private-network checks are enforced by the Import Worker before fetching.
+                         */
+                        resolvedUrl: string | null;
+                    } | {
+                        /** @enum {string} */
+                        kind: "github_snapshot";
+                        repository: string;
+                        commitSha: string;
+                    } | {
+                        /** @enum {string} */
+                        kind: "figma_snapshot";
+                        fileKey: string;
+                        versionId: string;
+                    };
+                    snapshot: components["schemas"]["RunSourceSnapshotManifest"];
+                }[];
+                designStyle: {
+                    artifactVersionId: string | null;
+                    snapshot: components["schemas"]["RuntimeDesignStyleSnapshot"] | components["schemas"]["RuntimePresetDesignStyleSnapshot"] | null;
+                    snapshotSha256: string | null;
+                };
+                knowledgeReleaseId: string | null;
+            } | null;
+            sha256: string;
+            modificationRequest: components["schemas"]["StartRunRequest"];
         };
         PrototypeRevisionSummary: {
             id: string;
@@ -12224,6 +12369,34 @@ export interface operations {
             404: components["responses"]["Problem"];
         };
     };
+    getPrototypeFeedbackLocations: {
+        parameters: {
+            query: {
+                sourceRevisionId: string;
+            };
+            header?: never;
+            path: {
+                projectId: components["parameters"]["ProjectId"];
+                revisionId: components["parameters"]["PrototypeRevisionId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Resolve exact source feedback anchors against a revision in the same family */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PrototypeFeedbackLocations"];
+                };
+            };
+            400: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+        };
+    };
     listPrototypeFeedback: {
         parameters: {
             query?: never;
@@ -12623,7 +12796,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["PrototypePlanInput"];
+                    "application/json": components["schemas"]["PrototypeRevisionInput"];
                 };
             };
             403: components["responses"]["Problem"];

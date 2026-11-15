@@ -14,7 +14,11 @@ const plan = { id:planId,projectId,rootPlanId:null,sourceRevisionId:null,content
 const pages = Array.from({length:50},(_,i) => { const id=`page-${i+1}`, title=i===0?'账户概览':i===1?'通知设置':`设置页面 ${i+1}`; const content=`<main data-wb-screen="${id}" data-wb-node="page-root-${i}" ${i?'hidden':''}><div class="eyebrow">WORKSPACE / SETTINGS</div><h1 data-wb-node="heading-${i}">${title}</h1><p class="sub">管理您的个人信息和工作区偏好。</p><section class="profile"><div class="avatar">L</div><div><h2>林晓</h2><p>产品设计团队 · 标准成员</p></div><span class="badge">已连接</span></section><form id="profile-${i}" data-wb-node="profile-form-${i}" onsubmit="event.preventDefault();this.querySelector('output').textContent='设置已保存'"><h2>个人资料</h2><label>显示名称<input data-wb-node="name-${i}" aria-label="显示名称" value="林晓"/></label><label>工作邮箱<input type="email" aria-label="工作邮箱" value="lin@example.test"/></label><label>语言<select aria-label="语言"><option>简体中文</option><option>English</option></select></label><label class="check"><input type="checkbox" aria-label="接收更新" checked/>接收产品更新</label><button data-wb-node="save-${i}" type="submit">保存更改</button><output></output></form><section><h2>工作区</h2><p>项目与资料保持同步，所有更改仅用于本地 UI 测试。</p><button type="button" onclick="document.dispatchEvent(new CustomEvent('workbench:prototype-select-page',{detail:{pageId:'page-2'}}))">通知设置</button></section><footer>账户偏好与访问权限</footer></main>`; return {id,title,slug:`page-${i+1}`,route:`/page-${i+1}`,order:i,content,sha256:hash(content)}; });
 const html=`<!doctype html><html><head><style>*{box-sizing:border-box}body{margin:0;background:#fff;color:#263141;font:16px -apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif}main{max-width:850px;margin:auto;padding:56px 64px}main[hidden]{display:none}.eyebrow{font-size:11px;letter-spacing:2px;color:#8b96a7}h1{font-size:34px;letter-spacing:-1px;margin:16px 0 10px}h2{font-size:18px;margin:0 0 8px}.sub,p{color:#778191;font-size:14px}.profile{display:flex;align-items:center;gap:20px;background:#f7f9fc;border-radius:14px;padding:24px;margin:30px 0}.avatar{display:grid;place-items:center;background:#e4eafa;color:#5371bc;font-size:26px;width:60px;height:60px;border-radius:18px}.badge{margin-left:auto;color:#288960;font-size:12px}form,section{border-bottom:1px solid #e9edf2;padding:24px 0}label{display:flex;align-items:center;justify-content:space-between;gap:20px;padding:16px 0;border-bottom:1px solid #f0f2f5;font-size:14px}input:not([type=checkbox]),select{font:inherit;width:54%;border:1px solid #dce2eb;border-radius:8px;padding:12px;background:#fff;color:#354155}.check{justify-content:flex-start}button{border:1px solid #dce2eb;border-radius:8px;padding:12px 20px;background:white;color:#354155;margin-top:20px;cursor:pointer}button[type=submit]{background:#2563eb;color:white;border-color:#2563eb}output{margin-left:20px;color:#288960;font-size:14px}footer{color:#9aa3b1;font-size:12px;padding:35px 0}</style></head><body>${pages.map(p=>p.content).join('')}<script>document.addEventListener('workbench:prototype-select-page',e=>{document.querySelectorAll('main').forEach(p=>p.hidden=p.dataset.wbScreen!==e.detail.pageId);document.dispatchEvent(new CustomEvent('workbench:prototype-page',{detail:e.detail}));});</script></body></html>`;
 const revision={id:revisionId,projectId,planId,version:1,sourceRevisionId:null,revision:1,status:'ready',title:project.title,documentSha256:hash(html),createdById:'principal-1',createdAt:now,updatedAt:now,failure:null,pages,previewHtml:html};
-const feedback=[]; const unknown=[],errors=[];
+const secondRevisionId='visual-revision-2';
+const secondPages=pages.map((item,index)=>index===0?{...item,content:item.content.replace('data-wb-node="heading-0"','data-wb-node="heading-new-0"')}:item).map(item=>({...item,sha256:hash(item.content)}));
+const secondHtml=html.replace('data-wb-node="heading-0"','data-wb-node="heading-new-0"');
+const secondRevision={...revision,id:secondRevisionId,sourceRevisionId:revisionId,version:2,pages:secondPages,previewHtml:secondHtml,documentSha256:hash(secondHtml)};
+const feedback=[];const feedbackReceipts=new Map(),feedbackRequests=[];let viewer=false,lostAcknowledgement=false; const unknown=[],errors=[];
 const browser=await chromium.launch({headless:true,executablePath:process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE});
 const context=await browser.newContext({viewport:{width:1440,height:900},recordVideo:{dir:new URL('video/',output).pathname,size:{width:1440,height:900}}});
 const json=(r,data,status=200)=>r.fulfill({status,contentType:'application/json',headers:{etag:'"1"'},body:JSON.stringify(data)});
@@ -26,16 +30,32 @@ await context.route('**/api/v1/**',async r=>{const u=new URL(r.request().url()),
  if(path.endsWith('/design-presets'))return json(r,{items:[]});
  if(path.endsWith('/identity/preferences'))return json(r,{productUpdatesEmail:false,researchInvitations:false,revision:0,createdAt:null,updatedAt:null});
  if(path.endsWith('/runtime/models'))return json(r,{items:[{id:'fixture-model',displayName:'验证模型（fixture）',description:null,supportedWorkflows:['generate','redesign','ideate','edit'],supportsThinking:true,supportsReasoningEffort:false}]});
- if(path.endsWith('/bootstrap'))return json(r,{project,access:{role:'owner'},threads:[thread],selectedThreadId:thread.id,entries:[],board,artifacts:[],latestRun:null});
+ if(path.endsWith('/bootstrap'))return json(r,{project,access:{role:viewer?'viewer':'owner'},threads:[thread],selectedThreadId:thread.id,entries:[],board,artifacts:[],latestRun:null});
  if(path.endsWith('/submission-intents/current'))return json(r,{item:null});
  if(path.endsWith('/board'))return json(r,board);
  if(path.endsWith('/prototype-v2/plans'))return json(r,[plan]);
  if(path.endsWith(`/plans/${planId}`))return json(r,plan);
  if(path.endsWith('/progress'))return json(r,{projectId,planId,status:plan.status,input:{requestedArtifactKinds:['prd','prototype'],modelId:'fixture-model',targetSurface:'web',sourceIds:[],designStyle:null},run:null,events:[],coverage:'window',finalRevisionId:revisionId});
- if(path.endsWith(`/plans/${planId}/revisions`)){const {pages,previewHtml,...summary}=revision;return json(r,[summary]);}
+ if(path.endsWith(`/plans/${planId}/revisions`))return json(r,[revision,secondRevision].map(({pages,previewHtml,...summary})=>summary));
  if(path.endsWith(`/revisions/${revisionId}`))return json(r,revision);
+ if(path.endsWith(`/revisions/${secondRevisionId}`))return json(r,secondRevision);
  if(path.endsWith('/diff'))return json(r,{sourceRevisionId:null,pages:pages.map(p=>({pageId:p.id,change:'added'}))});
- if(path.endsWith('/feedback')){if(method==='POST'){const item={id:`feedback-${feedback.length+1}`,projectId,revisionId,createdById:'principal-1',createdAt:now,updatedAt:now,revision:1,status:'open',resolvedAt:null,...r.request().postDataJSON()};feedback.push(item);return json(r,item,201);}return json(r,feedback);}
+ if(path.endsWith('/feedback-locations')){
+   const sourceRevisionId=u.searchParams.get('sourceRevisionId'),targetRevisionId=path.split('/').at(-2);
+   return json(r,{sourceRevisionId,targetRevisionId,items:feedback.filter(item=>item.revisionId===sourceRevisionId).map(item=>{const missing=targetRevisionId===secondRevisionId&&item.anchor?.nodeId==='heading-0';return {feedback:item,targetRevisionId,status:missing?'missing':item.anchor?'resolved':'version',pageId:missing?null:item.anchor?.pageId??null,nodeId:missing?null:item.anchor?.nodeId??null,reason:missing?'node_missing':null};})});
+ }
+ if(path.endsWith('/feedback')){
+   const targetRevisionId=path.split('/').at(-2);
+   if(method==='POST'){
+     if(viewer)return json(r,{title:'Read only',status:403},403);
+     const request=r.request().postDataJSON(),key=r.request().headers()['idempotency-key'];feedbackRequests.push({key,revisionId:targetRevisionId,request});
+     let item=feedbackReceipts.get(key);
+     if(!item){item={id:`feedback-${feedback.length+1}`,projectId,revisionId:targetRevisionId,createdById:'principal-1',createdAt:now,updatedAt:now,revision:1,status:'open',resolvedAt:null,...request};feedback.push(item);feedbackReceipts.set(key,item);}
+     if(request.body==='断线后重试页面批注'&&!lostAcknowledgement){lostAcknowledgement=true;return json(r,{status:503,title:'批注回执暂时中断',detail:'请重试保存'},503);}
+     return json(r,item,201);
+   }
+   return json(r,feedback.filter(item=>item.revisionId===targetRevisionId));
+ }
  if(path.endsWith('/prototype-v2/shares')||path.endsWith('/prototype-v2/exports'))return json(r,[]);
  if(path.endsWith('/projects'))return json(r,{items:[{...project,role:'owner',relationship:'owned'}],nextCursor:null});
  if(path.endsWith(`/projects/${projectId}`))return json(r,project);
@@ -57,9 +77,9 @@ try{
  await page.getByRole('textbox',{name:'当前版本批注'}).fill('将标题简化');await page.getByRole('button',{name:'保存批注',exact:true}).click();await page.getByText('批注已保存到当前版本').waitFor();assert.equal(feedback[0].anchor.pageId,'page-1');results.checks.push('anchored feedback request');
  await page.getByRole('button',{name:'图层',exact:true}).click();
  await page.getByRole('button',{name:'input · 显示名称',exact:true}).click();
- await page.getByRole('textbox',{name:'当前版本批注'}).fill('图层输入框批注');await page.getByRole('button',{name:'保存批注',exact:true}).click();await page.getByText('图层输入框批注',{exact:true}).waitFor();assert(feedback.at(-1).anchor.selector.includes('data-wb-node="name-0"'));
- await page.getByRole('button',{name:'选择父级',exact:true}).click();await page.getByRole('textbox',{name:'当前版本批注'}).fill('父级表单批注');await page.getByRole('button',{name:'保存批注',exact:true}).click();await page.getByText('父级表单批注',{exact:true}).waitFor();assert(feedback.at(-1).anchor.selector.includes('data-wb-node="profile-form-0"'));
- await frame.getByRole('textbox',{name:'显示名称'}).focus();await page.keyboard.press('Enter');await page.getByRole('textbox',{name:'当前版本批注'}).fill('键盘元素批注');await page.getByRole('button',{name:'保存批注',exact:true}).click();await page.getByText('键盘元素批注',{exact:true}).waitFor();assert(feedback.at(-1).anchor.selector.includes('data-wb-node="name-0"'));
+ await page.getByRole('textbox',{name:'当前版本批注'}).fill('图层输入框批注');await page.getByRole('button',{name:'保存批注',exact:true}).click();await page.getByText('图层输入框批注',{exact:true}).waitFor();assert.equal(feedback.at(-1).anchor.nodeId,'name-0');assert.equal(feedback.at(-1).anchor.sourceRevisionId,revisionId);
+ await page.getByRole('button',{name:'选择父级',exact:true}).click();await page.getByRole('textbox',{name:'当前版本批注'}).fill('父级表单批注');await page.getByRole('button',{name:'保存批注',exact:true}).click();await page.getByText('父级表单批注',{exact:true}).waitFor();assert.equal(feedback.at(-1).anchor.nodeId,'profile-form-0');
+ await frame.getByRole('textbox',{name:'显示名称'}).focus();await page.keyboard.press('Enter');await page.getByRole('textbox',{name:'当前版本批注'}).fill('键盘元素批注');await page.getByRole('button',{name:'保存批注',exact:true}).click();await page.getByText('键盘元素批注',{exact:true}).waitFor();assert.equal(feedback.at(-1).anchor.nodeId,'name-0');assert.equal(feedback.at(-1).anchor.sourceRevisionId,revisionId);
  results.checks.push('layer, parent and keyboard selections each persist the actual feedback anchor');results.feedbackAnchors=feedback.map(item=>item.anchor);
  await page.getByRole('button',{name:'图层',exact:true}).click();
  await page.screenshot({path:new URL('desktop-selection.png',output).pathname});
@@ -67,6 +87,42 @@ try{
  for(const [width,height] of [[1440,900],[1280,800],[768,1024],[390,844],[360,800]]){await page.setViewportSize({width,height});await page.waitForTimeout(180);assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));await page.screenshot({path:new URL(`workspace-${width}x${height}.png`,output).pathname});results.checks.push(`viewport ${width}x${height}`);}
  await page.setViewportSize({width:1440,height:900});await page.getByRole('button',{name:'页面总览',exact:true}).click();await page.getByPlaceholder('按页面名称搜索').fill('50');await page.getByRole('button',{name:/50\. 设置页面 50/}).click();await frame.getByRole('heading',{name:'设置页面 50'}).waitFor();assert.equal(await page.locator('iframe').count(),1);results.checks.push('50 pages searchable, only one active iframe');
  await page.getByRole('button',{name:'专注预览',exact:true}).click();assert.equal(await page.locator('.studio-composer').isVisible(),false);await page.getByRole('button',{name:'展开输入框',exact:true}).click();results.checks.push('focus and restore composer');
+ await page.getByRole('button',{name:'版本',exact:true}).first().click();
+ await page.getByRole('button',{name:/^版本 2 ·/}).click();
+ await page.getByRole('button',{name:'批注',exact:true}).click();
+ await page.getByRole('combobox',{name:'批注来源版本'}).selectOption(revisionId);
+ const missingRow=page.getByText('将标题简化',{exact:true}).locator('..');
+ await missingRow.getByText('原元素未找到，原页面、引文与正文已保留。',{exact:true}).waitFor();
+ assert.equal(await missingRow.getByRole('button',{name:'在当前版本定位'}).count(),0);
+ const resolvedRow=page.getByText('图层输入框批注',{exact:true}).locator('..');
+ await resolvedRow.getByRole('button',{name:'在当前版本定位',exact:true}).click();
+ await page.locator('[data-testid=selection-outline]').waitFor();
+ await page.getByText('新批注绑定版本 2 · 显示名称',{exact:true}).waitFor();
+ assert.deepEqual(feedback[0].anchor,{scope:'node',sourceRevisionId:revisionId,pageId:'page-1',nodeId:'heading-0',quote:'账户概览'});
+ results.checks.push('cross-version missing node preserves original text/quote/source without rebinding; an unchanged stable node can be located in the target version');
+ await page.getByRole('combobox',{name:'批注范围'}).selectOption('page');
+ await page.getByRole('textbox',{name:'当前版本批注'}).fill('断线后重试页面批注');
+ await page.getByRole('button',{name:'保存批注',exact:true}).click();
+ await page.getByText(/批注回执暂时中断|请重试保存/).first().waitFor();
+ assert.equal(await page.getByRole('textbox',{name:'当前版本批注'}).inputValue(),'断线后重试页面批注');
+ await page.getByRole('button',{name:'保存批注',exact:true}).click();
+ await page.getByText('批注已保存到当前版本',{exact:true}).waitFor();
+ const retryRequests=feedbackRequests.filter(item=>item.request.body==='断线后重试页面批注');
+ assert.equal(retryRequests.length,2);assert.equal(retryRequests[0].key,retryRequests[1].key);
+ assert.equal(feedback.filter(item=>item.body==='断线后重试页面批注').length,1);
+ assert.deepEqual(retryRequests[0].request.anchor,{scope:'page',sourceRevisionId:secondRevisionId,pageId:'page-1',quote:'账户概览'});
+ results.checks.push('page feedback binds the current revision; acknowledgement loss retains text and reuses the same idempotency key');
+ viewer=true;await page.reload({waitUntil:'networkidle'});
+ await page.getByRole('button',{name:'批注',exact:true}).click();
+ await page.getByRole('combobox',{name:'批注来源版本'}).selectOption(revisionId);
+ await page.getByText('图层输入框批注',{exact:true}).locator('..').getByRole('button',{name:'在当前版本定位',exact:true}).click();
+ await page.locator('[data-testid=selection-outline]').waitFor();
+ assert.equal(await page.getByRole('button',{name:'保存批注',exact:true}).isDisabled(),true);
+ assert((await page.getByRole('button',{name:'解决',exact:true}).all()).length>0);
+ for(const button of await page.getByRole('button',{name:'解决',exact:true}).all())assert(await button.isDisabled());
+ results.checks.push('viewer can locate persisted feedback but cannot create or resolve it');
+ results.feedbackRequests=feedbackRequests;
+ await page.screenshot({path:new URL('persisted-node-feedback.png',output).pathname});
  assert.equal(errors.length,0);assert.equal(unknown.length,0);results.status='passed';
 }catch(error){results.status='failed';results.failure=error.message;results.composer=await page.locator('.studio-composer').evaluate(e=>({html:e.outerHTML.slice(0,600),parent:e.parentElement.outerHTML.slice(0,300),rect:e.getBoundingClientRect().toJSON(),style:['position','left','bottom','transform','width','translate'].map(p=>[p,getComputedStyle(e).getPropertyValue(p)]),shell:getComputedStyle(e.firstElementChild).background}));await page.screenshot({path:new URL('failure.png',output).pathname});process.exitCode=1;}
 await writeFile(new URL('fixture-results.json',output),JSON.stringify(results,null,2));console.log(JSON.stringify(results,null,2));await context.close();await browser.close();

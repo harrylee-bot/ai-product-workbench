@@ -2,6 +2,7 @@ import { z } from "zod";
 import { startRunRequestSchema, runSchema, runEventSchema } from "./runs.js";
 import { runtimeMaterializedDesignStyleSnapshotSchema } from "./design-systems.js";
 import { importSourceKindSchema, importSourceDescriptorSchema, runSourceSnapshotManifestSchema } from "./import-sources.js";
+import { artifactIrIdSchema } from "./citations.js";
 import { sha256Schema } from "./files.js";
 import { isoDateTimeSchema, opaqueIdSchema, revisionSchema } from "./common.js";
 
@@ -88,11 +89,19 @@ export const prototypePublicRevisionSchema = z.object({
   failure: failureSchema.nullable(),
 }).strict();
 
-export const prototypeFeedbackAnchorSchema = z.object({
+const feedbackAnchorBase = {
+  sourceRevisionId: opaqueIdSchema,
   pageId: opaqueIdSchema,
-  selector: z.string().min(1).max(500).regex(/^[A-Za-z][A-Za-z0-9_.:#\- >\[\]="']*$/u),
   quote: z.string().max(1_000).optional(),
-}).strict();
+};
+const feedbackPageAnchorSchema = z.object({ ...feedbackAnchorBase, scope: z.literal("page") }).strict();
+const feedbackNodeAnchorSchema = z.object({ ...feedbackAnchorBase, scope: z.literal("node"), nodeId: artifactIrIdSchema }).strict();
+/** Old unidentifiable anchors are migrated once to an explicit unresolved state. */
+export const prototypeFeedbackAnchorSchema = z.discriminatedUnion("scope", [
+  feedbackPageAnchorSchema, feedbackNodeAnchorSchema,
+  z.object({ ...feedbackAnchorBase, scope: z.literal("unresolved") }).strict(),
+]);
+export const createPrototypeFeedbackAnchorSchema = z.discriminatedUnion("scope", [feedbackPageAnchorSchema, feedbackNodeAnchorSchema]);
 
 export const prototypeFeedbackSchema = z.object({
   id: opaqueIdSchema,
@@ -159,7 +168,7 @@ export const prototypeExportSchema = z.object({
 export const prototypeWorkflowActionRequestSchema = z.object({ reason: z.string().trim().max(2_000).optional() }).strict();
 export const createPrototypePlanRequestSchema = z.object({ prompt: shortText(20_000), title: shortText(240), generationRequest: startRunRequestSchema }).strict();
 export const revisePrototypeRevisionRequestSchema = z.object({ feedbackIds: z.array(opaqueIdSchema).min(1).max(100).refine((ids) => new Set(ids).size === ids.length, "Feedback ids must be unique"), prompt: shortText(4_000).optional() }).strict();
-export const createPrototypeFeedbackRequestSchema = z.object({ body: shortText(4_000), anchor: prototypeFeedbackAnchorSchema.nullable().optional() }).strict();
+export const createPrototypeFeedbackRequestSchema = z.object({ body: shortText(4_000), anchor: createPrototypeFeedbackAnchorSchema.nullable().optional() }).strict();
 export const createPrototypeShareRequestSchema = z.object({ revisionId: opaqueIdSchema, expiresAt: isoDateTimeSchema.nullable().optional() }).strict();
 export const createPrototypeExportRequestSchema = z.object({ revisionId: opaqueIdSchema, format: prototypeExportFormatSchema }).strict();
 export const prototypeListQuerySchema = z.object({ cursor: z.string().min(1).max(512).optional(), limit: z.coerce.number().int().min(1).max(100).default(30) }).strict();
@@ -234,3 +243,19 @@ export type PrototypeInputSnapshot=z.infer<typeof prototypeInputSnapshotSchema>;
 export type PrototypePlanInput=z.infer<typeof prototypePlanInputSchema>;
 export type UpdatePrototypePlanRequest=z.infer<typeof updatePrototypePlanRequestSchema>;
 export type CreatePrototypeRevisionPlanRequest=z.infer<typeof createPrototypeRevisionPlanRequestSchema>;
+
+/** Source input remains historical; modificationRequest is the effective edit input for this operation. */
+export const prototypeRevisionInputSchema = prototypePlanInputSchema.extend({ modificationRequest: startRunRequestSchema });
+export type PrototypeRevisionInput = z.infer<typeof prototypeRevisionInputSchema>;
+
+export const prototypeFeedbackLocationsQuerySchema = z.object({ sourceRevisionId: opaqueIdSchema }).strict();
+export const prototypeFeedbackLocationSchema = z.object({
+  feedback: prototypeFeedbackSchema,
+  targetRevisionId: opaqueIdSchema,
+  status: z.enum(["resolved", "missing", "version"]),
+  pageId: opaqueIdSchema.nullable(),
+  nodeId: artifactIrIdSchema.nullable(),
+  reason: z.enum(["page_missing", "node_missing", "unidentified_node", "source_unavailable"]).nullable(),
+}).strict();
+export const prototypeFeedbackLocationsSchema = z.object({sourceRevisionId:opaqueIdSchema,targetRevisionId:opaqueIdSchema,items:z.array(prototypeFeedbackLocationSchema).max(100)}).strict();
+export type PrototypeFeedbackLocation = z.infer<typeof prototypeFeedbackLocationSchema>;

@@ -28,9 +28,11 @@
 
 ## 当前服务边界与待收口项
 
-业务反馈 API 仍持久化 `pageId + selector + quote`；Studio 只从稳定 nodeId 生成一个规范 selector，没有旧节点回退。需求 FR-20 要求的独立 nodeId／源版本锚点持久化合同仍需收口，不能把本次前端测量协议当成已经完成该后端变更。
+业务反馈保存独立 `sourceRevisionId/pageId/nodeId` 锚点。`scope=node` 必须对应源 revision 文档中的同页稳定节点，`scope=page` 只绑定页面，null 表示整个版本；正文和锚点创建后不可改写。创建沿用服务幂等回执。旧 selector 仅通过一次性数据库迁移转换；不能明确转换的记录标记 unresolved，并保留正文和引文。运行时不再读取 selector。
 
-新增进度、完整输入合同、OpenAPI、API 控制器／服务和 `20261115100000_prototype_plan_input` 迁移必须随前端集成，不替换 Temporal／DeerFlow。真实模型至少两次中间变化、完整交付、所有业务能力和性能验收以审计中的逐项状态为准。fixture 与真实 PostgreSQL 接口测试不能代替模型和生产集成验收。
+`GET projects/:projectId/prototype-v2/revisions/:revisionId/feedback-locations?sourceRevisionId=...` 按项目 viewer 权限，在同一家族内对照来源批注与目标版本；最多返回 100 条并在界面提示窗口限制。状态为 resolved/missing/version；只有相同 pageId/nodeId 才定位，节点或页面消失、源文档不可解析时保留原文并返回明确缺失原因。跨版本比较不改变批注的归属；批量改稿须返回来源版本。只读成员可定位，不能创建或解决批注。
+
+新增进度、完整输入合同、OpenAPI、API 控制器／服务和 `20261115100000_prototype_plan_input`、`20261115120000_prototype_feedback_nodes` 迁移必须随前端集成，不替换 Temporal／DeerFlow。真实模型至少两次中间变化、完整交付、所有业务能力和性能验收以审计中的逐项状态为准。fixture 与真实 PostgreSQL 接口测试不能代替模型和生产集成验收。
 
 ## 文档运行生命周期
 
@@ -44,7 +46,9 @@
 
 `POST P/plans/:planId/input` 使用 If-Match 与 Idempotency-Key，仅允许尚未绑定 Run 的 draft。调整包括需求、模型、终端、输出、资料与设计，保留 artifactTargets、generationIntent 和来源身份。快照与输入一次性保存；数据库限制执行中改写及任何来源身份变化。412/409 后保留所有本地调整，读取最新输入，用户核对后明确继续；不自动覆盖。
 
-`GET P/revisions/:revisionId/input` 读取生成所选内容版本的实际计划/Run，而非始终取根计划。`POST P/revisions/:revisionId/plans` 创建待审批修改计划，固定 rootPlanId、sourceRevisionId、内容版本、选定反馈；审批前不启动运行。新增资料须就绪并校验项目和 blob 清单，保留的资料/设计沿用源快照。服务将修改请求绑定为 edit 及该源版本的精确 prototype artifactVersion；基准已变化时返回冲突，不把修改附到其他版本。
+`GET P/revisions/:revisionId/input` 读取生成所选内容版本的实际计划/Run，而非始终取根计划。历史 `request` 原样保留；另返回服务归一化的 `modificationRequest`，明确 edit 操作与精确源产物目标。Composer 按该操作筛选模型，不改写历史输入，也不自动替换原模型；不兼容时保留并提示用户选择支持编辑的模型。刷新恢复保留操作上下文，旧缓存缺少操作上下文时须重新载入源版本。
+
+`POST P/revisions/:revisionId/plans` 创建待审批修改计划，固定 rootPlanId、sourceRevisionId、内容版本、选定反馈；审批前不启动运行。新增资料须就绪并校验项目和 blob 清单，保留的资料/设计沿用源快照。服务将修改请求绑定为 edit 及该源版本的精确 prototype artifactVersion；基准已变化时返回冲突，不把修改附到其他版本。
 
 浏览计划、版本或前后导航不改变正在编辑的提交目标，输入区始终显示固定来源。显式切换新计划或文档操作会暂存先前完整草稿，并提供恢复入口。提交分支直接来自同一上下文状态；异步加载来源期间输入的文字保留，已放弃上下文的迟到响应不抢回输入区。设计预设选择固定 id/version/checksum；失效设计或模型要求明确替换，只有确有服务端快照的原设计可以继续沿用。
 
@@ -55,6 +59,5 @@
 | 需求 | 建议合同与约束 | 集成验证 |
 | --- | --- | --- |
 | FR-24 PRD→原型/多屏与双向关系 | 生成意图固定 sourcePrdVersionId 和明确 screen/flow 范围；授权验证源版本，服务返回 PRD 版本与 prototype revision/artifact version 的持久关系、分项状态；按固定关系查询双向入口 | 文档生成界面、多屏、联合输出及分项失败；不得用时间接近或标题猜测关系 |
-| FR-20 持久化锚点 | 反馈保存 sourceRevisionId/pageId/nodeId、文本引用与可选几何；服务幂等写入；解析锚点返回 resolved/missing，不以旧 selector 作为新协议回退 | 跨版本节点消失仍保留正文，旧帧/错误来源不能写入，重复保存不产生两条 |
 
 媒体与关系/变体入口、完整成员和邀请管理、项目级分享、公开错误细分、上传/提交意图中断后的完整恢复等继续按业务能力清单验收，不挂载旧前端作为备用路径。

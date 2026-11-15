@@ -14,6 +14,7 @@ export type ComposerContext =
       title: string;
       target: StudioPlanTarget;
       input: PrototypePlanInput;
+      operationRequest?: StartRunRequest;
       version?: number;
     }
   | {
@@ -53,7 +54,10 @@ const newContext: ComposerContext = {
   title: "新建计划",
 };
 export function newComposerEntry(context: ComposerContext, prompt = ""): Entry {
-  const input = context.kind === "input" ? context.input.request : undefined;
+  const input =
+    context.kind === "input"
+      ? (context.operationRequest ?? context.input.request)
+      : undefined;
   return {
     context,
     draft: {
@@ -70,6 +74,26 @@ export function newComposerEntry(context: ComposerContext, prompt = ""): Entry {
       missingFiles: [],
     },
   };
+}
+function restoreComposerEntry(
+  existing: Entry | undefined,
+  context: ComposerContext,
+  prompt: string,
+): Entry {
+  if (!existing) return newComposerEntry(context, prompt);
+  if (
+    existing.context.kind === "input" &&
+    context.kind === "input" &&
+    context.operationRequest
+  )
+    return {
+      ...existing,
+      context: {
+        ...existing.context,
+        operationRequest: context.operationRequest,
+      },
+    };
+  return existing;
 }
 function emptySession(prompt = ""): ComposerSession {
   return {
@@ -299,14 +323,13 @@ export function useStudioComposerSession(userId: string, projectId: string) {
               activeKey: context.key,
               entries: {
                 ...current.entries,
-                [context.key]:
-                  current.entries[context.key] ??
-                  newComposerEntry(
-                    context,
-                    options?.inheritPrompt
-                      ? current.entries[current.activeKey]!.draft.prompt
-                      : prompt,
-                  ),
+                [context.key]: restoreComposerEntry(
+                  current.entries[context.key],
+                  context,
+                  options?.inheritPrompt
+                    ? current.entries[current.activeKey]!.draft.prompt
+                    : prompt,
+                ),
               },
             },
       ),

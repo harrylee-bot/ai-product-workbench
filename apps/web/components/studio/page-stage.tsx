@@ -25,6 +25,12 @@ import { BaseRect } from "./onlook/base-rect";
 
 type Props = {
   storageScope?: string;
+  locate?: {
+    revisionId: string;
+    pageId: string;
+    nodeId: string | null;
+    requestId: string;
+  };
   readOnly?: boolean;
   revisionId: string;
   title: string;
@@ -40,6 +46,7 @@ type Props = {
 };
 export function PageStage({
   storageScope,
+  locate,
   readOnly = false,
   revisionId,
   title,
@@ -203,6 +210,7 @@ export function PageStage({
           data.node
             ? {
                 nodeId: data.node.nodeId,
+                revisionId,
                 target: data.node.selector,
                 tag: data.node.tag,
                 label: data.node.label,
@@ -219,6 +227,20 @@ export function PageStage({
     window.addEventListener("message", receive);
     return () => window.removeEventListener("message", receive);
   }, [pageId, pages, revisionId, sessionId, onPage, onSelection]);
+  useEffect(() => {
+    if (!locate || locate.revisionId !== revisionId || showDraft) return;
+    setOverview(false);
+    if (locate.pageId !== pageId) {
+      onPage(locate.pageId);
+      return;
+    }
+    if (!loaded) return;
+    const nextMode = locate.nodeId ? "select" : "browse";
+    setMode(nextMode);
+    command("page");
+    command("mode", { mode: nextMode });
+    if (locate.nodeId) command("selectNode", { nodeId: locate.nodeId });
+  }, [locate?.requestId, revisionId, pageId, loaded, showDraft]);
   const preview = previews.find((p) => p.kind === "prototype") ?? previews[0];
   const draftPages = preview?.screens ?? [];
   const [knownDraftPages, setKnownDraftPages] = useState<

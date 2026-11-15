@@ -76,7 +76,7 @@ describe("V2 project interaction", () => {
     act(() => window.dispatchEvent(new MessageEvent("message", { source: iframe.contentWindow, origin: "null", data: payload })));
     fireEvent.change(screen.getByRole("textbox", { name: "当前版本批注" }), { target: { value: "Change the save label" } });
     fireEvent.click(screen.getByRole("button", { name: "保存批注" }));
-    await waitFor(() => expect(state.createFeedback).toHaveBeenCalledWith({ request: { body: "Change the save label", anchor: { pageId: "screen-details", selector: 'button[data-wb-node="save"]', quote: "Save" } } }));
+    await waitFor(() => expect(state.createFeedback).toHaveBeenCalledWith({ request: { body: "Change the save label", anchor: { pageId: "screen-details", sourceRevisionId: "revision-one", scope: "page", quote: "Save" } } }));
   });
   it("restores the generating child from revision-only and root/revision links after a failed plan retry", async () => {
     state.plan = { ...state.plan, status: "failed", revision: 20 };

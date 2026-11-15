@@ -4,6 +4,7 @@ import {
 } from "./geometry-bridge";
 export type PrototypePreviewInteraction = {
   nodeId: string;
+  revisionId: string;
   target: string;
   tag: string;
   label: string;

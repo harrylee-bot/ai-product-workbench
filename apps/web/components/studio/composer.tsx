@@ -260,7 +260,9 @@ export function StudioComposer({
             : !readySources
               ? "引用资料尚未就绪、已删除或无权限。请移除失效引用或重新加载资料。"
               : !models.isPending && !modelId
-                ? "没有可用模型，请重试加载"
+                ? model && available.length
+                  ? "所选模型不支持当前操作，请选择可用模型"
+                  : "没有可用模型，请重试加载"
                 : "")
       }
       attachments={

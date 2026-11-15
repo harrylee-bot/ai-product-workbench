@@ -147,7 +147,7 @@ import {
   revisePrototypeRevisionRequestSchema,
   prototypeRevisionDiffSchema,
   prototypePlanListSchema,
-  prototypeFeedbackListSchema,
+  prototypeFeedbackListSchema, prototypeFeedbackLocationsSchema, prototypeFeedbackLocationsQuerySchema,
   prototypeShareListSchema,
   prototypeExportListSchema,
   createPrototypeExportRequestSchema,
@@ -158,7 +158,7 @@ import {
   prototypeFeedbackSchema,
   prototypePlanSchema,
   prototypeProgressSchema,
-  prototypePlanInputSchema,updatePrototypePlanRequestSchema,createPrototypeRevisionPlanRequestSchema,
+  prototypePlanInputSchema, prototypeRevisionInputSchema,updatePrototypePlanRequestSchema,createPrototypeRevisionPlanRequestSchema,
   prototypePublicShareSchema,
   prototypeRevisionSchema,
   prototypeRevisionListSchema,
@@ -1006,6 +1006,12 @@ export const workbenchHttpRoutes = [
     problemStatuses: problems(403, 404),
   },
   {
+    method: "get", path: "/projects/{projectId}/prototype-v2/revisions/{revisionId}/feedback-locations", operationId: "getPrototypeFeedbackLocations",
+    query: prototypeFeedbackLocationsQuerySchema,
+    response: response(200, "Resolve exact source feedback anchors against a revision in the same family", named("PrototypeFeedbackLocations", prototypeFeedbackLocationsSchema)),
+    problemStatuses: problems(400, 403, 404),
+  },
+  {
     method: "get", path: "/projects/{projectId}/prototype-v2/revisions/{revisionId}/feedback", operationId: "listPrototypeFeedback",
     response: response(200, "Read persisted prototype history", named("PrototypeFeedbackList", prototypeFeedbackListSchema)),
     problemStatuses: problems(403, 404),
@@ -1055,7 +1061,7 @@ export const workbenchHttpRoutes = [
   },
   {
     method:"get",path:"/projects/{projectId}/prototype-v2/revisions/{revisionId}/input",operationId:"getPrototypeRevisionInput",
-    response:response(200,"Read the selected revision's actual generation input",named("PrototypePlanInput",prototypePlanInputSchema)),problemStatuses:problems(403,404,409),
+    response:response(200,"Read the selected revision's actual generation input",named("PrototypeRevisionInput",prototypeRevisionInputSchema)),problemStatuses:problems(403,404,409),
   },
   {
     method:"post",path:"/projects/{projectId}/prototype-v2/plans/{planId}/input",operationId:"updatePrototypePlanInput",requestHeaders:["idempotencyKey","ifMatch"],requestBody:named("UpdatePrototypePlanRequest",updatePrototypePlanRequestSchema),

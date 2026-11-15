@@ -1,11 +1,12 @@
+import { feedbackAnchorIndex, resolveFeedbackLocation } from "./prototype-feedback-location.js";
 import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { Inject, Injectable, Optional, type OnModuleInit, type OnModuleDestroy } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import {
   canonicalJson,
-  prototypePlanInputSchema, prototypeInputSnapshotSchema, updatePrototypePlanRequestSchema, createPrototypeRevisionPlanRequestSchema,
+  prototypePlanInputSchema, prototypeRevisionInputSchema, prototypeInputSnapshotSchema, updatePrototypePlanRequestSchema, createPrototypeRevisionPlanRequestSchema,
   type UpdatePrototypePlanRequest, type CreatePrototypeRevisionPlanRequest,
-  prototypeProgressSchema,
+  prototypeProgressSchema, prototypeFeedbackLocationsSchema,
   runEventSchema,
   startRunRequestSchema,
   revisePrototypeRevisionRequestSchema,
@@ -196,7 +197,10 @@ export class PrototypeV2Service implements OnModuleInit, OnModuleDestroy {
     return this.db.$transaction(async tx=>{
       const source=await tx.prototypeRevision.findFirst({where:{id:revisionId,projectId}});
       if(!source)throw notFoundProblem("Prototype revision");
-      return this.readPlanInput(tx,await this.sourceGenerationPlan(tx,source));
+      const input=await this.readPlanInput(tx,await this.sourceGenerationPlan(tx,source));
+      if(!this.runs)throw temporalUnavailable();
+      const modificationRequest=await this.runs.resolvePrototypeRevisionRequest(tx,projectId,revisionId,input.request);
+      return prototypeRevisionInputSchema.parse({...input,modificationRequest});
     },{isolationLevel:Prisma.TransactionIsolationLevel.RepeatableRead});
   }
 
@@ -321,6 +325,17 @@ export class PrototypeV2Service implements OnModuleInit, OnModuleDestroy {
     if (!await this.db.prototypeRevision.findFirst({ where: { id: revisionId, projectId }, select: { id: true } })) throw notFoundProblem("Prototype revision");
     return prototypeFeedbackListSchema.parse((await this.db.prototypeFeedback.findMany({ where: { projectId, revisionId }, orderBy: [{ createdAt: "asc" }, { id: "asc" }], take: 100 })).map(toFeedback));
   }
+  async feedbackLocations(principal:AuthenticatedPrincipal,projectId:string,sourceRevisionId:string,targetRevisionId:string){
+    await this.requireProjectMember(principal.id,projectId,"viewer");
+    return this.db.$transaction(async tx=>{
+      const source=await tx.prototypeRevision.findFirst({where:{id:sourceRevisionId,projectId}}),target=await tx.prototypeRevision.findFirst({where:{id:targetRevisionId,projectId}});
+      if(!source||!target||source.planId!==target.planId)throw notFoundProblem("Prototype revision family");
+      const feedback=await tx.prototypeFeedback.findMany({where:{projectId,revisionId:sourceRevisionId},orderBy:[{createdAt:"asc"},{id:"asc"}],take:100});
+      const index=feedbackAnchorIndex(target);
+      return prototypeFeedbackLocationsSchema.parse({sourceRevisionId,targetRevisionId,items:feedback.map(item=>resolveFeedbackLocation(toFeedback(item),targetRevisionId,index))});
+    },{isolationLevel:Prisma.TransactionIsolationLevel.RepeatableRead});
+  }
+
   async listShares(principal: AuthenticatedPrincipal, projectId: string) {
     await this.requireProjectMember(principal.id, projectId, "viewer");
     const rows = await this.db.prototypeShare.findMany({ where: { projectId }, orderBy: [{ createdAt: "desc" }, { id: "desc" }], take: 100 });
@@ -448,12 +463,17 @@ export class PrototypeV2Service implements OnModuleInit, OnModuleDestroy {
   }
 
   async createFeedback(principal: AuthenticatedPrincipal, projectId: string, revisionId: string, request: CreatePrototypeFeedbackRequest, idempotencyKey: string): Promise<PrototypeFeedback> {
-    createPrototypeFeedbackRequestSchema.parse(request);
+    request=createPrototypeFeedbackRequestSchema.parse(request);
     await this.requireProjectMember(principal.id, projectId, "editor");
     return this.mutate(projectId, revisionId, principal.id, "feedback_create", idempotencyKey, { revisionId, ...request }, async (tx, requestHash) => {
       const revision = await tx.prototypeRevision.findFirst({ where: { id: revisionId, projectId } });
       if (!revision) throw notFoundProblem("Prototype revision");
-      if (request.anchor && !toRevision(revision).pages.some((page) => page.id === request.anchor?.pageId)) throw notFoundProblem("Prototype feedback page");
+      if (request.anchor) {
+        if(request.anchor.sourceRevisionId!==revisionId)throw new ProblemException({title:"Feedback source revision does not match",status:400,code:"PROTOTYPE_FEEDBACK_SOURCE_MISMATCH"});
+        const index=feedbackAnchorIndex(revision);
+        if(!index.pages.has(request.anchor.pageId))throw notFoundProblem("Prototype feedback page");
+        if(request.anchor.scope==="node"&&index.nodes?.get(request.anchor.nodeId)!==request.anchor.pageId)throw new ProblemException({title:"Prototype feedback element not found",status:404,code:"PROTOTYPE_FEEDBACK_NODE_NOT_FOUND"});
+      }
       const existing = await tx.prototypeFeedback.findFirst({ where: { projectId, createdById: principal.id, idempotencyKey } });
       if (existing) { assertRequestHash(existing.requestHash, requestHash); return toFeedback(existing); }
       return toFeedback(await tx.prototypeFeedback.create({ data: { id: `feedback_${randomBytes(12).toString("hex")}`, projectId, revisionId, createdById: principal.id, body: request.body, anchor: request.anchor ? request.anchor as Prisma.InputJsonValue : Prisma.JsonNull, status: "open", revision: 0, idempotencyKey, requestHash } }));

@@ -80,6 +80,7 @@ export function prototypeGeometryScript(
       if (pageId !== d.pageId) { pageId = d.pageId; selected = null; hovered = null; }
       if (d.command === 'page') { document.dispatchEvent(new CustomEvent('workbench:prototype-select-page',{detail:{pageId}})); send('page',null); }
       if (d.command === 'mode' && ['browse','select'].includes(d.mode)) { mode = d.mode; if (mode === 'browse') { selected = null; send('selection', null); } }
+      if (d.command === 'selectNode') { selected = typeof d.nodeId === 'string' && /^[A-Za-z][A-Za-z0-9_.:-]{0,95}$/.test(d.nodeId) ? query('[data-wb-node="'+d.nodeId+'"]') : null; if (selected) { selected.scrollIntoView({block:'center',inline:'nearest'}); schedule('selection'); } else send('missing',null); }
       if (d.command === 'select') { selected = query(d.selector); if (selected) { selected.scrollIntoView({block:'center',inline:'nearest'}); schedule('selection'); } else send('missing',null); }
       if (d.command === 'parent' && selected) { selected = selected.parentElement?.closest('[data-wb-node]') || null; schedule('selection'); }
       if (d.command === 'layers' || d.command === 'mode') send('layers',geometry(selected),layers());

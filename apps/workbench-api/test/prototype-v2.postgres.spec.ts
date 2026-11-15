@@ -2,7 +2,8 @@ import { createHash, randomUUID } from "node:crypto";
 import { Readable } from "node:stream";
 import { PrismaClient } from "@workbench/workbench-db";
 import { afterEach, beforeEach, beforeAll, describe, expect, it, vi } from "vitest";
-import { startRunRequestSchema } from "@workbench/workbench-contracts";
+import { startRunRequestSchema, type PrototypeDocument } from "@workbench/workbench-contracts";
+import { prototypeDocumentFixture } from "../../../packages/workbench-contracts/test/prototype-fixture.js";
 import { seedReadyKnowledge } from "../../../scripts/test-support/knowledge-fixture.mjs";
 import { AccessService } from "../src/modules/access/access.service.js";
 import { DesignPresetsService } from "../src/modules/design-presets/design-presets.service.js";
@@ -31,7 +32,7 @@ describePg("Prototype V2 durable PostgreSQL lifecycle (workflow transport simula
   const recreate = () => new PrototypeV2Service(db as never, workflows, config as never, storage as never, new RunsService(db as never, new AccessService(db as never), new RunEventStore(), { sendInTransaction: vi.fn() } as never, { assertAvailable: vi.fn() } as never, new DesignPresetsService()));
   const makePlan = () => service.createPlan(principal(), projectId, { title: "Review", prompt: "Create a reviewable prototype", generationRequest: generationRequest("Create a reviewable prototype") }, `create-${randomUUID()}`);
   const due = () => db.prototypeWorkflowCommand.updateMany({ where: { projectId, deliveredAt: null }, data: { availableAt: new Date(0), leaseUntil: null } });
-  const makeRevision = (planId: string, version = 1, sourceRevisionId?: string) => db.prototypeRevision.create({ data: { id: `revision_${randomUUID()}`, projectId, planId, createdById: ownerId, version, sourceRevisionId, revision: 0, status: "ready", title: "Review", pages: [page], documentSha256: hash(JSON.stringify([page])), idempotencyKey: `seed-${randomUUID()}`, requestHash: hash("seed") } });
+  const makeRevision = (planId: string, version = 1, sourceRevisionId?: string, document?: PrototypeDocument) => db.prototypeRevision.create({ data: { id: `revision_${randomUUID()}`, projectId, planId, createdById: ownerId, version, sourceRevisionId, revision: 0, status: "ready", title: "Review", sourceDocument: document as never, pages: document ? document.screens.map((screen,index)=>({...page,id:screen.id,route:screen.route,order:index})) : [page], documentSha256: hash(JSON.stringify([page])), idempotencyKey: `seed-${randomUUID()}`, requestHash: hash("seed") } });
 
   beforeAll(async () => { const seed = new PrismaClient({ datasourceUrl: databaseUrl! }); try { await seed.$transaction(tx => seedReadyKnowledge(tx), { timeout: 60_000 }); } finally { await seed.$disconnect(); } }, 90_000);
   beforeEach(async () => {
@@ -141,16 +142,52 @@ describePg("Prototype V2 durable PostgreSQL lifecycle (workflow transport simula
 
   it("binds concurrent feedback to exact revision and anchor and atomically resolves it", async () => {
     const plan = await makePlan(), revision = await makeRevision(plan.id);
-    const request = { body: "Change this button", anchor: { pageId: page.id, selector: 'button[data-node-id="save"]' } };
+    const request = { body: "Change this button", anchor: { pageId: page.id, sourceRevisionId: revision.id, scope: "page" as const } };
     const [one, two] = await Promise.all([service.createFeedback(principal(), projectId, revision.id, request, "feedback-concurrent"), service.createFeedback(principal(), projectId, revision.id, request, "feedback-concurrent")]);
     expect(two).toEqual(one);
     const another = await makeRevision(plan.id, 2);
-    await expect(service.createFeedback(principal(), projectId, another.id, request, "feedback-concurrent")).rejects.toMatchObject({ status: 409 });
-    await expect(service.createFeedback(principal(), projectId, revision.id, { ...request, anchor: { pageId: "missing_page", selector: "button" } }, "feedback-invalid")).rejects.toMatchObject({ status: 404 });
+    await expect(service.createFeedback(principal(), projectId, another.id, { ...request, anchor: { ...request.anchor, sourceRevisionId: another.id } }, "feedback-concurrent")).rejects.toMatchObject({ status: 409 });
+    await expect(service.createFeedback(principal(), projectId, revision.id, { ...request, anchor: { pageId: "missing_page", sourceRevisionId: revision.id, scope: "page" as const } }, "feedback-invalid")).rejects.toMatchObject({ status: 404 });
     const resolved = await service.resolveFeedback(principal(), projectId, one.id, "resolve-feedback", '"0"', {});
     await expect(service.resolveFeedback(principal(), projectId, one.id, "resolve-feedback", '"0"', {})).resolves.toEqual(resolved);
     expect(await service.listFeedback(principal(), projectId, revision.id)).toEqual([resolved]);
     expect(await service.listFeedback(principal(), projectId, another.id)).toEqual([]);
+  });
+
+  it("persists exact stable nodes, rejects forged scope, and resolves missing nodes without rebinding across versions", async () => {
+    const plan = await makePlan(), document = prototypeDocumentFixture();
+    const source = await makeRevision(plan.id, 1, undefined, document);
+    const anchor = { sourceRevisionId: source.id, scope: "node" as const, pageId: "screen-a", nodeId: "node-a", quote: "Original A" };
+    const request = { body: "Keep this review even if the element is removed", anchor };
+    const [one, replay] = await Promise.all([service.createFeedback(principal(), projectId, source.id, request, "node-feedback-concurrent"),service.createFeedback(principal(), projectId, source.id, request, "node-feedback-concurrent")]);
+    expect(replay).toEqual(one); expect((await db.prototypeFeedback.findUniqueOrThrow({where:{id:one.id}})).anchor).toEqual(anchor);
+    await expect(service.createFeedback(principal(),projectId,source.id,{...request,anchor:{...anchor,sourceRevisionId:"another-revision"}},"node-wrong-source")).rejects.toMatchObject({status:400});
+    await expect(service.createFeedback(principal(),projectId,source.id,{...request,anchor:{...anchor,nodeId:"node-b"}},"node-wrong-page")).rejects.toMatchObject({status:404});
+    await expect(service.createFeedback(principal(),projectId,source.id,{...request,anchor:{...anchor,nodeId:"missing-node"}},"node-not-found")).rejects.toMatchObject({status:404});
+    const removed=structuredClone(document);removed.nodes=removed.nodes.filter(node=>node.id!=="node-a");
+    for(const node of removed.nodes)if(node.kind==="frame")node.childIds=node.childIds.filter(id=>id!=="node-a");
+    const target=await makeRevision(plan.id,2,source.id,removed);
+    const same=await service.feedbackLocations(principal(),projectId,source.id,source.id);
+    expect(same.items[0]).toMatchObject({status:"resolved",pageId:"screen-a",nodeId:"node-a",reason:null});
+    const missing=await service.feedbackLocations(principal(),projectId,source.id,target.id);
+    expect(missing.items[0]).toEqual({feedback:one,targetRevisionId:target.id,status:"missing",pageId:null,nodeId:null,reason:"node_missing"});
+    const pageComment=await service.createFeedback(principal(),projectId,source.id,{body:"Page review",anchor:{sourceRevisionId:source.id,scope:"page",pageId:"screen-a"}},"node-page-review");
+    expect((await service.feedbackLocations(principal(),projectId,source.id,target.id)).items.find(item=>item.feedback.id===pageComment.id)).toMatchObject({status:"resolved",pageId:"screen-a",nodeId:null});
+    const otherPlan=await makePlan(),other=await makeRevision(otherPlan.id,1,undefined,document);
+    await expect(service.feedbackLocations(principal(),projectId,source.id,other.id)).rejects.toMatchObject({status:404});
+    await expect(service.feedbackLocations({id:"outsider"} as never,projectId,source.id,target.id)).rejects.toMatchObject({status:403});
+    await expect(db.prototypeFeedback.update({where:{id:one.id},data:{anchor:{...anchor,nodeId:"node-b"}}})).rejects.toThrow(/IMMUTABLE/);
+    await expect(db.prototypeFeedback.create({data:{projectId,revisionId:source.id,createdById:ownerId,body:"Direct forged anchor",anchor:{...anchor,nodeId:"node-b"},idempotencyKey:"direct-forged-anchor",requestHash:hash("forged")}})).rejects.toThrow(/NODE_NOT_FOUND/);
+    const viewerId=`viewer_${randomUUID()}`;
+    await db.principal.create({data:{id:viewerId,issuer:viewerId,subject:viewerId}});
+    try {
+      await db.workspaceMember.create({data:{workspaceId,principalId:viewerId,role:"member"}});
+      await db.projectMember.create({data:{projectId,workspaceId,principalId:viewerId,role:"viewer"}});
+      await expect(service.feedbackLocations({id:viewerId} as never,projectId,source.id,target.id)).resolves.toMatchObject({items:expect.arrayContaining([expect.objectContaining({status:"missing"})])});
+      await expect(service.createFeedback({id:viewerId} as never,projectId,source.id,request,"viewer-cannot-comment")).rejects.toMatchObject({status:403});
+    } finally {
+      await db.projectMember.deleteMany({where:{principalId:viewerId}});await db.workspaceMember.deleteMany({where:{principalId:viewerId}});await db.principal.delete({where:{id:viewerId}});
+    }
   });
 
   it("keeps multi-version history small and fetches only the selected frozen document", async () => {

@@ -1,8 +1,8 @@
-import { Controller, Get, HttpCode, Headers, Param, Post, Body, Res, StreamableFile, UseGuards } from "@nestjs/common";
+import { Controller, Get, Query, HttpCode, Headers, Param, Post, Body, Res, StreamableFile, UseGuards } from "@nestjs/common";
 import type { Response } from "express";
 import { z } from "zod";
 import {
-  revisePrototypeRevisionRequestSchema,
+  revisePrototypeRevisionRequestSchema, prototypeFeedbackLocationsQuerySchema,
   updatePrototypePlanRequestSchema,createPrototypeRevisionPlanRequestSchema,
   createPrototypeExportRequestSchema,
   createPrototypeFeedbackRequestSchema,
@@ -41,6 +41,12 @@ export class PrototypeV2Controller {
     const result = await this.service.getRevision(principal, projectId, revisionId);
     response.setHeader("ETag", revisionEtag(result.revision));
     return result;
+  }
+
+  @Get("revisions/:revisionId/feedback-locations")
+  async feedbackLocations(@CurrentPrincipal() principal: AuthenticatedPrincipal, @Param("projectId") projectId: string, @Param("revisionId") revisionId: string, @Query(body(prototypeFeedbackLocationsQuerySchema)) query: z.infer<typeof prototypeFeedbackLocationsQuerySchema>, @Res({ passthrough: true }) response: Response) {
+    response.setHeader("Cache-Control", "private, no-store");
+    return this.service.feedbackLocations(principal, projectId, query.sourceRevisionId, revisionId);
   }
 
   @Get("revisions/:revisionId/feedback")
