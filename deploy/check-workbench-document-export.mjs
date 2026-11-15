@@ -8,20 +8,20 @@ import {
 } from "../packages/workbench-contracts/dist/index.js";
 import { buildExport } from "../packages/workbench-export-core/dist/index.js";
 
-const prdDocumentV2Example = process.argv[2]
+const prdDocument = process.argv[2]
   ? JSON.parse(await readFile(process.argv[2], "utf8"))
-  : (await import("../packages/workbench-contracts/dist/prd-example.js")).prdDocumentV2Example;
+  : (await import("../packages/workbench-contracts/dist/prd-example.js")).prdDocumentV3Example;
 const digest = (value) => createHash("sha256").update(canonicalJson(value)).digest("hex");
 const artifact = {
   position: 0,
   artifactId: "document-export-smoke-artifact",
   artifactVersionId: "document-export-smoke-version",
-  kind: "document",
-  title: prdDocumentV2Example.title,
+  kind: "prd",
+  title: prdDocument.title,
   version: 1,
-  schemaVersion: 2,
-  checksum: digest(prdDocumentV2Example),
-  content: prdDocumentV2Example,
+  schemaVersion: 3,
+  checksum: digest(prdDocument),
+  content: prdDocument,
   contentMediaType: "application/json",
   assets: [],
 };
