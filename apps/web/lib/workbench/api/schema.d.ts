@@ -701,7 +701,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Public projection of an active immutable release */
+        /** Public projection of an active immutable release; unavailable links use opaque 404 with SHARE_EXPIRED or SHARE_REVOKED for a recognized capability */
         get: operations["getPublicShare"];
         put?: never;
         post?: never;
@@ -2009,7 +2009,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Resolve an active anonymous visual prototype share */
+        /** Resolve an active anonymous visual prototype share; recognized unavailable links use SHARE_EXPIRED, SHARE_REVOKED or SHARE_PREVIEW_UNAVAILABLE without private resource data */
         get: operations["getPublicPrototypeShare"];
         put?: never;
         post?: never;
@@ -10543,7 +10543,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Public projection of an active immutable release */
+            /** @description Public projection of an active immutable release; unavailable links use opaque 404 with SHARE_EXPIRED or SHARE_REVOKED for a recognized capability */
             200: {
                 headers: {
                     ETag: components["headers"]["ETag"];
@@ -13397,7 +13397,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Resolve an active anonymous visual prototype share */
+            /** @description Resolve an active anonymous visual prototype share; recognized unavailable links use SHARE_EXPIRED, SHARE_REVOKED or SHARE_PREVIEW_UNAVAILABLE without private resource data */
             200: {
                 headers: {
                     ETag: components["headers"]["ETag"];
@@ -13408,6 +13408,8 @@ export interface operations {
                 };
             };
             404: components["responses"]["Problem"];
+            409: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
         };
     };
     getPrototypePreviewDocument: {

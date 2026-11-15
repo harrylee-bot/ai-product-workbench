@@ -35,6 +35,16 @@ export function notFoundProblem(resource: string) {
   });
 }
 
+export function publicShareUnavailableProblem(reason: "expired" | "revoked" | "preview") {
+  const code = reason === "expired" ? "SHARE_EXPIRED" : reason === "revoked" ? "SHARE_REVOKED" : "SHARE_PREVIEW_UNAVAILABLE";
+  return new ProblemException({
+    title: "Share unavailable",
+    status: reason === "preview" ? HttpStatus.CONFLICT : HttpStatus.NOT_FOUND,
+    code,
+    detail: reason === "expired" ? "The share link has expired" : reason === "revoked" ? "The share link was revoked" : "The shared preview is unavailable",
+  });
+}
+
 export function forbiddenProblem() {
   return new ProblemException({
     title: "Forbidden",

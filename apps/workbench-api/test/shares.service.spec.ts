@@ -558,7 +558,7 @@ describe("ShareGrant security and lifecycle", () => {
     await expect(service.getPublic(`wbs_${"J".repeat(43)}`)).rejects.toMatchObject({ status: 404 });
   });
 
-  it("expires a stale public token atomically and returns the same opaque 404 as an invalid token", async () => {
+  it("expires a stale public token atomically and distinguishes expiry without private resource data", async () => {
     const token = `wbs_${"B".repeat(43)}`;
     const expired = shareRecord({
       tokenHash: hashShareToken(token),
@@ -575,7 +575,7 @@ describe("ShareGrant security and lifecycle", () => {
     };
     const service = new SharesService(db as never, {} as never, objectStorage() as never);
 
-    await expect(service.getPublic(token)).rejects.toMatchObject({ status: 404 });
+    await expect(service.getPublic(token)).rejects.toMatchObject({ status: 404, response: { code: "SHARE_EXPIRED" } });
     expect(db.shareGrant.updateMany).toHaveBeenCalledWith(expect.objectContaining({
       where: expect.objectContaining({ id: "share_1", status: "active", revision: 0 }),
       data: { status: "expired", revision: { increment: 1 } },
@@ -880,7 +880,7 @@ describe("ShareGrant security and lifecycle", () => {
     const service = new SharesService(db as never, {} as never, objectStorage() as never);
 
     await expect(service.getPublicArtifactVersion(token, "artifact_1", "version_1"))
-      .rejects.toMatchObject({ status: 404 });
+      .rejects.toMatchObject({ status: 404, response: { code: "SHARE_REVOKED" } });
     expect(db.artifactVersion.findFirst).not.toHaveBeenCalled();
   });
 });

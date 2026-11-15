@@ -4,6 +4,7 @@ import { WorkbenchQueryProvider } from "@/lib/workbench/query";
 import { WorkbenchTransportProvider } from "@/lib/workbench/transport";
 import { useWorkbenchPublicPrototypeShare } from "@/lib/workbench/features/prototype-shares";
 import { PageStage } from "./page-stage";
+import { PublicShareStatus } from "./public-share-status";
 export function PublicPrototype({ token }: { token: string }) {
   return (
     <WorkbenchQueryProvider>
@@ -26,19 +27,25 @@ function Content({ token }: { token: string }) {
         正在加载共享原型…
       </div>
     );
-  if (!query.data)
+  if (query.error || !query.data)
     return (
-      <div className="studio-loading">
-        <h1>分享不可用</h1>
-        <p>此链接已失效、被撤销，或无访问权限。</p>
-        <button onClick={() => void query.refetch()}>重试</button>
-      </div>
+      <PublicShareStatus
+        error={query.error}
+        onRetry={() => void query.refetch()}
+      />
     );
   const revision = query.data.value.revision,
     pages = [...revision.pages].sort((a, b) => a.order - b.order),
     pageId = pages.some((p) => p.id === page) ? page : (pages[0]?.id ?? "");
+  if (!revision.previewHtml || pages.length === 0)
+    return (
+      <PublicShareStatus
+        unavailablePreview
+        onRetry={() => void query.refetch()}
+      />
+    );
   return (
-    <div className="visual-workspace studio-workspace studio-public">
+    <div className="studio-shell visual-workspace studio-workspace studio-public">
       <header className="studio-topbar">
         <strong>{revision.title}</strong>
         <span>共享原型 · {pages.length} 页</span>

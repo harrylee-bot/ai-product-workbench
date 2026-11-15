@@ -83,6 +83,11 @@ const publicSourcePrototypePreview = contract.paths["/public/shares/{shareToken}
 assert(sourcePrototypePreview && publicSourcePrototypePreview, "Private and public source prototype preview routes are required");
 assert(sourcePrototypePreview.security === undefined, "Private source prototype preview must inherit OIDC authentication");
 assert(JSON.stringify(publicSourcePrototypePreview.security) === "[]", "Public source prototype preview must use its share token without requiring OIDC authentication");
+const publicPrototypeShare = contract.paths["/public/prototype-v2/shares/{token}"]?.get;
+assert(publicPrototypeShare && JSON.stringify(publicPrototypeShare.security) === "[]", "Anonymous prototype shares must resolve without OIDC authentication");
+for (const status of [404, 409, 503]) {
+  assert(publicPrototypeShare.responses?.[String(status)], `Anonymous prototype shares must document unavailable response ${status}`);
+}
 for (const operation of [sourcePrototypePreview, publicSourcePrototypePreview]) {
   assert(operation.responses?.["200"]?.content?.["application/json"]?.schema?.$ref === "#/components/schemas/ExportPreviewTokenResponse", "Source prototype previews must return the shared short-lived preview capability contract");
 }

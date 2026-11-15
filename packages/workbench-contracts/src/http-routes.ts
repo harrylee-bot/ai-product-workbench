@@ -563,7 +563,7 @@ export const workbenchHttpRoutes = [
   {
     method: "get", path: "/public/shares/{shareToken}", operationId: "getPublicShare", public: true,
     requestHeaders: ["ifNoneMatch"],
-    response: response(200, "Public projection of an active immutable release", named("PublicShare", publicShareSchema), ["etag"]),
+    response: response(200, "Public projection of an active immutable release; unavailable links use opaque 404 with SHARE_EXPIRED or SHARE_REVOKED for a recognized capability", named("PublicShare", publicShareSchema), ["etag"]),
     additionalResponses: [response(304, "Public release manifest digest matches If-None-Match")],
     problemStatuses: problems(404),
   },
@@ -1146,9 +1146,9 @@ export const workbenchHttpRoutes = [
     problemStatuses: problems(400, 403, 404, 409, 503),
   },
   {
-    method: "get", path: "/public/prototype-v2/shares/{token}", operationId: "getPublicPrototypeShare",
-    response: response(200, "Resolve an active anonymous visual prototype share", named("PrototypePublicShare", prototypePublicShareSchema), ["etag"]),
-    problemStatuses: problems(404),
+    method: "get", path: "/public/prototype-v2/shares/{token}", operationId: "getPublicPrototypeShare", public: true,
+    response: response(200, "Resolve an active anonymous visual prototype share; recognized unavailable links use SHARE_EXPIRED, SHARE_REVOKED or SHARE_PREVIEW_UNAVAILABLE without private resource data", named("PrototypePublicShare", prototypePublicShareSchema), ["etag"]),
+    problemStatuses: problems(404, 409, 503),
   },
   {
     method: "get", path: "/public/prototype-v2/previews/{token}", operationId: "getPrototypePreviewDocument", public: true,

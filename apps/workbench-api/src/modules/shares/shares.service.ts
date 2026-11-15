@@ -18,6 +18,7 @@ import { hashRequest, validateIdempotencyKey } from "../../common/idempotency.js
 import {
   idempotencyConflictProblem,
   notFoundProblem,
+  publicShareUnavailableProblem,
   revisionConflictProblem,
   shareStateConflictProblem,
   validationProblem,
@@ -514,12 +515,15 @@ export class SharesService {
         release: { include: { artifactPins: orderedReleaseArtifactPins } },
       },
     });
-    if (!row || row.status !== "active" || row.release.status !== "ready" || !row.artifactVersionId || row.scope !== "view") {
+    if (!row) throw notFoundProblem("Share");
+    if (row.status === "revoked") throw publicShareUnavailableProblem("revoked");
+    if (row.status === "expired") throw publicShareUnavailableProblem("expired");
+    if (row.status !== "active" || row.release.status !== "ready" || !row.artifactVersionId || row.scope !== "view") {
       throw notFoundProblem("Share");
     }
     if (row.expiresAt && row.expiresAt.getTime() <= Date.now()) {
       await this.expireIfNeeded(row);
-      throw notFoundProblem("Share");
+      throw publicShareUnavailableProblem("expired");
     }
     return { row, release: projectPrototypeShareRelease(mapProjectRelease(row.release as ReleaseRecord), row.artifactVersionId) };
   }

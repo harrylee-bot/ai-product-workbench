@@ -16,7 +16,9 @@ export function useWorkbenchPublicShare(shareToken: string) {
     queryKey: workbenchQueryKeys.publicShare(tokenScope),
     queryFn: () => service.getPublicShare(shareToken),
     enabled: Boolean(shareToken),
-    staleTime: Number.POSITIVE_INFINITY,
+    staleTime: 1_000,
+    refetchInterval: query => query.state.status === "error" ? false : 2_000,
+    retry: false,
   });
 }
 

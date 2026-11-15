@@ -304,9 +304,17 @@ describePg("Prototype V2 durable PostgreSQL lifecycle (workflow transport simula
     expect(await service.listShares(principal(), projectId)).toEqual([shared]);
     const revoked = await service.revokeShare(principal(), projectId, shared.id, "revoke-share", '"0"', {});
     expect(revoked.status).toBe("revoked");
-    await expect(service.getPublicShare(shared.url.split("/").at(-1)!)).rejects.toMatchObject({ status: 404 });
+    await expect(service.getPublicShare(shared.url.split("/").at(-1)!)).rejects.toMatchObject({ status: 404, response: { code: "SHARE_REVOKED" } });
     await expect(service.createShare(principal(), projectId, { revisionId: revision.id }, "share-durable")).resolves.toEqual(shared);
     await expect(service.revokeShare(principal(), projectId, shared.id, "revoke-share", '"0"', {})).resolves.toEqual(revoked);
     expect(await db.prototypeShare.findUnique({ where: { id: shared.id } })).toMatchObject({ status: "revoked" });
+    const expiresAt = new Date(Date.now() + 60_000).toISOString();
+    const expiring = await service.createShare(principal(), projectId, { revisionId: revision.id, expiresAt }, "share-expiring");
+    const clock = vi.spyOn(Date, "now").mockReturnValue(Date.parse(expiresAt) + 1);
+    try {
+      await expect(service.getPublicShare(expiring.url.split("/").at(-1)!)).rejects.toMatchObject({ status: 404, response: { code: "SHARE_EXPIRED" } });
+      expect(await db.prototypeShare.findUnique({ where: { id: expiring.id } })).toMatchObject({ status: "expired" });
+    } finally { clock.mockRestore(); }
+    await expect(service.getPublicShare("invalid")).rejects.toMatchObject({ status: 404, response: { code: "RESOURCE_NOT_FOUND" } });
   });
 });

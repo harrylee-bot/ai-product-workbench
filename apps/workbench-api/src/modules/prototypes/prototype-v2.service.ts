@@ -47,7 +47,7 @@ import {
   type PrototypeWorkflowActionRequest,
 } from "@workbench/workbench-contracts";
 import { Prisma } from "@workbench/workbench-db";
-import { forbiddenProblem, idempotencyConflictProblem, notFoundProblem, preconditionRequiredProblem, revisionConflictProblem, ProblemException } from "../../common/problem-details.js";
+import { forbiddenProblem, idempotencyConflictProblem, notFoundProblem, publicShareUnavailableProblem, preconditionRequiredProblem, revisionConflictProblem, ProblemException } from "../../common/problem-details.js";
 import { WorkbenchDbService } from "../../platform/database/workbench-db.service.js";
 import type { AuthenticatedPrincipal } from "../identity/identity.types.js";
 import { lockActiveProject } from "../projects/project-lock.js";
@@ -592,9 +592,10 @@ export class PrototypeV2Service implements OnModuleInit, OnModuleDestroy {
           data: { status: "expired", revision: { increment: 1 } },
         });
       }
-      throw notFoundProblem("Prototype share");
+      throw publicShareUnavailableProblem(row.status === "revoked" ? "revoked" : "expired");
     }
     const revision = await this.requireRevisionWithPreview(row.projectId, row.revisionId);
+    if (!revision.previewHtml || revision.pages.length === 0) throw publicShareUnavailableProblem("preview");
     return prototypePublicShareSchema.parse({ share: toShare(row, this.webOrigin(), token), revision: toPublicRevision(revision) });
   }
 
