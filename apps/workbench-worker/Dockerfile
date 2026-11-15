@@ -6,18 +6,19 @@ ENV NPM_CONFIG_UPDATE_NOTIFIER=false \
     NPM_CONFIG_AUDIT=false \
     NPM_CONFIG_FUND=false \
     NPM_CONFIG_REGISTRY=https://registry.npmmirror.com \
-    NPM_CONFIG_REPLACE_REGISTRY_HOST=always \
-    DEBIAN_FRONTEND=noninteractive
+    NPM_CONFIG_REPLACE_REGISTRY_HOST=always
 
 COPY --chmod=0555 deploy/prepare-node-image.sh /usr/local/bin/prepare-node-image
 RUN prepare-node-image ca-certificates openssl
 
 COPY package.json package-lock.json tsconfig.base.json ./
 COPY apps/workbench-worker/package.json apps/workbench-worker/package.json
+COPY apps/workbench-build-worker/package.json apps/workbench-build-worker/package.json
 COPY packages/workbench-canvas-tools/package.json packages/workbench-canvas-tools/package.json
 COPY packages/workbench-content-security/package.json packages/workbench-content-security/package.json
 COPY packages/workbench-contracts/package.json packages/workbench-contracts/package.json
 COPY packages/workbench-db/package.json packages/workbench-db/package.json
+COPY packages/workbench-export-core/package.json packages/workbench-export-core/package.json
 COPY packages/workbench-knowledge/package.json packages/workbench-knowledge/package.json
 COPY packages/workbench-telemetry/package.json packages/workbench-telemetry/package.json
 RUN --mount=type=cache,target=/root/.npm \
@@ -25,10 +26,12 @@ RUN --mount=type=cache,target=/root/.npm \
 
 FROM dependencies AS build
 COPY apps/workbench-worker apps/workbench-worker
+COPY apps/workbench-build-worker apps/workbench-build-worker
 COPY packages/workbench-canvas-tools packages/workbench-canvas-tools
 COPY packages/workbench-content-security packages/workbench-content-security
 COPY packages/workbench-contracts packages/workbench-contracts
 COPY packages/workbench-db packages/workbench-db
+COPY packages/workbench-export-core packages/workbench-export-core
 COPY packages/workbench-knowledge packages/workbench-knowledge
 COPY packages/workbench-telemetry packages/workbench-telemetry
 RUN rm -rf packages/workbench-db/generated \
@@ -36,6 +39,8 @@ RUN rm -rf packages/workbench-db/generated \
   && npm --workspace @workbench/workbench-contracts run build \
   && npm --workspace @workbench/workbench-canvas-tools run build \
   && npm --workspace @workbench/workbench-db run generate \
+  && npm --workspace @workbench/workbench-export-core run build \
+  && npm --workspace @workbench/workbench-build-worker run build \
   && npm --workspace @workbench/workbench-content-security run build \
   && npm --workspace @workbench/workbench-knowledge run build \
   && npm --workspace @workbench/workbench-telemetry run build \
@@ -61,19 +66,23 @@ RUN prepare-node-image ca-certificates openssl
 
 COPY --chown=node:node package.json package-lock.json ./
 COPY --chown=node:node apps/workbench-worker/package.json apps/workbench-worker/package.json
+COPY --chown=node:node apps/workbench-build-worker/package.json apps/workbench-build-worker/package.json
 COPY --chown=node:node packages/workbench-canvas-tools/package.json packages/workbench-canvas-tools/package.json
 COPY --chown=node:node packages/workbench-content-security/package.json packages/workbench-content-security/package.json
 COPY --chown=node:node packages/workbench-contracts/package.json packages/workbench-contracts/package.json
 COPY --chown=node:node packages/workbench-db/package.json packages/workbench-db/package.json
+COPY --chown=node:node packages/workbench-export-core/package.json packages/workbench-export-core/package.json
 COPY --chown=node:node packages/workbench-knowledge/package.json packages/workbench-knowledge/package.json
 COPY --chown=node:node packages/workbench-telemetry/package.json packages/workbench-telemetry/package.json
 COPY --from=production-dependencies --chown=node:node /app/node_modules node_modules
 COPY --from=production-dependencies --chown=node:node /app/.runtime-workspace-dependencies/ ./
 COPY --from=build --chown=node:node /app/apps/workbench-worker/dist apps/workbench-worker/dist
+COPY --from=build --chown=node:node /app/apps/workbench-build-worker/dist apps/workbench-build-worker/dist
 COPY --from=build --chown=node:node /app/packages/workbench-canvas-tools/dist packages/workbench-canvas-tools/dist
 COPY --from=build --chown=node:node /app/packages/workbench-content-security/dist packages/workbench-content-security/dist
 COPY --from=build --chown=node:node /app/packages/workbench-contracts/dist packages/workbench-contracts/dist
 COPY --from=build --chown=node:node /app/packages/workbench-db/generated packages/workbench-db/generated
+COPY --from=build --chown=node:node /app/packages/workbench-export-core/dist packages/workbench-export-core/dist
 COPY --from=build --chown=node:node /app/packages/workbench-knowledge/dist packages/workbench-knowledge/dist
 COPY --from=build --chown=node:node /app/packages/workbench-telemetry/dist packages/workbench-telemetry/dist
 

@@ -126,6 +126,8 @@ export const prototypeRadiiSchema = z.object({
 }).strict();
 
 export const prototypeTypographySchema = z.object({
+  color: prototypeColorValueSchema.optional()
+    .describe("Optional text color, independent of a control's background fill. Accepts a hex literal or color token; omitted values preserve legacy text fill and control contrast defaults."),
   fontFamily: prototypeStringValueSchema,
   fontSize: prototypePositiveValueSchema,
   fontWeight: z.union([
@@ -726,6 +728,7 @@ function styleTokenReferences(style: z.infer<typeof prototypeStyleSchema>) {
     [tokenId(style.radii.bottomRight), ["number", "radius"]],
     [tokenId(style.radii.bottomLeft), ["number", "radius"]],
     ...(style.typography ? [
+      [style.typography.color ? tokenId(style.typography.color) : null, ["color"]],
       [tokenId(style.typography.fontFamily), ["fontFamily"]],
       [tokenId(style.typography.fontSize), ["number", "fontSize"]],
       [tokenId(style.typography.fontWeight), ["fontWeight"]],

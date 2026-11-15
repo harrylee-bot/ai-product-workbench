@@ -14,6 +14,7 @@ import {
   materializeRuntimeDesignPresetSnapshot,
   materializeRuntimeDesignStyleSnapshot,
   opaqueIdSchema,
+  prototypeDocumentSchema,
   runSourceBlobLimit,
   runEventSchema,
   runSchema,
@@ -33,6 +34,7 @@ import {
   runStateConflictProblem,
   revisionConflictProblem,
   validationProblem,
+  ProblemException,
 } from "../../common/problem-details.js";
 import { hashRequest, validateIdempotencyKey } from "../../common/idempotency.js";
 import { WorkbenchDbService } from "../../platform/database/workbench-db.service.js";
@@ -82,6 +84,127 @@ export class RunsService {
     const normalizedRequest = startRunRequestSchema.parse(request);
     assertRunWorkflowInputs(normalizedRequest);
     return this.create(principalId, threadId, idempotencyKey, normalizedRequest, null);
+  }
+
+  /** A fresh browser snapshot is accepted once as immutable plan input, never
+   * as a future live Canvas capability. The caller has authorized the Project. */
+  async validatePrototypePlanCanvas(tx: Prisma.TransactionClient, projectId: string, request: StartRunRequest): Promise<void> {
+    const snapshot = request.canvasSnapshot;
+    if (!snapshot) return;
+    await tx.$queryRaw(Prisma.sql`SELECT "id" FROM "boards" WHERE "id" = ${snapshot.boardId} AND "project_id" = ${projectId} FOR SHARE`);
+    await this.assertCanvasSnapshot(tx, projectId, snapshot.threadId, snapshot);
+    await this.assertPrototypeCanvasReferences(tx, projectId, snapshot.threadId, snapshot);
+  }
+
+  /** Prepare a Temporal-owned Run using the same input checks and immutable
+   * snapshots as the ordinary composer. Caller holds the Plan lock and binds
+   * runtimeRunId before committing; no pg-boss execution is scheduled here. */
+  async preparePrototypeRun(tx: Prisma.TransactionClient, input: {
+    projectId: string; principalId: string; planId: string; title: string;
+    request: StartRunRequest; sourceRevisionId?: string | null; pinnedRunId?: string;
+  }): Promise<string> {
+    await lockActiveProject(tx, input.projectId, input.principalId, "edit");
+    let request = startRunRequestSchema.parse(input.request);
+    const pinned = input.pinnedRunId ? await tx.run.findFirst({ where: {
+      id: input.pinnedRunId, projectId: input.projectId, status: { in: ["failed", "cancelled"] },
+    } }) : null;
+    if (input.pinnedRunId && (!pinned || canonicalJson(pinned.request) !== canonicalJson(request))) {
+      throw runRetryConflictProblem("Prototype retry must preserve its original terminal Run request");
+    }
+    if (input.sourceRevisionId && !pinned) {
+      const source = await tx.prototypeRevision.findFirst({ where: {
+        id: input.sourceRevisionId, projectId: input.projectId,
+        status: { in: ["ready", "confirmed", "rejected"] },
+      } });
+      if (!source?.sourceDocument) throw validationProblem("The selected revision has no editable source document");
+      const generation = await tx.prototypePlan.findFirst({ where: {
+        projectId: input.projectId, contentVersion: source.version,
+        OR: [{ id: source.planId }, { rootPlanId: source.planId }],
+      } });
+      const generationRunId = generation?.runtimeRunId ?? generation?.reusedRunId;
+      if (!generationRunId) throw validationProblem("The selected revision has no generation Run");
+      const versions = await tx.artifactVersion.findMany({ where: {
+        projectId: input.projectId, createdByRunId: generationRunId,
+        status: "ready", schemaVersion: 1, artifact: { kind: "prototype" },
+      }, select: { id: true, artifactId: true, content: true, artifact: { select: { currentVersionId: true } } } });
+      if (versions.length !== 1 || canonicalJson(versions[0]!.content) !== canonicalJson(source.sourceDocument)) {
+        throw validationProblem("The selected revision does not match its immutable generation source");
+      }
+      if (versions[0]!.artifact.currentVersionId !== versions[0]!.id) throw new ProblemException({ title: "Prototype base version changed", status: 409, detail: "Select the current prototype version before requesting a revision", code: "PROTOTYPE_BASE_VERSION_CONFLICT" });
+      request = startRunRequestSchema.parse({ ...request, workflow: "edit", generationIntent: null,
+        requestedArtifactKinds: ["prototype"], canvasSnapshot: null,
+        artifactTargets: [{ artifactId: versions[0]!.artifactId, artifactVersionId: versions[0]!.id, screenIds: [] }],
+      });
+    }
+    if (pinned && request.workflow === "edit") {
+      for (const target of request.artifactTargets) {
+        const artifact = await tx.artifact.findFirst({ where: { id: target.artifactId, projectId: input.projectId }, select: { currentVersionId: true } });
+        if (artifact?.currentVersionId !== target.artifactVersionId) throw new ProblemException({ title: "Prototype base version changed", status: 409, detail: "Select the current prototype version before retrying this edit", code: "PROTOTYPE_BASE_VERSION_CONFLICT" });
+      }
+    }
+    assertRunWorkflowInputs(request);
+    if (!request.requestedArtifactKinds.includes("prototype")) {
+      throw validationProblem("Prototype plans must include a prototype artifact");
+    }
+    await this.assertPrototypeModelAvailable(request);
+    const project = await tx.project.findUniqueOrThrow({ where: { id: input.projectId }, select: { workspaceId: true } });
+    let threadId: string;
+    if (pinned) {
+      threadId = pinned.threadId;
+      const thread = await tx.thread.findFirst({ where: { id: threadId, projectId: input.projectId, status: "active" } });
+      if (!thread) throw notFoundProblem("Thread");
+    } else if (request.canvasSnapshot) {
+      threadId = request.canvasSnapshot.threadId;
+      const rows = await tx.$queryRaw<Array<{ status: string }>>(Prisma.sql`
+        SELECT "status"::text AS "status" FROM "threads"
+        WHERE "id" = ${threadId} AND "project_id" = ${input.projectId} FOR UPDATE
+      `);
+      if (rows[0]?.status !== "active") throw notFoundProblem("Thread");
+      const active = await tx.run.findFirst({ where: { threadId, status: { in: [...activeStatuses] } }, select: { id: true } });
+      if (active) throw activeRunConflictProblem(active.id);
+    } else {
+      const thread = await tx.thread.create({ data: { projectId: input.projectId, createdById: input.principalId, title: input.title } });
+      threadId = thread.id;
+    }
+    await tx.$queryRaw(Prisma.sql`SELECT "id" FROM "threads" WHERE "id" = ${threadId} FOR UPDATE`);
+    const activeRun = await tx.run.findFirst({ where: { threadId, status: { in: [...activeStatuses] } }, select: { id: true } });
+    if (activeRun) throw activeRunConflictProblem(activeRun.id);
+    const sources = pinned
+      ? await this.copyRetrySourceSnapshots(tx, pinned.id, request.sourceIds)
+      : await this.resolveSourceSnapshots(tx, input.projectId, request.sourceIds);
+    await this.assertReadyArtifactTargets(tx, input.projectId, request);
+    await this.assertPrototypeCanvasReferences(tx, input.projectId, threadId, request.canvasSnapshot ?? null);
+    const designStyle = pinned
+      ? { artifactVersionId: pinned.designStyleArtifactVersionId, snapshot: pinned.designStyleSnapshot ?? undefined, snapshotSha256: pinned.designStyleSnapshotSha256 }
+      : await this.resolveDesignStyle(tx, input.projectId, request.designStyle);
+    const release = pinned
+      ? await tx.knowledgeRelease.findFirst({ where: { id: pinned.knowledgeReleaseId ?? "", status: "ready" } })
+      : (await tx.knowledgeRelease.findFirst({ where: { status: "ready", projectId: input.projectId }, orderBy: { version: "desc" } })
+      ?? await tx.knowledgeRelease.findFirst({ where: { status: "ready", projectId: null, OR: [{ workspaceId: project.workspaceId }, { workspaceId: null }] }, orderBy: [{ version: "desc" }, { createdAt: "desc" }] }));
+    if (!release) throw knowledgeRetrievalUnavailableProblem("KNOWLEDGE_RELEASE_REQUIRED", "No ready knowledge release is available");
+    const thread = await tx.thread.update({ where: { id: threadId }, data: { entrySequence: { increment: 1 }, revision: { increment: 1 } } });
+    await tx.threadEntry.create({ data: { threadId, sequence: thread.entrySequence, role: "user", kind: "message",
+      content: { protocol: "workbench.entry.v1", type: "user.prompt", text: request.prompt, sourceIds: request.sourceIds } } });
+    const run = await tx.run.create({ data: {
+      projectId: input.projectId, threadId, createdById: input.principalId,
+      knowledgeReleaseId: release.id, designStyleArtifactVersionId: designStyle.artifactVersionId,
+      designStyleSnapshot: designStyle.snapshot as Prisma.InputJsonValue | undefined,
+      designStyleSnapshotSha256: designStyle.snapshotSha256,
+      idempotencyKey: `prototype:${input.planId}`, requestHash: runRequestHash(request, designStyle.snapshotSha256),
+      request: request as Prisma.InputJsonValue, requestId: randomUUID(), traceId: randomUUID(), status: "queued", modelId: request.modelId,
+    } });
+    if (sources.length) await tx.runSourceSnapshot.createMany({ data: sources.map((source, position) => ({
+      id: `run_source_${randomUUID()}`, runId: run.id, projectId: input.projectId, position,
+      sourceId: source.sourceId, kind: source.kind, label: source.label, checksum: source.checksum,
+      descriptor: source.descriptor as Prisma.InputJsonValue, snapshot: source.snapshot as Prisma.InputJsonValue,
+    })) });
+    await this.events.append(tx, run.id, "run.queued", { position: null });
+    return run.id;
+  }
+
+  async assertPrototypeModelAvailable(request: StartRunRequest): Promise<void> {
+    if (request.designStyle.kind === "preset") this.designPresets.resolve({ presetId: request.designStyle.presetId, version: request.designStyle.version, checksum: request.designStyle.checksum });
+    await this.runtimeModels.assertAvailable(request.modelId, request.workflow);
   }
 
   async retry(principalId: string, sourceRunId: string, idempotencyKey: string): Promise<Run> {
@@ -462,6 +585,53 @@ export class RunsService {
     }
   }
 
+  /** Ready ArtifactVersions and their asset pins are immutable in PostgreSQL.
+   * Recheck those exact ids and checksums without consulting today's Board
+   * revision or extending the original browser snapshot's lifetime. */
+  private async assertPrototypeCanvasReferences(
+    tx: Prisma.TransactionClient,
+    projectId: string,
+    threadId: string,
+    snapshot: StartRunRequest["canvasSnapshot"] | null,
+  ): Promise<void> {
+    if (!snapshot) return;
+    if (snapshot.projectId !== projectId || snapshot.threadId !== threadId || snapshot.runId !== null || snapshot.projectSessionGeneration <= 0) {
+      throw validationProblem("Prototype Canvas context scope is invalid");
+    }
+    const thread = await tx.thread.findFirst({ where: { id: threadId, projectId, status: "active" }, select: { id: true } });
+    const board = await tx.board.findFirst({ where: { id: snapshot.boardId, projectId }, select: { id: true } });
+    if (!thread || !board) throw notFoundProblem("Prototype Canvas context");
+    const references = snapshot.screens.map(screen => screen.reference);
+    if (references.length === 0) return;
+    const versionIds = [...new Set(references.map(reference => reference.artifactVersionId))].sort();
+    const versions = await tx.$queryRaw<Array<{
+      id: string; artifactId: string; kind: string; schemaVersion: number;
+      content: Prisma.JsonValue | null; contentBlobId: string | null; checksum: string;
+    }>>(Prisma.sql`
+      SELECT version."id", version."artifact_id" AS "artifactId", artifact."kind"::TEXT AS "kind",
+        version."schema_version" AS "schemaVersion", version."content",
+        version."content_blob_id" AS "contentBlobId", version."checksum"
+      FROM "artifact_versions" AS version JOIN "artifacts" AS artifact
+        ON artifact."id" = version."artifact_id" AND artifact."project_id" = version."project_id"
+      WHERE version."project_id" = ${projectId} AND version."id" IN (${Prisma.join(versionIds)}) AND version."status" = 'ready'
+      ORDER BY version."id" FOR SHARE OF version, artifact
+    `);
+    const byId = new Map<string, { artifactId: string; screenIds: ReadonlySet<string> }>();
+    for (const version of versions) {
+      const document = version.kind === "prototype" && version.schemaVersion === 1 && version.contentBlobId === null
+        ? prototypeDocumentSchema.safeParse(version.content) : null;
+      if (!document?.success || createHash("sha256").update(canonicalJson(version.content)).digest("hex") !== version.checksum) {
+        throw new ProblemException({ title: "Prototype Canvas context unavailable", status: 409, detail: "The fixed Canvas version does not match its validated immutable content", code: "PROTOTYPE_CANVAS_CONTEXT_INVALID" });
+      }
+      byId.set(version.id, { artifactId: version.artifactId, screenIds: new Set(document.data.screens.map(screen => screen.id)) });
+    }
+    for (const reference of references) {
+      const version = byId.get(reference.artifactVersionId);
+      if (!version || version.artifactId !== reference.artifactId) throw notFoundProblem("Fixed Canvas Artifact version");
+      if (!version.screenIds.has(reference.screenId)) throw notFoundProblem("Fixed Canvas screen");
+    }
+  }
+
   private async assertCanvasSnapshot(
     tx: Prisma.TransactionClient,
     projectId: string,
@@ -548,11 +718,6 @@ export class RunsService {
         ? encodeRunCursor({ createdAt: last.createdAt.toISOString(), id: last.id })
         : null,
     };
-  }
-
-  async listEvents(principalId: string, runId: string, afterSequence: number): Promise<RunEvent[]> {
-    await this.access.findRun(principalId, runId, "read");
-    return this.events.listAfter(runId, afterSequence);
   }
 
   async authorizeEventStream(principalId: string, runId: string) {

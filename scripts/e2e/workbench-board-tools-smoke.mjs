@@ -1,8 +1,9 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { chromium } from "playwright";
 import sharp from "sharp";
-import { injectWorkbenchPreviewBridge } from "../../apps/workbench-preview/dist/preview-bridge.js";
-import { previewContentSecurityPolicy } from "../../apps/workbench-preview/dist/csp.js";
+import { PreviewService } from "../../apps/workbench-preview/dist/preview.service.js";
+import { PreviewStorage } from "../../apps/workbench-preview/dist/storage.js";
+import { renderPreviewHtmlFixture } from "../test-support/preview-html-fixture.mjs";
 
 async function shiftSelectNodeByKeyboard(locator, label) {
   await locator.waitFor({ state: "visible" });
@@ -235,13 +236,13 @@ await context.addCookies([{
 
 await context.route(`${previewOrigin}/preview/**`, async (route) => {
   const capabilityId = new URL(route.request().url()).pathname.slice("/preview/".length);
-  const bridged = injectWorkbenchPreviewBridge(previewHtml, origin, capabilityId);
+  const bridged = await renderPreviewHtmlFixture({ PreviewService, PreviewStorage, html: previewHtml, webOrigin: origin, capabilityId });
   await route.fulfill({
     status: 200,
     contentType: "text/html; charset=utf-8",
     headers: {
       "cache-control": "private, no-store",
-      "content-security-policy": previewContentSecurityPolicy(bridged.html, origin),
+      "content-security-policy": bridged.contentSecurityPolicy,
     },
     body: bridged.html,
   });
@@ -581,32 +582,17 @@ await context.route("**/api/v1/**", async (route) => {
     return json(route, { items: [] });
   }
   if (method === "GET" && path === "/api/v1/exports/capabilities") {
-    const available = { available: true, authentication: "not_required", reasonCode: null };
-    const authRequired = {
-      available: false,
-      authentication: "required",
-      reasonCode: "EXPORT_EXTERNAL_AUTHENTICATION_REQUIRED",
-    };
+    const available = { available: true, reasonCode: null };
     return json(route, {
       formats: {
         html: available,
         react: available,
-        figma: { available: false, authentication: "not_required", reasonCode: "EXPORT_FIGMA_UNAVAILABLE" },
+        figma: { available: false, reasonCode: "EXPORT_FIGMA_UNAVAILABLE" },
         mcp: available,
         docx: available,
         pdf: available,
       },
       packaging: { single_file: available, zip: available },
-      external: {
-        ai_studio: {
-          available: false,
-          authentication: "not_required",
-          reasonCode: "EXPORT_EXTERNAL_AI_STUDIO_UNAVAILABLE",
-        },
-        netlify: authRequired,
-        lovable: authRequired,
-        bolt: authRequired,
-      },
     });
   }
   if (method === "POST" && path === "/api/v1/projects/project-1/previews") {

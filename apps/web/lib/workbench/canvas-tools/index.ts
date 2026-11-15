@@ -12,23 +12,11 @@ export type CanvasInteractionMode =
 /** A side panel which may be open independently of the interaction mode. */
 export type CanvasPanel = "media" | "design-system" | "favourites" | null;
 
-export type CanvasPrimaryInteractionMode = Exclude<CanvasInteractionMode, "frame-create" | "freehand">;
+type CanvasPrimaryInteractionMode = Exclude<CanvasInteractionMode, "frame-create" | "freehand">;
 export type CanvasMainCommand = CanvasPrimaryInteractionMode | Exclude<CanvasPanel, null>;
 export type CanvasMoreCommand = Extract<CanvasInteractionMode, "frame-create" | "freehand">;
 
-export const canvasMainCommands = [
-  "select",
-  "marquee",
-  "direct-edit",
-  "pan",
-  "media",
-  "design-system",
-  "favourites",
-] as const satisfies readonly CanvasMainCommand[];
-
-export const canvasMoreCommands = ["frame-create", "freehand"] as const satisfies readonly CanvasMoreCommand[];
-
-export type CanvasTargetPhase = "idle" | "generating" | "refining" | "complete";
+type CanvasTargetPhase = "idle" | "generating" | "refining" | "complete";
 
 /** The persisted selection projection needed by Direct edit. */
 export type CanvasSelectionTarget = {
@@ -54,12 +42,12 @@ export type CanvasToolsState = {
   projectId: string | null;
 };
 
-export type CanvasInteractionBlockReason =
+type CanvasInteractionBlockReason =
   | "active-run"
   | "read-only"
   | CanvasDirectEditBlockReason;
 
-export type CanvasDirectEditBlockReason =
+type CanvasDirectEditBlockReason =
   | "selection-count"
   | "target-not-persisted"
   | "target-not-complete"
@@ -81,21 +69,13 @@ export type CanvasToolsCommand =
   | { type: "main-command"; command: CanvasMainCommand }
   | { type: "more-command"; command: CanvasMoreCommand };
 
-export type CanvasToolsReducerEvent =
-  | (CanvasToolsCommand & { environment: CanvasToolEnvironment })
-  | { type: "environment-changed"; environment: CanvasToolEnvironment };
-
-export type CanvasSelectionEffect = "preserve";
+type CanvasSelectionEffect = "preserve";
 
 export type CanvasToolsTransition = {
   state: CanvasToolsState;
   selectionEffect: CanvasSelectionEffect;
   blockedReason: CanvasInteractionBlockReason | null;
 };
-
-export function createCanvasToolsState(projectId: string | null = null): CanvasToolsState {
-  return { interactionMode: "select", panel: null, projectId };
-}
 
 /**
  * Returns the strict Direct edit guard. Keeping the checks here prevents UI
@@ -198,17 +178,6 @@ export function normalizeCanvasToolsState(
     return state;
   }
   return { interactionMode, panel, projectId: environment.projectId };
-}
-
-/** Reducer-shaped entry point for React state containers. */
-export function reduceCanvasToolsState(
-  state: CanvasToolsState,
-  event: CanvasToolsReducerEvent,
-): CanvasToolsState {
-  if (event.type === "environment-changed") {
-    return normalizeCanvasToolsState(state, event.environment);
-  }
-  return transitionCanvasTools(state, event, event.environment).state;
 }
 
 export function transitionCanvasTools(

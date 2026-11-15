@@ -4,7 +4,6 @@ import {
   boardNodeProtocol,
   exportJobSchema,
   exportCapabilitiesSchema,
-  externalExportDeliverySchema,
   exportBuildJobSchema,
   exportBuildQueue,
   exportSelectionSchema,
@@ -15,6 +14,8 @@ import {
   revokeProjectShareGrantsResponseSchema,
   resolveExportBoardNodeSelection,
   rotateShareGrantResponseSchema,
+  rotateShareGrantRequestSchema,
+  publicShareSchema,
   shareGrantSchema,
   shareGrantListSchema,
   shareTokenHashSchema,
@@ -25,40 +26,6 @@ const checksumA = "a".repeat(64);
 const checksumB = "b".repeat(64);
 const createdAt = "2026-07-13T01:00:00.000Z";
 const finishedAt = "2026-07-13T01:01:00.000Z";
-
-const externalDeliveryPayload = {
-  exportJobId: "export-1",
-  releaseId: "release-1",
-  format: "html",
-  packaging: "zip",
-  selection: { kind: "release" },
-  output: {
-    mediaType: "application/zip",
-    byteSize: 128,
-    sha256: checksumA,
-    fileName: "workbench-export.zip",
-  },
-};
-
-const pendingExternalDelivery = {
-  id: "delivery-1",
-  exportJobId: "export-1",
-  createdById: "principal-1",
-  target: "netlify",
-  authentication: "required",
-  status: "pending_confirmation",
-  revision: 0,
-  attempt: 0,
-  payload: externalDeliveryPayload,
-  remoteReference: null,
-  failure: null,
-  createdAt,
-  confirmedAt: null,
-  startedAt: null,
-  transferAuthorizedAt: null,
-  finishedAt: null,
-  updatedAt: createdAt,
-};
 
 const artifactPin = {
   position: 0,
@@ -197,6 +164,19 @@ const activeShare = {
 };
 
 describe("share contracts", () => {
+  it("accepts only read-only scopes for new grants and public responses", () => {
+    const request = { releaseId: "release-1", artifactVersionId: "artifact-version-1" };
+    expect(rotateShareGrantRequestSchema.parse(request).scope).toBe("view");
+    expect(rotateShareGrantRequestSchema.safeParse({ ...request, scope: "remix" }).success).toBe(false);
+    const { createdById: _createdById, ...release } = readyRelease;
+    const { assets: _assets, ...pin } = artifactPin;
+    const share = { shareId: "share-1", scope: "view", expiresAt: null, release: {
+      ...release, artifactPins: [pin], manifest: { ...release.manifest, artifacts: [pin] },
+    } };
+    expect(publicShareSchema.safeParse(share).success).toBe(true);
+    expect(publicShareSchema.safeParse({ ...share, scope: "remix" }).success).toBe(false);
+  });
+
   it("reports the complete active count separately from the paginated audit rows", () => {
     expect(shareGrantListSchema.parse({
       items: [activeShare],
@@ -266,7 +246,7 @@ describe("share contracts", () => {
       artifactId: "artifact-1",
       artifactVersionId: "artifact-version-1",
       version: 3,
-      kind: "document",
+      kind: "prototype",
       schemaVersion: 1,
       status: "ready",
       checksum: checksumA,
@@ -336,30 +316,29 @@ const queuedExport = {
 
 describe("export contracts", () => {
   it("publishes an exact capability catalog without server proof material", () => {
-    const available = { available: true as const, authentication: "not_required" as const, reasonCode: null };
+    const available = { available: true as const, reasonCode: null };
     const catalog = {
       formats: {
         html: available,
         react: available,
-        figma: { available: false as const, authentication: "not_required" as const, reasonCode: "EXPORT_FIGMA_UNAVAILABLE" as const },
+        figma: { available: false as const, reasonCode: "EXPORT_FIGMA_UNAVAILABLE" as const },
         mcp: available,
         docx: available,
         pdf: available,
       },
       packaging: { single_file: available, zip: available },
-      external: {
-        ai_studio: { available: false as const, authentication: "not_required" as const, reasonCode: "EXPORT_EXTERNAL_AI_STUDIO_UNAVAILABLE" as const },
-        netlify: { available: false as const, authentication: "required" as const, reasonCode: "EXPORT_EXTERNAL_AUTHENTICATION_REQUIRED" as const },
-        lovable: { available: false as const, authentication: "required" as const, reasonCode: "EXPORT_EXTERNAL_AUTHENTICATION_REQUIRED" as const },
-        bolt: { available: false as const, authentication: "required" as const, reasonCode: "EXPORT_EXTERNAL_AUTHENTICATION_REQUIRED" as const },
-      },
     };
     expect(exportCapabilitiesSchema.parse(catalog)).toEqual(catalog);
+    expect(exportCapabilitiesSchema.safeParse({ ...catalog, external: {} }).success).toBe(false);
+    expect(exportCapabilitiesSchema.safeParse({
+      ...catalog,
+      formats: { ...catalog.formats, html: { ...available, authentication: "not_required" } },
+    }).success).toBe(false);
     expect(exportCapabilitiesSchema.safeParse({
       ...catalog,
       formats: {
         ...catalog.formats,
-        figma: { available: true, authentication: "not_required", reasonCode: null, internalProof: "not-public" },
+        figma: { available: true, reasonCode: null, internalProof: "not-public" },
       },
     }).success).toBe(false);
   });
@@ -517,92 +496,5 @@ describe("export contracts", () => {
 
   it("rejects request hashes and other internal fields in public DTOs", () => {
     expect(exportJobSchema.safeParse({ ...queuedExport, requestHash: checksumA }).success).toBe(false);
-  });
-});
-
-describe("external export delivery contracts", () => {
-  it("accepts confirmation, execution, compensation, and terminal snapshots", () => {
-    const queued = {
-      ...pendingExternalDelivery,
-      status: "queued",
-      revision: 1,
-      confirmedAt: createdAt,
-    };
-    const running = {
-      ...queued,
-      status: "running",
-      revision: 2,
-      attempt: 1,
-      startedAt: createdAt,
-    };
-    const authorizedAt = "2026-07-13T01:00:30.000Z";
-    const cancelling = {
-      ...running,
-      status: "cancelling",
-      revision: 4,
-      transferAuthorizedAt: authorizedAt,
-      remoteReference: "site_1",
-    };
-
-    expect(externalExportDeliverySchema.parse(pendingExternalDelivery)).toEqual(pendingExternalDelivery);
-    expect(externalExportDeliverySchema.parse(queued)).toEqual(queued);
-    expect(externalExportDeliverySchema.parse(running)).toEqual(running);
-    expect(externalExportDeliverySchema.parse(cancelling)).toEqual(cancelling);
-    expect(externalExportDeliverySchema.safeParse({
-      ...running,
-      status: "succeeded",
-      transferAuthorizedAt: authorizedAt,
-      remoteReference: "site_1",
-      finishedAt,
-    }).success).toBe(true);
-    expect(externalExportDeliverySchema.safeParse({
-      ...running,
-      status: "failed",
-      finishedAt,
-      failure: { code: "EXPORT_EXTERNAL_TARGET_UNAVAILABLE", detail: null },
-    }).success).toBe(true);
-    expect(externalExportDeliverySchema.safeParse({
-      ...pendingExternalDelivery,
-      status: "cancelled",
-      revision: 1,
-      finishedAt,
-    }).success).toBe(true);
-  });
-
-  it("requires execution evidence before exposing a remote receipt", () => {
-    expect(externalExportDeliverySchema.safeParse({
-      ...pendingExternalDelivery,
-      status: "cancelling",
-      attempt: 1,
-      confirmedAt: createdAt,
-      startedAt: createdAt,
-      remoteReference: "site_without_authorization",
-    }).success).toBe(false);
-    expect(externalExportDeliverySchema.safeParse({
-      ...pendingExternalDelivery,
-      status: "cancelled",
-      transferAuthorizedAt: createdAt,
-      finishedAt,
-    }).success).toBe(false);
-    expect(externalExportDeliverySchema.safeParse({
-      ...pendingExternalDelivery,
-      status: "succeeded",
-      attempt: 1,
-      confirmedAt: createdAt,
-      startedAt: createdAt,
-      transferAuthorizedAt: createdAt,
-      finishedAt,
-    }).success).toBe(false);
-  });
-
-  it("keeps lease ownership and request hashes out of the public DTO", () => {
-    expect(externalExportDeliverySchema.safeParse({
-      ...pendingExternalDelivery,
-      leaseToken: "internal-lease",
-    }).success).toBe(false);
-    expect(externalExportDeliverySchema.safeParse({
-      ...pendingExternalDelivery,
-      requestHash: checksumA,
-    }).success).toBe(false);
   });
 });

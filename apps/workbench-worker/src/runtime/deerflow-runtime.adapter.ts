@@ -28,6 +28,7 @@ import {
   type RuntimePrototypePatchInput,
   type RuntimeResult,
   type RuntimeResumeDecision,
+  type StartRunRequest,
 } from "@workbench/workbench-contracts";
 import type { VerifiedReadyObjectBody } from "@workbench/workbench-content-security";
 import { Client, type Run, type StreamMode } from "@langchain/langgraph-sdk";
@@ -51,6 +52,7 @@ import type {
   RuntimeCancellationResult,
   RuntimeContentLocator,
   RuntimeDesignAsset,
+  RuntimeArtifactTarget,
   RuntimeExecution,
   RuntimeExecutionObserver,
   RuntimePort,
@@ -70,6 +72,20 @@ import { assertPrdReferenceReadEvidence } from "./runtime-prd-reference-evidence
 import { RuntimeProviderContentFilterError } from "./runtime-provider-content-filter-error.js";
 import { RuntimeGenerationPreview, projectGenerationPreview } from "./runtime-generation-preview.js";
 import { RuntimeKnowledgeActivity } from "./runtime-knowledge-activity.js";
+
+/** The subset needed by the provider adapter. Keeping this narrow lets the
+ * Temporal prototype activity reuse the verified DeerFlow transport without
+ * constructing the full queue worker configuration. */
+export type DeerFlowRuntimeAdapterConfig = Pick<WorkerConfig,
+  | "deerFlowLangGraphUrl"
+  | "deerFlowGatewayUrl"
+  | "deerFlowAssistantId"
+  | "deerFlowInternalToken"
+  | "deerFlowStreamMode"
+  | "deerFlowTimeoutMs"
+  | "deerFlowSubmissionTimeoutMs"
+  | "deerFlowIdleTimeoutMs"
+>;
 
 export {
   assistantTextDelta,
@@ -273,7 +289,7 @@ export class DeerFlowRuntimeAdapter implements RuntimePort {
   private readonly csrfToken = randomBytes(32).toString("base64url");
 
   constructor(
-    private readonly config: WorkerConfig,
+    private readonly config: DeerFlowRuntimeAdapterConfig,
     private readonly storage: RuntimeReadyBlobReader,
   ) {}
 
@@ -857,7 +873,7 @@ export class DeerFlowRuntimeAdapter implements RuntimePort {
       };
       assertCanvasToolCausality(
         state,
-        execution.canvasTool?.reference.declaredTools ?? [],
+        execution.historicalCanvasSnapshot ? [] : execution.canvasTool?.reference.declaredTools ?? [],
         resultSubmission
           ? {
               declarationIndex: resultSubmission.declarationIndex,
@@ -1329,7 +1345,7 @@ export class DeerFlowRuntimeAdapter implements RuntimePort {
     artifactTargetHandles: DeerFlowArtifactTargetHandle[],
   ) {
     const knowledgeToolCapability = execution.knowledgeTool;
-    const canvasToolCapability = execution.canvasTool;
+    const canvasToolCapability = execution.historicalCanvasSnapshot ? null : execution.canvasTool;
     const knowledgeTool = knowledgeToolCapability
       ? knowledgeToolReferenceSchema.parse({
           protocol: "workbench.knowledge-tool-reference.v1",
@@ -1358,6 +1374,24 @@ export class DeerFlowRuntimeAdapter implements RuntimePort {
     const prototypePatchBaselines = prototypePatchBaselineContext(
       execution.prototypePatchBaselines,
     );
+    const serializeArtifact = (target: RuntimeArtifactTarget) => {
+      const content = target.content.mode === "inline"
+        ? target.content
+        : (() => {
+            const handle = artifactTargetContentHandleMap.get(target.artifactVersionId);
+            if (!handle) throw new Error("RUNTIME_ARTIFACT_TARGET_UPLOAD_MISSING");
+            return { mode: "blob" as const, blobId: target.content.blobId, mediaType: target.content.locator.mediaType, byteSize: target.content.locator.byteSize, sha256: target.content.locator.sha256, handle };
+          })();
+      return {
+        artifactId: target.artifactId, artifactVersionId: target.artifactVersionId,
+        screenIds: target.screenIds, kind: target.kind, schemaVersion: target.schemaVersion, checksum: target.checksum, content,
+        assets: target.assets.map(asset => {
+          const handle = artifactTargetAssetHandleMap.get(artifactTargetAssetHandleKey(target.artifactVersionId, asset.assetId));
+          if (!handle) throw new Error("RUNTIME_ARTIFACT_TARGET_ASSET_UPLOAD_MISSING");
+          return { ...asset.metadata, handle };
+        }),
+      };
+    };
     const context = {
       protocol: "workbench.runtime.input.v1",
       runId: execution.runId,
@@ -1377,6 +1411,7 @@ export class DeerFlowRuntimeAdapter implements RuntimePort {
       knowledgeReleaseId: knowledgeToolCapability?.releaseId ?? null,
       knowledgeTool,
       canvasTool: canvasToolCapability?.reference ?? null,
+      ...(execution.historicalCanvasSnapshot ? { historicalCanvas: { authority: "read-only-reference", snapshot: execution.historicalCanvasSnapshot, artifacts: (execution.historicalCanvasArtifacts ?? []).map(serializeArtifact) } } : {}),
       sources: sourceHandles.map((source) => ({
         position: source.position,
         sourceId: source.sourceId,
@@ -1395,41 +1430,7 @@ export class DeerFlowRuntimeAdapter implements RuntimePort {
         deerFlowFile: source.original,
         extraction: source.extraction,
       })),
-      artifactTargets: execution.artifactTargets.map((target) => {
-        const content = target.content.mode === "inline"
-          ? target.content
-          : (() => {
-              const handle = artifactTargetContentHandleMap.get(target.artifactVersionId);
-              if (!handle) throw new Error("RUNTIME_ARTIFACT_TARGET_UPLOAD_MISSING");
-              return {
-                mode: "blob" as const,
-                blobId: target.content.blobId,
-                mediaType: target.content.locator.mediaType,
-                byteSize: target.content.locator.byteSize,
-                sha256: target.content.locator.sha256,
-                handle,
-              };
-            })();
-        return {
-          artifactId: target.artifactId,
-          artifactVersionId: target.artifactVersionId,
-          screenIds: target.screenIds,
-          kind: target.kind,
-          schemaVersion: target.schemaVersion,
-          checksum: target.checksum,
-          content,
-          assets: target.assets.map((asset) => {
-            const handle = artifactTargetAssetHandleMap.get(
-              artifactTargetAssetHandleKey(target.artifactVersionId, asset.assetId),
-            );
-            if (!handle) throw new Error("RUNTIME_ARTIFACT_TARGET_ASSET_UPLOAD_MISSING");
-            return {
-              ...asset.metadata,
-              handle,
-            };
-          }),
-        };
-      }),
+      artifactTargets: execution.artifactTargets.map(serializeArtifact),
       prototypePatchBaselines,
       requestedArtifactKinds: execution.request.requestedArtifactKinds,
       outputContract: "workbench.runtime.result.v1",
@@ -1659,7 +1660,7 @@ export class DeerFlowRuntimeAdapter implements RuntimePort {
       uploadedByBlobId.set(blobId, { locator, handle });
       return handle;
     };
-    for (const [position, target] of execution.artifactTargets.entries()) {
+    for (const [position, target] of [...execution.artifactTargets, ...(execution.historicalCanvasArtifacts ?? [])].entries()) {
       if (signal?.aborted) throw signal.reason ?? new Error("RUNTIME_ABORTED");
       if (target.content.mode === "blob") {
         handles.push({

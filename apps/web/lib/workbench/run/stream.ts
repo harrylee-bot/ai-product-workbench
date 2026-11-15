@@ -236,7 +236,7 @@ export async function readRunEventStream({
   return { lastSequence: cursor, terminalEvent, retryDelayMs };
 }
 
-export class RunStreamDisconnectedError extends Error {
+class RunStreamDisconnectedError extends Error {
   readonly runId: string;
   readonly lastSequence: number;
 

@@ -1,4 +1,4 @@
-export const conditionalObjectCreateModes = [
+const conditionalObjectCreateModes = [
   "s3-if-none-match",
   "oss-forbid-overwrite",
 ] as const;

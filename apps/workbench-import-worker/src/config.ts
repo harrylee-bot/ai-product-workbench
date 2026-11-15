@@ -56,7 +56,7 @@ export function loadImportWorkerConfig() {
   };
 }
 
-export function pgConnectionString(value: string) {
+function pgConnectionString(value: string) {
   const url = new URL(value);
   url.searchParams.delete("schema");
   return url.toString();

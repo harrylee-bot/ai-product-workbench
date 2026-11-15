@@ -164,7 +164,7 @@ export function decodeDesignSystemCatalogCursor(value: string): DesignSystemCata
   }
 }
 
-export function normalizeCatalogQuery(value?: string) {
+function normalizeCatalogQuery(value?: string) {
   if (value === undefined) return undefined;
   const normalized = value.trim().replace(/\s+/g, " ");
   if (!normalized) throw validationProblem("q must not be blank");

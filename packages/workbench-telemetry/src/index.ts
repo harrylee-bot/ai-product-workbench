@@ -34,7 +34,7 @@ import {
 import { NodeTracerProvider } from "@opentelemetry/sdk-trace-node";
 
 const instrumentationName = "@workbench/workbench-telemetry";
-const instrumentationVersion = "0.1.0";
+const instrumentationVersion = "1.0.0";
 const queueTraceField = "__workbench_otel";
 const globalStateKey = Symbol.for("workbench.telemetry.runtime.v1");
 const traceparentPattern = /^[0-9a-f]{2}-[0-9a-f]{32}-[0-9a-f]{16}-[0-9a-f]{2}$/u;
@@ -130,7 +130,7 @@ export function telemetryConfigurationFromEnv(
 
 export function initializeTelemetry({
   serviceName,
-  serviceVersion = "0.1.0",
+  serviceVersion = instrumentationVersion,
   environment = process.env.NODE_ENV || "development",
   env = process.env,
   exporter,
@@ -210,7 +210,7 @@ export function shutdownTelemetry(): Promise<void> {
   return state.shutdownPromise;
 }
 
-const providerStateOperations = new Set(["read", "update", "backfill", "shadow-verify"] as const);
+const providerStateOperations = new Set(["read", "update", "backfill"] as const);
 const providerStateOutcomes = new Set(["ok", "error", "conflict", "missing", "replay"] as const);
 const transactionOperations = new Set([
   "provider-state-read",
@@ -236,7 +236,7 @@ const knowledgeOutcomes = new Set(["authorized", "hidden", "blocked", "error"] a
 const stableMetricErrorCode = /^[A-Z][A-Z0-9_]{0,63}$/u;
 
 export type RuntimeProviderStateMetric = {
-  operation: "read" | "update" | "backfill" | "shadow-verify";
+  operation: "read" | "update" | "backfill";
   outcome: "ok" | "error" | "conflict" | "missing" | "replay";
   durationMs: number;
   rowsApplied?: 0 | 1;

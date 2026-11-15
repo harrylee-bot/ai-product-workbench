@@ -4,30 +4,15 @@ import { describe, expect, it } from "vitest";
 import {
   canvasDirectEditAvailability,
   canvasInteractionAvailability,
-  canvasMainCommands,
-  canvasMoreCommands,
   canvasPanelAccess,
-  createCanvasToolsState,
   normalizeCanvasToolsState,
-  reduceCanvasToolsState,
   transitionCanvasTools,
   type CanvasToolEnvironment,
+  type CanvasToolsState,
   type CanvasSelectionTarget,
 } from ".";
 
 describe("canvas tools domain", () => {
-  it("exposes the canonical primary rail and More tools order", () => {
-    expect(canvasMainCommands).toEqual([
-      "select",
-      "marquee",
-      "direct-edit",
-      "pan",
-      "media",
-      "design-system",
-      "favourites",
-    ]);
-    expect(canvasMoreCommands).toEqual(["frame-create", "freehand"]);
-  });
 
   it("keeps interaction modes and panels orthogonal while switching commands", () => {
     const environment = editorEnvironment();
@@ -65,21 +50,6 @@ describe("canvas tools domain", () => {
     expect(opened.state).toMatchObject({ interactionMode: "pan", panel: "favourites" });
     const closed = transitionCanvasTools(opened.state, { type: "main-command", command: "favourites" }, environment);
     expect(closed.state).toMatchObject({ interactionMode: "pan", panel: null });
-  });
-
-  it("supports reducer-shaped command and environment events", () => {
-    const environment = editorEnvironment();
-    const initial = createCanvasToolsState("project-1");
-    const withPanel = reduceCanvasToolsState(initial, {
-      type: "main-command",
-      command: "favourites",
-      environment,
-    });
-    expect(withPanel).toMatchObject({ panel: "favourites", interactionMode: "select" });
-    expect(reduceCanvasToolsState(withPanel, {
-      type: "environment-changed",
-      environment: { ...environment, projectId: "project-2" },
-    })).toEqual({ interactionMode: "select", panel: null, projectId: "project-2" });
   });
 
   it.each([
@@ -234,4 +204,8 @@ function directEditTarget(): CanvasSelectionTarget {
     artifactVersionId: "version-1",
     artifactVersion,
   };
+}
+
+function createCanvasToolsState(projectId: string | null = null): CanvasToolsState {
+  return { interactionMode: "select", panel: null, projectId };
 }

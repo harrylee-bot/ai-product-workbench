@@ -212,41 +212,18 @@ function serviceWith(
   capabilities: object = {
     catalog: () => ({
       formats: {
-        html: { available: true, authentication: "not_required", reasonCode: null },
-        react: { available: true, authentication: "not_required", reasonCode: null },
-        figma: { available: true, authentication: "not_required", reasonCode: null },
-        mcp: { available: true, authentication: "not_required", reasonCode: null },
-        docx: { available: true, authentication: "not_required", reasonCode: null },
-        pdf: { available: true, authentication: "not_required", reasonCode: null },
+        html: { available: true, reasonCode: null },
+        react: { available: true, reasonCode: null },
+        figma: { available: true, reasonCode: null },
+        mcp: { available: true, reasonCode: null },
+        docx: { available: true, reasonCode: null },
+        pdf: { available: true, reasonCode: null },
       },
       packaging: {
-        single_file: { available: true, authentication: "not_required", reasonCode: null },
-        zip: { available: true, authentication: "not_required", reasonCode: null },
-      },
-      external: {
-        ai_studio: {
-          available: false,
-          authentication: "not_required",
-          reasonCode: "EXPORT_EXTERNAL_AI_STUDIO_UNAVAILABLE",
-        },
-        netlify: {
-          available: false,
-          authentication: "required",
-          reasonCode: "EXPORT_EXTERNAL_AUTHENTICATION_REQUIRED",
-        },
-        lovable: {
-          available: false,
-          authentication: "required",
-          reasonCode: "EXPORT_EXTERNAL_AUTHENTICATION_REQUIRED",
-        },
-        bolt: {
-          available: false,
-          authentication: "required",
-          reasonCode: "EXPORT_EXTERNAL_AUTHENTICATION_REQUIRED",
-        },
+        single_file: { available: true, reasonCode: null },
+        zip: { available: true, reasonCode: null },
       },
     }),
-    materializeOptions: (_format: string, options: object) => ({ ...options }),
   },
 ) {
   return new ExportsService(
@@ -260,6 +237,19 @@ function serviceWith(
 }
 
 describe("ExportJob API invariants", () => {
+  it.each([
+    { id: 42, createdAt: now.toISOString() },
+    { id: ["export_1"], createdAt: now.toISOString() },
+    { id: { lt: "export_1" }, createdAt: now.toISOString() },
+    { id: "export_1", createdAt: [now.toISOString()] },
+  ])("rejects non-string cursor fields %j before listing exports", async (value) => {
+    const db = { exportJob: { findMany: vi.fn().mockResolvedValue([]) } };
+    const service = serviceWith(db);
+    const cursor = Buffer.from(JSON.stringify(value)).toString("base64url");
+    await expect(service.list("principal_1", "project_1", cursor)).rejects.toMatchObject({ status: 400 });
+    expect(db.exportJob.findMany).not.toHaveBeenCalled();
+  });
+
   it.each(["quarantined", "deleted", "missing"])("isolates a %s output from the other jobs in a list", async (unavailable) => {
     const blob = { id: "blob_1", status: "ready", deletedAt: null, mediaType: "text/html", byteSize: 128n, sha256: "b".repeat(64) };
     const healthy = queuedJob({ status: "succeeded", startedAt: now, finishedAt: now, outputBlob: blob });
@@ -286,60 +276,18 @@ describe("ExportJob API invariants", () => {
     const capabilities = new ExportCapabilitiesConfig();
     expect(capabilities.catalog()).toEqual({
       formats: {
-        html: { available: true, authentication: "not_required", reasonCode: null },
-        react: { available: true, authentication: "not_required", reasonCode: null },
-        figma: { available: true, authentication: "not_required", reasonCode: null },
-        mcp: { available: true, authentication: "not_required", reasonCode: null },
-        docx: { available: true, authentication: "not_required", reasonCode: null },
-        pdf: { available: true, authentication: "not_required", reasonCode: null },
+        html: { available: true, reasonCode: null },
+        react: { available: true, reasonCode: null },
+        figma: { available: true, reasonCode: null },
+        mcp: { available: true, reasonCode: null },
+        docx: { available: true, reasonCode: null },
+        pdf: { available: true, reasonCode: null },
       },
       packaging: {
-        single_file: { available: true, authentication: "not_required", reasonCode: null },
-        zip: { available: true, authentication: "not_required", reasonCode: null },
-      },
-      external: {
-        ai_studio: {
-          available: false,
-          authentication: "not_required",
-          reasonCode: "EXPORT_EXTERNAL_AI_STUDIO_UNAVAILABLE",
-        },
-        netlify: {
-          available: false,
-          authentication: "required",
-          reasonCode: "EXPORT_EXTERNAL_AUTHENTICATION_REQUIRED",
-        },
-        lovable: {
-          available: false,
-          authentication: "required",
-          reasonCode: "EXPORT_EXTERNAL_AUTHENTICATION_REQUIRED",
-        },
-        bolt: {
-          available: false,
-          authentication: "required",
-          reasonCode: "EXPORT_EXTERNAL_AUTHENTICATION_REQUIRED",
-        },
+        single_file: { available: true, reasonCode: null },
+        zip: { available: true, reasonCode: null },
       },
     });
-  });
-
-  it("keeps the E2E external-delivery capability closed outside the test runtime", () => {
-    const originalNodeEnv = process.env.NODE_ENV;
-    const originalE2eTarget = process.env.WORKBENCH_E2E_EXTERNAL_DELIVERY_AVAILABLE;
-    try {
-      process.env.NODE_ENV = "production";
-      process.env.WORKBENCH_E2E_EXTERNAL_DELIVERY_AVAILABLE = "netlify";
-
-      expect(new ExportCapabilitiesConfig().catalog().external.netlify).toEqual({
-        available: false,
-        authentication: "required",
-        reasonCode: "EXPORT_EXTERNAL_AUTHENTICATION_REQUIRED",
-      });
-    } finally {
-      if (originalNodeEnv === undefined) delete process.env.NODE_ENV;
-      else process.env.NODE_ENV = originalNodeEnv;
-      if (originalE2eTarget === undefined) delete process.env.WORKBENCH_E2E_EXTERNAL_DELIVERY_AVAILABLE;
-      else process.env.WORKBENCH_E2E_EXTERNAL_DELIVERY_AVAILABLE = originalE2eTarget;
-    }
   });
 
   it("rejects client-controlled Figma options before persistence", async () => {

@@ -642,7 +642,6 @@ function renderRunSurfaces({
         runPhaseLabel={runPhaseLabel}
         runStatus={runStatus}
         selectedTask={null}
-        zoomLabel="100%"
       />
       {panelElement({
         generationStage,

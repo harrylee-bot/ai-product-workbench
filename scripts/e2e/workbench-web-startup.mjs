@@ -13,7 +13,7 @@ export const WORKBENCH_PROJECT_WARMUP_PATH = "/projects/project-run-preview";
 export const WORKBENCH_HOME_WARMUP_PATH = "/";
 export const WORKBENCH_PROJECT_WARMUP_COOKIE =
   "workbench.session_token=workbench-project-route-warmup";
-export const WORKBENCH_PROTECTED_ROUTE_WARMUPS = Object.freeze([
+const WORKBENCH_PROTECTED_ROUTE_WARMUPS = Object.freeze([
   Object.freeze({ path: WORKBENCH_PROJECT_WARMUP_PATH, phase: "project route warmup" }),
   Object.freeze({ path: WORKBENCH_HOME_WARMUP_PATH, phase: "home route warmup" }),
 ]);

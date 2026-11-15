@@ -3,6 +3,7 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
 import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
@@ -509,37 +510,37 @@ async function seedMinimumGraph(db) {
       "knowledge_release_id"
     ) VALUES
       (
-        'version-a-ready', 'artifact-a', 'project-a', 1, 1, 'ready',
-        '{"protocol":"workbench.prd.v1","citations":[]}'::jsonb, NULL,
+        'version-a-ready', 'artifact-a', 'project-a', 1, 3, 'ready',
+        '{"protocol":"workbench.prd.v3","citations":[]}'::jsonb, NULL,
         repeat('a', 64), '[]'::jsonb, NULL, NULL
       ),
       (
-        'version-a-staging', 'artifact-a', 'project-a', 2, 1, 'staging',
-        '{"protocol":"workbench.prd.v1","citations":[]}'::jsonb, NULL,
+        'version-a-staging', 'artifact-a', 'project-a', 2, 3, 'staging',
+        '{"protocol":"workbench.prd.v3","citations":[]}'::jsonb, NULL,
         repeat('b', 64), '[]'::jsonb, 'run-a', NULL
       ),
       (
-        'version-a-rejected', 'artifact-a', 'project-a', 3, 1, 'rejected',
-        '{"protocol":"workbench.prd.v1","citations":[]}'::jsonb, NULL,
+        'version-a-rejected', 'artifact-a', 'project-a', 3, 3, 'rejected',
+        '{"protocol":"workbench.prd.v3","citations":[]}'::jsonb, NULL,
         repeat('c', 64), '[]'::jsonb, 'run-a', NULL
       ),
       (
-        'version-a-blob', 'artifact-a', 'project-a', 4, 1, 'ready',
+        'version-a-blob', 'artifact-a', 'project-a', 4, 3, 'ready',
         NULL, 'blob-ready', repeat('d', 64), '[]'::jsonb, NULL, NULL
       ),
       (
-        'version-a-release', 'artifact-a', 'project-a', 5, 1, 'ready',
-        '{"protocol":"workbench.prd.v1","citations":[]}'::jsonb, NULL,
+        'version-a-release', 'artifact-a', 'project-a', 5, 3, 'ready',
+        '{"protocol":"workbench.prd.v3","citations":[]}'::jsonb, NULL,
         repeat('e', 64), '[]'::jsonb, NULL, 'release-artifact-a'
       ),
       (
-        'version-a-other-ready', 'artifact-a-other', 'project-a', 1, 1, 'ready',
-        '{"protocol":"workbench.prd.v1","citations":[]}'::jsonb, NULL,
+        'version-a-other-ready', 'artifact-a-other', 'project-a', 1, 3, 'ready',
+        '{"protocol":"workbench.prd.v3","citations":[]}'::jsonb, NULL,
         repeat('f', 64), '[]'::jsonb, NULL, NULL
       ),
       (
-        'version-b-ready', 'artifact-b', 'project-b', 1, 1, 'ready',
-        '{"protocol":"workbench.prd.v1","citations":[]}'::jsonb, NULL,
+        'version-b-ready', 'artifact-b', 'project-b', 1, 3, 'ready',
+        '{"protocol":"workbench.prd.v3","citations":[]}'::jsonb, NULL,
         repeat('9', 64), '[]'::jsonb, NULL, NULL
       ),
       (
@@ -837,59 +838,46 @@ async function runConstraintChecks(db) {
     await insertVersion(db, { version: 0 });
   }, constraint("23514", "artifact_versions_version_positive_check"));
 
-  await expectAccept(db, "ArtifactVersion accepts the PRD v1 schema and protocol pair", async () => {
+  await expectAccept(db, "ArtifactVersion accepts the current PRD schema and protocol pair", async () => {
     await insertVersion(db);
   });
 
-  await expectAccept(db, "ArtifactVersion accepts the PRD v2 schema and protocol pair", async () => {
-    await insertVersion(db, {
-      schemaVersion: 2,
-      content: { protocol: "workbench.prd.v2", citations: [] },
-    });
-  });
-
-  await expectReject(db, "ArtifactVersion rejects PRD schema v1 with protocol v2", async () => {
-    await insertVersion(db, {
-      content: { protocol: "workbench.prd.v2", citations: [] },
-    });
-  }, trigger("23514", "ARTIFACT_INLINE_IR_ENVELOPE_INVALID"));
-
-  await expectReject(db, "ArtifactVersion rejects PRD schema v2 with protocol v1", async () => {
-    await insertVersion(db, { schemaVersion: 2 });
-  }, trigger("23514", "ARTIFACT_INLINE_IR_ENVELOPE_INVALID"));
-
-  await expectReject(db, "ArtifactVersion rejects an unsupported PRD schema version", async () => {
-    await insertVersion(db, {
-      schemaVersion: 3,
-      content: { protocol: "workbench.prd.v2", citations: [] },
-    });
-  }, trigger("23514", "ARTIFACT_SCHEMA_VERSION_INVALID"));
+  for (const schemaVersion of [1, 2, 4]) {
+    await expectReject(db, `ArtifactVersion rejects unsupported PRD schema ${schemaVersion}`, async () => {
+      await insertVersion(db, { schemaVersion, content: { protocol: `workbench.prd.v${schemaVersion}`, citations: [] } });
+    }, trigger("23514", "ARTIFACT_SCHEMA_VERSION_INVALID"));
+  }
+  for (const protocol of ["workbench.prd.v1", "workbench.prd.v2"]) {
+    await expectReject(db, `ArtifactVersion rejects current PRD schema with retired protocol ${protocol}`, async () => {
+      await insertVersion(db, { content: { protocol, citations: [] } });
+    }, trigger("23514", "ARTIFACT_INLINE_IR_ENVELOPE_INVALID"));
+  }
 
   await expectReject(db, "ArtifactVersion rejects a PRD document with a missing protocol", async () => {
     await insertVersion(db, {
-      schemaVersion: 2,
+      schemaVersion: 3,
       content: { citations: [] },
     });
   }, trigger("23514", "ARTIFACT_INLINE_IR_ENVELOPE_INVALID"));
 
   await expectReject(db, "ArtifactVersion rejects a PRD document with a null protocol", async () => {
     await insertVersion(db, {
-      schemaVersion: 2,
+      schemaVersion: 3,
       content: { protocol: null, citations: [] },
     });
   }, trigger("23514", "ARTIFACT_INLINE_IR_ENVELOPE_INVALID"));
 
   await expectReject(db, "ArtifactVersion rejects a scalar PRD document", async () => {
     await insertVersion(db, {
-      schemaVersion: 2,
-      content: "workbench.prd.v2",
+      schemaVersion: 3,
+      content: "workbench.prd.v3",
     });
   }, trigger("23514", "ARTIFACT_INLINE_IR_ENVELOPE_INVALID"));
 
-  await expectReject(db, "Prototype ArtifactVersion remains schema v1 only", async () => {
+  await expectReject(db, "Prototype ArtifactVersion rejects unsupported schema v3", async () => {
     await insertVersion(db, {
       artifactId: "artifact-prototype",
-      schemaVersion: 2,
+      schemaVersion: 3,
       content: { protocol: "workbench.prototype.v1", assets: [] },
     });
   }, trigger("23514", "ARTIFACT_SCHEMA_VERSION_INVALID"));
@@ -903,32 +891,18 @@ async function runConstraintChecks(db) {
     });
   }, trigger("23514", "ARTIFACT_SCHEMA_VERSION_INVALID"));
 
-  await expectAccept(db, "ArtifactVersion edit receipt accepts PRD v1 continuity", async () => {
-    await insertPrdEditReceiptCandidate(db, {
-      baseSchemaVersion: 1,
-      resultSchemaVersion: 1,
-    });
+  await expectAccept(db, "ArtifactVersion edit receipt accepts current PRD continuity", async () => {
+    await insertPrdEditReceiptCandidate(db);
   });
 
-  await expectAccept(db, "ArtifactVersion edit receipt accepts PRD v2 continuity", async () => {
-    await insertPrdEditReceiptCandidate(db, {
-      baseSchemaVersion: 2,
-      resultSchemaVersion: 2,
-    });
-  });
+  await expectReject(db, "ArtifactVersion edit receipt cannot change immutable identity", async () => {
+    await insertPrdEditReceiptCandidate(db);
+    await db.query(`UPDATE "artifact_version_edit_receipts" SET "request_hash" = repeat('4', 64)
+      WHERE "id" = 'candidate-prd-edit-receipt'`);
+  }, trigger("23514", "ARTIFACT_VERSION_EDIT_RECEIPT_IMMUTABLE"));
 
-  await expectReject(db, "ArtifactVersion edit receipt rejects PRD v1 to v2 conversion", async () => {
-    await insertPrdEditReceiptCandidate(db, {
-      baseSchemaVersion: 1,
-      resultSchemaVersion: 2,
-    });
-  }, trigger("23514", "ARTIFACT_VERSION_EDIT_RECEIPT_RESULT_INVALID"));
-
-  await expectReject(db, "ArtifactVersion edit receipt rejects PRD v2 to v1 conversion", async () => {
-    await insertPrdEditReceiptCandidate(db, {
-      baseSchemaVersion: 2,
-      resultSchemaVersion: 1,
-    });
+  await expectReject(db, "ArtifactVersion edit receipt cannot repoint its result", async () => {
+    await insertPrdEditReceiptCandidate(db, { resultArtifactVersionId: "candidate-edit-base-version" });
   }, trigger("23514", "ARTIFACT_VERSION_EDIT_RECEIPT_RESULT_INVALID"));
 
   await expectReject(db, "ArtifactVersion checksum must be lowercase SHA-256", async () => {
@@ -937,7 +911,7 @@ async function runConstraintChecks(db) {
 
   await expectReject(db, "ArtifactVersion citations must satisfy the citation envelope", async () => {
     await insertVersion(db, {
-      content: { protocol: "workbench.prd.v1", citations: {} },
+      content: { protocol: "workbench.prd.v3", citations: {} },
       citations: {},
     });
   }, constraint("23514", "artifact_versions_citations_check"));
@@ -2285,215 +2259,45 @@ async function runConstraintChecks(db) {
     await db.query(`DELETE FROM "export_jobs" WHERE "id" = 'candidate-export'`);
   }, trigger("23514", "EXPORT_JOB_TERMINAL_IMMUTABLE"));
 
-  const confirmedAt = new Date("2026-07-18T01:00:00.000Z");
-  const startedAt = new Date("2026-07-18T01:01:00.000Z");
-  const transferAuthorizedAt = new Date("2026-07-18T01:02:00.000Z");
-  const finishedAt = new Date("2026-07-18T01:03:00.000Z");
-  const leaseExpiresAt = new Date("2026-07-18T01:06:00.000Z");
-  for (const { status, overrides } of [
-    { status: "pending_confirmation", overrides: {} },
-    { status: "queued", overrides: { confirmedAt } },
-    {
-      status: "running",
-      overrides: {
-        attempt: 1,
-        confirmedAt,
-        startedAt,
-        leaseToken: "candidate-delivery-running-lease",
-        leaseExpiresAt,
-      },
-    },
-    {
-      status: "cancelling",
-      overrides: {
-        attempt: 1,
-        confirmedAt,
-        startedAt,
-        transferAuthorizedAt,
-        remoteReference: "fake://netlify/candidate-delivery",
-      },
-    },
-    {
-      status: "succeeded",
-      overrides: {
-        attempt: 1,
-        confirmedAt,
-        startedAt,
-        transferAuthorizedAt,
-        remoteReference: "fake://netlify/candidate-delivery",
-        finishedAt,
-      },
-    },
-    {
-      status: "failed",
-      overrides: {
-        attempt: 1,
-        confirmedAt,
-        startedAt,
-        finishedAt,
-        failureCode: "DELIVERY_FAILED",
-        failureDetail: "The provider rejected the delivery",
-      },
-    },
-    { status: "cancelled", overrides: { finishedAt } },
-  ]) {
-    await expectAccept(db, `ExternalExportDelivery accepts ${status} lifecycle evidence`, async () => {
-      await insertSucceededExportJob(db);
-      await insertExternalExportDelivery(db, { status, ...overrides });
+  await expectAccept(db, "Retired external publishing table and enums are absent", async () => {
+    const result = await db.query(`
+      SELECT to_regclass('workbench.external_export_deliveries') AS table_name,
+             to_regtype('workbench."ExternalExportTarget"') AS target_type,
+             to_regtype('workbench."ExternalExportAuthentication"') AS authentication_type,
+             to_regtype('workbench."ExternalExportDeliveryStatus"') AS status_type
+    `);
+    assert.deepEqual(result.rows[0], {
+      table_name: null, target_type: null, authentication_type: null, status_type: null,
     });
-  }
+  });
 
-  await expectReject(db, "ExternalExportDelivery request hash must be SHA-256", async () => {
-    await insertSucceededExportJob(db);
-    await insertExternalExportDelivery(db, { requestHash: "not-a-sha256" });
-  }, constraint("23514", "external_export_deliveries_request_hash_check"));
-
-  await expectReject(db, "ExternalExportDelivery revision cannot be negative", async () => {
-    await insertSucceededExportJob(db);
-    await insertExternalExportDelivery(db, { revision: -1 });
-  }, constraint("23514", "external_export_deliveries_revision_check"));
-
-  await expectReject(db, "ExternalExportDelivery attempt cannot be negative", async () => {
-    await insertSucceededExportJob(db);
-    await insertExternalExportDelivery(db, { attempt: -1 });
-  }, constraint("23514", "external_export_deliveries_attempt_check"));
-
-  await expectReject(db, "ExternalExportDelivery payload must be an object", async () => {
-    await insertSucceededExportJob(db);
-    await insertExternalExportDelivery(db, { payload: [] });
-  }, constraint("23514", "external_export_deliveries_payload_check"));
-
-  await expectReject(db, "pending ExternalExportDelivery cannot retain an attempt", async () => {
-    await insertSucceededExportJob(db);
-    await insertExternalExportDelivery(db, { attempt: 1 });
-  }, constraint("23514", "external_export_deliveries_state_check"));
-
-  await expectReject(db, "queued ExternalExportDelivery requires confirmation", async () => {
-    await insertSucceededExportJob(db);
-    await insertExternalExportDelivery(db, { status: "queued" });
-  }, constraint("23514", "external_export_deliveries_state_check"));
-
-  await expectReject(db, "running ExternalExportDelivery requires a worker lease", async () => {
-    await insertSucceededExportJob(db);
-    await insertExternalExportDelivery(db, {
-      status: "running",
-      attempt: 1,
-      confirmedAt,
-      startedAt,
-    });
-  }, constraint("23514", "external_export_deliveries_state_check"));
-
-  await expectReject(db, "cancelling ExternalExportDelivery requires paired lease evidence", async () => {
-    await insertSucceededExportJob(db);
-    await insertExternalExportDelivery(db, {
-      status: "cancelling",
-      attempt: 1,
-      confirmedAt,
-      startedAt,
-      leaseToken: "candidate-delivery-incomplete-lease",
-    });
-  }, constraint("23514", "external_export_deliveries_state_check"));
-
-  await expectReject(db, "ExternalExportDelivery remote receipt requires transfer authorization", async () => {
-    await insertSucceededExportJob(db);
-    await insertExternalExportDelivery(db, {
-      status: "cancelling",
-      attempt: 1,
-      confirmedAt,
-      startedAt,
-      remoteReference: "fake://netlify/candidate-delivery",
-    });
-  }, constraint("23514", "external_export_deliveries_transfer_evidence_check"));
-
-  await expectReject(db, "ExternalExportDelivery transfer authorization requires execution evidence", async () => {
-    await insertSucceededExportJob(db);
-    await insertExternalExportDelivery(db, {
-      status: "cancelled",
-      transferAuthorizedAt,
-      finishedAt,
-    });
-  }, constraint("23514", "external_export_deliveries_transfer_evidence_check"));
-
-  await expectReject(db, "succeeded ExternalExportDelivery requires transfer authorization", async () => {
-    await insertSucceededExportJob(db);
-    await insertExternalExportDelivery(db, {
-      status: "succeeded",
-      attempt: 1,
-      confirmedAt,
-      startedAt,
-      remoteReference: "fake://netlify/candidate-delivery",
-      finishedAt,
-    });
-  }, constraint("23514", "external_export_deliveries_state_check"));
-
-  await expectReject(db, "succeeded ExternalExportDelivery requires a remote receipt", async () => {
-    await insertSucceededExportJob(db);
-    await insertExternalExportDelivery(db, {
-      status: "succeeded",
-      attempt: 1,
-      confirmedAt,
-      startedAt,
-      transferAuthorizedAt,
-      finishedAt,
-    });
-  }, constraint("23514", "external_export_deliveries_state_check"));
-
-  await expectReject(db, "failed ExternalExportDelivery requires failure evidence", async () => {
-    await insertSucceededExportJob(db);
-    await insertExternalExportDelivery(db, {
-      status: "failed",
-      attempt: 1,
-      confirmedAt,
-      startedAt,
-      finishedAt,
-    });
-  }, constraint("23514", "external_export_deliveries_state_check"));
-
-  await expectReject(db, "cancelled ExternalExportDelivery cannot retain a remote receipt", async () => {
-    await insertSucceededExportJob(db);
-    await insertExternalExportDelivery(db, {
-      status: "cancelled",
-      attempt: 1,
-      confirmedAt,
-      startedAt,
-      transferAuthorizedAt,
-      remoteReference: "fake://netlify/candidate-delivery",
-      finishedAt,
-    });
-  }, constraint("23514", "external_export_deliveries_state_check"));
-
-  await expectReject(db, "ExternalExportDelivery requires an existing ExportJob", async () => {
-    await insertExternalExportDelivery(db, { exportJobId: "missing-export-job" });
-  }, constraint("23503", "external_export_deliveries_export_job_id_fkey"));
-
-  await expectReject(db, "ExternalExportDelivery creator must be an existing Principal", async () => {
-    await insertSucceededExportJob(db);
-    await insertExternalExportDelivery(db, { createdById: "missing-principal" });
-  }, constraint("23503", "external_export_deliveries_created_by_id_fkey"));
-
-  await expectReject(db, "ExternalExportDelivery idempotency key is unique within an ExportJob", async () => {
-    await insertSucceededExportJob(db);
-    await insertExternalExportDelivery(db, { id: "candidate-delivery-one" });
-    await insertExternalExportDelivery(db, { id: "candidate-delivery-two" });
-  }, constraint("23505", "external_export_deliveries_export_job_id_idempotency_key_key"));
-
-  await expectAccept(db, "ExternalExportDelivery idempotency key is scoped to its ExportJob", async () => {
-    await insertSucceededExportJob(db, {
-      id: "candidate-export-one",
-      idempotencyKey: "candidate-export-one-key",
-    });
-    await insertSucceededExportJob(db, {
-      id: "candidate-export-two",
-      idempotencyKey: "candidate-export-two-key",
-    });
-    await insertExternalExportDelivery(db, {
-      id: "candidate-delivery-one",
-      exportJobId: "candidate-export-one",
-    });
-    await insertExternalExportDelivery(db, {
-      id: "candidate-delivery-two",
-      exportJobId: "candidate-export-two",
-    });
+  await expectAccept(db, "External publishing retirement refuses remaining records atomically", async () => {
+    // Recreate the exact historical table inside this rolled-back test case.
+    const original = readFileSync(path.join(root,
+      "packages/workbench-db/prisma/migrations/20260718020000_export_delivery_matrix/migration.sql"), "utf8");
+    await db.query(original.slice(original.indexOf('CREATE TYPE "ExternalExportTarget"'),
+      original.indexOf('ALTER TABLE "export_jobs"')));
+    await db.query(original.slice(original.indexOf('CREATE TABLE "external_export_deliveries"')));
+    await insertExportJob(db);
+    await db.query(`
+      INSERT INTO "external_export_deliveries" (
+        id, export_job_id, created_by_id, idempotency_key, request_hash,
+        target, authentication, payload, updated_at
+      ) VALUES ('retirement-test', 'candidate-export', 'principal-a', 'retirement-test',
+        repeat('a', 64), 'netlify', 'not_required', '{}'::jsonb, clock_timestamp())
+    `);
+    await db.query("SAVEPOINT retirement_guard");
+    const migration = readFileSync(path.join(root,
+      "packages/workbench-db/prisma/migrations/20261113020000_retire_external_export_delivery/migration.sql"), "utf8");
+    await assert.rejects(db.query(migration), { code: "23514", message: "EXTERNAL_EXPORT_DELIVERIES_REQUIRE_CLEANUP" });
+    await db.query("ROLLBACK TO SAVEPOINT retirement_guard");
+    assert.equal((await db.query('SELECT id FROM "external_export_deliveries"')).rows[0].id, "retirement-test");
+    assert.equal((await db.query(`SELECT id FROM "export_jobs" WHERE id = 'candidate-export'`)).rowCount, 1);
+    await db.query(`DELETE FROM "external_export_deliveries" WHERE id = 'retirement-test'`);
+    await db.query(migration);
+    assert.equal((await db.query("SELECT to_regclass('workbench.external_export_deliveries') AS name")).rows[0].name, null);
+    assert.equal((await db.query(`SELECT id FROM "export_jobs" WHERE id = 'candidate-export'`)).rowCount, 1);
+    assert.equal((await db.query(`SELECT id FROM "principals" WHERE id = 'principal-a'`)).rowCount, 1);
   });
 
   await expectReject(db, "Board revision must start at zero", async () => {
@@ -4934,9 +4738,9 @@ async function insertVersion(db, overrides = {}) {
     artifactId: "artifact-a",
     projectId: "project-a",
     version: 100,
-    schemaVersion: 1,
+    schemaVersion: 3,
     status: "staging",
-    content: { protocol: "workbench.prd.v1", citations: [] },
+    content: { protocol: "workbench.prd.v3", citations: [] },
     contentBlobId: null,
     checksum: "0".repeat(64),
     citations: [],
@@ -4969,9 +4773,8 @@ async function insertVersion(db, overrides = {}) {
 }
 
 async function insertPrdEditReceiptCandidate(db, {
-  baseSchemaVersion,
-  resultSchemaVersion,
-}) {
+  resultArtifactVersionId = "candidate-edit-result-version",
+} = {}) {
   const revisionResult = await db.query(`
     SELECT "revision"
     FROM "artifacts"
@@ -4979,17 +4782,17 @@ async function insertPrdEditReceiptCandidate(db, {
   `);
   assert.equal(revisionResult.rowCount, 1);
   const initialRevision = revisionResult.rows[0].revision;
-  const document = (schemaVersion) => ({
-    protocol: `workbench.prd.v${schemaVersion}`,
+  const document = {
+    protocol: "workbench.prd.v3",
     citations: [],
-  });
+  };
 
   await insertVersion(db, {
     id: "candidate-edit-base-version",
     version: 110,
-    schemaVersion: baseSchemaVersion,
+    schemaVersion: 3,
     status: "ready",
-    content: document(baseSchemaVersion),
+    content: document,
     checksum: "1".repeat(64),
     createdByRunId: null,
   });
@@ -5002,9 +4805,9 @@ async function insertPrdEditReceiptCandidate(db, {
   await insertVersion(db, {
     id: "candidate-edit-result-version",
     version: 111,
-    schemaVersion: resultSchemaVersion,
+    schemaVersion: 3,
     status: "ready",
-    content: document(resultSchemaVersion),
+    content: document,
     checksum: "2".repeat(64),
     createdByRunId: null,
   });
@@ -5021,10 +4824,10 @@ async function insertPrdEditReceiptCandidate(db, {
       "idempotency_key", "request_hash"
     ) VALUES (
       'candidate-prd-edit-receipt', 'artifact-a',
-      'candidate-edit-base-version', 'candidate-edit-result-version',
+      'candidate-edit-base-version', $3,
       $1, $2, 'principal-a', 'candidate-prd-edit', repeat('3', 64)
     )
-  `, [initialRevision + 1, initialRevision + 2]);
+  `, [initialRevision + 1, initialRevision + 2, resultArtifactVersionId]);
 }
 
 async function insertPrototypeCandidate(db, options = {}) {
@@ -5694,86 +5497,6 @@ async function insertExportJob(db, overrides = {}) {
   ]);
 }
 
-async function insertSucceededExportJob(db, overrides = {}) {
-  const id = overrides.id ?? "candidate-export";
-  await insertExportJob(db, { ...overrides, id });
-  await startExportJob(db, id);
-  await succeedExportJob(db, id, "blob-ready");
-}
-
-async function insertExternalExportDelivery(db, overrides = {}) {
-  const delivery = {
-    id: "candidate-delivery",
-    exportJobId: "candidate-export",
-    createdById: "principal-a",
-    idempotencyKey: "candidate-delivery-key",
-    requestHash: "8".repeat(64),
-    target: "netlify",
-    authentication: "not_required",
-    status: "pending_confirmation",
-    revision: 0,
-    payload: null,
-    remoteReference: null,
-    failureCode: null,
-    failureDetail: null,
-    attempt: 0,
-    leaseToken: null,
-    leaseExpiresAt: null,
-    transferAuthorizedAt: null,
-    confirmedAt: null,
-    startedAt: null,
-    finishedAt: null,
-    ...overrides,
-  };
-  if (!Object.hasOwn(overrides, "payload")) {
-    delivery.payload = {
-      exportJobId: delivery.exportJobId,
-      releaseId: "project-release-ready-a",
-      format: "html",
-      packaging: "single_file",
-      selection: { kind: "release" },
-      output: {
-        mediaType: "text/html",
-        byteSize: 128,
-        sha256: "7".repeat(64),
-        fileName: "workbench.html",
-      },
-    };
-  }
-  await db.query(`
-    INSERT INTO "external_export_deliveries" (
-      "id", "export_job_id", "created_by_id", "idempotency_key", "request_hash",
-      "target", "authentication", "status", "revision", "payload", "remote_reference",
-      "failure_code", "failure_detail", "attempt", "lease_token", "lease_expires_at",
-      "transfer_authorized_at", "confirmed_at", "started_at", "finished_at", "updated_at"
-    ) VALUES (
-      $1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, $11,
-      $12, $13, $14, $15, $16, $17, $18, $19, $20, clock_timestamp()
-    )
-  `, [
-    delivery.id,
-    delivery.exportJobId,
-    delivery.createdById,
-    delivery.idempotencyKey,
-    delivery.requestHash,
-    delivery.target,
-    delivery.authentication,
-    delivery.status,
-    delivery.revision,
-    JSON.stringify(delivery.payload),
-    delivery.remoteReference,
-    delivery.failureCode,
-    delivery.failureDetail,
-    delivery.attempt,
-    delivery.leaseToken,
-    delivery.leaseExpiresAt,
-    delivery.transferAuthorizedAt,
-    delivery.confirmedAt,
-    delivery.startedAt,
-    delivery.finishedAt,
-  ]);
-}
-
 async function insertPreviewExportJob(db, overrides = {}) {
   await insertExportJob(db, {
     id: "candidate-preview-export",
@@ -5793,7 +5516,7 @@ function previewArtifactPin(overrides = {}) {
     title: "Artifact A",
     kind: "prd",
     version: 1,
-    schemaVersion: 1,
+    schemaVersion: 3,
     checksum: "a".repeat(64),
     assets: [],
     ...overrides,
@@ -5806,6 +5529,7 @@ function prototypePreviewArtifactPin(overrides = {}) {
     artifactVersionId: "version-prototype-ready",
     title: "Prototype Artifact",
     kind: "prototype",
+    schemaVersion: 1,
     checksum: "8a".repeat(32),
     ...overrides,
   });

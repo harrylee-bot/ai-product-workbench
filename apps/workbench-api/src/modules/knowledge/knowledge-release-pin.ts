@@ -30,13 +30,6 @@ export type KnowledgeReleaseResolvedPin = {
   readonly policy: ReturnType<typeof knowledgeRetrievalPolicyFromProfile>;
 };
 
-export function assertKnowledgeReleasePin(
-  release: KnowledgeReleasePinValidationInput,
-  segmenterIdentity: KnowledgeRetrievalDependencies["segmenter"]["identity"],
-): CanonicalEmbeddingProfileV1 {
-  return assertKnowledgeReleasePins(release, segmenterIdentity).embeddingProfile;
-}
-
 export function assertKnowledgeReleasePins(
   release: KnowledgeReleasePinValidationInput,
   segmenterIdentity: KnowledgeRetrievalDependencies["segmenter"]["identity"],

@@ -5,7 +5,7 @@ import type {
   ImportSourceStatus,
 } from "@workbench/workbench-contracts";
 
-export const DEFAULT_IMPORT_SOURCE_POLL_INTERVAL_MS = 1_500;
+const DEFAULT_IMPORT_SOURCE_POLL_INTERVAL_MS = 1_500;
 
 export type ImportSourceListOptions = {
   cursor?: string;
@@ -32,7 +32,7 @@ export const importSourceStatusLabels: Record<ImportSourceStatus, string> = {
   deleted: "已删除",
 };
 
-export function importSourceNeedsPolling(source: ImportSource): boolean {
+function importSourceNeedsPolling(source: ImportSource): boolean {
   return source.status === "pending";
 }
 
@@ -47,7 +47,7 @@ export function importSourceRefetchInterval(
   return intervalMs;
 }
 
-export function importSourceListNeedsPolling(
+function importSourceListNeedsPolling(
   sources: readonly ImportSource[] | undefined,
 ): boolean {
   return sources?.some(importSourceNeedsPolling) ?? false;
@@ -137,7 +137,7 @@ export function importSourceLabel(source: ImportSource): string {
   return importSourceKindLabels[source.kind];
 }
 
-export function importSourceDraftLabel(draft: ImportSourceDraft): string {
+function importSourceDraftLabel(draft: ImportSourceDraft): string {
   if (draft.label?.trim()) return draft.label.trim();
   if (draft.kind === "url_snapshot") {
     try {

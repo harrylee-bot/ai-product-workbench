@@ -8,10 +8,6 @@ export function canonicalJson(value) {
   return JSON.stringify(normalizeCanonical(value));
 }
 
-export function canonicalJsonFile(value) {
-  return `${canonicalJson(value)}\n`;
-}
-
 function normalizeCanonical(value, location = "$") {
   if (value === null || typeof value === "string" || typeof value === "boolean") return value;
   if (typeof value === "number") {

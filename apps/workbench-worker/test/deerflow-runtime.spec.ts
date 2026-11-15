@@ -1096,11 +1096,10 @@ describe("DeerFlow runtime adapter", () => {
 
   it("verifies raw tool payload checksums before applying PRD schema defaults", async () => {
     const draft = structuredClone(runtimePrdResultFixture.artifacts[0]!);
-    if (draft.kind !== "prd" || draft.content.protocol !== "workbench.prd.v2") {
+    if (draft.kind !== "prd" || draft.content.protocol !== "workbench.prd.v3") {
       throw new Error("PRD_TEST_FIXTURE_INVALID");
     }
-    delete (draft.content.sections.businessRequirements as unknown as Record<string, unknown>)
-      .additionalSections;
+    delete (draft.content.sections.businessRequirements.functionSections[0] as unknown as Record<string, unknown>).diagrams;
     vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request, init: RequestInit = {}) => {
       const url = new URL(String(input));
       if (url.pathname === "/api/threads/deer_thread_1/runs" && (init.method ?? "GET") === "GET") {
@@ -1128,7 +1127,7 @@ describe("DeerFlow runtime adapter", () => {
       artifacts: [{
         content: {
           sections: {
-            businessRequirements: { additionalSections: [] },
+            businessRequirements: { functionSections: expect.arrayContaining([expect.objectContaining({ id: "section-task-submit", diagrams: [] })]) },
           },
         },
       }],
@@ -1800,7 +1799,7 @@ describe("DeerFlow runtime adapter", () => {
           type: "ai",
           content,
           tool_calls: [],
-          response_metadata: { model_name: "gemini-2.5-pro", finish_reason: "content_filter" },
+          response_metadata: { model_name: "deepseek-flash", finish_reason: "content_filter" },
         },
       ];
       expect(() => resolveRuntimeResult({ values: { messages } }, ["prototype"], execution()))
@@ -2262,7 +2261,7 @@ describe("DeerFlow runtime adapter", () => {
     );
   });
 
-  it("routes PRD runtime inputs to the installed v2 reference without embedding sample content", async () => {
+  it("routes PRD runtime inputs to the installed v3 reference without embedding sample content", async () => {
     let submittedBody: {
       input: { messages: Array<{ content: string }> };
     } | undefined;
@@ -2341,6 +2340,40 @@ describe("DeerFlow runtime adapter", () => {
       secrets: { WORKBENCH_CANVAS_CAPABILITY: string };
     }).secrets.WORKBENCH_CANVAS_CAPABILITY;
     expect(JSON.parse(secretValue)).toEqual(descriptor);
+  });
+
+  it("sends an expired retry Canvas snapshot only as read-only reference context", async () => {
+    let submittedBody: Record<string, any> | undefined;
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request, init: RequestInit = {}) => {
+      const url = new URL(String(input));
+      if (url.pathname === "/api/threads/deer_thread_1/runs" && (init.method ?? "GET") === "GET") return Response.json([]);
+      if (url.pathname === "/api/threads/deer_thread_1/runs/stream" && init.method === "POST") {
+        submittedBody = JSON.parse(String(init.body));
+        return successfulRuntimeResponse({ runId: "external_run_historical_canvas" });
+      }
+      throw new Error(`Unexpected request: ${init.method ?? "GET"} ${url}`);
+    }));
+    const historicalCanvasSnapshot: NonNullable<RuntimeExecution["historicalCanvasSnapshot"]> = {
+      protocol: "workbench.canvas-snapshot.v1", projectId: "project_1", threadId: "thread_1", runId: null, boardId: "board_1",
+      clientSessionId: "old-canvas-session", projectSessionGeneration: 2, boardRevision: 7, canvasStateRevision: 4,
+      capturedAt: "2020-01-01T00:00:00.000Z", expiresAt: "2020-01-01T00:01:00.000Z",
+      viewport: { x: 23, y: 41, zoom: 1.25 }, screens: [], visibleScreens: [], selectedScreens: [],
+    };
+    const base = execution();
+    const input = execution({ request: { ...base.request, canvasSnapshot: historicalCanvasSnapshot }, canvasTool: null, historicalCanvasSnapshot });
+    const originalRequest = structuredClone(input.request);
+    const adapter = new DeerFlowRuntimeAdapter(workerConfig(), { getObject: vi.fn() } as never);
+
+    await adapter.execute(input, observer());
+
+    const contextText = submittedBody!.input.messages[0].content.match(/<workbench_context>\n([\s\S]*?)\n<\/workbench_context>/u)?.[1];
+    const context = JSON.parse(contextText!);
+    expect(context.historicalCanvas).toEqual({ authority: "read-only-reference", snapshot: historicalCanvasSnapshot, artifacts: [] });
+    expect(context.canvasTool).toBeNull();
+    expect(submittedBody!.context.workbench.canvasTools).toBeNull();
+    expect(submittedBody!.config.configurable.workbench_canvas_tools).toBeNull();
+    expect(JSON.stringify(submittedBody)).not.toMatch(/WORKBENCH_CANVAS_CAPABILITY|wbct1\.|declaredTools/u);
+    expect(input.request).toEqual(originalRequest);
   });
 
   it("sends requested Artifact kinds through the trusted Workbench runtime context", async () => {
@@ -5851,7 +5884,7 @@ describe("DeerFlow runtime adapter", () => {
     expect(serialized).not.toContain("must-not-leak");
   });
 
-  it("deduplicates target asset uploads and exposes scoped handles without storage locators", async () => {
+  it.each([false, true])("deduplicates target and historical-source asset uploads without exposing storage locators (historical=%s)", async historical => {
     const image = Buffer.from("shared source image");
     const digest = sha256(image);
     const locator = {
@@ -5897,7 +5930,7 @@ describe("DeerFlow runtime adapter", () => {
     const document = minimalPrototypeDocument();
     const adapter = new DeerFlowRuntimeAdapter(workerConfig(), storage as never);
 
-    await adapter.execute(execution({
+    const runtimeInput = execution({
       request: {
         ...execution().request,
         generationIntent: "interactive-prototype",
@@ -5941,7 +5974,22 @@ describe("DeerFlow runtime adapter", () => {
           }],
         };
       }),
-    }), observer());
+    });
+    if (historical) {
+      runtimeInput.historicalCanvasSnapshot = {
+        protocol: "workbench.canvas-snapshot.v1", projectId: "project_1", threadId: "thread_1", runId: null, boardId: "board_1",
+        clientSessionId: "old-canvas-session", projectSessionGeneration: 1, boardRevision: 0, canvasStateRevision: 0,
+        capturedAt: "2020-01-01T00:00:00.000Z", expiresAt: "2020-01-01T00:01:00.000Z",
+        viewport: { x: 0, y: 0, zoom: 1 }, screens: [], visibleScreens: [], selectedScreens: [],
+      };
+      runtimeInput.historicalCanvasArtifacts = [runtimeInput.artifactTargets[1]!];
+      runtimeInput.artifactTargets = [runtimeInput.artifactTargets[0]!];
+      runtimeInput.request.artifactTargets = [runtimeInput.request.artifactTargets[0]!];
+      // Even an accidentally attached descriptor must not grant live access
+      // when a fixed historical context is present.
+      runtimeInput.canvasTool = canvasToolDescriptor(["get_visible_screens", "view_screen"]);
+    }
+    await adapter.execute(runtimeInput, observer());
 
     expect(storage.getObject).toHaveBeenCalledTimes(1);
     expect(uploads).toHaveLength(1);
@@ -5949,7 +5997,7 @@ describe("DeerFlow runtime adapter", () => {
     const input = runRequest?.input as { messages: Array<{ content: string }> };
     const contextText = input.messages[0]!.content.match(/<workbench_context>\n([\s\S]*?)\n<\/workbench_context>/)?.[1];
     const context = JSON.parse(contextText!);
-    expect(context.artifactTargets).toMatchObject([
+    expect([...context.artifactTargets, ...(context.historicalCanvas?.artifacts ?? [])]).toMatchObject([
       {
         artifactVersionId: "version-source-a",
         assets: [{
@@ -5973,6 +6021,14 @@ describe("DeerFlow runtime adapter", () => {
     expect(serialized).not.toContain("tenant/private");
     expect(serialized).not.toContain("storage_key");
     expect(serialized).not.toContain("must-not-leak");
+    if (historical) {
+      expect(context.artifactTargets).toHaveLength(1);
+      expect(context.historicalCanvas.artifacts).toHaveLength(1);
+      expect(context.historicalCanvas.authority).toBe("read-only-reference");
+      expect(context.historicalCanvas.artifacts[0].content.value).toEqual(document);
+      expect(context.canvasTool).toBeNull();
+      expect(serialized).not.toMatch(/WORKBENCH_CANVAS_CAPABILITY|wbct1\./u);
+    }
   });
 
   it("accepts only upload-scoped DeerFlow virtual paths", () => {

@@ -10,11 +10,11 @@ def normalize_prd_bidirectional_references(
 ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     """Close valid PRD requirement/criterion links without inventing relations."""
     normalized = copy.deepcopy(candidate)
-    if normalized.get("kind") != "prd" or normalized.get("schemaVersion") not in (2, 3):
+    if normalized.get("kind") != "prd" or normalized.get("schemaVersion") != 3:
         return normalized, []
 
     content = normalized.get("content")
-    if not isinstance(content, dict) or content.get("protocol") != f"workbench.prd.v{normalized['schemaVersion']}":
+    if not isinstance(content, dict) or content.get("protocol") != "workbench.prd.v3":
         return normalized, []
     sections = content.get("sections")
     if not isinstance(sections, dict):
@@ -23,7 +23,7 @@ def normalize_prd_bidirectional_references(
     if not isinstance(business_requirements, dict):
         return normalized, []
 
-    block_sections = _business_block_sections(business_requirements, normalized["schemaVersion"])
+    block_sections = _business_block_sections(business_requirements)
     requirements = [
         ([*path, "blocks", index], block)
         for path, section in block_sections
@@ -49,7 +49,7 @@ def normalize_prd_bidirectional_references(
         and criterion_counts[block_id] == 1
     }
 
-    # The fixed acceptance table has transport row IDs (normally ac-row-v-*),
+    # Acceptance tables have transport row IDs,
     # but those IDs are not typed acceptanceCriterion entities. Keep them out
     # of the typed relationship after a real, already reciprocal criterion is
     # present. Never use a table row to invent a business relationship.
@@ -163,8 +163,7 @@ def normalize_prd_bidirectional_references(
         row_candidates = [
             criterion_id
             for criterion_id in criterion_ids
-            if (normalized["schemaVersion"] == 3 or criterion_id.startswith("ac-row-v-"))
-            and acceptance_table_rows.get(criterion_id, (0, None, None))[0] == 1
+            if acceptance_table_rows.get(criterion_id, (0, None, None))[0] == 1
         ]
         if len(row_candidates) != 1:
             continue
@@ -223,20 +222,13 @@ def normalize_runtime_result_prd_references(
     return normalized, repairs
 
 
-def _business_block_sections(business: dict[str, Any], version: int) -> list[tuple[list[Any], Any]]:
-    if version == 3:
-        sections = business.get("functionSections")
-        if not isinstance(sections, list):
-            return []
-        return [(["pageLinks"], business.get("pageLinks")), *[
-            (["functionSections", index], section) for index, section in enumerate(sections)
-        ]]
-    return [
-        ([key], business.get(key)) for key in ("pageLinks", "coreRules", "flowAndPages", "acceptanceCriteria")
-    ] + [
-        (["additionalSections", index], section)
-        for index, section in enumerate(business.get("additionalSections", []))
-    ] if isinstance(business.get("additionalSections", []), list) else []
+def _business_block_sections(business: dict[str, Any]) -> list[tuple[list[Any], Any]]:
+    sections = business.get("functionSections")
+    if not isinstance(sections, list):
+        return []
+    return [(["pageLinks"], business.get("pageLinks")), *[
+        (["functionSections", index], section) for index, section in enumerate(sections)
+    ]]
 
 
 def _typed_blocks(section: Any, block_type: str) -> list[tuple[int, dict[str, Any]]]:

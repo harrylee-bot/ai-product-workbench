@@ -61,10 +61,6 @@ import {
   updateProjectRequestSchema,
 } from "./projects.js";
 import {
-  createProjectRemixRequestSchema,
-  createProjectRemixResponseSchema,
-} from "./remixes.js";
-import {
   createProjectReleaseRequestSchema,
   projectReleaseListSchema,
   projectReleaseSchema,
@@ -90,10 +86,7 @@ import {
   shareGrantSchema,
 } from "./shares.js";
 import {
-  createExternalExportDeliveryRequestSchema,
   createExportJobRequestSchema,
-  externalExportDeliveryListSchema,
-  externalExportDeliverySchema,
   exportCapabilitiesSchema,
   exportJobListSchema,
   exportJobSchema,
@@ -150,6 +143,26 @@ import {
   submissionIntentSchema,
   submitSubmissionIntentResponseSchema,
 } from "./submission-intents.js";
+import {
+  revisePrototypeRevisionRequestSchema,
+  prototypeRevisionDiffSchema,
+  prototypePlanListSchema,
+  prototypeFeedbackListSchema,
+  prototypeShareListSchema,
+  prototypeExportListSchema,
+  createPrototypeExportRequestSchema,
+  createPrototypeFeedbackRequestSchema,
+  createPrototypePlanRequestSchema,
+  createPrototypeShareRequestSchema,
+  prototypeExportSchema,
+  prototypeFeedbackSchema,
+  prototypePlanSchema,
+  prototypePublicShareSchema,
+  prototypeRevisionSchema,
+  prototypeRevisionListSchema,
+  prototypeShareSchema,
+  prototypeWorkflowActionRequestSchema,
+} from "./visual-prototype.js";
 
 export type WorkbenchHttpMethod = "get" | "post" | "put" | "patch" | "delete";
 export type WorkbenchRequestHeader = "byteRange" | "idempotencyKey" | "ifMatch" | "ifNoneMatch" | "lastEventId";
@@ -172,7 +185,7 @@ export type WorkbenchRouteResponse = Readonly<{
   status: number;
   description: string;
   schema?: NamedWorkbenchSchema;
-  mediaType?: "application/json" | "application/octet-stream" | "text/event-stream";
+  mediaType?: "application/json" | "application/octet-stream" | "text/event-stream" | "text/html";
   headers?: readonly WorkbenchResponseHeader[];
   byteRange?: "complete" | "partial";
 }>;
@@ -440,7 +453,7 @@ export const workbenchHttpRoutes = [
   {
     method: "post", path: "/project-invitations/accept", operationId: "acceptProjectInvitation",
     requestBody: named("ProjectInvitationTokenRequest", projectInvitationTokenRequestSchema),
-    response: response(200, "Invitation accepted atomically into its Workspace and Project", named("AcceptProjectInvitationResponse", acceptProjectInvitationResponseSchema), ["etag", "location"]),
+    response: response(200, "Invitation accepted atomically into its Project without granting Workspace membership", named("AcceptProjectInvitationResponse", acceptProjectInvitationResponseSchema), ["etag", "location"]),
     problemStatuses: problems(400, 404, 409),
   },
   {
@@ -602,13 +615,6 @@ export const workbenchHttpRoutes = [
     problemStatuses: problems(404, 503),
   },
   {
-    method: "post", path: "/public/shares/{shareToken}/remixes", operationId: "createProjectRemix",
-    requestHeaders: ["idempotencyKey"],
-    requestBody: named("CreateProjectRemixRequest", createProjectRemixRequestSchema),
-    response: response(201, "New isolated Project remixed from the immutable shared release", named("CreateProjectRemixResponse", createProjectRemixResponseSchema), ["etag", "location"]),
-    problemStatuses: problems(401, 404, 409),
-  },
-  {
     method: "get", path: "/exports/capabilities", operationId: "getExportCapabilities",
     response: response(200, "Server-authoritative availability catalog for Export formats", named("ExportCapabilities", exportCapabilitiesSchema)),
     problemStatuses: problems(401),
@@ -675,43 +681,6 @@ export const workbenchHttpRoutes = [
       response(304, "Export output digest matches If-None-Match"),
     ],
     problemStatuses: problems(404, 409, 502), rangeProblem: true,
-  },
-  {
-    method: "get", path: "/exports/{exportId}/deliveries", operationId: "listExternalExportDeliveries",
-    response: response(200, "External delivery audit records for one immutable Export output", named("ExternalExportDeliveryList", externalExportDeliveryListSchema)),
-    problemStatuses: problems(404),
-  },
-  {
-    method: "post", path: "/exports/{exportId}/deliveries", operationId: "createExternalExportDelivery",
-    requestHeaders: ["idempotencyKey"],
-    requestBody: named("CreateExternalExportDeliveryRequest", createExternalExportDeliveryRequestSchema),
-    response: response(201, "External delivery prepared and awaiting explicit user confirmation", named("ExternalExportDelivery", externalExportDeliverySchema), ["etag", "location"]),
-    problemStatuses: problems(400, 404, 409),
-  },
-  {
-    method: "get", path: "/export-deliveries/{deliveryId}", operationId: "getExternalExportDelivery",
-    requestHeaders: ["ifNoneMatch"],
-    response: response(200, "External delivery audit snapshot", named("ExternalExportDelivery", externalExportDeliverySchema), ["etag"]),
-    additionalResponses: [response(304, "External delivery revision has not changed")],
-    problemStatuses: problems(404),
-  },
-  {
-    method: "post", path: "/export-deliveries/{deliveryId}/confirm", operationId: "confirmExternalExportDelivery",
-    requestHeaders: ["ifMatch"],
-    response: response(202, "Explicitly confirmed external delivery queued", named("ExternalExportDelivery", externalExportDeliverySchema), ["etag"]),
-    problemStatuses: problems(404, 409, 412, 428),
-  },
-  {
-    method: "post", path: "/export-deliveries/{deliveryId}/retry", operationId: "retryExternalExportDelivery",
-    requestHeaders: ["ifMatch"],
-    response: response(202, "Failed external delivery explicitly retried", named("ExternalExportDelivery", externalExportDeliverySchema), ["etag"]),
-    problemStatuses: problems(404, 409, 412, 428),
-  },
-  {
-    method: "post", path: "/export-deliveries/{deliveryId}/cancel", operationId: "cancelExternalExportDelivery",
-    requestHeaders: ["ifMatch"],
-    response: response(202, "External delivery cancellation accepted or already terminal", named("ExternalExportDelivery", externalExportDeliverySchema), ["etag"]),
-    problemStatuses: problems(404, 409, 412, 428),
   },
   {
     method: "put", path: "/projects/{projectId}/board", operationId: "replaceBoard",
@@ -1023,5 +992,154 @@ export const workbenchHttpRoutes = [
   {
     method: "get", path: "/runs/{runId}/approvals", operationId: "listRunApprovals",
     response: response(200, "Ordered Run approvals", named("RunApprovalList", runApprovalListSchema)), problemStatuses: problems(404),
+  },
+  {
+    method: "get", path: "/projects/{projectId}/prototype-v2/plans", operationId: "listPrototypePlans",
+    response: response(200, "Read persisted prototype history", named("PrototypePlanList", prototypePlanListSchema)),
+    problemStatuses: problems(403, 404),
+  },
+  {
+    method: "get", path: "/projects/{projectId}/prototype-v2/revisions/{revisionId}", operationId: "getPrototypeRevision",
+    response: response(200, "Read persisted prototype history", named("PrototypeRevision", prototypeRevisionSchema), ["etag"]),
+    problemStatuses: problems(403, 404),
+  },
+  {
+    method: "get", path: "/projects/{projectId}/prototype-v2/revisions/{revisionId}/feedback", operationId: "listPrototypeFeedback",
+    response: response(200, "Read persisted prototype history", named("PrototypeFeedbackList", prototypeFeedbackListSchema)),
+    problemStatuses: problems(403, 404),
+  },
+  {
+    method: "get", path: "/projects/{projectId}/prototype-v2/shares", operationId: "listPrototypeShares",
+    response: response(200, "Read persisted prototype history", named("PrototypeShareList", prototypeShareListSchema)),
+    problemStatuses: problems(403, 404),
+  },
+  {
+    method: "get", path: "/projects/{projectId}/prototype-v2/exports", operationId: "listPrototypeExports",
+    response: response(200, "Read persisted prototype history", named("PrototypeExportList", prototypeExportListSchema)),
+    problemStatuses: problems(403, 404),
+  },
+  {
+    method: "get", path: "/projects/{projectId}/prototype-v2/revisions/{revisionId}/diff", operationId: "getPrototypeRevisionDiff",
+    response: response(200, "Compare semantic page changes against the pinned source revision", named("PrototypeRevisionDiff", prototypeRevisionDiffSchema)),
+    problemStatuses: problems(403, 404),
+  },
+  {
+    method: "post", path: "/projects/{projectId}/prototype-v2/plans/{planId}/retry", operationId: "retryPrototypePlan",
+    requestHeaders: ["idempotencyKey", "ifMatch"], requestBody: named("PrototypeWorkflowActionRequest", prototypeWorkflowActionRequestSchema),
+    response: response(202, "Retry terminal generation with the same pinned runtime context", named("PrototypePlan", prototypePlanSchema), ["etag"]),
+    problemStatuses: problems(403, 404, 409, 412, 428, 503),
+  },
+  {
+    method: "post", path: "/projects/{projectId}/prototype-v2/revisions/{revisionId}/revise", operationId: "revisePrototype",
+    requestHeaders: ["idempotencyKey", "ifMatch"], requestBody: named("RevisePrototypeRevisionRequest", revisePrototypeRevisionRequestSchema),
+    response: response(202, "Generate a new immutable version from anchored feedback", named("PrototypePlan", prototypePlanSchema), ["etag"]),
+    problemStatuses: problems(400, 403, 404, 409, 412, 428, 503),
+  },
+  {
+    method: "post", path: "/projects/{projectId}/prototype-v2/plans", operationId: "createPrototypePlan",
+    requestHeaders: ["idempotencyKey"], requestBody: named("CreatePrototypePlanRequest", createPrototypePlanRequestSchema),
+    response: response(201, "Create an idempotent visual prototype plan", named("PrototypePlan", prototypePlanSchema), ["etag", "location"]),
+    problemStatuses: problems(400, 403, 404, 409),
+  },
+  {
+    method: "post", path: "/projects/{projectId}/prototype-v2/plans/{planId}/approve", operationId: "approvePrototypePlan",
+    requestHeaders: ["idempotencyKey", "ifMatch"], requestBody: named("PrototypeWorkflowActionRequest", prototypeWorkflowActionRequestSchema),
+    response: response(202, "Approve a plan and enqueue the Temporal generation workflow", named("PrototypePlan", prototypePlanSchema), ["etag", "location"]),
+    problemStatuses: problems(403, 404, 409, 412, 428, 503),
+  },
+  {
+    method: "get", path: "/projects/{projectId}/prototype-v2/plans/{planId}", operationId: "getPrototypePlan",
+    response: response(200, "Get a visual prototype plan and current workflow status", named("PrototypePlan", prototypePlanSchema), ["etag"]),
+    problemStatuses: problems(403, 404),
+  },
+  {
+    method: "get", path: "/projects/{projectId}/prototype-v2/plans/{planId}/revisions", operationId: "listPrototypeRevisions",
+    response: response(200, "List visual prototype revision summaries without page content or preview HTML", named("PrototypeRevisionList", prototypeRevisionListSchema)),
+    problemStatuses: problems(403, 404),
+  },
+  {
+    method: "post", path: "/projects/{projectId}/prototype-v2/plans/{planId}/cancel", operationId: "cancelPrototypePlan",
+    requestHeaders: ["idempotencyKey", "ifMatch"], requestBody: named("PrototypeWorkflowActionRequest", prototypeWorkflowActionRequestSchema),
+    response: response(202, "Cancel a running visual prototype workflow", named("PrototypePlan", prototypePlanSchema), ["etag"]),
+    problemStatuses: problems(403, 404, 409, 412, 428, 503),
+  },
+  {
+    method: "post", path: "/projects/{projectId}/prototype-v2/revisions/{revisionId}/confirm", operationId: "confirmPrototypeRevision",
+    requestHeaders: ["idempotencyKey", "ifMatch"], requestBody: named("PrototypeWorkflowActionRequest", prototypeWorkflowActionRequestSchema),
+    response: response(200, "Confirm a ready visual prototype revision with CAS", named("PrototypeRevision", prototypeRevisionSchema), ["etag"]),
+    problemStatuses: problems(403, 404, 409, 412, 428),
+  },
+  {
+    method: "post", path: "/projects/{projectId}/prototype-v2/revisions/{revisionId}/reject", operationId: "rejectPrototypeRevision",
+    requestHeaders: ["idempotencyKey", "ifMatch"], requestBody: named("PrototypeWorkflowActionRequest", prototypeWorkflowActionRequestSchema),
+    response: response(200, "Reject a ready visual prototype revision with CAS", named("PrototypeRevision", prototypeRevisionSchema), ["etag"]),
+    problemStatuses: problems(403, 404, 409, 412, 428),
+  },
+  {
+    method: "post", path: "/projects/{projectId}/prototype-v2/revisions/{revisionId}/preview-token", operationId: "createPrototypePreviewToken",
+    response: response(200, "Create a short-lived preview capability bound to a project, revision and document checksum", named("ExportPreviewTokenResponse", exportPreviewTokenResponseSchema)),
+    problemStatuses: problems(403, 404, 409, 503),
+  },
+  {
+    method: "post", path: "/projects/{projectId}/prototype-v2/revisions/{revisionId}/feedback", operationId: "createPrototypeFeedback",
+    requestHeaders: ["idempotencyKey"], requestBody: named("CreatePrototypeFeedbackRequest", createPrototypeFeedbackRequestSchema),
+    response: response(201, "Create an anchored prototype feedback item", named("PrototypeFeedback", prototypeFeedbackSchema), ["etag", "location"]),
+    problemStatuses: problems(400, 403, 404, 409),
+  },
+  {
+    method: "post", path: "/projects/{projectId}/prototype-v2/feedback/{feedbackId}/resolve", operationId: "resolvePrototypeFeedback",
+    requestHeaders: ["idempotencyKey", "ifMatch"], requestBody: named("PrototypeWorkflowActionRequest", prototypeWorkflowActionRequestSchema),
+    response: response(200, "Resolve a feedback item with CAS", named("PrototypeFeedback", prototypeFeedbackSchema), ["etag"]),
+    problemStatuses: problems(403, 404, 409, 412, 428),
+  },
+  {
+    method: "post", path: "/projects/{projectId}/prototype-v2/shares", operationId: "createPrototypeShare",
+    requestHeaders: ["idempotencyKey"], requestBody: named("CreatePrototypeShareRequest", createPrototypeShareRequestSchema),
+    response: response(201, "Create an expiring anonymous prototype share", named("PrototypeShare", prototypeShareSchema), ["etag", "location"]),
+    problemStatuses: problems(400, 403, 404, 409, 503),
+  },
+  {
+    method: "get", path: "/public/prototype-v2/shares/{token}", operationId: "getPublicPrototypeShare",
+    response: response(200, "Resolve an active anonymous visual prototype share", named("PrototypePublicShare", prototypePublicShareSchema), ["etag"]),
+    problemStatuses: problems(404),
+  },
+  {
+    method: "get", path: "/public/prototype-v2/previews/{token}", operationId: "getPrototypePreviewDocument", public: true,
+    response: { status: 200, description: "Serve a short-lived isolated prototype preview document", mediaType: "text/html" },
+    problemStatuses: problems(404),
+  },
+  {
+    method: "post", path: "/projects/{projectId}/prototype-v2/shares/{shareId}/revoke", operationId: "revokePrototypeShare",
+    requestHeaders: ["idempotencyKey", "ifMatch"], requestBody: named("PrototypeWorkflowActionRequest", prototypeWorkflowActionRequestSchema),
+    response: response(200, "Revoke a prototype share with CAS", named("PrototypeShare", prototypeShareSchema), ["etag"]),
+    problemStatuses: problems(403, 404, 409, 412, 428),
+  },
+  {
+    method: "post", path: "/projects/{projectId}/prototype-v2/exports", operationId: "createPrototypeExport",
+    requestHeaders: ["idempotencyKey"], requestBody: named("CreatePrototypeExportRequest", createPrototypeExportRequestSchema),
+    response: response(202, "Queue a real HTML or React prototype export", named("PrototypeExport", prototypeExportSchema), ["etag", "location"]),
+    problemStatuses: problems(400, 403, 404, 409, 503),
+  },
+  {
+    method: "get", path: "/projects/{projectId}/prototype-v2/exports/{exportId}", operationId: "getPrototypeExport",
+    response: response(200, "Get a prototype export and immutable artifact identity", named("PrototypeExport", prototypeExportSchema), ["etag"]),
+    problemStatuses: problems(403, 404),
+  },
+  {
+    method: "get", path: "/projects/{projectId}/prototype-v2/exports/{exportId}/download", operationId: "downloadPrototypeExport",
+    response: { status: 200, description: "Stream the immutable completed prototype export artifact", mediaType: "application/octet-stream" },
+    problemStatuses: problems(403, 404, 409, 503),
+  },
+  {
+    method: "post", path: "/projects/{projectId}/prototype-v2/exports/{exportId}/retry", operationId: "retryPrototypeExport",
+    requestHeaders: ["idempotencyKey", "ifMatch"], requestBody: named("PrototypeWorkflowActionRequest", prototypeWorkflowActionRequestSchema),
+    response: response(202, "Retry a failed prototype export", named("PrototypeExport", prototypeExportSchema), ["etag", "location"]),
+    problemStatuses: problems(403, 404, 409, 412, 428, 503),
+  },
+  {
+    method: "post", path: "/projects/{projectId}/prototype-v2/exports/{exportId}/cancel", operationId: "cancelPrototypeExport",
+    requestHeaders: ["idempotencyKey", "ifMatch"], requestBody: named("PrototypeWorkflowActionRequest", prototypeWorkflowActionRequestSchema),
+    response: response(200, "Cancel a queued or building prototype export with CAS", named("PrototypeExport", prototypeExportSchema), ["etag"]),
+    problemStatuses: problems(403, 404, 409, 412, 428, 503),
   },
 ] as const satisfies readonly WorkbenchHttpRoute[];

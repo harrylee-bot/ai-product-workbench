@@ -45,6 +45,9 @@ PROTOTYPE_EXAMPLE_PATH = ROOT / "integrations/deerflow/skills/workbench/referenc
 PRD_EXAMPLE_PATH = ROOT / "integrations/deerflow/test-fixtures/prd-runtime-result.example.json"
 
 
+from prd_acceptance_test_fixture import anonymous_acceptance_collision
+
+
 class ArtifactDraftToolTests(unittest.TestCase):
     def setUp(self) -> None:
         self.runtime = SimpleNamespace(
@@ -182,7 +185,7 @@ class ArtifactDraftToolTests(unittest.TestCase):
         self.assertEqual(first_artifact["draft"], repeated_artifact["draft"])
         self.assertNotIn("repairInstruction", repeated_response)
 
-    def test_accepts_a_complete_prd_v2_draft_and_rejects_an_incomplete_safety_table(self) -> None:
+    def test_accepts_a_complete_prd_v3_draft_and_rejects_an_incomplete_safety_table(self) -> None:
         content, artifact = workbench_artifact_draft_publish.func(
             self.prd_runtime,
             0,
@@ -190,7 +193,7 @@ class ArtifactDraftToolTests(unittest.TestCase):
         )
 
         self.assertEqual(json.loads(content)["ok"], True)
-        self.assertEqual(artifact["draft"]["content"]["protocol"], "workbench.prd.v2")
+        self.assertEqual(artifact["draft"]["content"]["protocol"], "workbench.prd.v3")
 
         invalid = copy.deepcopy(self.prd_draft)
         invalid["content"]["sections"]["safetyBaseline"]["rows"].pop()
@@ -205,7 +208,7 @@ class ArtifactDraftToolTests(unittest.TestCase):
 
     def test_prd_semantic_errors_preserve_the_complete_draft_for_local_repair(self) -> None:
         invalid = copy.deepcopy(self.prd_draft)
-        section = invalid["content"]["sections"]["businessRequirements"]["acceptanceCriteria"]
+        section = invalid["content"]["sections"]["businessRequirements"]["functionSections"][2]
         table = next(block for block in section["blocks"] if block["type"] == "table")
         standard_column_id = table["columns"][2]["id"]
         standard = next(
@@ -407,9 +410,9 @@ class ArtifactDraftToolTests(unittest.TestCase):
         self.assertEqual(_artifact_draft_repair_hints(self.draft, issues), [])
         self.assertEqual(_artifact_draft_repair_hints(self.prd_draft, [None, {"path": [[]]}]), [])
 
-    def test_acceptance_coverage_points_to_actual_table_after_typed_criteria(self) -> None:
+    def test_acceptance_coverage_hints_cover_combined_table_and_typed_criteria(self) -> None:
         invalid = copy.deepcopy(self.prd_draft)
-        blocks = invalid["content"]["sections"]["businessRequirements"]["acceptanceCriteria"]["blocks"]
+        blocks = invalid["content"]["sections"]["businessRequirements"]["functionSections"][2]["blocks"]
         table = next(block for block in blocks if block["type"] == "table")
         blocks.remove(table)
         blocks.append(table)
@@ -420,16 +423,85 @@ class ArtifactDraftToolTests(unittest.TestCase):
         response = json.loads(workbench_artifact_draft_publish.func(self.prd_runtime, 0, invalid)[0])
         self.assertFalse(response["ok"])
         self.assertTrue(any(issue["message"].startswith("acceptance criteria must cover ") for issue in response["issues"]))
-        hints = [hint for hint in response["repairHints"] if "itemColumnIndex" in hint]
+        hints = [hint for hint in response["repairHints"] if "Acceptance coverage combines" in hint["instruction"]]
         self.assertEqual(len(hints), 1)
-        self.assertEqual(hints[0]["path"], ["content", "sections", "businessRequirements", "acceptanceCriteria", "blocks", len(blocks)-1])
-        self.assertIn("not the separate typed acceptanceCriterion blocks", hints[0]["instruction"])
+        self.assertEqual(hints[0]["path"], ["content", "sections", "businessRequirements", "functionSections"])
+        self.assertIn("typed Given/When/Then criteria", hints[0]["instruction"])
         self.assertNotIn("PRIVATE_ITEM_LABEL", json.dumps(hints))
         self.assertEqual(invalid, before)
 
+    def test_distinct_row_hint_uses_current_ssot_matrix_and_only_structural_paths(self) -> None:
+        draft = anonymous_acceptance_collision()
+        before = copy.deepcopy(draft)
+        response, artifact = workbench_artifact_draft_publish.func(self.prd_runtime, 0, draft)
+        ack = json.loads(response)
+        self.assertFalse(ack["ok"])
+        self.assertEqual([issue["message"] for issue in ack["issues"]], ["acceptance dimensions must be represented by distinct rows"])
+        hint = next(hint for hint in ack["repairHints"] if "acceptanceCoverage" in hint)
+        self.assertEqual(hint["candidateChecksum"], ack["candidateChecksum"])
+        coverage = hint["acceptanceCoverage"]
+        self.assertEqual({d["key"]: d["candidateRows"] for d in coverage["dimensions"]}, {
+            "visibility": [3], "rules": [2, 3], "state": [0, 1, 2, 3], "failureRecovery": [2],
+        })
+        self.assertEqual(coverage["conflict"], {"dimensionKeys": ["visibility", "rules", "failureRecovery"], "candidateRows": [3, 2], "candidateRowCount": 2})
+        self.assertEqual(coverage["requiredRowCount"], 4)
+        self.assertEqual(coverage["currentRowCount"], 4)
+        self.assertFalse(coverage["distinctRowsPossible"])
+        self.assertFalse(coverage["truncated"])
+        self.assertIn("given + when + the linked requirement.title", hint["instruction"])
+        self.assertIn("changing then alone does not add", hint["instruction"])
+        for row in coverage["rows"]:
+            self.assertTrue(any(path.endswith("/given") for path in row["conditionPaths"]))
+            self.assertTrue(any(path.endswith("/when") for path in row["conditionPaths"]))
+            self.assertTrue(any(path.endswith("/title") for path in row["conditionPaths"]))
+            for path in [row["path"], *row["conditionPaths"], *row["resultPaths"]]:
+                current = draft
+                for segment in path.lstrip("/").split("/"):
+                    current = current[int(segment)] if isinstance(current, list) else current[segment]
+        self.assertNotIn("已有任务", json.dumps(hint, ensure_ascii=False))
+        self.assertNotIn("repairHints", artifact)
+        self.assertTrue(all(set(issue) <= {"code", "path", "message", "expectedType", "expectedValue"} for issue in artifact["issues"]))
+        self.assertEqual(draft, before)
+        stale = _artifact_draft_repair_hints(draft, ack["issues"], [hint], "0" * 64)
+        self.assertFalse(any("acceptanceCoverage" in value for value in stale))
+
+    def test_missing_dimension_and_row_count_hints_share_exact_ssot_diagnostics(self) -> None:
+        draft = anonymous_acceptance_collision()
+        functions = draft["content"]["sections"]["businessRequirements"]["functionSections"]
+        functions[0]["blocks"].pop()
+        functions[0]["blocks"][1]["acceptanceCriterionIds"].remove("criterion-repair-2")
+        ack = json.loads(workbench_artifact_draft_publish.func(self.prd_runtime, 0, draft)[0])
+        self.assertTrue(any("at least 4 independently testable rows" in issue["message"] for issue in ack["issues"]))
+        self.assertTrue(any(issue["message"] == "acceptance criteria must cover 失败或异常恢复" for issue in ack["issues"]))
+        hints = [hint for hint in ack["repairHints"] if "acceptanceCoverage" in hint]
+        self.assertEqual(len(hints), 1)
+        coverage = hints[0]["acceptanceCoverage"]
+        self.assertEqual((coverage["currentRowCount"], coverage["requiredRowCount"]), (3, 4))
+        self.assertEqual(next(d for d in coverage["dimensions"] if d["key"] == "failureRecovery")["candidateRows"], [])
+
+    def test_acceptance_matrix_is_bounded_without_hiding_full_candidate_counts(self) -> None:
+        draft = anonymous_acceptance_collision()
+        functions = draft["content"]["sections"]["businessRequirements"]["functionSections"]
+        for index in range(40):
+            criterion = copy.deepcopy(functions[0]["blocks"][4])
+            criterion["id"] = f"criterion-volume-{index}"
+            criterion["given"][0]["text"] = f"已有第{index}项待办"
+            criterion["then"][0]["text"] = f"处理第{index}项待办后保留其单独的回执编号。"
+            functions[0]["blocks"].append(criterion)
+            functions[0]["blocks"][1]["acceptanceCriterionIds"].append(criterion["id"])
+        ack = json.loads(workbench_artifact_draft_publish.func(self.prd_runtime, 0, draft)[0])
+        hint = next(hint for hint in ack["repairHints"] if "acceptanceCoverage" in hint)
+        coverage = hint["acceptanceCoverage"]
+        self.assertEqual(coverage["currentRowCount"], 44)
+        self.assertLessEqual(len(coverage["rows"]), 8)
+        self.assertTrue(coverage["truncated"])
+        self.assertEqual(next(d for d in coverage["dimensions"] if d["key"] == "state")["candidateRowCount"], 44)
+        self.assertLessEqual(len(json.dumps(ack["repairHints"]).encode()), 12_000)
+        self.assertFalse(ack["ok"])
+
     def test_unknown_citation_hints_identify_every_actual_inline_without_choosing_a_source(self) -> None:
         invalid = copy.deepcopy(self.prd_draft)
-        blocks = invalid["content"]["sections"]["businessRequirements"]["coreRules"]["blocks"]
+        blocks = invalid["content"]["sections"]["businessRequirements"]["functionSections"][0]["blocks"]
         index = next(i for i, block in enumerate(blocks) if block["type"] == "requirement")
         inline = blocks[index]["description"]
         citation = {"type": "citation", "citationId": "missing-source-id", "label": "PRIVATE_SOURCE_LABEL"}
@@ -438,7 +510,7 @@ class ArtifactDraftToolTests(unittest.TestCase):
         response = json.loads(workbench_artifact_draft_publish.func(self.prd_runtime, 0, invalid)[0])
         self.assertFalse(response["ok"])
         hints = [hint for hint in response["repairHints"] if "undefined citation" in hint["instruction"]]
-        self.assertEqual([hint["path"] for hint in hints], [["content", "sections", "businessRequirements", "coreRules", "blocks", index, "description", i, "citationId"] for i in (len(inline)-2, len(inline)-1)])
+        self.assertEqual([hint["path"] for hint in hints], [["content", "sections", "businessRequirements", "functionSections", 0, "blocks", index, "description", i, "citationId"] for i in (len(inline)-2, len(inline)-1)])
         self.assertTrue(all("expectedValue" not in hint for hint in hints))
         self.assertNotIn("PRIVATE_SOURCE_LABEL", json.dumps(hints))
         self.assertEqual(invalid, before)
@@ -473,7 +545,7 @@ class ArtifactDraftToolTests(unittest.TestCase):
                 elif location == "business_children":
                     business = sections["businessRequirements"]
                     moves = []
-                    for name in ("acceptanceCriteria", "additionalSections"):
+                    for name in ("functionSections",):
                         sections[name] = business.pop(name)
                         moves.append((["content", "sections", name], ["content", "sections", "businessRequirements", name]))
                 else:

@@ -1464,7 +1464,7 @@ components:
         - contentMode
         - blob
       additionalProperties: false
-      description: PRD and prototype blob details require schemaVersion 1; enforced by the runtime Zod contract.
+      description: PRD blob details require schemaVersion 3 and prototype blob details require schemaVersion 1; enforced by the runtime Zod contract.
     ArtifactVersionContentMode:
       type: string
       enum:
@@ -2355,38 +2355,6 @@ components:
         - introducedInRevision
         - citationIds
       additionalProperties: false
-    PrdRevision:
-      type: object
-      properties:
-        number:
-          type: integer
-          exclusiveMinimum: 0
-        status:
-          type: string
-          enum:
-            - draft
-            - inReview
-            - approved
-        summary:
-          type: string
-          minLength: 1
-          maxLength: 2000
-        changedAt:
-          type: string
-          format: date-time
-        changedById:
-          type:
-            - string
-            - "null"
-          minLength: 1
-          maxLength: 128
-      required:
-        - number
-        - status
-        - summary
-        - changedAt
-        - changedById
-      additionalProperties: false
     PrdCitationInline:
       type: object
       properties:
@@ -3034,62 +3002,253 @@ components:
           acceptanceCriterion: "#/components/schemas/PrdAcceptanceCriterionBlock"
           flow: "#/components/schemas/PrdFlowBlock"
           risk: "#/components/schemas/PrdRiskBlock"
-    PrdSection:
+    PrdChannelRow:
+      type: object
+      properties:
+        sequence:
+          type: integer
+          minimum: 1
+          maximum: 3
+        channel:
+          type: string
+          enum:
+            - inApp
+            - wapH5
+            - miniProgram
+        enabled:
+          type: boolean
+      required:
+        - sequence
+        - channel
+        - enabled
+      additionalProperties: false
+    PrdRevision:
+      type: object
+      properties:
+        number:
+          type: integer
+          exclusiveMinimum: 0
+        status:
+          type: string
+          enum:
+            - draft
+            - inReview
+            - approved
+        summary:
+          type: string
+          minLength: 1
+          maxLength: 2000
+        changedAt:
+          type: string
+          format: date-time
+        changedById:
+          type:
+            - string
+            - "null"
+          minLength: 1
+          maxLength: 128
+      required:
+        - number
+        - status
+        - summary
+        - changedAt
+        - changedById
+      additionalProperties: false
+    PrdSafetyBaselineRow:
+      type: object
+      properties:
+        sequence:
+          type: integer
+          minimum: 1
+          maximum: 21
+        applicability:
+          type: string
+          enum:
+            - 是
+            - 否
+            - 不涉及
+        remarks:
+          type:
+            - string
+            - "null"
+          minLength: 1
+          maxLength: 1000
+      required:
+        - sequence
+        - applicability
+        - remarks
+      additionalProperties: false
+    PrdDiagramEdge:
+      type: object
+      properties:
+        id:
+          type: string
+          minLength: 1
+          maxLength: 96
+          pattern: ^[A-Za-z][A-Za-z0-9]*(?:[-_.:][A-Za-z0-9]+)*$
+        from:
+          type: string
+          minLength: 1
+          maxLength: 96
+          pattern: ^[A-Za-z][A-Za-z0-9]*(?:[-_.:][A-Za-z0-9]+)*$
+        to:
+          type: string
+          minLength: 1
+          maxLength: 96
+          pattern: ^[A-Za-z][A-Za-z0-9]*(?:[-_.:][A-Za-z0-9]+)*$
+        label:
+          type:
+            - string
+            - "null"
+          minLength: 1
+          maxLength: 240
+      required:
+        - id
+        - from
+        - to
+        - label
+      additionalProperties: false
+    PrdDiagramNode:
+      type: object
+      properties:
+        id:
+          type: string
+          minLength: 1
+          maxLength: 96
+          pattern: ^[A-Za-z][A-Za-z0-9]*(?:[-_.:][A-Za-z0-9]+)*$
+        label:
+          type: string
+          minLength: 1
+          maxLength: 240
+        group:
+          type:
+            - string
+            - "null"
+          minLength: 1
+          maxLength: 120
+      required:
+        - id
+        - label
+        - group
+      additionalProperties: false
+    PrdTemplateDiagram:
+      type: object
+      properties:
+        id:
+          type: string
+          minLength: 1
+          maxLength: 96
+          pattern: ^[A-Za-z][A-Za-z0-9]*(?:[-_.:][A-Za-z0-9]+)*$
+        kind:
+          type: string
+          enum:
+            - productFlow
+            - productArchitecture
+        title:
+          type: string
+          minLength: 4
+          maxLength: 240
+          pattern: ^图[1-9]\d*\s+\S
+        description:
+          type: string
+          minLength: 20
+          maxLength: 2000
+        nodes:
+          type: array
+          items:
+            $ref: "#/components/schemas/PrdDiagramNode"
+          minItems: 2
+          maxItems: 40
+        edges:
+          type: array
+          items:
+            $ref: "#/components/schemas/PrdDiagramEdge"
+          minItems: 1
+          maxItems: 80
+      required:
+        - id
+        - kind
+        - title
+        - description
+        - nodes
+        - edges
+      additionalProperties: false
+    PrdV3FunctionSection:
       type: object
       properties:
         title:
           type: string
-          minLength: 1
+          minLength: 5
           maxLength: 240
+          pattern: ^2\.(?:[2-9]|[1-9]\d+)\s+\S
         blocks:
           type: array
           items:
             $ref: "#/components/schemas/PrdBlock"
           minItems: 1
           maxItems: 500
+        id:
+          type: string
+          minLength: 1
+          maxLength: 96
+          pattern: ^[A-Za-z][A-Za-z0-9]*(?:[-_.:][A-Za-z0-9]+)*$
+        diagrams:
+          type: array
+          items:
+            $ref: "#/components/schemas/PrdTemplateDiagram"
+          maxItems: 2
+          default: []
       required:
         - title
         - blocks
+        - id
       additionalProperties: false
-    PrdSections:
+    PrdVersionHistoryEntry:
       type: object
       properties:
-        executiveSummary:
-          $ref: "#/components/schemas/PrdSection"
-        problem:
-          $ref: "#/components/schemas/PrdSection"
-        goals:
-          $ref: "#/components/schemas/PrdSection"
-        targetUsers:
-          $ref: "#/components/schemas/PrdSection"
-        scope:
-          $ref: "#/components/schemas/PrdSection"
-        requirements:
-          $ref: "#/components/schemas/PrdSection"
-        userFlows:
-          $ref: "#/components/schemas/PrdSection"
-        acceptanceCriteria:
-          $ref: "#/components/schemas/PrdSection"
-        risksAndDependencies:
-          $ref: "#/components/schemas/PrdSection"
+        status:
+          type: string
+          enum:
+            - 讨论稿
+            - 评审中
+            - 已定稿
+        author:
+          type: string
+          minLength: 1
+          maxLength: 120
+        participants:
+          type: array
+          items:
+            type: string
+            minLength: 1
+            maxLength: 120
+          minItems: 1
+          maxItems: 30
+        startDate:
+          type: string
+          pattern: ^\d{4}-\d{2}-\d{2}$
+        endDate:
+          type: string
+          pattern: ^\d{4}-\d{2}-\d{2}$
+        notes:
+          type: string
+          minLength: 1
+          maxLength: 1000
       required:
-        - executiveSummary
-        - problem
-        - goals
-        - targetUsers
-        - scope
-        - requirements
-        - userFlows
-        - acceptanceCriteria
-        - risksAndDependencies
+        - status
+        - author
+        - participants
+        - startDate
+        - endDate
+        - notes
       additionalProperties: false
-    PrdDocumentV1:
+    PrdDocument:
       type: object
       properties:
         protocol:
           type: string
           enum:
-            - workbench.prd.v1
+            - workbench.prd.v3
         documentId:
           type: string
           minLength: 1
@@ -3101,6 +3260,46 @@ components:
           maxLength: 240
         revision:
           $ref: "#/components/schemas/PrdRevision"
+        cover:
+          type: object
+          properties:
+            workOrderName:
+              type: string
+              minLength: 1
+              maxLength: 200
+            title:
+              type: string
+              minLength: 1
+              maxLength: 240
+          required:
+            - workOrderName
+            - title
+          additionalProperties: false
+        versionHistory:
+          type: array
+          items:
+            $ref: "#/components/schemas/PrdVersionHistoryEntry"
+          minItems: 1
+          maxItems: 100
+        tableOfContents:
+          type: object
+          properties:
+            title:
+              type: string
+              enum:
+                - 目 录
+            entries:
+              type: array
+              items:
+                type: string
+                minLength: 1
+                maxLength: 240
+              minItems: 9
+              maxItems: 58
+          required:
+            - title
+            - entries
+          additionalProperties: false
         assumptions:
           type: array
           items:
@@ -3112,17 +3311,190 @@ components:
             $ref: "#/components/schemas/ArtifactCitation"
           maxItems: 1000
         sections:
-          $ref: "#/components/schemas/PrdSections"
+          type: object
+          properties:
+            introduction:
+              type: object
+              properties:
+                title:
+                  type: string
+                  enum:
+                    - 1 引言
+                background:
+                  type: object
+                  properties:
+                    title:
+                      type: string
+                      enum:
+                        - 1.1项目背景
+                    blocks:
+                      type: array
+                      items:
+                        $ref: "#/components/schemas/PrdBlock"
+                      minItems: 1
+                      maxItems: 500
+                  required:
+                    - title
+                    - blocks
+                  additionalProperties: false
+                scope:
+                  type: object
+                  properties:
+                    title:
+                      type: string
+                      enum:
+                        - 1.2文档范围
+                    blocks:
+                      type: array
+                      items:
+                        $ref: "#/components/schemas/PrdBlock"
+                      minItems: 1
+                      maxItems: 500
+                  required:
+                    - title
+                    - blocks
+                  additionalProperties: false
+                usageScenarios:
+                  type: object
+                  properties:
+                    title:
+                      type: string
+                      enum:
+                        - 1.3使用场景（必填）
+                    blocks:
+                      type: array
+                      items:
+                        $ref: "#/components/schemas/PrdBlock"
+                      minItems: 1
+                      maxItems: 500
+                    channelTable:
+                      type: object
+                      properties:
+                        title:
+                          type: string
+                          enum:
+                            - 活动投放渠道
+                        rows:
+                          type: array
+                          items:
+                            $ref: "#/components/schemas/PrdChannelRow"
+                          minItems: 3
+                          maxItems: 3
+                      required:
+                        - title
+                        - rows
+                      additionalProperties: false
+                  required:
+                    - title
+                    - blocks
+                    - channelTable
+                  additionalProperties: false
+              required:
+                - title
+                - background
+                - scope
+                - usageScenarios
+              additionalProperties: false
+            businessRequirements:
+              type: object
+              properties:
+                title:
+                  type: string
+                  enum:
+                    - 2 业务需求
+                summary:
+                  $ref: "#/components/schemas/PrdInlineContent"
+                pageLinks:
+                  type: object
+                  properties:
+                    title:
+                      type: string
+                      enum:
+                        - 2.1页面链接
+                    blocks:
+                      type: array
+                      items:
+                        $ref: "#/components/schemas/PrdBlock"
+                      minItems: 1
+                      maxItems: 500
+                  required:
+                    - title
+                    - blocks
+                  additionalProperties: false
+                functionSections:
+                  type: array
+                  items:
+                    $ref: "#/components/schemas/PrdV3FunctionSection"
+                  minItems: 1
+                  maxItems: 50
+              required:
+                - title
+                - summary
+                - pageLinks
+                - functionSections
+              additionalProperties: false
+            degradation:
+              type: object
+              properties:
+                title:
+                  type: string
+                  enum:
+                    - 3 业务降级方案（必填）
+                applicable:
+                  type: boolean
+                content:
+                  $ref: "#/components/schemas/PrdInlineContent"
+              required:
+                - title
+                - applicable
+                - content
+              additionalProperties: false
+            safetyBaseline:
+              type: object
+              properties:
+                title:
+                  type: string
+                  enum:
+                    - 4 需求安全基线要求（必填）
+                intro:
+                  type: string
+                  enum:
+                    - |-
+                      该部分内容为必填项，请按照如下表格中的内容先进行自查，并按照如下要求完善需求文档：
+                      1、如选择“是”，代表本项自查内容已符合安全要求，需要提供截图违依据
+                      2、如选择“否”，代表本项自查内容暂时不符合安全要求，请在需求文档中增加本部分内容安全改造需求，并发送网信安需求评审邮件，附上本需求文档用于安全评审；
+                      3、如选择“不涉及”，代表本项目各项需求安全基线均不涉及，则无需召开网信安需求评审会。
+                      建议：该表格请业务人员和开发人员共同参与自查并填写。
+                rows:
+                  type: array
+                  items:
+                    $ref: "#/components/schemas/PrdSafetyBaselineRow"
+                  minItems: 21
+                  maxItems: 21
+              required:
+                - title
+                - intro
+                - rows
+              additionalProperties: false
+          required:
+            - introduction
+            - businessRequirements
+            - degradation
+            - safetyBaseline
+          additionalProperties: false
       required:
         - protocol
         - documentId
         - title
         - revision
+        - cover
+        - versionHistory
+        - tableOfContents
         - assumptions
         - citations
         - sections
       additionalProperties: false
-      description: Legacy PRD section whitelists and all IR references form a valid semantic graph; enforced by the runtime Zod contract.
+      description: PRD v3 uses contiguous function-specific sections, optional typed diagrams, embedded or later acceptance, and the same complete safety, table, citation and semantic-reference validation.
     ArtifactVersionInlinePrdDetail:
       type: object
       properties:
@@ -3179,9 +3551,9 @@ components:
         schemaVersion:
           type: number
           enum:
-            - 1
+            - 3
         content:
-          $ref: "#/components/schemas/PrdDocumentV1"
+          $ref: "#/components/schemas/PrdDocument"
       required:
         - artifactId
         - artifactVersionId
@@ -4825,6 +5197,23 @@ components:
     PrototypeTypography:
       type: object
       properties:
+        color:
+          anyOf:
+            - type: object
+              properties:
+                kind:
+                  type: string
+                  enum:
+                    - literal
+                value:
+                  type: string
+                  pattern: ^#[0-9a-f]{6}(?:[0-9a-f]{2})?$
+              required:
+                - kind
+                - value
+              additionalProperties: false
+            - $ref: "#/components/schemas/PrototypeTokenReference"
+          description: Optional text color, independent of a control's background fill. Accepts a hex literal or color token; omitted values preserve legacy text fill and control contrast defaults.
         fontFamily:
           $ref: "#/components/schemas/PrototypeStringValue"
         fontSize:
@@ -4989,6 +5378,23 @@ components:
             - object
             - "null"
           properties:
+            color:
+              anyOf:
+                - type: object
+                  properties:
+                    kind:
+                      type: string
+                      enum:
+                        - literal
+                    value:
+                      type: string
+                      pattern: ^#[0-9a-f]{6}(?:[0-9a-f]{2})?$
+                  required:
+                    - kind
+                    - value
+                  additionalProperties: false
+                - $ref: "#/components/schemas/PrototypeTokenReference"
+              description: Optional text color, independent of a control's background fill. Accepts a hex literal or color token; omitted values preserve legacy text fill and control contrast defaults.
             fontFamily:
               $ref: "#/components/schemas/PrototypeStringValue"
             fontSize:
@@ -6451,1007 +6857,6 @@ components:
         - schemaVersion
         - content
       additionalProperties: false
-    ArtifactVersionInlineDetail:
-      oneOf:
-        - $ref: "#/components/schemas/ArtifactVersionInlinePrdDetail"
-        - $ref: "#/components/schemas/ArtifactVersionInlinePrototypeDetail"
-        - $ref: "#/components/schemas/ArtifactVersionInlineDesignSystemDetail"
-        - $ref: "#/components/schemas/ArtifactVersionInlineImageDetail"
-        - $ref: "#/components/schemas/ArtifactVersionInlineCodeDetail"
-        - $ref: "#/components/schemas/ArtifactVersionInlineDocumentDetail"
-        - $ref: "#/components/schemas/ArtifactVersionInlineDataDetail"
-      discriminator:
-        propertyName: kind
-        mapping:
-          prd: "#/components/schemas/ArtifactVersionInlinePrdDetail"
-          prototype: "#/components/schemas/ArtifactVersionInlinePrototypeDetail"
-          design_system: "#/components/schemas/ArtifactVersionInlineDesignSystemDetail"
-          image: "#/components/schemas/ArtifactVersionInlineImageDetail"
-          code: "#/components/schemas/ArtifactVersionInlineCodeDetail"
-          document: "#/components/schemas/ArtifactVersionInlineDocumentDetail"
-          data: "#/components/schemas/ArtifactVersionInlineDataDetail"
-    PrdAdditionalBusinessSection:
-      type: object
-      properties:
-        title:
-          type: string
-          minLength: 5
-          maxLength: 240
-          pattern: ^2\.(?:[5-9]|[1-9]\d+)\s+\S
-        blocks:
-          type: array
-          items:
-            $ref: "#/components/schemas/PrdBlock"
-          minItems: 1
-          maxItems: 500
-      required:
-        - title
-        - blocks
-      additionalProperties: false
-    PrdChannelRow:
-      type: object
-      properties:
-        sequence:
-          type: integer
-          minimum: 1
-          maximum: 3
-        channel:
-          type: string
-          enum:
-            - inApp
-            - wapH5
-            - miniProgram
-        enabled:
-          type: boolean
-      required:
-        - sequence
-        - channel
-        - enabled
-      additionalProperties: false
-    PrdDiagramEdge:
-      type: object
-      properties:
-        id:
-          type: string
-          minLength: 1
-          maxLength: 96
-          pattern: ^[A-Za-z][A-Za-z0-9]*(?:[-_.:][A-Za-z0-9]+)*$
-        from:
-          type: string
-          minLength: 1
-          maxLength: 96
-          pattern: ^[A-Za-z][A-Za-z0-9]*(?:[-_.:][A-Za-z0-9]+)*$
-        to:
-          type: string
-          minLength: 1
-          maxLength: 96
-          pattern: ^[A-Za-z][A-Za-z0-9]*(?:[-_.:][A-Za-z0-9]+)*$
-        label:
-          type:
-            - string
-            - "null"
-          minLength: 1
-          maxLength: 240
-      required:
-        - id
-        - from
-        - to
-        - label
-      additionalProperties: false
-    PrdDiagramNode:
-      type: object
-      properties:
-        id:
-          type: string
-          minLength: 1
-          maxLength: 96
-          pattern: ^[A-Za-z][A-Za-z0-9]*(?:[-_.:][A-Za-z0-9]+)*$
-        label:
-          type: string
-          minLength: 1
-          maxLength: 240
-        group:
-          type:
-            - string
-            - "null"
-          minLength: 1
-          maxLength: 120
-      required:
-        - id
-        - label
-        - group
-      additionalProperties: false
-    PrdDiagram:
-      type: object
-      properties:
-        id:
-          type: string
-          minLength: 1
-          maxLength: 96
-          pattern: ^[A-Za-z][A-Za-z0-9]*(?:[-_.:][A-Za-z0-9]+)*$
-        kind:
-          type: string
-          enum:
-            - productFlow
-            - productArchitecture
-        title:
-          type: string
-          enum:
-            - 图1 产品流程图
-            - 图2 产品架构图
-        description:
-          type: string
-          minLength: 20
-          maxLength: 2000
-        nodes:
-          type: array
-          items:
-            $ref: "#/components/schemas/PrdDiagramNode"
-          minItems: 4
-          maxItems: 40
-        edges:
-          type: array
-          items:
-            $ref: "#/components/schemas/PrdDiagramEdge"
-          minItems: 3
-          maxItems: 80
-      required:
-        - id
-        - kind
-        - title
-        - description
-        - nodes
-        - edges
-      additionalProperties: false
-    PrdSafetyBaselineRow:
-      type: object
-      properties:
-        sequence:
-          type: integer
-          minimum: 1
-          maximum: 21
-        applicability:
-          type: string
-          enum:
-            - 是
-            - 否
-            - 不涉及
-        remarks:
-          type:
-            - string
-            - "null"
-          minLength: 1
-          maxLength: 1000
-      required:
-        - sequence
-        - applicability
-        - remarks
-      additionalProperties: false
-    PrdVersionHistoryEntry:
-      type: object
-      properties:
-        status:
-          type: string
-          enum:
-            - 讨论稿
-            - 评审中
-            - 已定稿
-        author:
-          type: string
-          minLength: 1
-          maxLength: 120
-        participants:
-          type: array
-          items:
-            type: string
-            minLength: 1
-            maxLength: 120
-          minItems: 1
-          maxItems: 30
-        startDate:
-          type: string
-          pattern: ^\d{4}-\d{2}-\d{2}$
-        endDate:
-          type: string
-          pattern: ^\d{4}-\d{2}-\d{2}$
-        notes:
-          type: string
-          minLength: 1
-          maxLength: 1000
-      required:
-        - status
-        - author
-        - participants
-        - startDate
-        - endDate
-        - notes
-      additionalProperties: false
-    PrdDocumentV2:
-      type: object
-      properties:
-        protocol:
-          type: string
-          enum:
-            - workbench.prd.v2
-        documentId:
-          type: string
-          minLength: 1
-          maxLength: 96
-          pattern: ^[A-Za-z][A-Za-z0-9]*(?:[-_.:][A-Za-z0-9]+)*$
-        title:
-          type: string
-          minLength: 1
-          maxLength: 240
-        revision:
-          $ref: "#/components/schemas/PrdRevision"
-        cover:
-          type: object
-          properties:
-            workOrderName:
-              type: string
-              minLength: 1
-              maxLength: 200
-            title:
-              type: string
-              minLength: 1
-              maxLength: 240
-          required:
-            - workOrderName
-            - title
-          additionalProperties: false
-        versionHistory:
-          type: array
-          items:
-            $ref: "#/components/schemas/PrdVersionHistoryEntry"
-          minItems: 1
-          maxItems: 100
-        tableOfContents:
-          type: object
-          properties:
-            title:
-              type: string
-              enum:
-                - 目 录
-            entries:
-              type: array
-              items:
-                type: string
-                minLength: 1
-                maxLength: 240
-              minItems: 11
-              maxItems: 61
-          required:
-            - title
-            - entries
-          additionalProperties: false
-        assumptions:
-          type: array
-          items:
-            $ref: "#/components/schemas/PrdAssumption"
-          maxItems: 500
-        citations:
-          type: array
-          items:
-            $ref: "#/components/schemas/ArtifactCitation"
-          maxItems: 1000
-        sections:
-          type: object
-          properties:
-            introduction:
-              type: object
-              properties:
-                title:
-                  type: string
-                  enum:
-                    - 1 引言
-                background:
-                  type: object
-                  properties:
-                    title:
-                      type: string
-                      enum:
-                        - 1.1项目背景
-                    blocks:
-                      type: array
-                      items:
-                        $ref: "#/components/schemas/PrdBlock"
-                      minItems: 1
-                      maxItems: 500
-                  required:
-                    - title
-                    - blocks
-                  additionalProperties: false
-                scope:
-                  type: object
-                  properties:
-                    title:
-                      type: string
-                      enum:
-                        - 1.2文档范围
-                    blocks:
-                      type: array
-                      items:
-                        $ref: "#/components/schemas/PrdBlock"
-                      minItems: 1
-                      maxItems: 500
-                  required:
-                    - title
-                    - blocks
-                  additionalProperties: false
-                usageScenarios:
-                  type: object
-                  properties:
-                    title:
-                      type: string
-                      enum:
-                        - 1.3使用场景（必填）
-                    blocks:
-                      type: array
-                      items:
-                        $ref: "#/components/schemas/PrdBlock"
-                      minItems: 1
-                      maxItems: 500
-                    channelTable:
-                      type: object
-                      properties:
-                        title:
-                          type: string
-                          enum:
-                            - 活动投放渠道
-                        rows:
-                          type: array
-                          items:
-                            $ref: "#/components/schemas/PrdChannelRow"
-                          minItems: 3
-                          maxItems: 3
-                      required:
-                        - title
-                        - rows
-                      additionalProperties: false
-                  required:
-                    - title
-                    - blocks
-                    - channelTable
-                  additionalProperties: false
-              required:
-                - title
-                - background
-                - scope
-                - usageScenarios
-              additionalProperties: false
-            businessRequirements:
-              type: object
-              properties:
-                title:
-                  type: string
-                  enum:
-                    - 2 业务需求
-                summary:
-                  $ref: "#/components/schemas/PrdInlineContent"
-                pageLinks:
-                  type: object
-                  properties:
-                    title:
-                      type: string
-                      enum:
-                        - 2.1页面链接
-                    blocks:
-                      type: array
-                      items:
-                        $ref: "#/components/schemas/PrdBlock"
-                      minItems: 1
-                      maxItems: 500
-                  required:
-                    - title
-                    - blocks
-                  additionalProperties: false
-                coreRules:
-                  type: object
-                  properties:
-                    title:
-                      type: string
-                      enum:
-                        - 2.2 核心业务规则/功能说明
-                    blocks:
-                      type: array
-                      items:
-                        $ref: "#/components/schemas/PrdBlock"
-                      minItems: 1
-                      maxItems: 500
-                  required:
-                    - title
-                    - blocks
-                  additionalProperties: false
-                flowAndPages:
-                  type: object
-                  properties:
-                    title:
-                      type: string
-                      enum:
-                        - 2.3 核心流程/状态/页面要求
-                    blocks:
-                      type: array
-                      items:
-                        $ref: "#/components/schemas/PrdBlock"
-                      minItems: 1
-                      maxItems: 500
-                    diagrams:
-                      type: array
-                      items:
-                        $ref: "#/components/schemas/PrdDiagram"
-                      minItems: 2
-                      maxItems: 2
-                  required:
-                    - title
-                    - blocks
-                    - diagrams
-                  additionalProperties: false
-                acceptanceCriteria:
-                  type: object
-                  properties:
-                    title:
-                      type: string
-                      enum:
-                        - 2.4 验收标准
-                    blocks:
-                      type: array
-                      items:
-                        $ref: "#/components/schemas/PrdBlock"
-                      minItems: 1
-                      maxItems: 500
-                  required:
-                    - title
-                    - blocks
-                  additionalProperties: false
-                additionalSections:
-                  type: array
-                  items:
-                    $ref: "#/components/schemas/PrdAdditionalBusinessSection"
-                  maxItems: 50
-                  default: []
-              required:
-                - title
-                - summary
-                - pageLinks
-                - coreRules
-                - flowAndPages
-                - acceptanceCriteria
-              additionalProperties: false
-            degradation:
-              type: object
-              properties:
-                title:
-                  type: string
-                  enum:
-                    - 3 业务降级方案（必填）
-                applicable:
-                  type: boolean
-                content:
-                  $ref: "#/components/schemas/PrdInlineContent"
-              required:
-                - title
-                - applicable
-                - content
-              additionalProperties: false
-            safetyBaseline:
-              type: object
-              properties:
-                title:
-                  type: string
-                  enum:
-                    - 4 需求安全基线要求（必填）
-                intro:
-                  type: string
-                  enum:
-                    - |-
-                      该部分内容为必填项，请按照如下表格中的内容先进行自查，并按照如下要求完善需求文档：
-                      1、如选择“是”，代表本项自查内容已符合安全要求，需要提供截图违依据
-                      2、如选择“否”，代表本项自查内容暂时不符合安全要求，请在需求文档中增加本部分内容安全改造需求，并发送网信安需求评审邮件，附上本需求文档用于安全评审；
-                      3、如选择“不涉及”，代表本项目各项需求安全基线均不涉及，则无需召开网信安需求评审会。
-                      建议：该表格请业务人员和开发人员共同参与自查并填写。
-                rows:
-                  type: array
-                  items:
-                    $ref: "#/components/schemas/PrdSafetyBaselineRow"
-                  minItems: 21
-                  maxItems: 21
-              required:
-                - title
-                - intro
-                - rows
-              additionalProperties: false
-          required:
-            - introduction
-            - businessRequirements
-            - degradation
-            - safetyBaseline
-          additionalProperties: false
-      required:
-        - protocol
-        - documentId
-        - title
-        - revision
-        - cover
-        - versionHistory
-        - tableOfContents
-        - assumptions
-        - citations
-        - sections
-      additionalProperties: false
-      description: PRD v2 cover, fixed sections, channel table, diagrams, degradation plan, safety baseline, placeholders, tables, and IR references are validated by the runtime Zod contract.
-    ArtifactVersionInlinePrdV2Detail:
-      type: object
-      properties:
-        artifactId:
-          type: string
-          minLength: 1
-          maxLength: 128
-        artifactVersionId:
-          type: string
-          minLength: 1
-          maxLength: 128
-        version:
-          type: integer
-          exclusiveMinimum: 0
-        status:
-          $ref: "#/components/schemas/ArtifactVersionStatus"
-        checksum:
-          type: string
-          pattern: ^[a-f0-9]{64}$
-        citations:
-          type: array
-          items:
-            $ref: "#/components/schemas/ArtifactCitation"
-          maxItems: 1000
-        createdByRunId:
-          type:
-            - string
-            - "null"
-          minLength: 1
-          maxLength: 128
-        knowledgeReleaseId:
-          type:
-            - string
-            - "null"
-          minLength: 1
-          maxLength: 128
-        sourcePrdVersionId:
-          type:
-            - string
-            - "null"
-          minLength: 1
-          maxLength: 128
-        createdAt:
-          type: string
-          format: date-time
-        contentMode:
-          type: string
-          enum:
-            - inline
-        kind:
-          type: string
-          enum:
-            - prd
-        schemaVersion:
-          type: number
-          enum:
-            - 2
-        content:
-          $ref: "#/components/schemas/PrdDocumentV2"
-      required:
-        - artifactId
-        - artifactVersionId
-        - version
-        - status
-        - checksum
-        - citations
-        - createdByRunId
-        - knowledgeReleaseId
-        - createdAt
-        - contentMode
-        - kind
-        - schemaVersion
-        - content
-      additionalProperties: false
-    PrdTemplateDiagram:
-      type: object
-      properties:
-        id:
-          type: string
-          minLength: 1
-          maxLength: 96
-          pattern: ^[A-Za-z][A-Za-z0-9]*(?:[-_.:][A-Za-z0-9]+)*$
-        kind:
-          type: string
-          enum:
-            - productFlow
-            - productArchitecture
-        title:
-          type: string
-          minLength: 4
-          maxLength: 240
-          pattern: ^图[1-9]\d*\s+\S
-        description:
-          type: string
-          minLength: 20
-          maxLength: 2000
-        nodes:
-          type: array
-          items:
-            $ref: "#/components/schemas/PrdDiagramNode"
-          minItems: 2
-          maxItems: 40
-        edges:
-          type: array
-          items:
-            $ref: "#/components/schemas/PrdDiagramEdge"
-          minItems: 1
-          maxItems: 80
-      required:
-        - id
-        - kind
-        - title
-        - description
-        - nodes
-        - edges
-      additionalProperties: false
-    PrdV3FunctionSection:
-      type: object
-      properties:
-        title:
-          type: string
-          minLength: 5
-          maxLength: 240
-          pattern: ^2\.(?:[2-9]|[1-9]\d+)\s+\S
-        blocks:
-          type: array
-          items:
-            $ref: "#/components/schemas/PrdBlock"
-          minItems: 1
-          maxItems: 500
-        id:
-          type: string
-          minLength: 1
-          maxLength: 96
-          pattern: ^[A-Za-z][A-Za-z0-9]*(?:[-_.:][A-Za-z0-9]+)*$
-        diagrams:
-          type: array
-          items:
-            $ref: "#/components/schemas/PrdTemplateDiagram"
-          maxItems: 2
-          default: []
-      required:
-        - title
-        - blocks
-        - id
-      additionalProperties: false
-    PrdDocumentV3:
-      type: object
-      properties:
-        protocol:
-          type: string
-          enum:
-            - workbench.prd.v3
-        documentId:
-          type: string
-          minLength: 1
-          maxLength: 96
-          pattern: ^[A-Za-z][A-Za-z0-9]*(?:[-_.:][A-Za-z0-9]+)*$
-        title:
-          type: string
-          minLength: 1
-          maxLength: 240
-        revision:
-          $ref: "#/components/schemas/PrdRevision"
-        cover:
-          type: object
-          properties:
-            workOrderName:
-              type: string
-              minLength: 1
-              maxLength: 200
-            title:
-              type: string
-              minLength: 1
-              maxLength: 240
-          required:
-            - workOrderName
-            - title
-          additionalProperties: false
-        versionHistory:
-          type: array
-          items:
-            $ref: "#/components/schemas/PrdVersionHistoryEntry"
-          minItems: 1
-          maxItems: 100
-        tableOfContents:
-          type: object
-          properties:
-            title:
-              type: string
-              enum:
-                - 目 录
-            entries:
-              type: array
-              items:
-                type: string
-                minLength: 1
-                maxLength: 240
-              minItems: 9
-              maxItems: 58
-          required:
-            - title
-            - entries
-          additionalProperties: false
-        assumptions:
-          type: array
-          items:
-            $ref: "#/components/schemas/PrdAssumption"
-          maxItems: 500
-        citations:
-          type: array
-          items:
-            $ref: "#/components/schemas/ArtifactCitation"
-          maxItems: 1000
-        sections:
-          type: object
-          properties:
-            introduction:
-              type: object
-              properties:
-                title:
-                  type: string
-                  enum:
-                    - 1 引言
-                background:
-                  type: object
-                  properties:
-                    title:
-                      type: string
-                      enum:
-                        - 1.1项目背景
-                    blocks:
-                      type: array
-                      items:
-                        $ref: "#/components/schemas/PrdBlock"
-                      minItems: 1
-                      maxItems: 500
-                  required:
-                    - title
-                    - blocks
-                  additionalProperties: false
-                scope:
-                  type: object
-                  properties:
-                    title:
-                      type: string
-                      enum:
-                        - 1.2文档范围
-                    blocks:
-                      type: array
-                      items:
-                        $ref: "#/components/schemas/PrdBlock"
-                      minItems: 1
-                      maxItems: 500
-                  required:
-                    - title
-                    - blocks
-                  additionalProperties: false
-                usageScenarios:
-                  type: object
-                  properties:
-                    title:
-                      type: string
-                      enum:
-                        - 1.3使用场景（必填）
-                    blocks:
-                      type: array
-                      items:
-                        $ref: "#/components/schemas/PrdBlock"
-                      minItems: 1
-                      maxItems: 500
-                    channelTable:
-                      type: object
-                      properties:
-                        title:
-                          type: string
-                          enum:
-                            - 活动投放渠道
-                        rows:
-                          type: array
-                          items:
-                            $ref: "#/components/schemas/PrdChannelRow"
-                          minItems: 3
-                          maxItems: 3
-                      required:
-                        - title
-                        - rows
-                      additionalProperties: false
-                  required:
-                    - title
-                    - blocks
-                    - channelTable
-                  additionalProperties: false
-              required:
-                - title
-                - background
-                - scope
-                - usageScenarios
-              additionalProperties: false
-            businessRequirements:
-              type: object
-              properties:
-                title:
-                  type: string
-                  enum:
-                    - 2 业务需求
-                summary:
-                  $ref: "#/components/schemas/PrdInlineContent"
-                pageLinks:
-                  type: object
-                  properties:
-                    title:
-                      type: string
-                      enum:
-                        - 2.1页面链接
-                    blocks:
-                      type: array
-                      items:
-                        $ref: "#/components/schemas/PrdBlock"
-                      minItems: 1
-                      maxItems: 500
-                  required:
-                    - title
-                    - blocks
-                  additionalProperties: false
-                functionSections:
-                  type: array
-                  items:
-                    $ref: "#/components/schemas/PrdV3FunctionSection"
-                  minItems: 1
-                  maxItems: 50
-              required:
-                - title
-                - summary
-                - pageLinks
-                - functionSections
-              additionalProperties: false
-            degradation:
-              type: object
-              properties:
-                title:
-                  type: string
-                  enum:
-                    - 3 业务降级方案（必填）
-                applicable:
-                  type: boolean
-                content:
-                  $ref: "#/components/schemas/PrdInlineContent"
-              required:
-                - title
-                - applicable
-                - content
-              additionalProperties: false
-            safetyBaseline:
-              type: object
-              properties:
-                title:
-                  type: string
-                  enum:
-                    - 4 需求安全基线要求（必填）
-                intro:
-                  type: string
-                  enum:
-                    - |-
-                      该部分内容为必填项，请按照如下表格中的内容先进行自查，并按照如下要求完善需求文档：
-                      1、如选择“是”，代表本项自查内容已符合安全要求，需要提供截图违依据
-                      2、如选择“否”，代表本项自查内容暂时不符合安全要求，请在需求文档中增加本部分内容安全改造需求，并发送网信安需求评审邮件，附上本需求文档用于安全评审；
-                      3、如选择“不涉及”，代表本项目各项需求安全基线均不涉及，则无需召开网信安需求评审会。
-                      建议：该表格请业务人员和开发人员共同参与自查并填写。
-                rows:
-                  type: array
-                  items:
-                    $ref: "#/components/schemas/PrdSafetyBaselineRow"
-                  minItems: 21
-                  maxItems: 21
-              required:
-                - title
-                - intro
-                - rows
-              additionalProperties: false
-          required:
-            - introduction
-            - businessRequirements
-            - degradation
-            - safetyBaseline
-          additionalProperties: false
-      required:
-        - protocol
-        - documentId
-        - title
-        - revision
-        - cover
-        - versionHistory
-        - tableOfContents
-        - assumptions
-        - citations
-        - sections
-      additionalProperties: false
-      description: PRD v3 uses contiguous function-specific sections, optional typed diagrams, embedded or later acceptance, and the same complete safety, table, citation and semantic-reference validation.
-    ArtifactVersionInlinePrdV3Detail:
-      type: object
-      properties:
-        artifactId:
-          type: string
-          minLength: 1
-          maxLength: 128
-        artifactVersionId:
-          type: string
-          minLength: 1
-          maxLength: 128
-        version:
-          type: integer
-          exclusiveMinimum: 0
-        status:
-          $ref: "#/components/schemas/ArtifactVersionStatus"
-        checksum:
-          type: string
-          pattern: ^[a-f0-9]{64}$
-        citations:
-          type: array
-          items:
-            $ref: "#/components/schemas/ArtifactCitation"
-          maxItems: 1000
-        createdByRunId:
-          type:
-            - string
-            - "null"
-          minLength: 1
-          maxLength: 128
-        knowledgeReleaseId:
-          type:
-            - string
-            - "null"
-          minLength: 1
-          maxLength: 128
-        sourcePrdVersionId:
-          type:
-            - string
-            - "null"
-          minLength: 1
-          maxLength: 128
-        createdAt:
-          type: string
-          format: date-time
-        contentMode:
-          type: string
-          enum:
-            - inline
-        kind:
-          type: string
-          enum:
-            - prd
-        schemaVersion:
-          type: number
-          enum:
-            - 3
-        content:
-          $ref: "#/components/schemas/PrdDocumentV3"
-      required:
-        - artifactId
-        - artifactVersionId
-        - version
-        - status
-        - checksum
-        - citations
-        - createdByRunId
-        - knowledgeReleaseId
-        - createdAt
-        - contentMode
-        - kind
-        - schemaVersion
-        - content
-      additionalProperties: false
     ArtifactVersionInlineSourcePrototypeDetail:
       type: object
       properties:
@@ -7526,12 +6931,26 @@ components:
         - schemaVersion
         - content
       additionalProperties: false
-    ArtifactVersionDetail:
-      oneOf:
-        - $ref: "#/components/schemas/ArtifactVersionInlineDetail"
-        - $ref: "#/components/schemas/ArtifactVersionInlinePrdV2Detail"
-        - $ref: "#/components/schemas/ArtifactVersionInlinePrdV3Detail"
+    ArtifactVersionInlineDetail:
+      anyOf:
+        - $ref: "#/components/schemas/ArtifactVersionInlinePrdDetail"
+        - $ref: "#/components/schemas/ArtifactVersionInlinePrototypeDetail"
         - $ref: "#/components/schemas/ArtifactVersionInlineSourcePrototypeDetail"
+        - $ref: "#/components/schemas/ArtifactVersionInlineDesignSystemDetail"
+        - $ref: "#/components/schemas/ArtifactVersionInlineImageDetail"
+        - $ref: "#/components/schemas/ArtifactVersionInlineCodeDetail"
+        - $ref: "#/components/schemas/ArtifactVersionInlineDocumentDetail"
+        - $ref: "#/components/schemas/ArtifactVersionInlineDataDetail"
+    ArtifactVersionDetail:
+      anyOf:
+        - $ref: "#/components/schemas/ArtifactVersionInlinePrdDetail"
+        - $ref: "#/components/schemas/ArtifactVersionInlinePrototypeDetail"
+        - $ref: "#/components/schemas/ArtifactVersionInlineSourcePrototypeDetail"
+        - $ref: "#/components/schemas/ArtifactVersionInlineDesignSystemDetail"
+        - $ref: "#/components/schemas/ArtifactVersionInlineImageDetail"
+        - $ref: "#/components/schemas/ArtifactVersionInlineCodeDetail"
+        - $ref: "#/components/schemas/ArtifactVersionInlineDocumentDetail"
+        - $ref: "#/components/schemas/ArtifactVersionInlineDataDetail"
         - $ref: "#/components/schemas/ArtifactVersionBlobDetail"
     ArtifactVersionFavoriteListItem:
       type: object
@@ -7643,7 +7062,7 @@ components:
         - createdAt
         - contentMode
       additionalProperties: false
-      description: PRD and prototype list items require schemaVersion 1; enforced by the runtime Zod contract.
+      description: PRD list items require schemaVersion 3 and prototype list items use schemaVersion 1 or inline schemaVersion 2; enforced by the runtime Zod contract.
     ArtifactVersionList:
       type: object
       properties:
@@ -7744,40 +7163,6 @@ components:
         - artifactVersionId
         - version
       additionalProperties: false
-    ExportCapabilityUnavailableReason:
-      type: string
-      enum:
-        - EXPORT_FIGMA_UNAVAILABLE
-        - EXPORT_EXTERNAL_AI_STUDIO_UNAVAILABLE
-        - EXPORT_EXTERNAL_AUTHENTICATION_REQUIRED
-    ExternalExportAuthentication:
-      type: string
-      enum:
-        - not_required
-        - required
-        - authenticated
-    AvailableExportCapability:
-      type: object
-      properties:
-        available:
-          type: boolean
-        authentication:
-          $ref: "#/components/schemas/ExternalExportAuthentication"
-        reasonCode:
-          type:
-            - string
-            - "null"
-          enum:
-            - EXPORT_FIGMA_UNAVAILABLE
-            - EXPORT_EXTERNAL_AI_STUDIO_UNAVAILABLE
-            - EXPORT_EXTERNAL_AUTHENTICATION_REQUIRED
-            - null
-      required:
-        - available
-        - authentication
-        - reasonCode
-      additionalProperties: false
-      description: Export capability availability, authentication state, and stable reason codes remain mutually consistent; enforced by the runtime Zod contract.
     BoardEdge:
       type: object
       properties:
@@ -12040,43 +11425,7 @@ components:
           enum:
             - prd
         document:
-          $ref: "#/components/schemas/PrdDocumentV1"
-      required:
-        - baseArtifactVersionId
-        - kind
-        - document
-      additionalProperties: false
-    CreatePrdV2ArtifactVersionRequest:
-      type: object
-      properties:
-        baseArtifactVersionId:
-          type: string
-          minLength: 1
-          maxLength: 128
-        kind:
-          type: string
-          enum:
-            - prd
-        document:
-          $ref: "#/components/schemas/PrdDocumentV2"
-      required:
-        - baseArtifactVersionId
-        - kind
-        - document
-      additionalProperties: false
-    CreatePrdV3ArtifactVersionRequest:
-      type: object
-      properties:
-        baseArtifactVersionId:
-          type: string
-          minLength: 1
-          maxLength: 128
-        kind:
-          type: string
-          enum:
-            - prd
-        document:
-          $ref: "#/components/schemas/PrdDocumentV3"
+          $ref: "#/components/schemas/PrdDocument"
       required:
         - baseArtifactVersionId
         - kind
@@ -12119,11 +11468,9 @@ components:
         - document
       additionalProperties: false
     CreateArtifactVersionRequest:
-      oneOf:
+      anyOf:
         - $ref: "#/components/schemas/CreatePrdArtifactVersionRequest"
         - $ref: "#/components/schemas/CreatePrototypeArtifactVersionRequest"
-        - $ref: "#/components/schemas/CreatePrdV2ArtifactVersionRequest"
-        - $ref: "#/components/schemas/CreatePrdV3ArtifactVersionRequest"
         - $ref: "#/components/schemas/CreateSourcePrototypeArtifactVersionRequest"
     CreateDesignSystemRequest:
       type: object
@@ -12138,10 +11485,6 @@ components:
         - title
         - document
       additionalProperties: false
-    CreateExportOptions:
-      type: object
-      additionalProperties:
-        $ref: "#/components/schemas/JsonValue"
     ExportFormat:
       type: string
       enum:
@@ -12151,6 +11494,10 @@ components:
         - mcp
         - docx
         - pdf
+    ExportOptions:
+      type: object
+      additionalProperties:
+        $ref: "#/components/schemas/JsonValue"
     ExportPackaging:
       type: string
       enum:
@@ -12235,7 +11582,7 @@ components:
         selection:
           $ref: "#/components/schemas/ExportSelection"
         options:
-          $ref: "#/components/schemas/CreateExportOptions"
+          $ref: "#/components/schemas/ExportOptions"
       required:
         - releaseId
         - format
@@ -12243,21 +11590,6 @@ components:
         - selection
       additionalProperties: false
       description: Figma Export uses the fixed versioned Workbench Importer contract and does not accept client-controlled converter options.
-    ExternalExportTarget:
-      type: string
-      enum:
-        - ai_studio
-        - netlify
-        - lovable
-        - bolt
-    CreateExternalExportDeliveryRequest:
-      type: object
-      properties:
-        target:
-          $ref: "#/components/schemas/ExternalExportTarget"
-      required:
-        - target
-      additionalProperties: false
     SubmissionIntentClientFingerprint:
       type: string
       minLength: 1
@@ -12528,109 +11860,6 @@ components:
         - boardId
         - boardRevision
       additionalProperties: false
-    CreateProjectRemixRequest:
-      type: object
-      properties:
-        workspaceId:
-          type: string
-          minLength: 1
-          maxLength: 128
-        title:
-          type: string
-          minLength: 1
-          maxLength: 160
-      required:
-        - workspaceId
-      additionalProperties: false
-    ProjectStatus:
-      type: string
-      enum:
-        - active
-        - archived
-    Project:
-      type: object
-      properties:
-        id:
-          type: string
-          minLength: 1
-          maxLength: 128
-        workspaceId:
-          type: string
-          minLength: 1
-          maxLength: 128
-        title:
-          type: string
-          minLength: 1
-          maxLength: 160
-        summary:
-          type:
-            - string
-            - "null"
-          maxLength: 2000
-        status:
-          $ref: "#/components/schemas/ProjectStatus"
-        revision:
-          $ref: "#/components/schemas/Revision"
-        createdAt:
-          type: string
-          format: date-time
-        updatedAt:
-          type: string
-          format: date-time
-      required:
-        - id
-        - workspaceId
-        - title
-        - summary
-        - status
-        - revision
-        - createdAt
-        - updatedAt
-    ProjectLineage:
-      type: object
-      properties:
-        targetProjectId:
-          type: string
-          minLength: 1
-          maxLength: 128
-        sourceReleaseId:
-          type: string
-          minLength: 1
-          maxLength: 128
-        sourceShareId:
-          type: string
-          minLength: 1
-          maxLength: 128
-        createdById:
-          type: string
-          minLength: 1
-          maxLength: 128
-        workspaceId:
-          type: string
-          minLength: 1
-          maxLength: 128
-        createdAt:
-          type: string
-          format: date-time
-      required:
-        - targetProjectId
-        - sourceReleaseId
-        - sourceShareId
-        - createdById
-        - workspaceId
-        - createdAt
-      additionalProperties: false
-    CreateProjectRemixResponse:
-      type: object
-      properties:
-        project:
-          $ref: "#/components/schemas/Project"
-        lineage:
-          $ref: "#/components/schemas/ProjectLineage"
-      required:
-        - project
-        - lineage
-      additionalProperties: false
     CreateProjectRequest:
       type: object
       properties:
@@ -12643,49 +11872,74 @@ components:
           maxLength: 2000
       required:
         - title
-    SubmissionIntentAttachmentRequest:
-      oneOf:
-        - type: object
+    PrototypeExportFormat:
+      type: string
+      enum:
+        - html
+        - react
+    CreatePrototypeExportRequest:
+      type: object
+      properties:
+        revisionId:
+          type: string
+          minLength: 1
+          maxLength: 128
+        format:
+          $ref: "#/components/schemas/PrototypeExportFormat"
+      required:
+        - revisionId
+        - format
+      additionalProperties: false
+    PrototypeFeedbackAnchor:
+      type: object
+      properties:
+        pageId:
+          type: string
+          minLength: 1
+          maxLength: 128
+        selector:
+          type: string
+          minLength: 1
+          maxLength: 500
+          pattern: ^[A-Za-z][A-Za-z0-9_.:#\- >\[\]="']*$
+        quote:
+          type: string
+          maxLength: 1000
+      required:
+        - pageId
+        - selector
+      additionalProperties: false
+    CreatePrototypeFeedbackRequest:
+      type: object
+      properties:
+        body:
+          type: string
+          minLength: 1
+          maxLength: 4000
+        anchor:
+          type:
+            - object
+            - "null"
           properties:
-            kind:
-              type: string
-              enum:
-                - existing
-            fileAssetId:
+            pageId:
               type: string
               minLength: 1
               maxLength: 128
-          required:
-            - kind
-            - fileAssetId
-          additionalProperties: false
-        - type: object
-          properties:
-            kind:
+            selector:
               type: string
-              enum:
-                - upload
-            clientFingerprint:
-              $ref: "#/components/schemas/SubmissionIntentClientFingerprint"
-            fileName:
-              $ref: "#/components/schemas/FileName"
-            declaredMediaType:
+              minLength: 1
+              maxLength: 500
+              pattern: ^[A-Za-z][A-Za-z0-9_.:#\- >\[\]="']*$
+            quote:
               type: string
-              minLength: 3
-              maxLength: 255
-              pattern: ^[a-z0-9][a-z0-9!#$&^_.+-]*\/[a-z0-9][a-z0-9!#$&^_.+-]*$
-            byteSize:
-              $ref: "#/components/schemas/UploadObjectByteSize"
-            lastModified:
-              $ref: "#/components/schemas/SafeInteger"
+              maxLength: 1000
           required:
-            - kind
-            - clientFingerprint
-            - fileName
-            - declaredMediaType
-            - byteSize
-            - lastModified
+            - pageId
+            - selector
           additionalProperties: false
+      required:
+        - body
+      additionalProperties: false
     RunArtifactTarget:
       type: object
       properties:
@@ -12817,6 +12071,220 @@ components:
         - redesign
         - ideate
         - edit
+    StartRunRequest:
+      type: object
+      properties:
+        prompt:
+          type: string
+          minLength: 1
+          maxLength: 50000
+        modelId:
+          type: string
+          minLength: 1
+          maxLength: 128
+        workflow:
+          $ref: "#/components/schemas/RunWorkflow"
+        generationIntent:
+          type:
+            - string
+            - "null"
+          enum:
+            - followup-design
+            - interactive-prototype
+            - null
+          default: null
+        targetSurface:
+          $ref: "#/components/schemas/RunTargetSurface"
+        designStyle:
+          $ref: "#/components/schemas/RunDesignStyle"
+        sourceIds:
+          $ref: "#/components/schemas/RunSourceIds"
+        artifactTargets:
+          type: array
+          items:
+            $ref: "#/components/schemas/RunArtifactTarget"
+          maxItems: 12
+          default: []
+          description: Immutable ready ArtifactVersion selections in runtime target order; Generate Prototype requires one or more explicit screen ids on every source target
+        requestedArtifactKinds:
+          type: array
+          items:
+            $ref: "#/components/schemas/RuntimeRequestedArtifactKind"
+          maxItems: 12
+          default: []
+        canvasSnapshot:
+          type:
+            - object
+            - "null"
+          properties:
+            protocol:
+              type: string
+              enum:
+                - workbench.canvas-snapshot.v1
+            projectId:
+              type: string
+              minLength: 1
+              maxLength: 128
+              pattern: ^[A-Za-z0-9][A-Za-z0-9._:-]*$
+              description: Canvas entity ids are bounded opaque identifiers and cannot be URI schemes; enforced by the runtime Zod contract.
+            threadId:
+              type: string
+              minLength: 1
+              maxLength: 128
+              pattern: ^[A-Za-z0-9][A-Za-z0-9._:-]*$
+              description: Canvas entity ids are bounded opaque identifiers and cannot be URI schemes; enforced by the runtime Zod contract.
+            runId:
+              type:
+                - string
+                - "null"
+              minLength: 1
+              maxLength: 128
+              pattern: ^[A-Za-z0-9][A-Za-z0-9._:-]*$
+              description: Canvas entity ids are bounded opaque identifiers and cannot be URI schemes; enforced by the runtime Zod contract.
+            boardId:
+              type: string
+              minLength: 1
+              maxLength: 128
+              pattern: ^[A-Za-z0-9][A-Za-z0-9._:-]*$
+              description: Canvas entity ids are bounded opaque identifiers and cannot be URI schemes; enforced by the runtime Zod contract.
+            clientSessionId:
+              type: string
+              minLength: 8
+              maxLength: 128
+              pattern: ^[A-Za-z0-9][A-Za-z0-9._:-]*$
+              description: Canvas browser session ids are bounded opaque identifiers and cannot be URI schemes; enforced by the runtime Zod contract.
+            projectSessionGeneration:
+              $ref: "#/components/schemas/Revision"
+            boardRevision:
+              $ref: "#/components/schemas/Revision"
+            canvasStateRevision:
+              $ref: "#/components/schemas/Revision"
+            capturedAt:
+              type: string
+              format: date-time
+            expiresAt:
+              type: string
+              format: date-time
+            viewport:
+              $ref: "#/components/schemas/CanvasViewport"
+            screens:
+              type: array
+              items:
+                $ref: "#/components/schemas/CanvasScreenSummary"
+              maxItems: 512
+            visibleScreens:
+              type: array
+              items:
+                $ref: "#/components/schemas/CanvasAgentScreenReference"
+              maxItems: 512
+            selectedScreens:
+              type: array
+              items:
+                $ref: "#/components/schemas/CanvasAgentScreenReference"
+              maxItems: 512
+          default: null
+          required:
+            - protocol
+            - projectId
+            - threadId
+            - runId
+            - boardId
+            - clientSessionId
+            - projectSessionGeneration
+            - boardRevision
+            - canvasStateRevision
+            - capturedAt
+            - expiresAt
+            - viewport
+            - screens
+            - visibleScreens
+            - selectedScreens
+          additionalProperties: false
+          description: Canvas snapshots use unique screen references and only expose references declared by the snapshot; enforced by the runtime Zod contract.
+      required:
+        - prompt
+        - modelId
+        - workflow
+        - targetSurface
+        - designStyle
+      additionalProperties: false
+      description: Redesign requires a ready Import Source; Edit requires an Artifact target; Generate accepts explicit non-empty screen targets only when prototype is requested; Redesign and Ideate forbid targets. Enforced by the runtime Zod contract.
+    CreatePrototypePlanRequest:
+      type: object
+      properties:
+        prompt:
+          type: string
+          minLength: 1
+          maxLength: 20000
+        title:
+          type: string
+          minLength: 1
+          maxLength: 240
+        generationRequest:
+          $ref: "#/components/schemas/StartRunRequest"
+      required:
+        - prompt
+        - title
+        - generationRequest
+      additionalProperties: false
+    CreatePrototypeShareRequest:
+      type: object
+      properties:
+        revisionId:
+          type: string
+          minLength: 1
+          maxLength: 128
+        expiresAt:
+          type:
+            - string
+            - "null"
+          format: date-time
+      required:
+        - revisionId
+      additionalProperties: false
+    SubmissionIntentAttachmentRequest:
+      oneOf:
+        - type: object
+          properties:
+            kind:
+              type: string
+              enum:
+                - existing
+            fileAssetId:
+              type: string
+              minLength: 1
+              maxLength: 128
+          required:
+            - kind
+            - fileAssetId
+          additionalProperties: false
+        - type: object
+          properties:
+            kind:
+              type: string
+              enum:
+                - upload
+            clientFingerprint:
+              $ref: "#/components/schemas/SubmissionIntentClientFingerprint"
+            fileName:
+              $ref: "#/components/schemas/FileName"
+            declaredMediaType:
+              type: string
+              minLength: 3
+              maxLength: 255
+              pattern: ^[a-z0-9][a-z0-9!#$&^_.+-]*\/[a-z0-9][a-z0-9!#$&^_.+-]*$
+            byteSize:
+              $ref: "#/components/schemas/UploadObjectByteSize"
+            lastModified:
+              $ref: "#/components/schemas/SafeInteger"
+          required:
+            - kind
+            - clientFingerprint
+            - fileName
+            - declaredMediaType
+            - byteSize
+            - lastModified
+          additionalProperties: false
     SubmissionIntentRunRequest:
       type: object
       properties:
@@ -13800,6 +13268,27 @@ components:
         - kind
         - dimension
       additionalProperties: false
+    ExportCapabilityUnavailableReason:
+      type: string
+      enum:
+        - EXPORT_FIGMA_UNAVAILABLE
+    ExportCapability:
+      type: object
+      properties:
+        available:
+          type: boolean
+        reasonCode:
+          type:
+            - string
+            - "null"
+          enum:
+            - EXPORT_FIGMA_UNAVAILABLE
+            - null
+      required:
+        - available
+        - reasonCode
+      additionalProperties: false
+      description: Export capability availability, authentication state, and stable reason codes remain mutually consistent; enforced by the runtime Zod contract.
     ExportCapabilities:
       type: object
       properties:
@@ -13807,17 +13296,17 @@ components:
           type: object
           properties:
             html:
-              $ref: "#/components/schemas/AvailableExportCapability"
+              $ref: "#/components/schemas/ExportCapability"
             react:
-              $ref: "#/components/schemas/AvailableExportCapability"
+              $ref: "#/components/schemas/ExportCapability"
             figma:
-              $ref: "#/components/schemas/AvailableExportCapability"
+              $ref: "#/components/schemas/ExportCapability"
             mcp:
-              $ref: "#/components/schemas/AvailableExportCapability"
+              $ref: "#/components/schemas/ExportCapability"
             docx:
-              $ref: "#/components/schemas/AvailableExportCapability"
+              $ref: "#/components/schemas/ExportCapability"
             pdf:
-              $ref: "#/components/schemas/AvailableExportCapability"
+              $ref: "#/components/schemas/ExportCapability"
           required:
             - html
             - react
@@ -13830,63 +13319,17 @@ components:
           type: object
           properties:
             single_file:
-              $ref: "#/components/schemas/AvailableExportCapability"
+              $ref: "#/components/schemas/ExportCapability"
             zip:
-              $ref: "#/components/schemas/AvailableExportCapability"
+              $ref: "#/components/schemas/ExportCapability"
           required:
             - single_file
             - zip
           additionalProperties: false
-        external:
-          type: object
-          properties:
-            ai_studio:
-              $ref: "#/components/schemas/AvailableExportCapability"
-            netlify:
-              $ref: "#/components/schemas/AvailableExportCapability"
-            lovable:
-              $ref: "#/components/schemas/AvailableExportCapability"
-            bolt:
-              $ref: "#/components/schemas/AvailableExportCapability"
-          required:
-            - ai_studio
-            - netlify
-            - lovable
-            - bolt
-          additionalProperties: false
       required:
         - formats
         - packaging
-        - external
       additionalProperties: false
-    ExportCapability:
-      type: object
-      properties:
-        available:
-          type: boolean
-        authentication:
-          $ref: "#/components/schemas/ExternalExportAuthentication"
-        reasonCode:
-          type:
-            - string
-            - "null"
-          enum:
-            - EXPORT_FIGMA_UNAVAILABLE
-            - EXPORT_EXTERNAL_AI_STUDIO_UNAVAILABLE
-            - EXPORT_EXTERNAL_AUTHENTICATION_REQUIRED
-            - null
-      required:
-        - available
-        - authentication
-        - reasonCode
-      additionalProperties: false
-      description: Export capability availability, authentication state, and stable reason codes remain mutually consistent; enforced by the runtime Zod contract.
-    ExportDeliveryKind:
-      type: string
-      enum:
-        - download
-        - clipboard
-        - external
     ExportFailure:
       type: object
       properties:
@@ -13937,7 +13380,7 @@ components:
         revision:
           $ref: "#/components/schemas/Revision"
         options:
-          $ref: "#/components/schemas/CreateExportOptions"
+          $ref: "#/components/schemas/ExportOptions"
         output:
           type:
             - object
@@ -14040,10 +13483,6 @@ components:
         - items
         - nextCursor
       additionalProperties: false
-    ExportOptions:
-      type: object
-      additionalProperties:
-        $ref: "#/components/schemas/JsonValue"
     ExportPreviewTokenResponse:
       type: object
       properties:
@@ -14059,211 +13498,6 @@ components:
         - url
         - expiresAt
       additionalProperties: false
-    ExternalExportDeliveryStatus:
-      type: string
-      enum:
-        - pending_confirmation
-        - queued
-        - running
-        - cancelling
-        - succeeded
-        - failed
-        - cancelled
-    ExternalExportFailure:
-      type: object
-      properties:
-        code:
-          type: string
-          minLength: 1
-          maxLength: 120
-        detail:
-          type:
-            - string
-            - "null"
-          maxLength: 4000
-      required:
-        - code
-        - detail
-      additionalProperties: false
-    ExternalExportPayloadSnapshot:
-      type: object
-      properties:
-        exportJobId:
-          type: string
-          minLength: 1
-          maxLength: 128
-        releaseId:
-          type: string
-          minLength: 1
-          maxLength: 128
-        format:
-          $ref: "#/components/schemas/ExportFormat"
-        packaging:
-          $ref: "#/components/schemas/ExportPackaging"
-        selection:
-          $ref: "#/components/schemas/ExportSelection"
-        output:
-          type: object
-          properties:
-            mediaType:
-              type: string
-              minLength: 1
-              maxLength: 255
-            byteSize:
-              type: integer
-              exclusiveMinimum: 0
-            sha256:
-              type: string
-              pattern: ^[a-f0-9]{64}$
-            fileName:
-              type: string
-              minLength: 1
-              maxLength: 500
-          required:
-            - mediaType
-            - byteSize
-            - sha256
-            - fileName
-          additionalProperties: false
-      required:
-        - exportJobId
-        - releaseId
-        - format
-        - packaging
-        - selection
-        - output
-      additionalProperties: false
-    ExternalExportDelivery:
-      type: object
-      properties:
-        id:
-          type: string
-          minLength: 1
-          maxLength: 128
-        exportJobId:
-          type: string
-          minLength: 1
-          maxLength: 128
-        createdById:
-          type: string
-          minLength: 1
-          maxLength: 128
-        target:
-          $ref: "#/components/schemas/ExternalExportTarget"
-        authentication:
-          $ref: "#/components/schemas/ExternalExportAuthentication"
-        status:
-          $ref: "#/components/schemas/ExternalExportDeliveryStatus"
-        revision:
-          $ref: "#/components/schemas/Revision"
-        attempt:
-          type: integer
-          minimum: 0
-        payload:
-          $ref: "#/components/schemas/ExternalExportPayloadSnapshot"
-        remoteReference:
-          type:
-            - string
-            - "null"
-          minLength: 1
-          maxLength: 500
-        failure:
-          type:
-            - object
-            - "null"
-          properties:
-            code:
-              type: string
-              minLength: 1
-              maxLength: 120
-            detail:
-              type:
-                - string
-                - "null"
-              maxLength: 4000
-          required:
-            - code
-            - detail
-          additionalProperties: false
-        createdAt:
-          type: string
-          format: date-time
-        confirmedAt:
-          type:
-            - string
-            - "null"
-          format: date-time
-        startedAt:
-          type:
-            - string
-            - "null"
-          format: date-time
-        transferAuthorizedAt:
-          type:
-            - string
-            - "null"
-          format: date-time
-        finishedAt:
-          type:
-            - string
-            - "null"
-          format: date-time
-        updatedAt:
-          type: string
-          format: date-time
-      required:
-        - id
-        - exportJobId
-        - createdById
-        - target
-        - authentication
-        - status
-        - revision
-        - attempt
-        - payload
-        - remoteReference
-        - failure
-        - createdAt
-        - confirmedAt
-        - startedAt
-        - transferAuthorizedAt
-        - finishedAt
-        - updatedAt
-      additionalProperties: false
-      description: External delivery confirmation, execution timestamps, remote references, and failure state match the durable lifecycle; enforced by the runtime Zod contract and database constraints.
-    ExternalExportDeliveryList:
-      type: object
-      properties:
-        items:
-          type: array
-          items:
-            $ref: "#/components/schemas/ExternalExportDelivery"
-          maxItems: 100
-      required:
-        - items
-      additionalProperties: false
-    FigmaExportCapability:
-      type: object
-      properties:
-        available:
-          type: boolean
-        authentication:
-          $ref: "#/components/schemas/ExternalExportAuthentication"
-        reasonCode:
-          type:
-            - string
-            - "null"
-          enum:
-            - EXPORT_FIGMA_UNAVAILABLE
-            - EXPORT_EXTERNAL_AI_STUDIO_UNAVAILABLE
-            - EXPORT_EXTERNAL_AUTHENTICATION_REQUIRED
-            - null
-      required:
-        - available
-        - authentication
-        - reasonCode
-      additionalProperties: false
-      description: Export capability availability, authentication state, and stable reason codes remain mutually consistent; enforced by the runtime Zod contract.
     FileList:
       type: object
       properties:
@@ -15410,64 +14644,275 @@ components:
         - parts
       additionalProperties: false
       description: Multipart part numbers are unique and strictly ascending; enforced by the runtime Zod contract.
-    PrdDocument:
-      anyOf:
-        - $ref: "#/components/schemas/PrdDocumentV1"
-        - $ref: "#/components/schemas/PrdDocumentV2"
-        - $ref: "#/components/schemas/PrdDocumentV3"
-    PrdSectionKey:
-      type: string
-      enum:
-        - executiveSummary
-        - problem
-        - goals
-        - targetUsers
-        - scope
-        - requirements
-        - userFlows
-        - acceptanceCriteria
-        - risksAndDependencies
-    PrdV3Diagram:
+    PrdDocumentV3:
       type: object
       properties:
-        id:
+        protocol:
+          type: string
+          enum:
+            - workbench.prd.v3
+        documentId:
           type: string
           minLength: 1
           maxLength: 96
           pattern: ^[A-Za-z][A-Za-z0-9]*(?:[-_.:][A-Za-z0-9]+)*$
-        kind:
-          type: string
-          enum:
-            - productFlow
-            - productArchitecture
         title:
           type: string
-          minLength: 4
+          minLength: 1
           maxLength: 240
-          pattern: ^图[1-9]\d*\s+\S
-        description:
-          type: string
-          minLength: 20
-          maxLength: 2000
-        nodes:
+        revision:
+          $ref: "#/components/schemas/PrdRevision"
+        cover:
+          type: object
+          properties:
+            workOrderName:
+              type: string
+              minLength: 1
+              maxLength: 200
+            title:
+              type: string
+              minLength: 1
+              maxLength: 240
+          required:
+            - workOrderName
+            - title
+          additionalProperties: false
+        versionHistory:
           type: array
           items:
-            $ref: "#/components/schemas/PrdDiagramNode"
-          minItems: 2
-          maxItems: 40
-        edges:
-          type: array
-          items:
-            $ref: "#/components/schemas/PrdDiagramEdge"
+            $ref: "#/components/schemas/PrdVersionHistoryEntry"
           minItems: 1
-          maxItems: 80
+          maxItems: 100
+        tableOfContents:
+          type: object
+          properties:
+            title:
+              type: string
+              enum:
+                - 目 录
+            entries:
+              type: array
+              items:
+                type: string
+                minLength: 1
+                maxLength: 240
+              minItems: 9
+              maxItems: 58
+          required:
+            - title
+            - entries
+          additionalProperties: false
+        assumptions:
+          type: array
+          items:
+            $ref: "#/components/schemas/PrdAssumption"
+          maxItems: 500
+        citations:
+          type: array
+          items:
+            $ref: "#/components/schemas/ArtifactCitation"
+          maxItems: 1000
+        sections:
+          type: object
+          properties:
+            introduction:
+              type: object
+              properties:
+                title:
+                  type: string
+                  enum:
+                    - 1 引言
+                background:
+                  type: object
+                  properties:
+                    title:
+                      type: string
+                      enum:
+                        - 1.1项目背景
+                    blocks:
+                      type: array
+                      items:
+                        $ref: "#/components/schemas/PrdBlock"
+                      minItems: 1
+                      maxItems: 500
+                  required:
+                    - title
+                    - blocks
+                  additionalProperties: false
+                scope:
+                  type: object
+                  properties:
+                    title:
+                      type: string
+                      enum:
+                        - 1.2文档范围
+                    blocks:
+                      type: array
+                      items:
+                        $ref: "#/components/schemas/PrdBlock"
+                      minItems: 1
+                      maxItems: 500
+                  required:
+                    - title
+                    - blocks
+                  additionalProperties: false
+                usageScenarios:
+                  type: object
+                  properties:
+                    title:
+                      type: string
+                      enum:
+                        - 1.3使用场景（必填）
+                    blocks:
+                      type: array
+                      items:
+                        $ref: "#/components/schemas/PrdBlock"
+                      minItems: 1
+                      maxItems: 500
+                    channelTable:
+                      type: object
+                      properties:
+                        title:
+                          type: string
+                          enum:
+                            - 活动投放渠道
+                        rows:
+                          type: array
+                          items:
+                            $ref: "#/components/schemas/PrdChannelRow"
+                          minItems: 3
+                          maxItems: 3
+                      required:
+                        - title
+                        - rows
+                      additionalProperties: false
+                  required:
+                    - title
+                    - blocks
+                    - channelTable
+                  additionalProperties: false
+              required:
+                - title
+                - background
+                - scope
+                - usageScenarios
+              additionalProperties: false
+            businessRequirements:
+              type: object
+              properties:
+                title:
+                  type: string
+                  enum:
+                    - 2 业务需求
+                summary:
+                  $ref: "#/components/schemas/PrdInlineContent"
+                pageLinks:
+                  type: object
+                  properties:
+                    title:
+                      type: string
+                      enum:
+                        - 2.1页面链接
+                    blocks:
+                      type: array
+                      items:
+                        $ref: "#/components/schemas/PrdBlock"
+                      minItems: 1
+                      maxItems: 500
+                  required:
+                    - title
+                    - blocks
+                  additionalProperties: false
+                functionSections:
+                  type: array
+                  items:
+                    $ref: "#/components/schemas/PrdV3FunctionSection"
+                  minItems: 1
+                  maxItems: 50
+              required:
+                - title
+                - summary
+                - pageLinks
+                - functionSections
+              additionalProperties: false
+            degradation:
+              type: object
+              properties:
+                title:
+                  type: string
+                  enum:
+                    - 3 业务降级方案（必填）
+                applicable:
+                  type: boolean
+                content:
+                  $ref: "#/components/schemas/PrdInlineContent"
+              required:
+                - title
+                - applicable
+                - content
+              additionalProperties: false
+            safetyBaseline:
+              type: object
+              properties:
+                title:
+                  type: string
+                  enum:
+                    - 4 需求安全基线要求（必填）
+                intro:
+                  type: string
+                  enum:
+                    - |-
+                      该部分内容为必填项，请按照如下表格中的内容先进行自查，并按照如下要求完善需求文档：
+                      1、如选择“是”，代表本项自查内容已符合安全要求，需要提供截图违依据
+                      2、如选择“否”，代表本项自查内容暂时不符合安全要求，请在需求文档中增加本部分内容安全改造需求，并发送网信安需求评审邮件，附上本需求文档用于安全评审；
+                      3、如选择“不涉及”，代表本项目各项需求安全基线均不涉及，则无需召开网信安需求评审会。
+                      建议：该表格请业务人员和开发人员共同参与自查并填写。
+                rows:
+                  type: array
+                  items:
+                    $ref: "#/components/schemas/PrdSafetyBaselineRow"
+                  minItems: 21
+                  maxItems: 21
+              required:
+                - title
+                - intro
+                - rows
+              additionalProperties: false
+          required:
+            - introduction
+            - businessRequirements
+            - degradation
+            - safetyBaseline
+          additionalProperties: false
       required:
-        - id
-        - kind
+        - protocol
+        - documentId
         - title
-        - description
-        - nodes
-        - edges
+        - revision
+        - cover
+        - versionHistory
+        - tableOfContents
+        - assumptions
+        - citations
+        - sections
+      additionalProperties: false
+      description: PRD v3 uses contiguous function-specific sections, optional typed diagrams, embedded or later acceptance, and the same complete safety, table, citation and semantic-reference validation.
+    PrdSection:
+      type: object
+      properties:
+        title:
+          type: string
+          minLength: 1
+          maxLength: 240
+        blocks:
+          type: array
+          items:
+            $ref: "#/components/schemas/PrdBlock"
+          minItems: 1
+          maxItems: 500
+      required:
+        - title
+        - blocks
       additionalProperties: false
     PreviewStatus:
       type: string
@@ -15556,6 +15001,50 @@ components:
         - title
         - status
         - code
+    ProjectStatus:
+      type: string
+      enum:
+        - active
+        - archived
+    Project:
+      type: object
+      properties:
+        id:
+          type: string
+          minLength: 1
+          maxLength: 128
+        workspaceId:
+          type: string
+          minLength: 1
+          maxLength: 128
+        title:
+          type: string
+          minLength: 1
+          maxLength: 160
+        summary:
+          type:
+            - string
+            - "null"
+          maxLength: 2000
+        status:
+          $ref: "#/components/schemas/ProjectStatus"
+        revision:
+          $ref: "#/components/schemas/Revision"
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - workspaceId
+        - title
+        - summary
+        - status
+        - revision
+        - createdAt
+        - updatedAt
     RunPhase:
       type: string
       enum:
@@ -17073,6 +16562,210 @@ components:
             - expectedStatus
             - targetStatus
           additionalProperties: false
+    PrototypeExportArtifact:
+      type: object
+      properties:
+        downloadUrl:
+          type: string
+          format: uri
+        artifactSha256:
+          type: string
+          pattern: ^[a-f0-9]{64}$
+        byteSize:
+          type: integer
+          exclusiveMinimum: 0
+        mediaType:
+          type: string
+          minLength: 1
+          maxLength: 255
+      required:
+        - downloadUrl
+        - artifactSha256
+        - byteSize
+        - mediaType
+      additionalProperties: false
+    PrototypeExportStatus:
+      type: string
+      enum:
+        - queued
+        - building
+        - succeeded
+        - failed
+        - cancelled
+    PrototypeExport:
+      type: object
+      properties:
+        id:
+          type: string
+          minLength: 1
+          maxLength: 128
+        projectId:
+          type: string
+          minLength: 1
+          maxLength: 128
+        revisionId:
+          type: string
+          minLength: 1
+          maxLength: 128
+        format:
+          $ref: "#/components/schemas/PrototypeExportFormat"
+        status:
+          $ref: "#/components/schemas/PrototypeExportStatus"
+        revision:
+          $ref: "#/components/schemas/Revision"
+        artifact:
+          type:
+            - object
+            - "null"
+          properties:
+            downloadUrl:
+              type: string
+              format: uri
+            artifactSha256:
+              type: string
+              pattern: ^[a-f0-9]{64}$
+            byteSize:
+              type: integer
+              exclusiveMinimum: 0
+            mediaType:
+              type: string
+              minLength: 1
+              maxLength: 255
+          required:
+            - downloadUrl
+            - artifactSha256
+            - byteSize
+            - mediaType
+          additionalProperties: false
+        failure:
+          type:
+            - object
+            - "null"
+          properties:
+            code:
+              type: string
+              minLength: 1
+              maxLength: 120
+            detail:
+              type: string
+              minLength: 1
+              maxLength: 2000
+          required:
+            - code
+            - detail
+          additionalProperties: false
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+        finishedAt:
+          type:
+            - string
+            - "null"
+          format: date-time
+      required:
+        - id
+        - projectId
+        - revisionId
+        - format
+        - status
+        - revision
+        - artifact
+        - failure
+        - createdAt
+        - updatedAt
+        - finishedAt
+      additionalProperties: false
+      description: Visual Prototype exports require an immutable artifact on success, failure details on failure, and no output on cancellation; enforced by the runtime V2 contract.
+    PrototypeExportList:
+      type: array
+      items:
+        $ref: "#/components/schemas/PrototypeExport"
+      maxItems: 100
+    PrototypeFeedbackStatus:
+      type: string
+      enum:
+        - open
+        - resolved
+    PrototypeFeedback:
+      type: object
+      properties:
+        id:
+          type: string
+          minLength: 1
+          maxLength: 128
+        projectId:
+          type: string
+          minLength: 1
+          maxLength: 128
+        revisionId:
+          type: string
+          minLength: 1
+          maxLength: 128
+        createdById:
+          type: string
+          minLength: 1
+          maxLength: 128
+        body:
+          type: string
+          minLength: 1
+          maxLength: 4000
+        anchor:
+          type:
+            - object
+            - "null"
+          properties:
+            pageId:
+              type: string
+              minLength: 1
+              maxLength: 128
+            selector:
+              type: string
+              minLength: 1
+              maxLength: 500
+              pattern: ^[A-Za-z][A-Za-z0-9_.:#\- >\[\]="']*$
+            quote:
+              type: string
+              maxLength: 1000
+          required:
+            - pageId
+            - selector
+          additionalProperties: false
+        status:
+          $ref: "#/components/schemas/PrototypeFeedbackStatus"
+        revision:
+          $ref: "#/components/schemas/Revision"
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+        resolvedAt:
+          type:
+            - string
+            - "null"
+          format: date-time
+      required:
+        - id
+        - projectId
+        - revisionId
+        - createdById
+        - body
+        - anchor
+        - status
+        - revision
+        - createdAt
+        - updatedAt
+        - resolvedAt
+      additionalProperties: false
+    PrototypeFeedbackList:
+      type: array
+      items:
+        $ref: "#/components/schemas/PrototypeFeedback"
+      maxItems: 100
     PrototypeInsertNodeOperation:
       type: object
       properties:
@@ -17096,6 +16789,76 @@ components:
         - parentId
         - index
         - node
+      additionalProperties: false
+    PrototypeListQuery:
+      type: object
+      properties:
+        cursor:
+          type: string
+          minLength: 1
+          maxLength: 512
+        limit:
+          type: integer
+          minimum: 1
+          maximum: 100
+          default: 30
+      additionalProperties: false
+    PrototypeMutationHeaders:
+      type: object
+      properties:
+        idempotencyKey:
+          type: string
+          minLength: 8
+          maxLength: 128
+          pattern: ^[A-Za-z0-9._:-]+$
+        ifMatch:
+          type: string
+          minLength: 1
+          maxLength: 256
+      required:
+        - idempotencyKey
+      additionalProperties: false
+    PrototypePage:
+      type: object
+      properties:
+        id:
+          type: string
+          minLength: 1
+          maxLength: 128
+        slug:
+          type: string
+          minLength: 1
+          maxLength: 160
+          pattern: ^[a-z0-9][a-z0-9/_-]*$
+        title:
+          type: string
+          minLength: 1
+          maxLength: 160
+        route:
+          type: string
+          minLength: 1
+          maxLength: 512
+          pattern: ^\/
+        order:
+          type: integer
+          minimum: 0
+          maximum: 500
+        content:
+          type: string
+          minLength: 1
+          maxLength: 2097152
+          description: This page's DOM fragment. Execute the revision's verified previewHtml for the complete shared runtime.
+        sha256:
+          type: string
+          pattern: ^[a-f0-9]{64}$
+      required:
+        - id
+        - slug
+        - title
+        - route
+        - order
+        - content
+        - sha256
       additionalProperties: false
     PrototypePutActionOperation:
       type: object
@@ -17488,6 +17251,467 @@ components:
         - resultingChecksum
       additionalProperties: false
       description: Published Prototype patch events preserve the same exact one-step screen revision transition.
+    PrototypePlanStatus:
+      type: string
+      enum:
+        - draft
+        - approved
+        - generating
+        - ready
+        - failed
+        - cancelled
+    PrototypePlan:
+      type: object
+      properties:
+        id:
+          type: string
+          minLength: 1
+          maxLength: 128
+        projectId:
+          type: string
+          minLength: 1
+          maxLength: 128
+        rootPlanId:
+          type:
+            - string
+            - "null"
+          minLength: 1
+          maxLength: 128
+          default: null
+        sourceRevisionId:
+          type:
+            - string
+            - "null"
+          minLength: 1
+          maxLength: 128
+          default: null
+        contentVersion:
+          type: integer
+          exclusiveMinimum: 0
+          default: 1
+        status:
+          $ref: "#/components/schemas/PrototypePlanStatus"
+        prompt:
+          type: string
+          minLength: 1
+          maxLength: 20000
+        title:
+          type: string
+          minLength: 1
+          maxLength: 240
+        revision:
+          $ref: "#/components/schemas/Revision"
+        createdById:
+          type: string
+          minLength: 1
+          maxLength: 128
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+        failure:
+          type:
+            - object
+            - "null"
+          properties:
+            code:
+              type: string
+              minLength: 1
+              maxLength: 120
+            detail:
+              type: string
+              minLength: 1
+              maxLength: 2000
+          required:
+            - code
+            - detail
+          additionalProperties: false
+      required:
+        - id
+        - projectId
+        - status
+        - prompt
+        - title
+        - revision
+        - createdById
+        - createdAt
+        - updatedAt
+        - failure
+      additionalProperties: false
+    PrototypePlanList:
+      type: array
+      items:
+        $ref: "#/components/schemas/PrototypePlan"
+      maxItems: 100
+    PrototypeRevisionStatus:
+      type: string
+      enum:
+        - queued
+        - generating
+        - ready
+        - confirmed
+        - rejected
+        - failed
+        - cancelled
+    PrototypePublicRevision:
+      type: object
+      properties:
+        id:
+          type: string
+          minLength: 1
+          maxLength: 128
+        projectId:
+          type: string
+          minLength: 1
+          maxLength: 128
+        planId:
+          type: string
+          minLength: 1
+          maxLength: 128
+        version:
+          type: integer
+          exclusiveMinimum: 0
+          default: 1
+        sourceRevisionId:
+          type:
+            - string
+            - "null"
+          minLength: 1
+          maxLength: 128
+          default: null
+        revision:
+          $ref: "#/components/schemas/Revision"
+        status:
+          $ref: "#/components/schemas/PrototypeRevisionStatus"
+        title:
+          type: string
+          minLength: 1
+          maxLength: 240
+        pages:
+          type: array
+          items:
+            $ref: "#/components/schemas/PrototypePage"
+          minItems: 1
+          maxItems: 50
+        previewHtml:
+          type:
+            - string
+            - "null"
+          minLength: 1
+          default: null
+          description: The same verified immutable HTML document used by the private revision preview.
+        documentSha256:
+          type: string
+          pattern: ^[a-f0-9]{64}$
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+        failure:
+          type:
+            - object
+            - "null"
+          properties:
+            code:
+              type: string
+              minLength: 1
+              maxLength: 120
+            detail:
+              type: string
+              minLength: 1
+              maxLength: 2000
+          required:
+            - code
+            - detail
+          additionalProperties: false
+      required:
+        - id
+        - projectId
+        - planId
+        - revision
+        - status
+        - title
+        - pages
+        - documentSha256
+        - createdAt
+        - updatedAt
+        - failure
+      additionalProperties: false
+    PrototypeShareStatus:
+      type: string
+      enum:
+        - active
+        - revoked
+        - expired
+    PrototypeShare:
+      type: object
+      properties:
+        id:
+          type: string
+          minLength: 1
+          maxLength: 128
+        projectId:
+          type: string
+          minLength: 1
+          maxLength: 128
+        revisionId:
+          type: string
+          minLength: 1
+          maxLength: 128
+        revision:
+          $ref: "#/components/schemas/Revision"
+        status:
+          $ref: "#/components/schemas/PrototypeShareStatus"
+        url:
+          type: string
+          format: uri
+        expiresAt:
+          type:
+            - string
+            - "null"
+          format: date-time
+        createdAt:
+          type: string
+          format: date-time
+        revokedAt:
+          type:
+            - string
+            - "null"
+          format: date-time
+      required:
+        - id
+        - projectId
+        - revisionId
+        - revision
+        - status
+        - url
+        - expiresAt
+        - createdAt
+        - revokedAt
+      additionalProperties: false
+    PrototypePublicShare:
+      type: object
+      properties:
+        share:
+          $ref: "#/components/schemas/PrototypeShare"
+        revision:
+          $ref: "#/components/schemas/PrototypePublicRevision"
+      required:
+        - share
+        - revision
+      additionalProperties: false
+    PrototypeRevision:
+      type: object
+      properties:
+        id:
+          type: string
+          minLength: 1
+          maxLength: 128
+        projectId:
+          type: string
+          minLength: 1
+          maxLength: 128
+        planId:
+          type: string
+          minLength: 1
+          maxLength: 128
+        version:
+          type: integer
+          exclusiveMinimum: 0
+          default: 1
+        sourceRevisionId:
+          type:
+            - string
+            - "null"
+          minLength: 1
+          maxLength: 128
+          default: null
+        revision:
+          $ref: "#/components/schemas/Revision"
+        status:
+          $ref: "#/components/schemas/PrototypeRevisionStatus"
+        title:
+          type: string
+          minLength: 1
+          maxLength: 240
+        documentSha256:
+          type: string
+          pattern: ^[a-f0-9]{64}$
+        createdById:
+          type: string
+          minLength: 1
+          maxLength: 128
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+        failure:
+          type:
+            - object
+            - "null"
+          properties:
+            code:
+              type: string
+              minLength: 1
+              maxLength: 120
+            detail:
+              type: string
+              minLength: 1
+              maxLength: 2000
+          required:
+            - code
+            - detail
+          additionalProperties: false
+        pages:
+          type: array
+          items:
+            $ref: "#/components/schemas/PrototypePage"
+          minItems: 1
+          maxItems: 50
+        previewHtml:
+          type:
+            - string
+            - "null"
+          minLength: 1
+          default: null
+          description: The verified immutable HTML document, loaded only by a direct revision read; null while pending or in mutation responses.
+      required:
+        - id
+        - projectId
+        - planId
+        - revision
+        - status
+        - title
+        - documentSha256
+        - createdById
+        - createdAt
+        - updatedAt
+        - failure
+        - pages
+      additionalProperties: false
+      description: Visual Prototype revisions contain unique page ids and bounded per-page DOM fragments; the complete executable document is provided once as verified previewHtml.
+    PrototypeRevisionDiff:
+      type: object
+      properties:
+        sourceRevisionId:
+          type:
+            - string
+            - "null"
+          minLength: 1
+          maxLength: 128
+        pages:
+          type: array
+          items:
+            type: object
+            properties:
+              pageId:
+                type: string
+                minLength: 1
+                maxLength: 128
+              change:
+                type: string
+                enum:
+                  - added
+                  - removed
+                  - changed
+                  - unchanged
+            required:
+              - pageId
+              - change
+            additionalProperties: false
+          maxItems: 100
+      required:
+        - sourceRevisionId
+        - pages
+      additionalProperties: false
+    PrototypeRevisionSummary:
+      type: object
+      properties:
+        id:
+          type: string
+          minLength: 1
+          maxLength: 128
+        projectId:
+          type: string
+          minLength: 1
+          maxLength: 128
+        planId:
+          type: string
+          minLength: 1
+          maxLength: 128
+        version:
+          type: integer
+          exclusiveMinimum: 0
+          default: 1
+        sourceRevisionId:
+          type:
+            - string
+            - "null"
+          minLength: 1
+          maxLength: 128
+          default: null
+        revision:
+          $ref: "#/components/schemas/Revision"
+        status:
+          $ref: "#/components/schemas/PrototypeRevisionStatus"
+        title:
+          type: string
+          minLength: 1
+          maxLength: 240
+        documentSha256:
+          type: string
+          pattern: ^[a-f0-9]{64}$
+        createdById:
+          type: string
+          minLength: 1
+          maxLength: 128
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+        failure:
+          type:
+            - object
+            - "null"
+          properties:
+            code:
+              type: string
+              minLength: 1
+              maxLength: 120
+            detail:
+              type: string
+              minLength: 1
+              maxLength: 2000
+          required:
+            - code
+            - detail
+          additionalProperties: false
+      required:
+        - id
+        - projectId
+        - planId
+        - revision
+        - status
+        - title
+        - documentSha256
+        - createdById
+        - createdAt
+        - updatedAt
+        - failure
+      additionalProperties: false
+    PrototypeRevisionList:
+      type: array
+      items:
+        $ref: "#/components/schemas/PrototypeRevisionSummary"
+      maxItems: 50
     PrototypeScreenProjection:
       type: object
       properties:
@@ -17559,6 +17783,11 @@ components:
         - bindings
         - motions
       additionalProperties: false
+    PrototypeShareList:
+      type: array
+      items:
+        $ref: "#/components/schemas/PrototypeShare"
+      maxItems: 100
     PrototypeSubmitValue:
       type: object
       properties:
@@ -17629,6 +17858,13 @@ components:
         - screenId
         - values
       additionalProperties: false
+    PrototypeWorkflowActionRequest:
+      type: object
+      properties:
+        reason:
+          type: string
+          maxLength: 2000
+      additionalProperties: false
     PublicArtifactContentBlob:
       type: object
       properties:
@@ -17687,15 +17923,11 @@ components:
         kind:
           type: string
           enum:
-            - prd
             - prototype
-            - image
-            - code
-            - document
-            - data
         schemaVersion:
-          type: integer
-          exclusiveMinimum: 0
+          type: number
+          enum:
+            - 1
         contentMode:
           type: string
           enum:
@@ -17714,494 +17946,6 @@ components:
         - schemaVersion
         - contentMode
         - blob
-      additionalProperties: false
-      description: Public PRD and prototype blob details require schemaVersion 1 without exposing Blob identity.
-    PublicArtifactVersionInlineCodeDetail:
-      type: object
-      properties:
-        artifactId:
-          type: string
-          minLength: 1
-          maxLength: 128
-        artifactVersionId:
-          type: string
-          minLength: 1
-          maxLength: 128
-        version:
-          type: integer
-          exclusiveMinimum: 0
-        status:
-          type: string
-          enum:
-            - ready
-        checksum:
-          type: string
-          pattern: ^[a-f0-9]{64}$
-        citations:
-          type: array
-          items:
-            $ref: "#/components/schemas/ArtifactCitation"
-          maxItems: 1000
-        createdAt:
-          type: string
-          format: date-time
-        contentMode:
-          type: string
-          enum:
-            - inline
-        kind:
-          type: string
-          enum:
-            - code
-        schemaVersion:
-          type: integer
-          exclusiveMinimum: 0
-        content:
-          $ref: "#/components/schemas/JsonValue"
-      required:
-        - artifactId
-        - artifactVersionId
-        - version
-        - status
-        - checksum
-        - citations
-        - createdAt
-        - contentMode
-        - kind
-        - schemaVersion
-        - content
-      additionalProperties: false
-    PublicArtifactVersionInlineDataDetail:
-      type: object
-      properties:
-        artifactId:
-          type: string
-          minLength: 1
-          maxLength: 128
-        artifactVersionId:
-          type: string
-          minLength: 1
-          maxLength: 128
-        version:
-          type: integer
-          exclusiveMinimum: 0
-        status:
-          type: string
-          enum:
-            - ready
-        checksum:
-          type: string
-          pattern: ^[a-f0-9]{64}$
-        citations:
-          type: array
-          items:
-            $ref: "#/components/schemas/ArtifactCitation"
-          maxItems: 1000
-        createdAt:
-          type: string
-          format: date-time
-        contentMode:
-          type: string
-          enum:
-            - inline
-        kind:
-          type: string
-          enum:
-            - data
-        schemaVersion:
-          type: integer
-          exclusiveMinimum: 0
-        content:
-          $ref: "#/components/schemas/JsonValue"
-      required:
-        - artifactId
-        - artifactVersionId
-        - version
-        - status
-        - checksum
-        - citations
-        - createdAt
-        - contentMode
-        - kind
-        - schemaVersion
-        - content
-      additionalProperties: false
-    PublicDesignSystemFontAsset:
-      type: object
-      properties:
-        id:
-          type: string
-          minLength: 1
-          maxLength: 96
-          pattern: ^[A-Za-z][A-Za-z0-9]*(?:[-_.:][A-Za-z0-9]+)*$
-        name:
-          type: string
-          minLength: 1
-          maxLength: 240
-        mediaType:
-          type: string
-          minLength: 1
-          maxLength: 255
-        byteSize:
-          type: integer
-          exclusiveMinimum: 0
-          maximum: 9007199254740991
-        sha256:
-          type: string
-          pattern: ^[a-f0-9]{64}$
-        kind:
-          type: string
-          enum:
-            - font
-        family:
-          type: string
-          minLength: 1
-          maxLength: 240
-        weight:
-          type: integer
-          minimum: 100
-          maximum: 900
-        style:
-          type: string
-          enum:
-            - normal
-            - italic
-      required:
-        - id
-        - name
-        - mediaType
-        - byteSize
-        - sha256
-        - kind
-        - family
-        - weight
-        - style
-      additionalProperties: false
-    PublicDesignSystemImageAsset:
-      type: object
-      properties:
-        id:
-          type: string
-          minLength: 1
-          maxLength: 96
-          pattern: ^[A-Za-z][A-Za-z0-9]*(?:[-_.:][A-Za-z0-9]+)*$
-        name:
-          type: string
-          minLength: 1
-          maxLength: 240
-        mediaType:
-          type: string
-          minLength: 1
-          maxLength: 255
-        byteSize:
-          type: integer
-          exclusiveMinimum: 0
-          maximum: 9007199254740991
-        sha256:
-          type: string
-          pattern: ^[a-f0-9]{64}$
-        kind:
-          type: string
-          enum:
-            - image
-        width:
-          type: integer
-          exclusiveMinimum: 0
-        height:
-          type: integer
-          exclusiveMinimum: 0
-      required:
-        - id
-        - name
-        - mediaType
-        - byteSize
-        - sha256
-        - kind
-        - width
-        - height
-      additionalProperties: false
-    PublicDesignSystemAsset:
-      oneOf:
-        - $ref: "#/components/schemas/PublicDesignSystemImageAsset"
-        - $ref: "#/components/schemas/PublicDesignSystemFontAsset"
-      discriminator:
-        propertyName: kind
-        mapping:
-          image: "#/components/schemas/PublicDesignSystemImageAsset"
-          font: "#/components/schemas/PublicDesignSystemFontAsset"
-    PublicDesignSystemDocument:
-      type: object
-      properties:
-        protocol:
-          type: string
-          enum:
-            - workbench.design-system.v1
-        documentId:
-          type: string
-          minLength: 1
-          maxLength: 96
-          pattern: ^[A-Za-z][A-Za-z0-9]*(?:[-_.:][A-Za-z0-9]+)*$
-        title:
-          type: string
-          minLength: 1
-          maxLength: 240
-        tokens:
-          type: array
-          items:
-            $ref: "#/components/schemas/DesignSystemToken"
-          maxItems: 5000
-        assets:
-          type: array
-          items:
-            $ref: "#/components/schemas/PublicDesignSystemAsset"
-          maxItems: 2000
-        principles:
-          type: array
-          items:
-            $ref: "#/components/schemas/DesignSystemPrinciple"
-          maxItems: 500
-        guidelines:
-          type: array
-          items:
-            $ref: "#/components/schemas/DesignSystemGuideline"
-          maxItems: 2000
-        components:
-          type: array
-          items:
-            $ref: "#/components/schemas/DesignSystemComponent"
-          maxItems: 2000
-      required:
-        - protocol
-        - documentId
-        - title
-        - tokens
-        - assets
-        - principles
-        - guidelines
-        - components
-      additionalProperties: false
-      description: Public Design System projections preserve the same semantic graph after private Blob identities are removed.
-    PublicArtifactVersionInlineDesignSystemDetail:
-      type: object
-      properties:
-        artifactId:
-          type: string
-          minLength: 1
-          maxLength: 128
-        artifactVersionId:
-          type: string
-          minLength: 1
-          maxLength: 128
-        version:
-          type: integer
-          exclusiveMinimum: 0
-        status:
-          type: string
-          enum:
-            - ready
-        checksum:
-          type: string
-          pattern: ^[a-f0-9]{64}$
-        citations:
-          type: array
-          items:
-            $ref: "#/components/schemas/ArtifactCitation"
-          maxItems: 1000
-        createdAt:
-          type: string
-          format: date-time
-        contentMode:
-          type: string
-          enum:
-            - inline
-        kind:
-          type: string
-          enum:
-            - design_system
-        schemaVersion:
-          type: number
-          enum:
-            - 1
-        content:
-          $ref: "#/components/schemas/PublicDesignSystemDocument"
-      required:
-        - artifactId
-        - artifactVersionId
-        - version
-        - status
-        - checksum
-        - citations
-        - createdAt
-        - contentMode
-        - kind
-        - schemaVersion
-        - content
-      additionalProperties: false
-    PublicArtifactVersionInlineDocumentDetail:
-      type: object
-      properties:
-        artifactId:
-          type: string
-          minLength: 1
-          maxLength: 128
-        artifactVersionId:
-          type: string
-          minLength: 1
-          maxLength: 128
-        version:
-          type: integer
-          exclusiveMinimum: 0
-        status:
-          type: string
-          enum:
-            - ready
-        checksum:
-          type: string
-          pattern: ^[a-f0-9]{64}$
-        citations:
-          type: array
-          items:
-            $ref: "#/components/schemas/ArtifactCitation"
-          maxItems: 1000
-        createdAt:
-          type: string
-          format: date-time
-        contentMode:
-          type: string
-          enum:
-            - inline
-        kind:
-          type: string
-          enum:
-            - document
-        schemaVersion:
-          type: integer
-          exclusiveMinimum: 0
-        content:
-          $ref: "#/components/schemas/JsonValue"
-      required:
-        - artifactId
-        - artifactVersionId
-        - version
-        - status
-        - checksum
-        - citations
-        - createdAt
-        - contentMode
-        - kind
-        - schemaVersion
-        - content
-      additionalProperties: false
-    PublicArtifactVersionInlineImageDetail:
-      type: object
-      properties:
-        artifactId:
-          type: string
-          minLength: 1
-          maxLength: 128
-        artifactVersionId:
-          type: string
-          minLength: 1
-          maxLength: 128
-        version:
-          type: integer
-          exclusiveMinimum: 0
-        status:
-          type: string
-          enum:
-            - ready
-        checksum:
-          type: string
-          pattern: ^[a-f0-9]{64}$
-        citations:
-          type: array
-          items:
-            $ref: "#/components/schemas/ArtifactCitation"
-          maxItems: 1000
-        createdAt:
-          type: string
-          format: date-time
-        contentMode:
-          type: string
-          enum:
-            - inline
-        kind:
-          type: string
-          enum:
-            - image
-        schemaVersion:
-          type: integer
-          exclusiveMinimum: 0
-        content:
-          $ref: "#/components/schemas/JsonValue"
-      required:
-        - artifactId
-        - artifactVersionId
-        - version
-        - status
-        - checksum
-        - citations
-        - createdAt
-        - contentMode
-        - kind
-        - schemaVersion
-        - content
-      additionalProperties: false
-    PublicArtifactVersionInlinePrdDetail:
-      type: object
-      properties:
-        artifactId:
-          type: string
-          minLength: 1
-          maxLength: 128
-        artifactVersionId:
-          type: string
-          minLength: 1
-          maxLength: 128
-        version:
-          type: integer
-          exclusiveMinimum: 0
-        status:
-          type: string
-          enum:
-            - ready
-        checksum:
-          type: string
-          pattern: ^[a-f0-9]{64}$
-        citations:
-          type: array
-          items:
-            $ref: "#/components/schemas/ArtifactCitation"
-          maxItems: 1000
-        createdAt:
-          type: string
-          format: date-time
-        contentMode:
-          type: string
-          enum:
-            - inline
-        kind:
-          type: string
-          enum:
-            - prd
-        schemaVersion:
-          type: number
-          enum:
-            - 1
-        content:
-          $ref: "#/components/schemas/PrdDocumentV1"
-      required:
-        - artifactId
-        - artifactVersionId
-        - version
-        - status
-        - checksum
-        - citations
-        - createdAt
-        - contentMode
-        - kind
-        - schemaVersion
-        - content
       additionalProperties: false
     PublicPrototypeFontAsset:
       type: object
@@ -18450,137 +18194,6 @@ components:
         - schemaVersion
         - content
       additionalProperties: false
-    PublicArtifactVersionInlineDetail:
-      oneOf:
-        - $ref: "#/components/schemas/PublicArtifactVersionInlinePrdDetail"
-        - $ref: "#/components/schemas/PublicArtifactVersionInlinePrototypeDetail"
-        - $ref: "#/components/schemas/PublicArtifactVersionInlineDesignSystemDetail"
-        - $ref: "#/components/schemas/PublicArtifactVersionInlineImageDetail"
-        - $ref: "#/components/schemas/PublicArtifactVersionInlineCodeDetail"
-        - $ref: "#/components/schemas/PublicArtifactVersionInlineDocumentDetail"
-        - $ref: "#/components/schemas/PublicArtifactVersionInlineDataDetail"
-      discriminator:
-        propertyName: kind
-        mapping:
-          prd: "#/components/schemas/PublicArtifactVersionInlinePrdDetail"
-          prototype: "#/components/schemas/PublicArtifactVersionInlinePrototypeDetail"
-          design_system: "#/components/schemas/PublicArtifactVersionInlineDesignSystemDetail"
-          image: "#/components/schemas/PublicArtifactVersionInlineImageDetail"
-          code: "#/components/schemas/PublicArtifactVersionInlineCodeDetail"
-          document: "#/components/schemas/PublicArtifactVersionInlineDocumentDetail"
-          data: "#/components/schemas/PublicArtifactVersionInlineDataDetail"
-    PublicArtifactVersionInlinePrdV2Detail:
-      type: object
-      properties:
-        artifactId:
-          type: string
-          minLength: 1
-          maxLength: 128
-        artifactVersionId:
-          type: string
-          minLength: 1
-          maxLength: 128
-        version:
-          type: integer
-          exclusiveMinimum: 0
-        status:
-          type: string
-          enum:
-            - ready
-        checksum:
-          type: string
-          pattern: ^[a-f0-9]{64}$
-        citations:
-          type: array
-          items:
-            $ref: "#/components/schemas/ArtifactCitation"
-          maxItems: 1000
-        createdAt:
-          type: string
-          format: date-time
-        contentMode:
-          type: string
-          enum:
-            - inline
-        kind:
-          type: string
-          enum:
-            - prd
-        schemaVersion:
-          type: number
-          enum:
-            - 2
-        content:
-          $ref: "#/components/schemas/PrdDocumentV2"
-      required:
-        - artifactId
-        - artifactVersionId
-        - version
-        - status
-        - checksum
-        - citations
-        - createdAt
-        - contentMode
-        - kind
-        - schemaVersion
-        - content
-      additionalProperties: false
-    PublicArtifactVersionInlinePrdV3Detail:
-      type: object
-      properties:
-        artifactId:
-          type: string
-          minLength: 1
-          maxLength: 128
-        artifactVersionId:
-          type: string
-          minLength: 1
-          maxLength: 128
-        version:
-          type: integer
-          exclusiveMinimum: 0
-        status:
-          type: string
-          enum:
-            - ready
-        checksum:
-          type: string
-          pattern: ^[a-f0-9]{64}$
-        citations:
-          type: array
-          items:
-            $ref: "#/components/schemas/ArtifactCitation"
-          maxItems: 1000
-        createdAt:
-          type: string
-          format: date-time
-        contentMode:
-          type: string
-          enum:
-            - inline
-        kind:
-          type: string
-          enum:
-            - prd
-        schemaVersion:
-          type: number
-          enum:
-            - 3
-        content:
-          $ref: "#/components/schemas/PrdDocumentV3"
-      required:
-        - artifactId
-        - artifactVersionId
-        - version
-        - status
-        - checksum
-        - citations
-        - createdAt
-        - contentMode
-        - kind
-        - schemaVersion
-        - content
-      additionalProperties: false
     PublicSourcePrototypeDocument:
       type: object
       properties:
@@ -18685,13 +18298,170 @@ components:
         - schemaVersion
         - content
       additionalProperties: false
+    PublicArtifactVersionInlineDetail:
+      anyOf:
+        - $ref: "#/components/schemas/PublicArtifactVersionInlinePrototypeDetail"
+        - $ref: "#/components/schemas/PublicArtifactVersionInlineSourcePrototypeDetail"
     PublicArtifactVersionDetail:
-      oneOf:
-        - $ref: "#/components/schemas/PublicArtifactVersionInlineDetail"
-        - $ref: "#/components/schemas/PublicArtifactVersionInlinePrdV2Detail"
-        - $ref: "#/components/schemas/PublicArtifactVersionInlinePrdV3Detail"
+      anyOf:
+        - $ref: "#/components/schemas/PublicArtifactVersionInlinePrototypeDetail"
         - $ref: "#/components/schemas/PublicArtifactVersionInlineSourcePrototypeDetail"
         - $ref: "#/components/schemas/PublicArtifactVersionBlobDetail"
+    PublicDesignSystemFontAsset:
+      type: object
+      properties:
+        id:
+          type: string
+          minLength: 1
+          maxLength: 96
+          pattern: ^[A-Za-z][A-Za-z0-9]*(?:[-_.:][A-Za-z0-9]+)*$
+        name:
+          type: string
+          minLength: 1
+          maxLength: 240
+        mediaType:
+          type: string
+          minLength: 1
+          maxLength: 255
+        byteSize:
+          type: integer
+          exclusiveMinimum: 0
+          maximum: 9007199254740991
+        sha256:
+          type: string
+          pattern: ^[a-f0-9]{64}$
+        kind:
+          type: string
+          enum:
+            - font
+        family:
+          type: string
+          minLength: 1
+          maxLength: 240
+        weight:
+          type: integer
+          minimum: 100
+          maximum: 900
+        style:
+          type: string
+          enum:
+            - normal
+            - italic
+      required:
+        - id
+        - name
+        - mediaType
+        - byteSize
+        - sha256
+        - kind
+        - family
+        - weight
+        - style
+      additionalProperties: false
+    PublicDesignSystemImageAsset:
+      type: object
+      properties:
+        id:
+          type: string
+          minLength: 1
+          maxLength: 96
+          pattern: ^[A-Za-z][A-Za-z0-9]*(?:[-_.:][A-Za-z0-9]+)*$
+        name:
+          type: string
+          minLength: 1
+          maxLength: 240
+        mediaType:
+          type: string
+          minLength: 1
+          maxLength: 255
+        byteSize:
+          type: integer
+          exclusiveMinimum: 0
+          maximum: 9007199254740991
+        sha256:
+          type: string
+          pattern: ^[a-f0-9]{64}$
+        kind:
+          type: string
+          enum:
+            - image
+        width:
+          type: integer
+          exclusiveMinimum: 0
+        height:
+          type: integer
+          exclusiveMinimum: 0
+      required:
+        - id
+        - name
+        - mediaType
+        - byteSize
+        - sha256
+        - kind
+        - width
+        - height
+      additionalProperties: false
+    PublicDesignSystemAsset:
+      oneOf:
+        - $ref: "#/components/schemas/PublicDesignSystemImageAsset"
+        - $ref: "#/components/schemas/PublicDesignSystemFontAsset"
+      discriminator:
+        propertyName: kind
+        mapping:
+          image: "#/components/schemas/PublicDesignSystemImageAsset"
+          font: "#/components/schemas/PublicDesignSystemFontAsset"
+    PublicDesignSystemDocument:
+      type: object
+      properties:
+        protocol:
+          type: string
+          enum:
+            - workbench.design-system.v1
+        documentId:
+          type: string
+          minLength: 1
+          maxLength: 96
+          pattern: ^[A-Za-z][A-Za-z0-9]*(?:[-_.:][A-Za-z0-9]+)*$
+        title:
+          type: string
+          minLength: 1
+          maxLength: 240
+        tokens:
+          type: array
+          items:
+            $ref: "#/components/schemas/DesignSystemToken"
+          maxItems: 5000
+        assets:
+          type: array
+          items:
+            $ref: "#/components/schemas/PublicDesignSystemAsset"
+          maxItems: 2000
+        principles:
+          type: array
+          items:
+            $ref: "#/components/schemas/DesignSystemPrinciple"
+          maxItems: 500
+        guidelines:
+          type: array
+          items:
+            $ref: "#/components/schemas/DesignSystemGuideline"
+          maxItems: 2000
+        components:
+          type: array
+          items:
+            $ref: "#/components/schemas/DesignSystemComponent"
+          maxItems: 2000
+      required:
+        - protocol
+        - documentId
+        - title
+        - tokens
+        - assets
+        - principles
+        - guidelines
+        - components
+      additionalProperties: false
+      description: Public Design System projections preserve the same semantic graph after private Blob identities are removed.
     PublicProjectReleaseArtifactPin:
       type: object
       properties:
@@ -18842,11 +18612,6 @@ components:
         - updatedAt
       additionalProperties: false
       description: Public release lifecycle, Board snapshot, artifact pins, and manifest references agree without exposing creator principal ids.
-    ShareScope:
-      type: string
-      enum:
-        - view
-        - remix
     PublicShare:
       type: object
       properties:
@@ -18855,7 +18620,9 @@ components:
           minLength: 1
           maxLength: 128
         scope:
-          $ref: "#/components/schemas/ShareScope"
+          type: string
+          enum:
+            - view
         expiresAt:
           type:
             - string
@@ -18910,6 +18677,25 @@ components:
       required:
         - expectedStatus
       additionalProperties: false
+    RevisePrototypeRevisionRequest:
+      type: object
+      properties:
+        feedbackIds:
+          type: array
+          items:
+            type: string
+            minLength: 1
+            maxLength: 128
+          minItems: 1
+          maxItems: 100
+          description: Feedback ids must be unique and all belong to the selected source revision. Uniqueness is enforced by Zod; ownership and open status are enforced in the transaction.
+        prompt:
+          type: string
+          minLength: 1
+          maxLength: 4000
+      required:
+        - feedbackIds
+      additionalProperties: false
     RevokeProjectShareGrantsResponse:
       type: object
       properties:
@@ -18937,7 +18723,10 @@ components:
           minLength: 1
           maxLength: 128
         scope:
-          $ref: "#/components/schemas/ShareScope"
+          type: string
+          enum:
+            - view
+          default: view
         expiresAt:
           type:
             - string
@@ -18947,6 +18736,11 @@ components:
       required:
         - releaseId
       additionalProperties: false
+    ShareScope:
+      type: string
+      enum:
+        - view
+        - remix
     ShareStatus:
       type: string
       enum:
@@ -19602,105 +19396,7 @@ components:
         - content
         - operation
       additionalProperties: false
-    RuntimeArtifactDraftPrdV1Revision:
-      type: object
-      properties:
-        title:
-          type: string
-          minLength: 1
-          maxLength: 240
-        citations:
-          type: array
-          items:
-            $ref: "#/components/schemas/ArtifactCitation"
-          minItems: 1
-          maxItems: 1000
-        kind:
-          type: string
-          enum:
-            - prd
-        schemaVersion:
-          type: number
-          enum:
-            - 1
-        content:
-          $ref: "#/components/schemas/PrdDocumentV1"
-        operation:
-          type: object
-          properties:
-            kind:
-              type: string
-              enum:
-                - revise
-            target:
-              $ref: "#/components/schemas/RunArtifactTarget"
-          required:
-            - kind
-            - target
-          additionalProperties: false
-      required:
-        - title
-        - citations
-        - kind
-        - schemaVersion
-        - content
-        - operation
-      additionalProperties: false
-    RuntimeArtifactDraftPrdV2:
-      type: object
-      properties:
-        title:
-          type: string
-          minLength: 1
-          maxLength: 240
-        citations:
-          type: array
-          items:
-            $ref: "#/components/schemas/ArtifactCitation"
-          minItems: 1
-          maxItems: 1000
-        kind:
-          type: string
-          enum:
-            - prd
-        schemaVersion:
-          type: number
-          enum:
-            - 2
-        content:
-          $ref: "#/components/schemas/PrdDocumentV2"
-        operation:
-          oneOf:
-            - type: object
-              properties:
-                kind:
-                  type: string
-                  enum:
-                    - create
-              required:
-                - kind
-              additionalProperties: false
-            - type: object
-              properties:
-                kind:
-                  type: string
-                  enum:
-                    - revise
-                target:
-                  $ref: "#/components/schemas/RunArtifactTarget"
-              required:
-                - kind
-                - target
-              additionalProperties: false
-      required:
-        - title
-        - citations
-        - kind
-        - schemaVersion
-        - content
-        - operation
-      additionalProperties: false
-    RuntimeArtifactDraftPrdV3:
+    RuntimeArtifactDraftPrd:
       type: object
       properties:
         title:
@@ -19722,7 +19418,7 @@ components:
           enum:
             - 3
         content:
-          $ref: "#/components/schemas/PrdDocumentV3"
+          $ref: "#/components/schemas/PrdDocument"
         operation:
           oneOf:
             - type: object
@@ -19754,11 +19450,6 @@ components:
         - content
         - operation
       additionalProperties: false
-    RuntimeArtifactDraftPrd:
-      anyOf:
-        - $ref: "#/components/schemas/RuntimeArtifactDraftPrdV1Revision"
-        - $ref: "#/components/schemas/RuntimeArtifactDraftPrdV2"
-        - $ref: "#/components/schemas/RuntimeArtifactDraftPrdV3"
     RuntimeArtifactDraftPrototype:
       type: object
       properties:
@@ -19814,14 +19505,14 @@ components:
         - operation
       additionalProperties: false
     RuntimeArtifactDraft:
-      description: A PRD draft's top-level citations exactly match its content citations; enforced by the runtime Zod contract.
-      oneOf:
+      anyOf:
         - $ref: "#/components/schemas/RuntimeArtifactDraftPrd"
         - $ref: "#/components/schemas/RuntimeArtifactDraftPrototype"
         - $ref: "#/components/schemas/RuntimeArtifactDraftImage"
         - $ref: "#/components/schemas/RuntimeArtifactDraftCode"
         - $ref: "#/components/schemas/RuntimeArtifactDraftDocument"
         - $ref: "#/components/schemas/RuntimeArtifactDraftData"
+      description: A PRD draft's top-level citations exactly match its content citations; enforced by the runtime Zod contract.
     RuntimeDesignAsset:
       type: object
       properties:
@@ -20211,144 +19902,6 @@ components:
         - headers
         - expiresAt
       additionalProperties: false
-    StartRunRequest:
-      type: object
-      properties:
-        prompt:
-          type: string
-          minLength: 1
-          maxLength: 50000
-        modelId:
-          type: string
-          minLength: 1
-          maxLength: 128
-        workflow:
-          $ref: "#/components/schemas/RunWorkflow"
-        generationIntent:
-          type:
-            - string
-            - "null"
-          enum:
-            - followup-design
-            - interactive-prototype
-            - null
-          default: null
-        targetSurface:
-          $ref: "#/components/schemas/RunTargetSurface"
-        designStyle:
-          $ref: "#/components/schemas/RunDesignStyle"
-        sourceIds:
-          $ref: "#/components/schemas/RunSourceIds"
-        artifactTargets:
-          type: array
-          items:
-            $ref: "#/components/schemas/RunArtifactTarget"
-          maxItems: 12
-          default: []
-          description: Immutable ready ArtifactVersion selections in runtime target order; Generate Prototype requires one or more explicit screen ids on every source target
-        requestedArtifactKinds:
-          type: array
-          items:
-            $ref: "#/components/schemas/RuntimeRequestedArtifactKind"
-          maxItems: 12
-          default: []
-        canvasSnapshot:
-          type:
-            - object
-            - "null"
-          properties:
-            protocol:
-              type: string
-              enum:
-                - workbench.canvas-snapshot.v1
-            projectId:
-              type: string
-              minLength: 1
-              maxLength: 128
-              pattern: ^[A-Za-z0-9][A-Za-z0-9._:-]*$
-              description: Canvas entity ids are bounded opaque identifiers and cannot be URI schemes; enforced by the runtime Zod contract.
-            threadId:
-              type: string
-              minLength: 1
-              maxLength: 128
-              pattern: ^[A-Za-z0-9][A-Za-z0-9._:-]*$
-              description: Canvas entity ids are bounded opaque identifiers and cannot be URI schemes; enforced by the runtime Zod contract.
-            runId:
-              type:
-                - string
-                - "null"
-              minLength: 1
-              maxLength: 128
-              pattern: ^[A-Za-z0-9][A-Za-z0-9._:-]*$
-              description: Canvas entity ids are bounded opaque identifiers and cannot be URI schemes; enforced by the runtime Zod contract.
-            boardId:
-              type: string
-              minLength: 1
-              maxLength: 128
-              pattern: ^[A-Za-z0-9][A-Za-z0-9._:-]*$
-              description: Canvas entity ids are bounded opaque identifiers and cannot be URI schemes; enforced by the runtime Zod contract.
-            clientSessionId:
-              type: string
-              minLength: 8
-              maxLength: 128
-              pattern: ^[A-Za-z0-9][A-Za-z0-9._:-]*$
-              description: Canvas browser session ids are bounded opaque identifiers and cannot be URI schemes; enforced by the runtime Zod contract.
-            projectSessionGeneration:
-              $ref: "#/components/schemas/Revision"
-            boardRevision:
-              $ref: "#/components/schemas/Revision"
-            canvasStateRevision:
-              $ref: "#/components/schemas/Revision"
-            capturedAt:
-              type: string
-              format: date-time
-            expiresAt:
-              type: string
-              format: date-time
-            viewport:
-              $ref: "#/components/schemas/CanvasViewport"
-            screens:
-              type: array
-              items:
-                $ref: "#/components/schemas/CanvasScreenSummary"
-              maxItems: 512
-            visibleScreens:
-              type: array
-              items:
-                $ref: "#/components/schemas/CanvasAgentScreenReference"
-              maxItems: 512
-            selectedScreens:
-              type: array
-              items:
-                $ref: "#/components/schemas/CanvasAgentScreenReference"
-              maxItems: 512
-          default: null
-          required:
-            - protocol
-            - projectId
-            - threadId
-            - runId
-            - boardId
-            - clientSessionId
-            - projectSessionGeneration
-            - boardRevision
-            - canvasStateRevision
-            - capturedAt
-            - expiresAt
-            - viewport
-            - screens
-            - visibleScreens
-            - selectedScreens
-          additionalProperties: false
-          description: Canvas snapshots use unique screen references and only expose references declared by the snapshot; enforced by the runtime Zod contract.
-      required:
-        - prompt
-        - modelId
-        - workflow
-        - targetSurface
-        - designStyle
-      additionalProperties: false
-      description: Redesign requires a ready Import Source; Edit requires an Artifact target; Generate accepts explicit non-empty screen targets only when prototype is requested; Redesign and Ideate forbid targets. Enforced by the runtime Zod contract.
     StartRunRequestObject:
       type: object
       properties:
@@ -21071,6 +20624,31 @@ components:
       type: string
       minLength: 1
       maxLength: 128
+    PlanId:
+      type: string
+      minLength: 1
+      maxLength: 128
+    PrototypeRevisionId:
+      type: string
+      minLength: 1
+      maxLength: 128
+    PrototypeFeedbackId:
+      type: string
+      minLength: 1
+      maxLength: 128
+    PrototypeShareId:
+      type: string
+      minLength: 1
+      maxLength: 128
+    PrototypeExportId:
+      type: string
+      minLength: 1
+      maxLength: 128
+    PrototypeShareToken:
+      type: string
+      minLength: 32
+      maxLength: 128
+      pattern: ^[A-Za-z0-9_-]+$/u
     KnowledgeProfileType:
       type: string
       enum:
@@ -21140,10 +20718,6 @@ components:
       type: string
       minLength: 1
       maxLength: 128
-    ExportDeliveryId:
-      type: string
-      minLength: 1
-      maxLength: 128
     PreviewId:
       type: string
       minLength: 1
@@ -21193,6 +20767,42 @@ components:
         $ref: "#/components/schemas/InvitationId"
       required: true
       name: invitationId
+      in: path
+    PlanId:
+      schema:
+        $ref: "#/components/schemas/PlanId"
+      required: true
+      name: planId
+      in: path
+    PrototypeRevisionId:
+      schema:
+        $ref: "#/components/schemas/PrototypeRevisionId"
+      required: true
+      name: revisionId
+      in: path
+    PrototypeFeedbackId:
+      schema:
+        $ref: "#/components/schemas/PrototypeFeedbackId"
+      required: true
+      name: feedbackId
+      in: path
+    PrototypeShareId:
+      schema:
+        $ref: "#/components/schemas/PrototypeShareId"
+      required: true
+      name: shareId
+      in: path
+    PrototypeExportId:
+      schema:
+        $ref: "#/components/schemas/PrototypeExportId"
+      required: true
+      name: exportId
+      in: path
+    PrototypeShareToken:
+      schema:
+        $ref: "#/components/schemas/PrototypeShareToken"
+      required: true
+      name: token
       in: path
     KnowledgeProfileType:
       schema:
@@ -21297,12 +20907,6 @@ components:
         $ref: "#/components/schemas/ExportId"
       required: true
       name: exportId
-      in: path
-    ExportDeliveryId:
-      schema:
-        $ref: "#/components/schemas/ExportDeliveryId"
-      required: true
-      name: deliveryId
       in: path
     PreviewId:
       schema:
@@ -22285,7 +21889,7 @@ paths:
   /project-invitations/accept:
     post:
       operationId: acceptProjectInvitation
-      summary: Invitation accepted atomically into its Workspace and Project
+      summary: Invitation accepted atomically into its Project without granting Workspace membership
       requestBody:
         required: true
         content:
@@ -22294,7 +21898,7 @@ paths:
               $ref: "#/components/schemas/ProjectInvitationTokenRequest"
       responses:
         "200":
-          description: Invitation accepted atomically into its Workspace and Project
+          description: Invitation accepted atomically into its Project without granting Workspace membership
           headers:
             ETag:
               $ref: "#/components/headers/ETag"
@@ -22948,38 +22552,6 @@ paths:
           $ref: "#/components/responses/RangeProblem"
         "503":
           $ref: "#/components/responses/Problem"
-  /public/shares/{shareToken}/remixes:
-    post:
-      operationId: createProjectRemix
-      summary: New isolated Project remixed from the immutable shared release
-      parameters:
-        - $ref: "#/components/parameters/ShareToken"
-        - $ref: "#/components/parameters/IdempotencyKey"
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/CreateProjectRemixRequest"
-      responses:
-        "201":
-          description: New isolated Project remixed from the immutable shared release
-          headers:
-            ETag:
-              $ref: "#/components/headers/ETag"
-            Location:
-              schema:
-                type: string
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/CreateProjectRemixResponse"
-        "401":
-          $ref: "#/components/responses/Problem"
-        "404":
-          $ref: "#/components/responses/Problem"
-        "409":
-          $ref: "#/components/responses/Problem"
   /exports/capabilities:
     get:
       operationId: getExportCapabilities
@@ -23241,148 +22813,6 @@ paths:
         "416":
           $ref: "#/components/responses/RangeProblem"
         "502":
-          $ref: "#/components/responses/Problem"
-  /exports/{exportId}/deliveries:
-    get:
-      operationId: listExternalExportDeliveries
-      summary: External delivery audit records for one immutable Export output
-      parameters:
-        - $ref: "#/components/parameters/ExportId"
-      responses:
-        "200":
-          description: External delivery audit records for one immutable Export output
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ExternalExportDeliveryList"
-        "404":
-          $ref: "#/components/responses/Problem"
-    post:
-      operationId: createExternalExportDelivery
-      summary: External delivery prepared and awaiting explicit user confirmation
-      parameters:
-        - $ref: "#/components/parameters/ExportId"
-        - $ref: "#/components/parameters/IdempotencyKey"
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/CreateExternalExportDeliveryRequest"
-      responses:
-        "201":
-          description: External delivery prepared and awaiting explicit user confirmation
-          headers:
-            ETag:
-              $ref: "#/components/headers/ETag"
-            Location:
-              schema:
-                type: string
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ExternalExportDelivery"
-        "400":
-          $ref: "#/components/responses/Problem"
-        "404":
-          $ref: "#/components/responses/Problem"
-        "409":
-          $ref: "#/components/responses/Problem"
-  /export-deliveries/{deliveryId}:
-    get:
-      operationId: getExternalExportDelivery
-      summary: External delivery audit snapshot
-      parameters:
-        - $ref: "#/components/parameters/ExportDeliveryId"
-        - $ref: "#/components/parameters/IfNoneMatch"
-      responses:
-        "200":
-          description: External delivery audit snapshot
-          headers:
-            ETag:
-              $ref: "#/components/headers/ETag"
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ExternalExportDelivery"
-        "304":
-          description: External delivery revision has not changed
-        "404":
-          $ref: "#/components/responses/Problem"
-  /export-deliveries/{deliveryId}/confirm:
-    post:
-      operationId: confirmExternalExportDelivery
-      summary: Explicitly confirmed external delivery queued
-      parameters:
-        - $ref: "#/components/parameters/ExportDeliveryId"
-        - $ref: "#/components/parameters/IfMatch"
-      responses:
-        "202":
-          description: Explicitly confirmed external delivery queued
-          headers:
-            ETag:
-              $ref: "#/components/headers/ETag"
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ExternalExportDelivery"
-        "404":
-          $ref: "#/components/responses/Problem"
-        "409":
-          $ref: "#/components/responses/Problem"
-        "412":
-          $ref: "#/components/responses/Problem"
-        "428":
-          $ref: "#/components/responses/Problem"
-  /export-deliveries/{deliveryId}/retry:
-    post:
-      operationId: retryExternalExportDelivery
-      summary: Failed external delivery explicitly retried
-      parameters:
-        - $ref: "#/components/parameters/ExportDeliveryId"
-        - $ref: "#/components/parameters/IfMatch"
-      responses:
-        "202":
-          description: Failed external delivery explicitly retried
-          headers:
-            ETag:
-              $ref: "#/components/headers/ETag"
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ExternalExportDelivery"
-        "404":
-          $ref: "#/components/responses/Problem"
-        "409":
-          $ref: "#/components/responses/Problem"
-        "412":
-          $ref: "#/components/responses/Problem"
-        "428":
-          $ref: "#/components/responses/Problem"
-  /export-deliveries/{deliveryId}/cancel:
-    post:
-      operationId: cancelExternalExportDelivery
-      summary: External delivery cancellation accepted or already terminal
-      parameters:
-        - $ref: "#/components/parameters/ExportDeliveryId"
-        - $ref: "#/components/parameters/IfMatch"
-      responses:
-        "202":
-          description: External delivery cancellation accepted or already terminal
-          headers:
-            ETag:
-              $ref: "#/components/headers/ETag"
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ExternalExportDelivery"
-        "404":
-          $ref: "#/components/responses/Problem"
-        "409":
-          $ref: "#/components/responses/Problem"
-        "412":
-          $ref: "#/components/responses/Problem"
-        "428":
           $ref: "#/components/responses/Problem"
   /workspaces/{workspaceId}/design-systems:
     get:
@@ -24673,5 +24103,759 @@ paths:
               schema:
                 $ref: "#/components/schemas/RunApprovalList"
         "404":
+          $ref: "#/components/responses/Problem"
+  /projects/{projectId}/prototype-v2/plans:
+    get:
+      operationId: listPrototypePlans
+      summary: Read persisted prototype history
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+      responses:
+        "200":
+          description: Read persisted prototype history
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PrototypePlanList"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+    post:
+      operationId: createPrototypePlan
+      summary: Create an idempotent visual prototype plan
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreatePrototypePlanRequest"
+      responses:
+        "201":
+          description: Create an idempotent visual prototype plan
+          headers:
+            ETag:
+              $ref: "#/components/headers/ETag"
+            Location:
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PrototypePlan"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+        "409":
+          $ref: "#/components/responses/Problem"
+  /projects/{projectId}/prototype-v2/revisions/{revisionId}:
+    get:
+      operationId: getPrototypeRevision
+      summary: Read persisted prototype history
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/PrototypeRevisionId"
+      responses:
+        "200":
+          description: Read persisted prototype history
+          headers:
+            ETag:
+              $ref: "#/components/headers/ETag"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PrototypeRevision"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+  /projects/{projectId}/prototype-v2/revisions/{revisionId}/feedback:
+    get:
+      operationId: listPrototypeFeedback
+      summary: Read persisted prototype history
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/PrototypeRevisionId"
+      responses:
+        "200":
+          description: Read persisted prototype history
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PrototypeFeedbackList"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+    post:
+      operationId: createPrototypeFeedback
+      summary: Create an anchored prototype feedback item
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/PrototypeRevisionId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreatePrototypeFeedbackRequest"
+      responses:
+        "201":
+          description: Create an anchored prototype feedback item
+          headers:
+            ETag:
+              $ref: "#/components/headers/ETag"
+            Location:
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PrototypeFeedback"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+        "409":
+          $ref: "#/components/responses/Problem"
+  /projects/{projectId}/prototype-v2/shares:
+    get:
+      operationId: listPrototypeShares
+      summary: Read persisted prototype history
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+      responses:
+        "200":
+          description: Read persisted prototype history
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PrototypeShareList"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+    post:
+      operationId: createPrototypeShare
+      summary: Create an expiring anonymous prototype share
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreatePrototypeShareRequest"
+      responses:
+        "201":
+          description: Create an expiring anonymous prototype share
+          headers:
+            ETag:
+              $ref: "#/components/headers/ETag"
+            Location:
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PrototypeShare"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+        "409":
+          $ref: "#/components/responses/Problem"
+        "503":
+          $ref: "#/components/responses/Problem"
+  /projects/{projectId}/prototype-v2/exports:
+    get:
+      operationId: listPrototypeExports
+      summary: Read persisted prototype history
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+      responses:
+        "200":
+          description: Read persisted prototype history
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PrototypeExportList"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+    post:
+      operationId: createPrototypeExport
+      summary: Queue a real HTML or React prototype export
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreatePrototypeExportRequest"
+      responses:
+        "202":
+          description: Queue a real HTML or React prototype export
+          headers:
+            ETag:
+              $ref: "#/components/headers/ETag"
+            Location:
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PrototypeExport"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+        "409":
+          $ref: "#/components/responses/Problem"
+        "503":
+          $ref: "#/components/responses/Problem"
+  /projects/{projectId}/prototype-v2/revisions/{revisionId}/diff:
+    get:
+      operationId: getPrototypeRevisionDiff
+      summary: Compare semantic page changes against the pinned source revision
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/PrototypeRevisionId"
+      responses:
+        "200":
+          description: Compare semantic page changes against the pinned source revision
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PrototypeRevisionDiff"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+  /projects/{projectId}/prototype-v2/plans/{planId}/retry:
+    post:
+      operationId: retryPrototypePlan
+      summary: Retry terminal generation with the same pinned runtime context
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/PlanId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/IfMatch"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PrototypeWorkflowActionRequest"
+      responses:
+        "202":
+          description: Retry terminal generation with the same pinned runtime context
+          headers:
+            ETag:
+              $ref: "#/components/headers/ETag"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PrototypePlan"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+        "409":
+          $ref: "#/components/responses/Problem"
+        "412":
+          $ref: "#/components/responses/Problem"
+        "428":
+          $ref: "#/components/responses/Problem"
+        "503":
+          $ref: "#/components/responses/Problem"
+  /projects/{projectId}/prototype-v2/revisions/{revisionId}/revise:
+    post:
+      operationId: revisePrototype
+      summary: Generate a new immutable version from anchored feedback
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/PrototypeRevisionId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/IfMatch"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RevisePrototypeRevisionRequest"
+      responses:
+        "202":
+          description: Generate a new immutable version from anchored feedback
+          headers:
+            ETag:
+              $ref: "#/components/headers/ETag"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PrototypePlan"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+        "409":
+          $ref: "#/components/responses/Problem"
+        "412":
+          $ref: "#/components/responses/Problem"
+        "428":
+          $ref: "#/components/responses/Problem"
+        "503":
+          $ref: "#/components/responses/Problem"
+  /projects/{projectId}/prototype-v2/plans/{planId}/approve:
+    post:
+      operationId: approvePrototypePlan
+      summary: Approve a plan and enqueue the Temporal generation workflow
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/PlanId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/IfMatch"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PrototypeWorkflowActionRequest"
+      responses:
+        "202":
+          description: Approve a plan and enqueue the Temporal generation workflow
+          headers:
+            ETag:
+              $ref: "#/components/headers/ETag"
+            Location:
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PrototypePlan"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+        "409":
+          $ref: "#/components/responses/Problem"
+        "412":
+          $ref: "#/components/responses/Problem"
+        "428":
+          $ref: "#/components/responses/Problem"
+        "503":
+          $ref: "#/components/responses/Problem"
+  /projects/{projectId}/prototype-v2/plans/{planId}:
+    get:
+      operationId: getPrototypePlan
+      summary: Get a visual prototype plan and current workflow status
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/PlanId"
+      responses:
+        "200":
+          description: Get a visual prototype plan and current workflow status
+          headers:
+            ETag:
+              $ref: "#/components/headers/ETag"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PrototypePlan"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+  /projects/{projectId}/prototype-v2/plans/{planId}/revisions:
+    get:
+      operationId: listPrototypeRevisions
+      summary: List visual prototype revision summaries without page content or preview HTML
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/PlanId"
+      responses:
+        "200":
+          description: List visual prototype revision summaries without page content or preview HTML
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PrototypeRevisionList"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+  /projects/{projectId}/prototype-v2/plans/{planId}/cancel:
+    post:
+      operationId: cancelPrototypePlan
+      summary: Cancel a running visual prototype workflow
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/PlanId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/IfMatch"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PrototypeWorkflowActionRequest"
+      responses:
+        "202":
+          description: Cancel a running visual prototype workflow
+          headers:
+            ETag:
+              $ref: "#/components/headers/ETag"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PrototypePlan"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+        "409":
+          $ref: "#/components/responses/Problem"
+        "412":
+          $ref: "#/components/responses/Problem"
+        "428":
+          $ref: "#/components/responses/Problem"
+        "503":
+          $ref: "#/components/responses/Problem"
+  /projects/{projectId}/prototype-v2/revisions/{revisionId}/confirm:
+    post:
+      operationId: confirmPrototypeRevision
+      summary: Confirm a ready visual prototype revision with CAS
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/PrototypeRevisionId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/IfMatch"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PrototypeWorkflowActionRequest"
+      responses:
+        "200":
+          description: Confirm a ready visual prototype revision with CAS
+          headers:
+            ETag:
+              $ref: "#/components/headers/ETag"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PrototypeRevision"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+        "409":
+          $ref: "#/components/responses/Problem"
+        "412":
+          $ref: "#/components/responses/Problem"
+        "428":
+          $ref: "#/components/responses/Problem"
+  /projects/{projectId}/prototype-v2/revisions/{revisionId}/reject:
+    post:
+      operationId: rejectPrototypeRevision
+      summary: Reject a ready visual prototype revision with CAS
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/PrototypeRevisionId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/IfMatch"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PrototypeWorkflowActionRequest"
+      responses:
+        "200":
+          description: Reject a ready visual prototype revision with CAS
+          headers:
+            ETag:
+              $ref: "#/components/headers/ETag"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PrototypeRevision"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+        "409":
+          $ref: "#/components/responses/Problem"
+        "412":
+          $ref: "#/components/responses/Problem"
+        "428":
+          $ref: "#/components/responses/Problem"
+  /projects/{projectId}/prototype-v2/revisions/{revisionId}/preview-token:
+    post:
+      operationId: createPrototypePreviewToken
+      summary: Create a short-lived preview capability bound to a project, revision and document checksum
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/PrototypeRevisionId"
+      responses:
+        "200":
+          description: Create a short-lived preview capability bound to a project, revision and document checksum
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ExportPreviewTokenResponse"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+        "409":
+          $ref: "#/components/responses/Problem"
+        "503":
+          $ref: "#/components/responses/Problem"
+  /projects/{projectId}/prototype-v2/feedback/{feedbackId}/resolve:
+    post:
+      operationId: resolvePrototypeFeedback
+      summary: Resolve a feedback item with CAS
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/PrototypeFeedbackId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/IfMatch"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PrototypeWorkflowActionRequest"
+      responses:
+        "200":
+          description: Resolve a feedback item with CAS
+          headers:
+            ETag:
+              $ref: "#/components/headers/ETag"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PrototypeFeedback"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+        "409":
+          $ref: "#/components/responses/Problem"
+        "412":
+          $ref: "#/components/responses/Problem"
+        "428":
+          $ref: "#/components/responses/Problem"
+  /public/prototype-v2/shares/{token}:
+    get:
+      operationId: getPublicPrototypeShare
+      summary: Resolve an active anonymous visual prototype share
+      parameters:
+        - $ref: "#/components/parameters/PrototypeShareToken"
+      responses:
+        "200":
+          description: Resolve an active anonymous visual prototype share
+          headers:
+            ETag:
+              $ref: "#/components/headers/ETag"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PrototypePublicShare"
+        "404":
+          $ref: "#/components/responses/Problem"
+  /public/prototype-v2/previews/{token}:
+    get:
+      operationId: getPrototypePreviewDocument
+      summary: Serve a short-lived isolated prototype preview document
+      security: []
+      parameters:
+        - $ref: "#/components/parameters/PrototypeShareToken"
+      responses:
+        "200":
+          description: Serve a short-lived isolated prototype preview document
+          content:
+            text/html:
+              schema:
+                type: string
+        "404":
+          $ref: "#/components/responses/Problem"
+  /projects/{projectId}/prototype-v2/shares/{shareId}/revoke:
+    post:
+      operationId: revokePrototypeShare
+      summary: Revoke a prototype share with CAS
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/ShareId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/IfMatch"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PrototypeWorkflowActionRequest"
+      responses:
+        "200":
+          description: Revoke a prototype share with CAS
+          headers:
+            ETag:
+              $ref: "#/components/headers/ETag"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PrototypeShare"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+        "409":
+          $ref: "#/components/responses/Problem"
+        "412":
+          $ref: "#/components/responses/Problem"
+        "428":
+          $ref: "#/components/responses/Problem"
+  /projects/{projectId}/prototype-v2/exports/{exportId}:
+    get:
+      operationId: getPrototypeExport
+      summary: Get a prototype export and immutable artifact identity
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/ExportId"
+      responses:
+        "200":
+          description: Get a prototype export and immutable artifact identity
+          headers:
+            ETag:
+              $ref: "#/components/headers/ETag"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PrototypeExport"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+  /projects/{projectId}/prototype-v2/exports/{exportId}/download:
+    get:
+      operationId: downloadPrototypeExport
+      summary: Stream the immutable completed prototype export artifact
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/ExportId"
+      responses:
+        "200":
+          description: Stream the immutable completed prototype export artifact
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+        "409":
+          $ref: "#/components/responses/Problem"
+        "503":
+          $ref: "#/components/responses/Problem"
+  /projects/{projectId}/prototype-v2/exports/{exportId}/retry:
+    post:
+      operationId: retryPrototypeExport
+      summary: Retry a failed prototype export
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/ExportId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/IfMatch"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PrototypeWorkflowActionRequest"
+      responses:
+        "202":
+          description: Retry a failed prototype export
+          headers:
+            ETag:
+              $ref: "#/components/headers/ETag"
+            Location:
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PrototypeExport"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+        "409":
+          $ref: "#/components/responses/Problem"
+        "412":
+          $ref: "#/components/responses/Problem"
+        "428":
+          $ref: "#/components/responses/Problem"
+        "503":
+          $ref: "#/components/responses/Problem"
+  /projects/{projectId}/prototype-v2/exports/{exportId}/cancel:
+    post:
+      operationId: cancelPrototypeExport
+      summary: Cancel a queued or building prototype export with CAS
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/ExportId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/IfMatch"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PrototypeWorkflowActionRequest"
+      responses:
+        "200":
+          description: Cancel a queued or building prototype export with CAS
+          headers:
+            ETag:
+              $ref: "#/components/headers/ETag"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PrototypeExport"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+        "409":
+          $ref: "#/components/responses/Problem"
+        "412":
+          $ref: "#/components/responses/Problem"
+        "428":
+          $ref: "#/components/responses/Problem"
+        "503":
           $ref: "#/components/responses/Problem"
 webhooks: {}

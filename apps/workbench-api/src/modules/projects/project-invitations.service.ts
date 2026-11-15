@@ -282,7 +282,7 @@ export class ProjectInvitationsService {
     if (!invitation || invitation.project.status !== "active") {
       throw notFoundProblem("Project invitation");
     }
-    assertMatchingEmail(principal.email, invitation.email);
+    matchingEmail(principal.email, invitation.email);
     if (invitation.status === "accepted" && invitation.acceptedById !== principal.id) {
       throw projectInvitationStateConflictProblem(
         "This invitation was accepted by a different account",
@@ -447,7 +447,7 @@ export function decodeProjectInvitationCursor(value: string): InvitationCursor {
       || cursor.projectId.length > 128
       || !(
         cursor.status === null
-        || ["pending", "accepted", "revoked", "expired"].includes(String(cursor.status))
+        || (typeof cursor.status === "string" && ["pending", "accepted", "revoked", "expired"].includes(cursor.status))
       )
       || typeof cursor.createdAt !== "string"
       || !Number.isFinite(Date.parse(cursor.createdAt))
@@ -598,10 +598,6 @@ function matchingEmail(principalEmail: string | null, invitationEmail: string) {
     );
   }
   return normalized;
-}
-
-function assertMatchingEmail(principalEmail: string | null, invitationEmail: string) {
-  matchingEmail(principalEmail, invitationEmail);
 }
 
 function assertRevision(actual: number, expected: number) {

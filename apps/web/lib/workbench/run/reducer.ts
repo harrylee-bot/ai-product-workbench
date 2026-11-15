@@ -18,8 +18,8 @@ export type RunMessageProjection = {
 };
 
 export type RunActivityProjection = RunEventOf<"activity.changed">["payload"];
-export type RunInputProjection = RunEventOf<"run.input.required">["payload"];
-export type RunFailureProjection = RunEventOf<"run.failed">["payload"];
+type RunInputProjection = RunEventOf<"run.input.required">["payload"];
+type RunFailureProjection = RunEventOf<"run.failed">["payload"];
 export type RunArtifactDraftProjection = RunEventOf<"artifact.draft.created">["payload"];
 
 export type RunProjectionState = {

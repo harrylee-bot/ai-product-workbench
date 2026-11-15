@@ -8,43 +8,39 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { ExportDialog } from "./workbench-export-dialog";
 
 const selection = { kind: "board_nodes" as const, nodeIds: ["node-a"] };
-const available = { available: true as const, authentication: "not_required" as const, reasonCode: null };
-const authRequired = { available: false as const, authentication: "required" as const, reasonCode: "EXPORT_EXTERNAL_AUTHENTICATION_REQUIRED" as const };
+const available = { available: true as const, reasonCode: null };
 const capabilities = {
   formats: {
     html: available,
     react: available,
-    figma: { available: false as const, authentication: "not_required" as const, reasonCode: "EXPORT_FIGMA_UNAVAILABLE" as const },
+    figma: { available: false as const, reasonCode: "EXPORT_FIGMA_UNAVAILABLE" as const },
     mcp: available,
     docx: available,
     pdf: available,
   },
   packaging: { single_file: available, zip: available },
-  external: {
-    ai_studio: { available: false as const, authentication: "not_required" as const, reasonCode: "EXPORT_EXTERNAL_AI_STUDIO_UNAVAILABLE" as const },
-    netlify: authRequired,
-    lovable: authRequired,
-    bolt: authRequired,
-  },
-};
-const netlifyCapabilities = {
-  ...capabilities,
-  external: {
-    ...capabilities.external,
-    netlify: available,
-  },
 };
 
 afterEach(cleanup);
 
 describe("ExportDialog persisted job state", () => {
+  it("shows local export actions without retired external publishing targets", () => {
+    render(<ExportDialog {...documentDialogProps()} />);
+    for (const target of ["Netlify", "Lovable", "Bolt", "AI Studio"]) {
+      expect(screen.queryByText(target, { exact: true })).toBeNull();
+    }
+    for (const target of ["Download .zip", "Copy code", "React", "Figma", "MCP", "Download Word", "Download PDF"]) {
+      expect(screen.getByText(target, { exact: true })).toBeTruthy();
+    }
+  });
+
   it("limits source prototypes to the supported local HTML and React outputs", async () => {
     const props = documentDialogProps();
     props.onStartExport.mockResolvedValue(exportJob({ format: "react", status: "queued" }));
     const sourceSelection = { kind: "artifact" as const, artifactId: "source", artifactVersionId: "source-v1" };
     render(<ExportDialog {...props} selection={sourceSelection} sourceExport={{ source: true, reason: null }}
-      capabilities={{ ...netlifyCapabilities, formats: { ...capabilities.formats, figma: available } }} />);
-    for (const target of ["Figma", "MCP", "Netlify"]) {
+      capabilities={{ ...capabilities, formats: { ...capabilities.formats, figma: available } }} />);
+    for (const target of ["Figma", "MCP"]) {
       expect((screen.getByText(target).closest("button") as HTMLButtonElement).disabled).toBe(true);
     }
     for (const target of ["Download .zip", "Copy code", "React"]) {
@@ -96,12 +92,12 @@ describe("ExportDialog persisted job state", () => {
 
   it("explains why a non-PRD selection cannot be exported as Word or PDF", () => {
     render(<ExportDialog {...documentDialogProps()}
-      documentExport={{ selection: null, title: null, reason: "Word/PDF 仅支持完整 PRD v2 需求文档" }}
+      documentExport={{ selection: null, title: null, reason: "Word/PDF 仅支持完整 PRD v3 需求文档" }}
     />);
     for (const target of ["Download Word", "Download PDF"]) {
       expect((screen.getByText(target).closest("button") as HTMLButtonElement).disabled).toBe(true);
     }
-    expect(screen.getAllByText("Word/PDF 仅支持完整 PRD v2 需求文档")).toHaveLength(2);
+    expect(screen.getAllByText("Word/PDF 仅支持完整 PRD v3 需求文档")).toHaveLength(2);
   });
 
   it("disables a previously selected document action when the current selection becomes invalid", () => {
@@ -231,7 +227,6 @@ describe("ExportDialog persisted job state", () => {
     render(<ExportDialog
       activeExport={exportJob({ format: "react", status: "succeeded" })}
       activeExportSelection={selection}
-      activeExternalDelivery={null}
       busy={false}
       capabilities={capabilities}
       capabilitiesError={null}
@@ -239,14 +234,10 @@ describe("ExportDialog persisted job state", () => {
       error={null}
       hasSelection
       onCancelExport={vi.fn()}
-      onCancelExternalDelivery={vi.fn()}
-      onConfirmExternalDelivery={vi.fn()}
       onCopyCode={vi.fn()}
       onDownload={onDownload}
       onOpenChange={vi.fn()}
-      onPrepareExternalDelivery={vi.fn()}
       onRetryCapabilities={vi.fn(async () => undefined)}
-      onRetryExternalDelivery={vi.fn()}
       onSelectAll={vi.fn()}
       onStartExport={vi.fn()}
       open
@@ -268,7 +259,6 @@ describe("ExportDialog persisted job state", () => {
     render(<ExportDialog
       activeExport={exportJob({ format: "html", status: "queued" })}
       activeExportSelection={selection}
-      activeExternalDelivery={null}
       busy={false}
       capabilities={capabilities}
       capabilitiesError={null}
@@ -276,14 +266,10 @@ describe("ExportDialog persisted job state", () => {
       error={null}
       hasSelection
       onCancelExport={onCancelExport}
-      onCancelExternalDelivery={vi.fn()}
-      onConfirmExternalDelivery={vi.fn()}
       onCopyCode={vi.fn()}
       onDownload={vi.fn()}
       onOpenChange={vi.fn()}
-      onPrepareExternalDelivery={vi.fn()}
       onRetryCapabilities={vi.fn(async () => undefined)}
-      onRetryExternalDelivery={vi.fn()}
       onSelectAll={vi.fn()}
       onStartExport={vi.fn()}
       open
@@ -299,7 +285,6 @@ describe("ExportDialog persisted job state", () => {
     render(<ExportDialog
       activeExport={null}
       activeExportSelection={null}
-      activeExternalDelivery={null}
       busy={false}
       capabilities={null}
       capabilitiesError={new Error("capabilities unavailable")}
@@ -307,14 +292,10 @@ describe("ExportDialog persisted job state", () => {
       error={null}
       hasSelection
       onCancelExport={vi.fn()}
-      onCancelExternalDelivery={vi.fn()}
-      onConfirmExternalDelivery={vi.fn()}
       onCopyCode={vi.fn()}
       onDownload={vi.fn()}
       onOpenChange={vi.fn()}
-      onPrepareExternalDelivery={vi.fn()}
       onRetryCapabilities={onRetryCapabilities}
-      onRetryExternalDelivery={vi.fn()}
       onSelectAll={vi.fn()}
       onStartExport={vi.fn()}
       open
@@ -324,97 +305,6 @@ describe("ExportDialog persisted job state", () => {
     expect(screen.getAllByText("导出能力检查失败").length).toBeGreaterThan(0);
     fireEvent.click(screen.getByRole("button", { name: "导出能力检查失败，重试" }));
     await waitFor(() => expect(onRetryCapabilities).toHaveBeenCalledOnce());
-  });
-
-  it("restores the external target and immutable payload confirmation", async () => {
-    const job = {
-      ...exportJob({ format: "html", status: "succeeded" }),
-      packaging: "zip" as const,
-      output: {
-        blobId: "blob-zip",
-        mediaType: "application/zip",
-        byteSize: 2_048,
-        sha256: "b".repeat(64),
-        fileName: "workbench-export.zip",
-      },
-    };
-    render(<ExportDialog
-      activeExport={job}
-      activeExportSelection={selection}
-      activeExternalDelivery={externalDelivery(job.id)}
-      busy={false}
-      capabilities={capabilities}
-      capabilitiesError={null}
-      capabilitiesPending={false}
-      error={null}
-      hasSelection
-      onCancelExport={vi.fn()}
-      onCancelExternalDelivery={vi.fn()}
-      onConfirmExternalDelivery={vi.fn()}
-      onCopyCode={vi.fn()}
-      onDownload={vi.fn()}
-      onOpenChange={vi.fn()}
-      onPrepareExternalDelivery={vi.fn()}
-      onRetryCapabilities={vi.fn(async () => undefined)}
-      onRetryExternalDelivery={vi.fn()}
-      onSelectAll={vi.fn()}
-      onStartExport={vi.fn()}
-      open
-      selection={selection}
-    />);
-
-    await waitFor(() => expect(screen.getByText("Netlify").closest("button")?.getAttribute("aria-pressed")).toBe("true"));
-    expect(screen.getByRole("button", { name: "确认发布至 Netlify" })).toBeTruthy();
-    expect(screen.getByText("画布节点 1 个")).toBeTruthy();
-    expect(screen.getByText("workbench-export.zip")).toBeTruthy();
-    expect(screen.getByText(/2\.0 KB/)).toBeTruthy();
-  });
-
-  it("keeps the selected external target while its matching Export becomes ready", async () => {
-    const onPrepareExternalDelivery = vi.fn(async () => externalDelivery("export-html"));
-    const queued = {
-      ...exportJob({ format: "html", status: "queued" }),
-      packaging: "zip" as const,
-    };
-    const succeeded = {
-      ...exportJob({ format: "html", status: "succeeded" }),
-      packaging: "zip" as const,
-    };
-    const props = {
-      activeExportSelection: selection,
-      activeExternalDelivery: null,
-      busy: false,
-      capabilities: netlifyCapabilities,
-      capabilitiesError: null,
-      capabilitiesPending: false,
-      error: null,
-      hasSelection: true,
-      onCancelExport: vi.fn(),
-      onCancelExternalDelivery: vi.fn(),
-      onConfirmExternalDelivery: vi.fn(),
-      onCopyCode: vi.fn(),
-      onDownload: vi.fn(),
-      onOpenChange: vi.fn(),
-      onPrepareExternalDelivery,
-      onRetryCapabilities: vi.fn(async () => undefined),
-      onRetryExternalDelivery: vi.fn(),
-      onSelectAll: vi.fn(),
-      onStartExport: vi.fn(),
-      open: true,
-      selection,
-    };
-    const rendered = render(<ExportDialog {...props} activeExport={null} activeExportSelection={null} />);
-
-    fireEvent.click(screen.getByText("Netlify").closest("button")!);
-    expect(screen.getByText("Netlify").closest("button")?.getAttribute("aria-pressed")).toBe("true");
-
-    rendered.rerender(<ExportDialog {...props} activeExport={queued} />);
-    await waitFor(() => expect(screen.getByText("Netlify").closest("button")?.getAttribute("aria-pressed")).toBe("true"));
-
-    rendered.rerender(<ExportDialog {...props} activeExport={succeeded} />);
-    const prepare = await screen.findByRole("button", { name: "准备发布至 Netlify" });
-    fireEvent.click(prepare);
-    await waitFor(() => expect(onPrepareExternalDelivery).toHaveBeenCalledWith("Netlify"));
   });
 });
 
@@ -457,7 +347,6 @@ function documentDialogProps() {
   return {
     activeExport: null,
     activeExportSelection: null,
-    activeExternalDelivery: null,
     busy: false,
     capabilities,
     capabilitiesError: null,
@@ -465,52 +354,13 @@ function documentDialogProps() {
     error: null,
     hasSelection: true,
     onCancelExport: vi.fn(),
-    onCancelExternalDelivery: vi.fn(),
-    onConfirmExternalDelivery: vi.fn(),
     onCopyCode: vi.fn(),
     onDownload: vi.fn(),
     onOpenChange: vi.fn(),
-    onPrepareExternalDelivery: vi.fn(),
     onRetryCapabilities: vi.fn(async () => undefined),
-    onRetryExternalDelivery: vi.fn(),
     onSelectAll: vi.fn(),
     onStartExport: vi.fn(),
     open: true,
     selection,
-  };
-}
-
-function externalDelivery(exportJobId: string) {
-  const timestamp = "2026-07-18T00:00:00.000Z";
-  return {
-    id: "delivery-netlify",
-    exportJobId,
-    createdById: "principal-1",
-    target: "netlify" as const,
-    authentication: "authenticated" as const,
-    status: "pending_confirmation" as const,
-    revision: 0,
-    attempt: 0,
-    payload: {
-      exportJobId,
-      releaseId: "release-1",
-      format: "html" as const,
-      packaging: "zip" as const,
-      selection,
-      output: {
-        mediaType: "application/zip",
-        byteSize: 2_048,
-        sha256: "b".repeat(64),
-        fileName: "workbench-export.zip",
-      },
-    },
-    remoteReference: null,
-    failure: null,
-    createdAt: timestamp,
-    confirmedAt: null,
-    startedAt: null,
-    transferAuthorizedAt: null,
-    finishedAt: null,
-    updatedAt: timestamp,
   };
 }

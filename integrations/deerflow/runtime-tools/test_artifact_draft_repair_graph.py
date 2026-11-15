@@ -24,6 +24,80 @@ def real_runtime_available() -> bool:
 
 @unittest.skipUnless(real_runtime_available(), "requires the pinned real LangChain/LangGraph runtime")
 class PrdRepairGraphTests(unittest.IsolatedAsyncioTestCase):
+    async def test_acceptance_matrix_repair_is_actionable_through_real_middleware_and_toolnode(self):
+        from langchain.agents import create_agent
+        from langchain_core.language_models.fake_chat_models import FakeMessagesListChatModel
+        from langchain_core.messages import AIMessage
+        from deerflow_workbench_tools.artifact_draft_tool import workbench_artifact_draft_publish
+        from deerflow_workbench_tools.runtime_result_validator import validate_runtime_artifact_draft
+        from prd_acceptance_test_fixture import anonymous_acceptance_collision
+
+        spec = importlib.util.spec_from_file_location("workbench_acceptance_graph_helpers", PATCH_ROOT / "test_workbench_tool_scope_middleware.py")
+        helpers = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = helpers
+        spec.loader.exec_module(helpers)
+        broken = anonymous_acceptance_collision()
+        validation = validate_runtime_artifact_draft(broken)
+        coverage = validation["repairHints"][0]["acceptanceCoverage"]
+        then_path = coverage["rows"][2]["resultPaths"][0]
+        given_path = next(path for path in coverage["rows"][0]["conditionPaths"] if path.endswith("/given"))
+        then_value = "重试后保留录入内容并提供可核对的回执。"
+        then_candidate = copy.deepcopy(broken)
+        then_candidate["content"]["sections"]["businessRequirements"]["functionSections"][0]["blocks"][6]["then"][0]["text"] = then_value
+        then_checksum = validate_runtime_artifact_draft(then_candidate)["candidateChecksum"]
+        captured = []
+
+        class ToolModel(FakeMessagesListChatModel):
+            def bind_tools(self, tools, *, tool_choice=None, **kwargs):
+                return self
+
+            def _generate(self, messages, *args, **kwargs):
+                captured.append(copy.deepcopy(messages))
+                return super()._generate(messages, *args, **kwargs)
+
+        for asynchronous in (False, True):
+            with self.subTest(asynchronous=asynchronous):
+                captured.clear()
+                initial = helpers.automatic_prd_request().state
+                del initial["messages"][-2:]
+                original = copy.deepcopy(initial)
+                calls = [
+                    helpers.call("workbench_artifact_draft_publish", "coverage-base", {"artifact_index": 0, "draft": copy.deepcopy(broken)}),
+                    helpers.call("workbench_artifact_draft_publish", "coverage-then", {"artifact_index": 0, "repair": {
+                        "baseCandidateChecksum": validation["candidateChecksum"],
+                        "operations": [{"op": "replace", "path": then_path + "/0/text", "value": then_value}],
+                    }}),
+                    helpers.call("workbench_artifact_draft_publish", "coverage-given", {"artifact_index": 0, "repair": {
+                        "baseCandidateChecksum": then_checksum,
+                        "operations": [{"op": "replace", "path": given_path + "/0/text", "value": "必填项尚未输入"}],
+                    }}),
+                ]
+                model = ToolModel(responses=[*[AIMessage(content="", tool_calls=[call]) for call in calls], AIMessage(content="Accepted; continue the prototype workflow.")])
+                graph = create_agent(model, tools=[workbench_artifact_draft_publish], middleware=[
+                    helpers.WorkbenchToolScopeMiddleware(None, ["prd", "prototype"], run_scope=("run-auto", "attempt-auto")),
+                ])
+                kwargs = {"context": {"workbench": {"runId": "run-auto", "runtimeAttemptId": "attempt-auto", "requestedArtifactKinds": ["prd", "prototype"]}}}
+                with unittest.mock.patch.object(helpers.middleware_module, "_PROTOTYPE_REFERENCE_DIRECTORY", ROOT / "integrations/deerflow/skills/workbench/references"):
+                    result = await graph.ainvoke(initial, **kwargs) if asynchronous else graph.invoke(initial, **kwargs)
+                receipts = {message.tool_call_id: message for message in result["messages"] if helpers.middleware_module._is_tool_message(message)}
+                for call_id in ("coverage-base", "coverage-then"):
+                    receipt = receipts[call_id]
+                    self.assertEqual(receipt.status, "success")
+                    self.assertFalse(receipt.artifact["ok"])
+                    self.assertNotIn("draft", receipt.artifact)
+                    self.assertNotIn("repairHints", receipt.artifact)
+                    ack = json.loads(receipt.content)
+                    hint = next(hint for hint in ack["repairHints"] if "acceptanceCoverage" in hint)
+                    self.assertEqual(hint["candidateChecksum"], ack["candidateChecksum"])
+                    self.assertEqual(hint["acceptanceCoverage"], coverage)
+                self.assertTrue(receipts["coverage-given"].artifact["ok"])
+                self.assertTrue(validate_runtime_artifact_draft(receipts["coverage-given"].artifact["draft"])["ok"])
+                self.assertEqual(helpers.middleware_module._successful_prd_drafts(result, "run-auto", "attempt-auto"), (1, False))
+                self.assertEqual(initial, original)
+                # The actual model input, not just an internal validator result,
+                # includes the bounded repair diagnosis after rejection.
+                self.assertTrue(any("acceptanceCoverage" in str(message.content) for message in captured[1] if message.type == "tool"))
+
     async def test_template_restore_recovers_after_repeated_unchanged_model_repairs(self):
         from langchain.agents import create_agent
         from langchain_core.language_models.fake_chat_models import FakeMessagesListChatModel

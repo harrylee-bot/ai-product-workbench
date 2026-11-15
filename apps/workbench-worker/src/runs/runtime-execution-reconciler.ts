@@ -61,6 +61,7 @@ export class RuntimeExecutionReconciler {
         SELECT run."id"
         FROM "runs" AS run
         WHERE run."status" = 'running'
+          AND NOT EXISTS (SELECT 1 FROM "prototype_plans" AS plan WHERE plan."runtime_run_id" = run."id")
           AND (
             run."execution_owner_id" IS NULL
             OR run."execution_lease_expires_at" <= CURRENT_TIMESTAMP
@@ -101,6 +102,7 @@ export class RuntimeExecutionReconciler {
         FROM "runs" AS run
         WHERE run."id" = ${runId}
           AND run."status" = 'running'
+          AND NOT EXISTS (SELECT 1 FROM "prototype_plans" AS plan WHERE plan."runtime_run_id" = run."id")
           AND (
             run."execution_owner_id" IS NULL
             OR run."execution_lease_expires_at" <= CURRENT_TIMESTAMP

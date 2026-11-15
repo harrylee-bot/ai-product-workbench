@@ -6,9 +6,9 @@ const WORKBENCH_BOARD_NODE_PARAM = "boardNode";
 const WORKBENCH_HISTORY_STATE_KEY = "__workbenchNavigation";
 const WORKBENCH_HISTORY_STATE_VERSION = 1;
 const WORKBENCH_PROJECT_PATH_PREFIX = "/projects/";
-export const WORKBENCH_URL_COMMITTED_EVENT = "workbench:navigation:url-committed";
+const WORKBENCH_URL_COMMITTED_EVENT = "workbench:navigation:url-committed";
 
-export type WorkbenchCommittedUrlDetail = {
+type WorkbenchCommittedUrlDetail = {
   href: string;
 };
 

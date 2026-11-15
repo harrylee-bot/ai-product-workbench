@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { prdDocumentV2Example } from "@workbench/workbench-contracts/test-fixtures";
-import { prdDocumentV2Schema, prdTableOfContentsEntriesFor } from "@workbench/workbench-contracts";
+import { prdDocumentV3Example } from "@workbench/workbench-contracts/test-fixtures";
+import { prdDocumentV3Schema, prdTableOfContentsEntriesForV3 } from "@workbench/workbench-contracts";
 import { unzipSync, strFromU8 } from "fflate";
 import { JSDOM } from "jsdom";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
@@ -14,7 +14,7 @@ import { exportRequest } from "./fixtures.js";
 const inline = (text: string) => [{ type: "text" as const, text, marks: [] }];
 
 function allContentExample() {
-  const document = structuredClone(prdDocumentV2Example);
+  const document = structuredClone(prdDocumentV3Example);
   document.revision.number = 2;
   document.revision.summary = "完整保留第二次评审修订说明";
   document.revision.changedById = "revision-reviewer";
@@ -28,8 +28,9 @@ function allContentExample() {
     locator: { heading: "调研访谈章节", startLine: 12, endLine: 18 },
   });
   document.assumptions[0]!.citationIds = ["citation-research"];
-  document.sections.safetyBaseline.rows[0]!.remarks = "安全评审说明原文保留，不遗漏备注。";
-  document.sections.businessRequirements.additionalSections = [{
+  document.sections.safetyBaseline.rows[0]!.remarks = "调整工作台任务页面的提交逻辑，安全评审说明原文完整保留。";
+  document.sections.businessRequirements.functionSections.push({
+    id: "section-extra", diagrams: [],
     title: "2.5 业务补充说明",
     blocks: [
       { id: "rich-marks", type: "paragraph", content: [
@@ -62,9 +63,9 @@ function allContentExample() {
         })),
       },
     ],
-  }];
-  document.tableOfContents.entries = prdTableOfContentsEntriesFor(["2.5 业务补充说明"]);
-  return prdDocumentV2Schema.parse(document);
+  });
+  document.tableOfContents.entries = prdTableOfContentsEntriesForV3(document.sections.businessRequirements.functionSections.map((section) => section.title));
+  return prdDocumentV3Schema.parse(document);
 }
 
 function readDocx(bytes: Uint8Array) {
@@ -127,19 +128,19 @@ describe("Word and PDF document selection", () => {
     expect(Object.keys(archive).filter((name) => name.startsWith("word/media/"))).toHaveLength(0);
   }, 120_000);
 
-  it.each(["docx", "pdf"] as const)("renders a valid PRD v2 document artifact for %s", async (format) => {
+  it.each(["docx", "pdf"] as const)("renders a valid PRD v3 artifact for %s", async (format) => {
     const request = exportRequest(format);
     request.packaging = "single_file";
     const artifact = request.source.artifacts[0]!;
-    artifact.kind = "document";
-    artifact.schemaVersion = 2;
-    artifact.title = prdDocumentV2Example.title;
-    artifact.content = structuredClone(prdDocumentV2Example);
+    artifact.kind = "prd";
+    artifact.schemaVersion = 3;
+    artifact.title = prdDocumentV3Example.title;
+    artifact.content = structuredClone(prdDocumentV3Example);
 
     const output = await buildExport(request);
 
     expect(output.bytes.byteLength).toBeGreaterThan(1_000);
-    expect(output.fileName).toBe(`${prdDocumentV2Example.title}.${format}`);
+    expect(output.fileName).toBe(`${prdDocumentV3Example.title}.${format}`);
     expect(Buffer.from(output.bytes).subarray(0, format === "docx" ? 2 : 5).toString()).toBe(format === "docx" ? "PK" : "%PDF-");
   }, 120_000);
 
@@ -178,18 +179,18 @@ describe("Word and PDF document selection", () => {
     }
   }, 120_000);
 
-  it.each(["docx", "pdf"] as const)("accepts a document-kind artifact and then enforces the PRD v2 protocol for %s", async (format) => {
+  it.each(["docx", "pdf"] as const)("rejects a retired PRD protocol for %s", async (format) => {
     const request = exportRequest(format);
     request.packaging = "single_file";
     const artifact = request.source.artifacts[0]!;
-    artifact.kind = "document";
-    artifact.schemaVersion = 2;
-    artifact.title = prdDocumentV2Example.title;
-    artifact.content = { ...structuredClone(prdDocumentV2Example), protocol: "workbench.prd.v1" } as never;
+    artifact.kind = "prd";
+    artifact.schemaVersion = 3;
+    artifact.title = prdDocumentV3Example.title;
+    artifact.content = { ...structuredClone(prdDocumentV3Example), protocol: "workbench.prd.v1" } as never;
 
     await expect(buildExport(request)).rejects.toMatchObject({
       code: "EXPORT_CONTENT_INVALID",
-      safeDetail: "DOCX export only supports PRD v2 or v3",
+      safeDetail: "DOCX export requires a valid PRD v3 or business document",
     });
   });
 
@@ -204,8 +205,8 @@ describe("Word and PDF document selection", () => {
     const artifact = {
       ...request.source.artifacts[0]!,
       kind: "prd" as const,
-      schemaVersion: 2,
-      content: structuredClone(prdDocumentV2Example),
+      schemaVersion: 3,
+      content: structuredClone(prdDocumentV3Example),
     };
     request.source.artifacts = Array.from({ length: count }, (_, index) => ({
       ...artifact,
@@ -215,7 +216,7 @@ describe("Word and PDF document selection", () => {
 
     await expect(buildExport(request)).rejects.toMatchObject({
       code: "EXPORT_CONTENT_INVALID",
-      safeDetail: `${format.toUpperCase()} export requires exactly one PRD artifact`,
+      safeDetail: `${format.toUpperCase()} export requires exactly one PRD or business document artifact`,
     });
   });
 
@@ -229,11 +230,11 @@ describe("Word and PDF document selection", () => {
     { protocol: "workbench.prd.v2" },
     "A regular document is not a PRD",
     null,
-    { ...structuredClone(prdDocumentV2Example), sections: {} },
+    { ...structuredClone(prdDocumentV3Example), sections: {} },
   ])("rejects incomplete and ordinary document content before launching a renderer", async (content) => {
     const request = exportRequest("docx");
     request.packaging = "single_file";
-    request.source.artifacts[0]!.kind = "document";
+    request.source.artifacts[0]!.kind = "prd";
     request.source.artifacts[0]!.content = content as never;
     await expect(buildExport(request)).rejects.toMatchObject({ code: "EXPORT_CONTENT_INVALID" });
   });
@@ -242,19 +243,19 @@ describe("Word and PDF document selection", () => {
     const request = exportRequest("docx");
     request.packaging = "single_file";
     request.source.artifacts[0]!.kind = "prd";
-    const content = structuredClone(prdDocumentV2Example);
-    content.sections.businessRequirements.flowAndPages.diagrams[0]!.id = "../escaped";
+    const content = structuredClone(prdDocumentV3Example);
+    content.sections.businessRequirements.functionSections[1]!.diagrams[0]!.id = "../escaped";
     request.source.artifacts[0]!.content = content;
     await expect(buildExport(request)).rejects.toMatchObject({
       code: "EXPORT_CONTENT_INVALID",
-      safeDetail: "DOCX export requires a complete valid PRD v2 or v3 document",
+      safeDetail: "DOCX export requires a valid PRD v3 or business document",
     });
   });
 
   it("preserves every block, table cell, relation, history entry, remark and source in DOCX", async () => {
     const request = exportRequest("docx");
     request.packaging = "single_file";
-    request.source.artifacts[0]!.kind = "document";
+    request.source.artifacts[0]!.kind = "prd";
     const content = allContentExample();
     request.source.artifacts[0]!.content = content;
     const output = await buildExport(request);
@@ -282,7 +283,7 @@ describe("Word and PDF document selection", () => {
       if (anchor) expect(bookmarkNames.has(anchor), `Missing TOC target: ${anchor}`).toBe(true);
     }
     expect(Object.keys(archive).filter((name) => name.startsWith("word/media/"))).toHaveLength(2);
-    for (const diagram of content.sections.businessRequirements.flowAndPages.diagrams) {
+    for (const diagram of content.sections.businessRequirements.functionSections[1]!.diagrams) {
       for (const edge of diagram.edges) {
         expect(text).toContain(edge.id);
         expect(text).toContain(edge.from);
@@ -309,7 +310,7 @@ describe("Word and PDF document selection", () => {
     vi.stubEnv("WORKBENCH_WEB_ORIGIN", "");
     const request = exportRequest("docx");
     request.packaging = "single_file";
-    request.source.artifacts[0]!.kind = "document";
+    request.source.artifacts[0]!.kind = "prd";
     request.source.artifacts[0]!.content = allContentExample();
     const { archive, text } = readDocx((await buildExport(request)).bytes);
     expect(text).toContain("业务资料链接");
@@ -320,7 +321,7 @@ describe("Word and PDF document selection", () => {
   it("keeps Chinese source text in the generated PDF, including tables and remarks", async () => {
     const request = exportRequest("pdf");
     request.packaging = "single_file";
-    request.source.artifacts[0]!.kind = "document";
+    request.source.artifacts[0]!.kind = "prd";
     const content = allContentExample();
     request.source.artifacts[0]!.content = content;
     const output = await buildExport(request);

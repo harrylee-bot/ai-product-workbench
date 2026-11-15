@@ -13,6 +13,23 @@ const now = new Date("2026-07-13T00:00:00.000Z");
 const checksum = createHash("sha256").update("shareobj").digest("hex");
 const assetChecksum = checksum;
 
+describe("Share cursor validation", () => {
+  it.each([
+    { id: 42, createdAt: now.toISOString() },
+    { id: ["share_1"], createdAt: now.toISOString() },
+    { id: { lt: "share_1" }, createdAt: now.toISOString() },
+    { id: "share_1", createdAt: [now.toISOString()] },
+  ])("rejects non-string cursor fields %j before listing shares", async (value) => {
+    const db = { shareGrant: {
+      updateMany: vi.fn(), findMany: vi.fn().mockResolvedValue([]), count: vi.fn().mockResolvedValue(0),
+    } };
+    const service = new SharesService(db as never, { findProject: vi.fn() } as never, objectStorage() as never);
+    const cursor = Buffer.from(JSON.stringify(value)).toString("base64url");
+    await expect(service.list("principal_1", "project_1", cursor)).rejects.toMatchObject({ status: 400 });
+    expect(db.shareGrant.findMany).not.toHaveBeenCalled();
+  });
+});
+
 function objectStorage() {
   return {
     getObject: vi.fn().mockResolvedValue({
@@ -536,7 +553,7 @@ describe("ShareGrant security and lifecycle", () => {
     }) } };
     const service = new SharesService(db as never, {} as never, objectStorage() as never);
     await expect(service.rotate("principal_1", "project_1", "share:rotate:12345678", {
-      releaseId: "release_1", scope: "remix", expiresAt: null,
+      releaseId: "release_1", scope: "remix" as never, expiresAt: null,
     })).rejects.toMatchObject({ status: 400 });
     await expect(service.getPublic(`wbs_${"J".repeat(43)}`)).rejects.toMatchObject({ status: 404 });
   });

@@ -22,7 +22,7 @@ export class ImportSourceProcessor {
     const heartbeat = setInterval(() => void this.store.touchAttempt(start.attemptId, start.leaseToken, leaseMs).catch(() => undefined), Math.max(1_000, Math.floor(leaseMs / 3)));
     heartbeat.unref();
     try {
-      const frozen = await this.providers.freeze(start.command.request, signal);
+      const frozen = await this.providers.freeze(start.request, signal);
       const total = frozen.blobs.reduce((sum, blob) => sum + blob.bytes.byteLength, 0);
       if (frozen.blobs.length === 0 || frozen.blobs.length > maximumImportSourceManifestBlobs || total > this.maximumSourceBytes) throw new TerminalImportError("IMPORT_SOURCE_LIMIT", "The frozen source exceeds the source manifest limit");
       const reserved = [];

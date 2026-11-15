@@ -23,6 +23,11 @@ must bind its actual OCI digest as `WORKBENCH_DEERFLOW_BASE_IMAGE_REF`. It is
 not an executable runtime. Runtime publication, signing, private configuration
 updates and production cutover follow the existing release procedure.
 
+`npm run deerflow:tools:test` uses `python3.12` from `PATH` for the focused
+standard-library test suite. Its lightweight LangChain substitutes live only in
+test files. The production middleware imports the pinned runtime types directly;
+the runtime image build runs the graph contracts with real dependencies.
+
 `prepare_release.py` verifies every upstream file before copying an explicit
 source allowlist. It injects the security constraints and verified lock. The
 runtime build then applies the matching source patch and verifies every

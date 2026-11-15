@@ -41,7 +41,3 @@ export function useWorkbenchTransport(): WorkbenchTransport {
   if (!context) throw new Error("useWorkbenchTransport must be used within WorkbenchTransportProvider");
   return context;
 }
-
-export function useOptionalWorkbenchTransport(): WorkbenchTransport | null {
-  return useContext(WorkbenchTransportContext);
-}

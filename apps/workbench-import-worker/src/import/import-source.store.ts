@@ -18,44 +18,24 @@ export type ImportDelivery = {
   leaseMs: number;
 };
 
-export type ImportCommand = {
-  id: string;
-  projectId: string;
-  requestHash: string;
-  request: Exclude<CreateImportSourceRequest, { kind: "file" | "design_md" }>;
-};
-
 export type AttemptStart =
-  | { kind: "run"; attemptId: string; attemptNumber: number; leaseToken: string; command: ImportCommand }
-  | { kind: "terminal"; status: "ready" | "failed" | "deleted" }
+  | { kind: "run"; attemptId: string; attemptNumber: number; leaseToken: string; request: Exclude<CreateImportSourceRequest, { kind: "file" | "design_md" }> }
+  | { kind: "terminal" }
   | { kind: "busy" };
 
 export type ReservedBlob = {
   id: string;
-  generation: number;
-  status: "pending" | "ready";
-  storageKey: string;
   canonicalStorageKey: string;
   sha256: string;
-  mediaType: string;
-  byteSize: number;
-  latestScanStatus: string | null;
 };
 
 export type ReconciliationCandidate = {
   sourceId: string;
-  projectId: string;
   requestHash: string;
   nextAttempt: number;
 };
 
 export type ImportFailureDisposition = "retryable" | "terminal" | "exhausted";
-
-export type LeaseReconciliationResult = {
-  expired: number;
-  retryable: number;
-  exhausted: number;
-};
 
 export class PrismaImportSourceStore {
   constructor(
@@ -69,16 +49,12 @@ export class PrismaImportSourceStore {
       const source = await tx.importSource.findUnique({
         where: { id: sourceId },
         select: {
-          id: true,
-          projectId: true,
           status: true,
           request: true,
-          requestHash: true,
           attempts: { where: { queueJobId: delivery.queueJobId }, take: 1 },
         },
       });
-      if (!source) return { kind: "terminal", status: "deleted" };
-      if (source.status !== "pending") return { kind: "terminal", status: source.status };
+      if (!source || source.status !== "pending") return { kind: "terminal" };
       const attempt = source.attempts[0];
       if (!attempt || !["queued", "running"].includes(attempt.status)) return { kind: "busy" };
       const parsed = createImportSourceRequestSchema.parse(source.request);
@@ -101,7 +77,7 @@ export class PrismaImportSourceStore {
         attemptId: attempt.id,
         attemptNumber: attempt.attempt,
         leaseToken,
-        command: { id: source.id, projectId: source.projectId, requestHash: source.requestHash, request: parsed },
+        request: parsed,
       };
     });
   }
@@ -120,13 +96,12 @@ export class PrismaImportSourceStore {
       await advisoryShaLock(tx, input.sha256);
       const active = await tx.blob.findFirst({
         where: { sha256: input.sha256, status: { not: "deleted" } },
-        include: { scans: { orderBy: { attempt: "desc" }, take: 1 } },
       });
       if (active) {
         if (Number(active.byteSize) !== input.byteSize || active.mediaType !== input.mediaType || active.status === "quarantined") {
           throw new TerminalImportError("IMPORT_BLOB_IDENTITY_CONFLICT", "Downloaded source content conflicts with an existing content identity");
         }
-        return mapBlob(active, this.prefixes);
+        return mapBlob(active, this.prefixes.canonical);
       }
       const generation = ((await tx.blob.aggregate({ where: { sha256: input.sha256 }, _max: { generation: true } }))._max.generation ?? 0) + 1;
       const created = await tx.blob.create({
@@ -139,9 +114,8 @@ export class PrismaImportSourceStore {
           byteSize: BigInt(input.byteSize),
           status: "pending",
         },
-        include: { scans: { orderBy: { attempt: "desc" }, take: 1 } },
       });
-      return mapBlob(created, this.prefixes);
+      return mapBlob(created, this.prefixes.canonical);
     }, { maxWait: 10_000, timeout: 30_000 });
   }
 
@@ -252,7 +226,7 @@ export class PrismaImportSourceStore {
     });
   }
 
-  async expireStaleAttempts(before: Date, maximumAttempts: number, limit: number): Promise<LeaseReconciliationResult> {
+  async expireStaleAttempts(before: Date, maximumAttempts: number, limit: number): Promise<void> {
     const now = new Date();
     return this.db.$transaction(async (tx) => {
       const attempts = await tx.$queryRaw<Array<{ id: string; sourceId: string; attempt: number }>>(Prisma.sql`
@@ -267,8 +241,6 @@ export class PrismaImportSourceStore {
         LIMIT ${limit}
         FOR UPDATE OF attempt, source SKIP LOCKED
       `);
-      let retryable = 0;
-      let exhausted = 0;
       for (const attempt of attempts) {
         const isExhausted = attempt.attempt >= maximumAttempts;
         const updated = await tx.importSourceAttempt.updateMany({
@@ -298,12 +270,8 @@ export class PrismaImportSourceStore {
               revision: { increment: 1 },
             },
           });
-          exhausted += 1;
-        } else {
-          retryable += 1;
         }
       }
-      return { expired: retryable + exhausted, retryable, exhausted };
     }, { maxWait: 10_000, timeout: 30_000 });
   }
 
@@ -338,8 +306,8 @@ export class PrismaImportSourceStore {
   }
 
   async reconciliationCandidates(before: Date, maximumAttempts: number, limit: number): Promise<ReconciliationCandidate[]> {
-    const rows = await this.db.$queryRaw<Array<{ sourceId: string; projectId: string; requestHash: string; attemptCount: bigint }>>(Prisma.sql`
-      SELECT source."id" AS "sourceId", source."project_id" AS "projectId",
+    const rows = await this.db.$queryRaw<Array<{ sourceId: string; requestHash: string; attemptCount: bigint }>>(Prisma.sql`
+      SELECT source."id" AS "sourceId",
              source."request_hash" AS "requestHash", COUNT(attempt."id")::BIGINT AS "attemptCount"
       FROM "import_sources" AS source
       LEFT JOIN "import_source_attempts" AS attempt ON attempt."import_source_id" = source."id"
@@ -355,12 +323,12 @@ export class PrismaImportSourceStore {
             AND failed."status" = 'retryable_failed'
             AND (failed."failure_code" = 'IMPORT_LEASE_EXPIRED' OR failed."updated_at" <= ${before})
         )
-      GROUP BY source."id", source."project_id", source."request_hash", source."created_at"
+      GROUP BY source."id", source."request_hash", source."created_at"
       HAVING COUNT(attempt."id") < ${maximumAttempts}
       ORDER BY source."created_at", source."id"
       LIMIT ${limit}
     `);
-    return rows.map((row) => ({ sourceId: row.sourceId, projectId: row.projectId, requestHash: row.requestHash, nextAttempt: Number(row.attemptCount) + 1 }));
+    return rows.map((row) => ({ sourceId: row.sourceId, requestHash: row.requestHash, nextAttempt: Number(row.attemptCount) + 1 }));
   }
 
 }
@@ -395,20 +363,14 @@ async function advisoryShaLock(tx: Prisma.TransactionClient, sha256: string) {
   await tx.$queryRaw(Prisma.sql`SELECT pg_advisory_xact_lock(hashtextextended(${sha256}, 0))::TEXT AS "lock_receipt"`);
 }
 
-function mapBlob(blob: { id: string; generation: number; status: string; storageKey: string; sha256: string; mediaType: string; byteSize: bigint; scans: Array<{ status: string }> }, prefixes: { pending: string; canonical: string }): ReservedBlob {
+function mapBlob(blob: { id: string; generation: number; status: string; storageKey: string; sha256: string; byteSize: bigint }, canonicalPrefix: string): ReservedBlob {
   if (blob.status !== "pending" && blob.status !== "ready") throw new TerminalImportError("IMPORT_BLOB_UNAVAILABLE", "The reserved source blob is unavailable");
   const byteSize = Number(blob.byteSize);
   if (!Number.isSafeInteger(byteSize) || byteSize <= 0) throw new TerminalImportError("IMPORT_BLOB_SIZE_INVALID", "The reserved source blob size is invalid");
   return {
     id: blob.id,
-    generation: blob.generation,
-    status: blob.status,
-    storageKey: blob.storageKey,
-    canonicalStorageKey: stableKey(prefixes.canonical, blob.sha256, blob.generation),
+    canonicalStorageKey: blob.status === "ready" ? blob.storageKey : stableKey(canonicalPrefix, blob.sha256, blob.generation),
     sha256: blob.sha256,
-    mediaType: blob.mediaType,
-    byteSize,
-    latestScanStatus: blob.scans[0]?.status ?? null,
   };
 }
 

@@ -19,12 +19,12 @@ export type FigmaImportPayload = {
   assets: FigmaImportAssetBytes;
 };
 
-export type ImportDocumentHandler = (payload: FigmaImportPayload) => void | Promise<void>;
+type ImportDocumentHandler = (payload: FigmaImportPayload) => void | Promise<void>;
 export type ImportDocumentEvent = {
   name: typeof FIGMA_IMPORT_EVENTS.document;
   handler: ImportDocumentHandler;
 };
-export type ImportProgressHandler = (progress: {
+type ImportProgressHandler = (progress: {
   phase: "validating" | "creating" | "finished";
   completed: number;
   total: number;
@@ -34,7 +34,7 @@ export type ImportProgressEvent = {
   name: typeof FIGMA_IMPORT_EVENTS.progress;
   handler: ImportProgressHandler;
 };
-export type ImportCompletedHandler = (result: {
+type ImportCompletedHandler = (result: {
   pageCount: number;
   screenCount: number;
   nodeCount: number;
@@ -43,7 +43,7 @@ export type ImportCompletedEvent = {
   name: typeof FIGMA_IMPORT_EVENTS.completed;
   handler: ImportCompletedHandler;
 };
-export type ImportFailedHandler = (failure: {
+type ImportFailedHandler = (failure: {
   code: string;
   message: string;
 }) => void;

@@ -32,6 +32,11 @@ def workbench_artifact_draft_publish(
     checkpoint only after its renderable content materially changes.
     For a PRD, call workbench_generation_stage_update(stage="validating-prd")
     immediately before the first draft call, after drafting-prd.
+    For a new or edited Prototype, begin its real phases in this run with
+    workbench_generation_stage_update in order: design-system, mapping-components,
+    creating-flows, generating-ui. Record one phase per model tool-call batch and
+    wait for its successful ACK. Publish only after generating-ui succeeds; an
+    earlier run's stages or unacknowledged calls in this batch do not count.
     For the initial call, pass draft. After a rejection, prefer repair to edit only
     invalid paths in the latest rejected candidate while preserving all other data.
     Pass exactly one of draft or repair. A repair is {baseCandidateChecksum,
@@ -141,7 +146,9 @@ def workbench_artifact_draft_publish(
             "editablePaths": ["/title", "/content/...", "/citations/..."],
             "immutableFields": ["kind", "schemaVersion", "operation"],
         }
-        response["repairHints"] = _artifact_draft_repair_hints(draft, validation["issues"])
+        response["repairHints"] = _artifact_draft_repair_hints(
+            draft, validation["issues"], validation.get("repairHints", []), validation["candidateChecksum"],
+        )
         template_operations = [operation for issue in validation["issues"]
                                if (operation := template_restore_operation(issue)) is not None]
         if template_operations:
@@ -205,12 +212,15 @@ def _artifact_draft_repair_instruction(candidate: Any, issues: list[Any]) -> str
     return instruction
 
 
-def _artifact_draft_repair_hints(candidate: Any, issues: list[Any]) -> list[dict[str, Any]]:
+def _artifact_draft_repair_hints(
+    candidate: Any, issues: list[Any], validator_hints: list[Any] | None = None,
+    candidate_checksum: str | None = None,
+) -> list[dict[str, Any]]:
     """Bounded transport guidance only; never normalize or invent business content."""
     if (
         not isinstance(candidate, dict)
         or candidate.get("kind") != "prd"
-        or candidate.get("schemaVersion") not in (2, 3)
+        or candidate.get("schemaVersion") != 3
     ):
         return []
     hints: list[dict[str, Any]] = []
@@ -224,6 +234,26 @@ def _artifact_draft_repair_hints(candidate: Any, issues: list[Any]) -> list[dict
             hints.append(hint)
             used_bytes += addition
 
+    acceptance_path = ["content", "sections", "businessRequirements", "functionSections"]
+    acceptance_instruction = (
+        "Acceptance coverage combines canonical acceptance-table rows and typed Given/When/Then criteria. "
+        "Each relevant dimension needs a distinct independently testable row; a shared candidate row cannot "
+        "serve two dimensions at once. conflict identifies dimensions competing for too few rows. "
+        "dimensions[].candidateRows indexes rows[].index, whose path and "
+        "conditionPaths identify the current candidate fields. Typed coverage matches given + when + the "
+        "linked requirement.title; then is the observable result and changing then alone does not add "
+        "dimension coverage. Table coverage matches the item cell, not the standard cell. Mirrored "
+        "table/typed observable standards count once (sourceCount). Use existing authorized facts to "
+        "express independent conditions in given/when or table items; preserve results, stable IDs and "
+        "bidirectional references. Do not invent facts, alter requirement meaning, or pad keywords. "
+        "Counts describe the full candidate; truncated means only some paths are shown."
+    )
+    for hint in validator_hints or []:
+        if (isinstance(hint, dict) and hint.get("path") == acceptance_path
+                and isinstance(candidate_checksum, str) and hint.get("candidateChecksum") == candidate_checksum
+                and isinstance(hint.get("acceptanceCoverage"), dict)):
+            append({**hint, "instruction": acceptance_instruction})
+
     inline_shape = '[{type:"text",text:string,marks:[]}]'
     paragraph_shape = '{id:string,type:"paragraph",content:' + inline_shape + '}'
     list_shape = (
@@ -232,34 +262,17 @@ def _artifact_draft_repair_hints(candidate: Any, issues: list[Any]) -> list[dict
     section_shapes = {
         ("content", "sections"): (
             '{introduction:{title,background,scope,usageScenarios},'
-            'businessRequirements:{title,summary,pageLinks,coreRules,flowAndPages,'
-            'acceptanceCriteria,additionalSections},degradation:{title,applicable,content},'
-            'safetyBaseline:{title,intro,rows}}'
+            'businessRequirements:{title,summary,pageLinks,functionSections},'
+            'degradation:{title,applicable,content},safetyBaseline:{title,intro,rows}}'
         ),
         ("content", "sections", "businessRequirements"): (
-            '{title:string,summary:Inline[],pageLinks:{title,blocks},coreRules:{title,blocks},'
-            'flowAndPages:{title,blocks,diagrams},acceptanceCriteria:{title,blocks},'
-            'additionalSections:[{title,blocks}]}'
+            '{title:string,summary:Inline[],pageLinks:{title,blocks},'
+            'functionSections:[{id:string,title:string,blocks:Block[],diagrams:Diagram[]}]}'
         ),
         ("content", "sections", "degradation"): '{title:string,applicable:boolean,content:Inline[]}',
         ("content", "sections", "safetyBaseline"): '{title:string,intro:string,rows:SafetyRow[21]}',
-        ("content", "sections", "businessRequirements", "acceptanceCriteria"): '{title:string,blocks:Block[]}',
-        ("content", "sections", "businessRequirements", "additionalSections"): '[{title:string,blocks:Block[]}]',
+        ("content", "sections", "businessRequirements", "functionSections"): '[{id:string,title:string,blocks:Block[],diagrams:Diagram[]}]',
     }
-    is_v3 = candidate["schemaVersion"] == 3
-    if is_v3:
-        section_shapes[("content", "sections")] = (
-            '{introduction:{title,background,scope,usageScenarios},'
-            'businessRequirements:{title,summary,pageLinks,functionSections},'
-            'degradation:{title,applicable,content},safetyBaseline:{title,intro,rows}}'
-        )
-        section_shapes[("content", "sections", "businessRequirements")] = (
-            '{title:string,summary:Inline[],pageLinks:{title,blocks},'
-            'functionSections:[{id:string,title:string,blocks:Block[],diagrams:Diagram[]}]}'
-        )
-        for key in ("acceptanceCriteria", "additionalSections"):
-            section_shapes.pop(("content", "sections", "businessRequirements", key), None)
-        section_shapes[("content", "sections", "businessRequirements", "functionSections")] = '[{id:string,title:string,blocks:Block[],diagrams:Diagram[]}]'
     for name in _misplaced_prd_sections(candidate, issues):
         append({
             "path": ["content", "sections", name],
@@ -272,26 +285,17 @@ def _artifact_draft_repair_hints(candidate: Any, issues: list[Any]) -> list[dict
         (["safetyBaseline"], ["content", "sections", "safetyBaseline"], dict),
         (["content", "degradation"], ["content", "sections", "degradation"], dict),
         (["content", "safetyBaseline"], ["content", "sections", "safetyBaseline"], dict),
-        (["content", "sections", "flowAndPages"], ["content", "sections", "businessRequirements", "flowAndPages"], dict),
-        (["content", "sections", "businessRequirements", "diagrams"], ["content", "sections", "businessRequirements", "flowAndPages", "diagrams"], list),
-        (["content", "sections", "acceptanceCriteria"], ["content", "sections", "businessRequirements", "acceptanceCriteria"], dict),
-        (["content", "sections", "additionalSections"], ["content", "sections", "businessRequirements", "additionalSections"], list),
+    ] + [
+        (source, ["content", "sections", "businessRequirements", "functionSections"], list)
+        for source in (["functionSections"], ["content", "functionSections"], ["content", "sections", "functionSections"])
     ]
-    if is_v3:
-        relocation_paths = [entry for entry in relocation_paths if not any(key in entry[1] for key in ("flowAndPages", "diagrams", "acceptanceCriteria", "additionalSections"))]
-        relocation_paths += [
-            (source, ["content", "sections", "businessRequirements", "functionSections"], list)
-            for source in (["functionSections"], ["content", "functionSections"], ["content", "sections", "functionSections"])
-        ]
     for source, target, expected_type in relocation_paths:
         parent = _candidate_value(candidate, target[:-1])
         if (
             isinstance(parent, dict) and target[-1] not in parent
             and isinstance(_candidate_value(candidate, source), expected_type)
             and any(isinstance(i, dict) and i.get("code") == "unrecognized_keys" and i.get("path") == source[:-1] for i in issues)
-            # additionalSections has a contract default, so only its rejected
-            # source is required as evidence; it must still remain absent here.
-            and (target[-1] == "additionalSections" or any(isinstance(i, dict) and i.get("code") == "invalid_type" and i.get("path") == target for i in issues))
+            and any(isinstance(i, dict) and i.get("code") == "invalid_type" and i.get("path") == target for i in issues)
         ):
             append({"path": target, "moveFrom": source, "instruction": "Move the complete existing value to its exact owning path and remove only the misplaced copy. Preserve all nested content; do not rewrite it."})
     for issue in issues[:100]:
@@ -305,27 +309,12 @@ def _artifact_draft_repair_hints(candidate: Any, issues: list[Any]) -> list[dict
         ):
             continue
         code = issue.get("code")
-        if (
-            code == "custom"
-            and path == ["content", "sections", "businessRequirements", "acceptanceCriteria", "blocks"]
-            and isinstance(issue.get("message"), str)
-            and issue["message"].startswith(("acceptance criteria must cover ", "acceptance criteria must contain at least "))
-        ):
-            blocks = _candidate_value(candidate, path)
-            if isinstance(blocks, list):
-                for index, block in enumerate(blocks):
-                    if isinstance(block, dict) and block.get("type") == "table":
-                        append({
-                            "path": [*path, index],
-                            "instruction": "Coverage is checked against the item labels in the second column of this acceptance table, not the separate typed acceptanceCriterion blocks. Repair the table's item labels and observable standards from the requested facts; preserve the typed criteria and their bidirectional requirement references.",
-                            "itemColumnIndex": 1,
-                            "standardColumnIndex": 2,
-                        })
-        if (is_v3 and code == "custom"
+        if (code == "custom"
                 and path == ["content", "sections", "businessRequirements", "functionSections"]
                 and isinstance(issue.get("message"), str)
-                and issue["message"].startswith(("acceptance criteria must cover ", "acceptance criteria must contain at least "))):
-            append({"path": path, "instruction": "Acceptance coverage combines canonical acceptance-table rows and typed Given/When/Then criteria across all functional sections. Mirrored observable standards count once. Repair only relevant item labels, explicit conditions and observable results from authorized facts; preserve stable IDs and bidirectional requirement references."})
+                and issue["message"].startswith(("acceptance criteria must cover ", "acceptance criteria must contain at least ", "acceptance dimensions must be represented by distinct rows"))
+                and not any(hint.get("path") == acceptance_path for hint in hints)):
+            append({"path": path, "instruction": acceptance_instruction})
         if (
             code == "custom" and path == ["content", "sections"]
             and isinstance(issue.get("message"), str)
@@ -386,14 +375,8 @@ def _artifact_draft_repair_hints(candidate: Any, issues: list[Any]) -> list[dict
                 "degradation": ["content", "sections", "degradation"],
                 "safetyBaseline": ["content", "sections", "safetyBaseline"],
                 "pageLinks": ["content", "sections", "businessRequirements", "pageLinks"],
-                "coreRules": ["content", "sections", "businessRequirements", "coreRules"],
-                "flowAndPages": ["content", "sections", "businessRequirements", "flowAndPages"],
-                "acceptanceCriteria": ["content", "sections", "businessRequirements", "acceptanceCriteria"],
+                "functionSections": ["content", "sections", "businessRequirements", "functionSections"],
             }
-            if is_v3:
-                for legacy_name in ("coreRules", "flowAndPages", "acceptanceCriteria"):
-                    misplaced_field_paths.pop(legacy_name, None)
-                misplaced_field_paths["functionSections"] = ["content", "sections", "businessRequirements", "functionSections"]
             value = _candidate_value(candidate, path)
             owning_path = misplaced_field_paths.get(value) if isinstance(value, str) else None
             if owning_path is not None:
@@ -455,7 +438,7 @@ def _misplaced_prd_sections(candidate: Any, issues: list[Any]) -> list[str]:
     if (
         not isinstance(candidate, dict)
         or candidate.get("kind") != "prd"
-        or candidate.get("schemaVersion") not in (2, 3)
+        or candidate.get("schemaVersion") != 3
     ):
         return []
     content = candidate.get("content")
@@ -509,7 +492,7 @@ def _has_prd_shape_failure(candidate: Any, issues: list[Any]) -> bool:
     if (
         not isinstance(candidate, dict)
         or candidate.get("kind") != "prd"
-        or candidate.get("schemaVersion") not in (2, 3)
+        or candidate.get("schemaVersion") != 3
     ):
         return False
     shape_roots = {

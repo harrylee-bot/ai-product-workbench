@@ -73,9 +73,24 @@ def _validate_candidate(
         or not _optional_checksum(result.get("candidateChecksum"))
         or not isinstance(result.get("artifactChecksums"), list)
         or not all(_required_checksum(value) for value in result["artifactChecksums"])
+        or not _valid_repair_hints(result.get("repairHints", []), result["artifactChecksums"])
     ):
         raise RuntimeResultValidatorError("WORKBENCH_RUNTIME_VALIDATOR_OUTPUT_INVALID")
     return result
+
+
+def _valid_repair_hints(hints: object, checksums: list[str]) -> bool:
+    if not isinstance(hints, list) or len(hints) > len(checksums):
+        return False
+    return all(
+        isinstance(hint, dict)
+        and type(hint.get("artifactIndex")) is int
+        and 0 <= hint["artifactIndex"] < len(checksums)
+        and hint.get("candidateChecksum") == checksums[hint["artifactIndex"]]
+        and hint.get("path") == ["content", "sections", "businessRequirements", "functionSections"]
+        and isinstance(hint.get("acceptanceCoverage"), dict)
+        for hint in hints
+    )
 
 
 def validate_runtime_artifact_draft(candidate: dict[str, Any]) -> dict[str, Any]:
@@ -88,6 +103,11 @@ def validate_runtime_artifact_draft(candidate: dict[str, Any]) -> dict[str, Any]
     if len(artifact_checksums) != 1:
         raise RuntimeResultValidatorError("WORKBENCH_RUNTIME_VALIDATOR_OUTPUT_INVALID")
     draft_result = {**result, "candidateChecksum": artifact_checksums[0]}
+    if "repairHints" in result:
+        draft_result["repairHints"] = [
+            {key: value for key, value in hint.items() if key != "artifactIndex"}
+            for hint in result["repairHints"] if hint["artifactIndex"] == 0
+        ]
     if result["ok"] is True:
         return draft_result
 

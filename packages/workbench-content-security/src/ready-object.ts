@@ -10,7 +10,7 @@ const DEFAULT_MAXIMUM_OBJECT_BYTES = 512 * MEBIBYTE;
 const DEFAULT_MAXIMUM_IN_FLIGHT_BYTES = 2 * DEFAULT_MAXIMUM_OBJECT_BYTES;
 const DEFAULT_SPOOL_DIRECTORY = join(tmpdir(), "workbench-ready-object-spool");
 const inFlightBytesBySpoolDirectory = new Map<string, number>();
-const verifiedReadyObjectBodyBrand: unique symbol = Symbol("verified-ready-object-body");
+declare const verifiedReadyObjectBodyBrand: unique symbol;
 
 export type ReadyObjectManifest = {
   storageKey: string;
@@ -43,14 +43,11 @@ export type ReadyObjectStagingOptions = {
   maximumInFlightBytes?: number;
 };
 
-export const readyObjectIntegrityFailureCodes = [
-  "OBJECT_STORAGE_BYTE_SIZE_MISMATCH",
-  "OBJECT_STORAGE_MEDIA_TYPE_MISMATCH",
-  "OBJECT_STORAGE_CONTENT_RANGE_MISMATCH",
-  "OBJECT_STORAGE_SHA256_MISMATCH",
-] as const;
-
-export type ReadyObjectIntegrityFailureCode = typeof readyObjectIntegrityFailureCodes[number];
+export type ReadyObjectIntegrityFailureCode =
+  | "OBJECT_STORAGE_BYTE_SIZE_MISMATCH"
+  | "OBJECT_STORAGE_MEDIA_TYPE_MISMATCH"
+  | "OBJECT_STORAGE_CONTENT_RANGE_MISMATCH"
+  | "OBJECT_STORAGE_SHA256_MISMATCH";
 
 export type ReadyObjectIntegrityFailure = {
   failureCode: ReadyObjectIntegrityFailureCode;

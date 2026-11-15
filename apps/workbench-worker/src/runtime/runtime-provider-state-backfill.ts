@@ -13,7 +13,7 @@ import {
 } from "./runtime-assistant-text.js";
 import { knownRuntimeProviderStateErrorCode } from "./runtime-provider-state-error.js";
 
-export const runtimeProviderStateBackfillOperatorVersion = 2;
+const runtimeProviderStateBackfillOperatorVersion = 2;
 export const runtimeProviderStateBackfillEventPageSize = 250;
 
 const runtimeProviderStateBackfillAttemptPageSize = 250;
@@ -109,19 +109,6 @@ export class RuntimeProviderStateBackfill {
       checkpoints,
       nextAfterAttemptId: attempts.at(-1)?.id ?? null,
       hasMore: candidates.length > input.batchSize,
-    };
-  }
-
-  async processBatch(input: {
-    candidateSha: string;
-    mode: RuntimeProviderStateBackfillMode;
-    batchSize: number;
-    afterAttemptId?: string;
-  }) {
-    const page = await this.processPage(input);
-    return {
-      ...page,
-      coverage: await this.coverage(),
     };
   }
 

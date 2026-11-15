@@ -8,17 +8,13 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { workbenchQueryKeys } from "../../../query/keys";
 import {
   useRevokeWorkbenchProjectShareGrants,
-  useRevokeWorkbenchShareGrant,
   useRotateWorkbenchShareGrant,
-  useWorkbenchShareGrant,
   useWorkbenchShareGrants,
 } from "./index";
 
 const mocks = vi.hoisted(() => ({
-  getShareGrant: vi.fn(),
   listShareGrants: vi.fn(),
   revokeProjectShareGrants: vi.fn(),
-  revokeShareGrant: vi.fn(),
   rotateShareGrant: vi.fn(),
 }));
 
@@ -31,34 +27,22 @@ afterEach(() => {
 });
 
 describe("Workbench Share hooks", () => {
-  it("loads Share list and detail state through their public hooks", async () => {
+  it("loads Share list state through its public hook", async () => {
     const queryClient = client();
     const list = { items: [{ id: "share-1" }], activeCount: 1, nextCursor: null };
-    const detail = { value: { id: "share-1" }, etag: '"1"' };
     mocks.listShareGrants.mockResolvedValue(list);
-    mocks.getShareGrant.mockResolvedValue(detail);
     const listHook = renderHook(
       () => useWorkbenchShareGrants("project-1", { limit: 25 }),
       { wrapper: wrapper(queryClient) },
     );
-    const detailHook = renderHook(
-      () => useWorkbenchShareGrant("project-1", "share-1"),
-      { wrapper: wrapper(queryClient) },
-    );
 
     await waitFor(() => expect(listHook.result.current.data).toEqual(list));
-    await waitFor(() => expect(detailHook.result.current.data).toEqual(detail));
     expect(mocks.listShareGrants).toHaveBeenCalledWith("project-1", { limit: 25 });
-    expect(mocks.getShareGrant).toHaveBeenCalledWith("share-1");
     expect(queryClient.getQueryData(
       workbenchQueryKeys.shareList("project-1", { limit: 25 }),
     )).toEqual(list);
-    expect(queryClient.getQueryData(
-      workbenchQueryKeys.share("project-1", "share-1"),
-    )).toEqual(detail);
 
     listHook.unmount();
-    detailHook.unmount();
     queryClient.clear();
   });
 
@@ -86,30 +70,6 @@ describe("Workbench Share hooks", () => {
     expect(queryClient.getQueryData(
       workbenchQueryKeys.share("project-1", "share-1"),
     )).toEqual({ value: share, etag: '"1"' });
-    rendered.unmount();
-    queryClient.clear();
-  });
-
-  it("revokes a Share with the revision ETag from its detail cache", async () => {
-    const queryClient = client();
-    const current = { id: "share-1", status: "active" };
-    const revoked = { value: { ...current, status: "revoked" }, etag: '"2"' };
-    queryClient.setQueryData(workbenchQueryKeys.share("project-1", "share-1"), {
-      value: current,
-      etag: '"1"',
-    });
-    mocks.revokeShareGrant.mockResolvedValue(revoked);
-    const rendered = renderHook(
-      () => useRevokeWorkbenchShareGrant("project-1", "share-1"),
-      { wrapper: wrapper(queryClient) },
-    );
-
-    await act(() => rendered.result.current.mutateAsync({}));
-
-    expect(mocks.revokeShareGrant).toHaveBeenCalledWith("share-1", '"1"');
-    expect(queryClient.getQueryData(
-      workbenchQueryKeys.share("project-1", "share-1"),
-    )).toEqual(revoked);
     rendered.unmount();
     queryClient.clear();
   });

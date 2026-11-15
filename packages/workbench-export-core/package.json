@@ -26,6 +26,7 @@
     "mdast-util-from-markdown": "2.0.3",
     "mdast-util-gfm": "3.1.0",
     "micromark-extension-gfm": "3.0.0",
+    "parse5": "7.3.0",
     "perfect-freehand": "1.2.2",
     "prettier": "3.6.2",
     "react": "19.2.3",

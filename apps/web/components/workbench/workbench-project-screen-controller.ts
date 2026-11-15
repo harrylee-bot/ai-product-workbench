@@ -183,10 +183,6 @@ export function useProjectScreenComposerController({
   };
 }
 
-export type ProjectScreenComposerController = ReturnType<
-  typeof useProjectScreenComposerController
->;
-
 export type ProjectScreenArtifactSelectionOptions = {
   nodes: readonly WorkbenchNode[];
   persistedBoardNodeIds: ReadonlySet<string>;
@@ -245,7 +241,7 @@ export function projectScreenArtifactSelection({
   };
 }
 
-export type ProjectScreenArtifactSelection = ReturnType<
+type ProjectScreenArtifactSelection = ReturnType<
   typeof projectScreenArtifactSelection
 >;
 
@@ -322,10 +318,6 @@ export function useProjectScreenArtifactIntentController({
   };
 }
 
-export type ProjectScreenArtifactIntentController = ReturnType<
-  typeof useProjectScreenArtifactIntentController
->;
-
 export function projectScreenArtifactReferenceFromNode(
   node: WorkbenchNode | undefined,
 ): WorkbenchArtifactReference | null {
@@ -400,10 +392,6 @@ export function useProjectScreenPreviewController({
   };
 }
 
-export type ProjectScreenPreviewController = ReturnType<
-  typeof useProjectScreenPreviewController
->;
-
 export type ProjectScreenBoardIntentControllerOptions = {
   projectId: string;
 };
@@ -442,7 +430,3 @@ export function useProjectScreenBoardIntentController({
     renameTargetNodeId,
   };
 }
-
-export type ProjectScreenBoardIntentController = ReturnType<
-  typeof useProjectScreenBoardIntentController
->;

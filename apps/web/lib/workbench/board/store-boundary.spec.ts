@@ -22,7 +22,7 @@ describe("Board React Flow runtime boundary", () => {
     ]));
   });
 
-  it("keeps the official reducers in the Project UI adapter", async () => {
+  it("keeps the official node reducer in the Project UI adapter", async () => {
     const adapterFile = fileURLToPath(new URL(
       "../../../components/workbench/workbench-project-react-flow-adapter.ts",
       import.meta.url,
@@ -31,7 +31,7 @@ describe("Board React Flow runtime boundary", () => {
     await expect(importsOf(adapterFile)).resolves.toEqual(expect.arrayContaining([{
       module: "@xyflow/react",
       typeOnly: false,
-      values: ["applyEdgeChanges", "applyNodeChanges"],
+      values: ["applyNodeChanges"],
     }]));
   });
 });

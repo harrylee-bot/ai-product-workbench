@@ -1,6 +1,8 @@
 import { chromium } from "playwright";
 import { readFile } from "node:fs/promises";
-import { injectWorkbenchPreviewBridge } from "../../apps/workbench-preview/dist/preview-bridge.js";
+import { PreviewService } from "../../apps/workbench-preview/dist/preview.service.js";
+import { PreviewStorage } from "../../apps/workbench-preview/dist/storage.js";
+import { renderPreviewHtmlFixture } from "../test-support/preview-html-fixture.mjs";
 
 const webOrigin = normalizedOrigin(
   process.env.WORKBENCH_E2E_WEB_ORIGIN ?? "http://localhost:3000",
@@ -108,13 +110,13 @@ await context.route(`${previewOrigin}/preview/**`, async (route) => {
   const requestUrl = route.request().url();
   previewRequests.push(requestUrl);
   const capabilityId = new URL(requestUrl).pathname.slice("/preview/".length);
-  const bridgedPreview = injectWorkbenchPreviewBridge(previewHtml, webOrigin, capabilityId);
+  const bridgedPreview = await renderPreviewHtmlFixture({ PreviewService, PreviewStorage, html: previewHtml, webOrigin, capabilityId });
   await route.fulfill({
     status: 200,
     contentType: "text/html; charset=utf-8",
     headers: {
       "cache-control": "no-store",
-      "content-security-policy": "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'",
+      "content-security-policy": bridgedPreview.contentSecurityPolicy,
       "x-content-type-options": "nosniff",
     },
     body: bridgedPreview.html,
@@ -249,14 +251,13 @@ await context.route("**/api/v1/**", async (route) => {
     return json(route, board, { etag: '"1"' });
   }
   if (method === "GET" && path === "/api/v1/exports/capabilities") {
-    const available = { available: true, authentication: "not_required", reasonCode: null };
+    const available = { available: true, reasonCode: null };
     return json(route, {
       formats: {
         html: available,
         react: available,
         figma: {
           available: false,
-          authentication: "not_required",
           reasonCode: "EXPORT_FIGMA_UNAVAILABLE",
         },
         mcp: available,
@@ -264,28 +265,6 @@ await context.route("**/api/v1/**", async (route) => {
         pdf: available,
       },
       packaging: { single_file: available, zip: available },
-      external: {
-        ai_studio: {
-          available: false,
-          authentication: "not_required",
-          reasonCode: "EXPORT_EXTERNAL_AI_STUDIO_UNAVAILABLE",
-        },
-        netlify: {
-          available: false,
-          authentication: "required",
-          reasonCode: "EXPORT_EXTERNAL_AUTHENTICATION_REQUIRED",
-        },
-        lovable: {
-          available: false,
-          authentication: "required",
-          reasonCode: "EXPORT_EXTERNAL_AUTHENTICATION_REQUIRED",
-        },
-        bolt: {
-          available: false,
-          authentication: "required",
-          reasonCode: "EXPORT_EXTERNAL_AUTHENTICATION_REQUIRED",
-        },
-      },
     });
   }
   if (method === "POST" && path === "/api/v1/projects/project-1/previews") {

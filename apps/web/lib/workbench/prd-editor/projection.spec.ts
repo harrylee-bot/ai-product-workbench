@@ -3,13 +3,10 @@
 import { Editor, type JSONContent } from "@tiptap/core";
 import {
   prdDocumentSchema,
-  prdDocumentV1Schema,
-  prdDocumentV2Schema,
   prdDocumentV3Schema,
   prdTableOfContentsEntriesForV3,
-  prdTableOfContentsEntriesFor,
 } from "@workbench/workbench-contracts";
-import { prdDocumentV2Example, prdDocumentV3Example } from "@workbench/workbench-contracts/test-fixtures";
+import { prdDocumentV3Example } from "@workbench/workbench-contracts/test-fixtures";
 import { describe, expect, it } from "vitest";
 
 import { prdDocument } from "../../../components/workbench/workbench-prd-test-fixture";
@@ -24,7 +21,7 @@ describe("PRD Tiptap projection", () => {
     const source = structuredClone(prdDocumentV3Example);
     const editor = new Editor({ extensions: workbenchPrdExtensions, content: prdDocumentToTiptap(source) });
     expect(prdDocumentV3Schema.parse(applyTiptapToPrdDocument(source, editor.getJSON()))).toEqual(source);
-    const functionNode = findJsonNode(editor.getJSON(), (node) => node.attrs?.sectionKey === "v3:function:section-task-state");
+    const functionNode = findJsonNode(editor.getJSON(), (node) => node.attrs?.sectionKey === "prd:function:section-task-state");
     expect(functionNode?.content?.filter((node) => node.type === "prdDiagram")).toHaveLength(2);
     editor.destroy();
   });
@@ -54,14 +51,14 @@ describe("PRD Tiptap projection", () => {
     const projected = prdDocumentToTiptap(source);
     const result = applyTiptapToPrdDocument(source, projected);
 
-    expect(prdDocumentV1Schema.parse(result)).toEqual(source);
-    expect(result.sections.executiveSummary.blocks[0]).toEqual(
-      source.sections.executiveSummary.blocks[0],
+    expect(prdDocumentV3Schema.parse(result)).toEqual(source);
+    expect(result.sections.introduction.background.blocks[0]).toEqual(
+      source.sections.introduction.background.blocks[0],
     );
   });
 
-  it("round-trips PRD v2 through Tiptap without changing fixed template data", () => {
-    const source = structuredClone(prdDocumentV2Example);
+  it("round-trips PRD v3 through Tiptap without changing fixed template data", () => {
+    const source = structuredClone(prdDocumentV3Example);
     const editor = new Editor({
       extensions: workbenchPrdExtensions,
       content: prdDocumentToTiptap(source),
@@ -69,49 +66,50 @@ describe("PRD Tiptap projection", () => {
 
     const result = applyTiptapToPrdDocument(source, editor.getJSON());
 
-    expect(prdDocumentV2Schema.parse(result)).toEqual(source);
+    expect(prdDocumentV3Schema.parse(result)).toEqual(source);
     expect(editor.getJSON().content?.some((node) => node.type === "prdFixedBlock")).toBe(true);
     editor.destroy();
   });
 
-  it("round-trips and edits PRD v2 additional business sections with a synchronized TOC", () => {
-    const source = structuredClone(prdDocumentV2Example);
-    source.sections.businessRequirements.additionalSections = [{
+  it("round-trips and edits PRD v3 additional business sections with a synchronized TOC", () => {
+    const source = structuredClone(prdDocumentV3Example);
+    source.sections.businessRequirements.functionSections.push({
+      id: "section-config", diagrams: [],
       title: "2.5 配置规则",
       blocks: [{
         id: "additional-config-rule",
         type: "paragraph",
         content: [{ type: "text", text: "补充业务配置规则及对应结果。", marks: [] }],
       }],
-    }];
-    source.tableOfContents.entries = prdTableOfContentsEntriesFor(["2.5 配置规则"]);
+    });
+    source.tableOfContents.entries = prdTableOfContentsEntriesForV3(source.sections.businessRequirements.functionSections.map((section) => section.title));
     const projected = prdDocumentToTiptap(source);
 
     expect(findJsonNode(projected, (node) => (
-      node.attrs?.sectionKey === "v2:businessRequirements.additionalSections.0"
+      node.attrs?.sectionKey === "prd:function:section-config"
     ))).not.toBeNull();
     replaceNodeText(
       projected,
-      ["sections", "businessRequirements", "additionalSections", 0, "title"],
+      ["sections", "businessRequirements", "functionSections", 3, "title"],
       "2.5 结果规则",
     );
     replaceNodeText(
       projected,
-      ["sections", "businessRequirements", "additionalSections", 0, "blocks", 0, "content"],
+      ["sections", "businessRequirements", "functionSections", 3, "blocks", 0, "content"],
       "补充后的业务结果规则。",
     );
 
-    const result = prdDocumentV2Schema.parse(applyTiptapToPrdDocument(source, projected));
+    const result = prdDocumentV3Schema.parse(applyTiptapToPrdDocument(source, projected));
 
-    expect(result.sections.businessRequirements.additionalSections[0]).toMatchObject({
+    expect(result.sections.businessRequirements.functionSections[3]).toMatchObject({
       title: "2.5 结果规则",
       blocks: [{ content: [{ type: "text", text: "补充后的业务结果规则。", marks: [] }] }],
     });
     expect(result.tableOfContents.entries[9]).toBe("2.5 结果规则");
   });
 
-  it("edits allowed PRD v2 fields while preserving its fixed template structures", () => {
-    const source = structuredClone(prdDocumentV2Example);
+  it("edits allowed PRD v3 fields while preserving its fixed template structures", () => {
+    const source = structuredClone(prdDocumentV3Example);
     const projected = prdDocumentToTiptap(source);
     replaceNodeText(projected, ["title"], "编辑后工单");
     replaceNodeText(
@@ -131,10 +129,10 @@ describe("PRD Tiptap projection", () => {
     );
     removeFixedBlocks(projected);
 
-    const result = prdDocumentV2Schema.parse(applyTiptapToPrdDocument(source, projected));
+    const result = prdDocumentV3Schema.parse(applyTiptapToPrdDocument(source, projected));
 
-    expect(result.protocol).toBe("workbench.prd.v2");
-    if (result.protocol !== "workbench.prd.v2") throw new Error("expected PRD v2");
+    expect(result.protocol).toBe("workbench.prd.v3");
+    if (result.protocol !== "workbench.prd.v3") throw new Error("expected PRD v3");
     expect(result.title).toBe("编辑后工单需求说明书");
     expect(result.cover).toEqual({
       workOrderName: "编辑后工单",
@@ -145,8 +143,8 @@ describe("PRD Tiptap projection", () => {
     });
     expect(result.sections.introduction.usageScenarios.channelTable)
       .toEqual(source.sections.introduction.usageScenarios.channelTable);
-    expect(result.sections.businessRequirements.flowAndPages.diagrams)
-      .toEqual(source.sections.businessRequirements.flowAndPages.diagrams);
+    expect(result.sections.businessRequirements.functionSections[1]!.diagrams)
+      .toEqual(source.sections.businessRequirements.functionSections[1]!.diagrams);
     expect(result.sections.safetyBaseline).toEqual(source.sections.safetyBaseline);
     expect(result.tableOfContents).toEqual(source.tableOfContents);
   });
@@ -168,12 +166,12 @@ describe("PRD Tiptap projection", () => {
     expect(titleRange).not.toBeNull();
     editor.chain().setTextSelection(titleRange!).insertContent("Edited PRD").run();
 
-    const edited = prdDocumentV1Schema.parse(
+    const edited = prdDocumentV3Schema.parse(
       applyTiptapToPrdDocument(source, editor.getJSON()),
     );
-    expect(edited.title).toBe("Edited PRD");
-    expect(edited.sections.executiveSummary.blocks[0]).toEqual(
-      source.sections.executiveSummary.blocks[0],
+    expect(edited.title).toBe("Edited PRD需求说明书");
+    expect(edited.sections.introduction.background.blocks[0]).toEqual(
+      source.sections.introduction.background.blocks[0],
     );
 
     expect(editor.commands.undo()).toBe(true);
@@ -196,9 +194,9 @@ describe("PRD Tiptap projection", () => {
   it("rebuilds section block order so insert, delete, and move are durable", () => {
     const source = prdDocument();
     const projected = prdDocumentToTiptap(source);
-    const executive = findJsonNode(projected, (node) => node.attrs?.sectionKey === "executiveSummary");
-    const problem = findJsonNode(projected, (node) => node.attrs?.sectionKey === "problem");
-    const movedProblem = problem?.content?.find((node) => node.attrs?.dataId === "problem");
+    const executive = findJsonNode(projected, (node) => node.attrs?.sectionKey === "prd:introduction.background");
+    const problem = findJsonNode(projected, (node) => node.attrs?.sectionKey === "prd:introduction.usageScenarios");
+    const movedProblem = problem?.content?.find((node) => node.attrs?.dataId === "usage-main");
     expect(executive).not.toBeNull();
     expect(problem).not.toBeNull();
     expect(movedProblem).toBeDefined();
@@ -207,22 +205,22 @@ describe("PRD Tiptap projection", () => {
     problem!.content = [problem!.content![0]!, {
       type: "paragraph",
       attrs: { dataId: "new-problem", prdRole: "body" },
-      content: [{ type: "text", text: "Replacement problem" }],
+      content: [{ type: "text", text: "用户从工作台端内渠道进入页面并查看任务结果" }],
     }];
 
-    const result = prdDocumentV1Schema.parse(applyTiptapToPrdDocument(source, projected));
-    expect(result.sections.executiveSummary.blocks.map((block) => block.id)).toEqual(["problem"]);
-    expect(result.sections.problem.blocks).toEqual([{
+    const result = prdDocumentV3Schema.parse(applyTiptapToPrdDocument(source, projected));
+    expect(result.sections.introduction.background.blocks.map((block) => block.id)).toEqual(["usage-main"]);
+    expect(result.sections.introduction.usageScenarios.blocks).toEqual([{
       id: "new-problem",
       type: "paragraph",
-      content: [{ type: "text", text: "Replacement problem", marks: [] }],
+      content: [{ type: "text", text: "用户从工作台端内渠道进入页面并查看任务结果", marks: [] }],
     }]);
   });
 
   it("rebuilds list items instead of retaining deleted source items", () => {
     const source = prdDocument();
     const projected = prdDocumentToTiptap(source);
-    const list = findJsonNode(projected, (node) => node.attrs?.dataId === "scope-list");
+    const list = findJsonNode(projected, (node) => node.attrs?.dataId === "scope-main");
     expect(list).not.toBeNull();
     list!.content = [{
       type: "listItem",
@@ -233,9 +231,9 @@ describe("PRD Tiptap projection", () => {
       }],
     }];
 
-    const result = prdDocumentV1Schema.parse(applyTiptapToPrdDocument(source, projected));
-    expect(result.sections.scope.blocks[0]).toEqual({
-      id: "scope-list",
+    const result = prdDocumentV3Schema.parse(applyTiptapToPrdDocument(source, projected));
+    expect(result.sections.introduction.scope.blocks[0]).toEqual({
+      id: "scope-main",
       type: "bulletList",
       items: [{
         id: "scope-item-2",
@@ -246,7 +244,7 @@ describe("PRD Tiptap projection", () => {
 
   it("rebuilds table column order and new rows with stable IR ids", () => {
     const source = prdDocument();
-    source.sections.executiveSummary.blocks.push({
+    source.sections.introduction.background.blocks.push({
       id: "summary-table",
       type: "table",
       columns: [
@@ -279,8 +277,8 @@ describe("PRD Tiptap projection", () => {
       })),
     }];
 
-    const result = prdDocumentV1Schema.parse(applyTiptapToPrdDocument(source, projected));
-    const rebuilt = result.sections.executiveSummary.blocks[1];
+    const result = prdDocumentV3Schema.parse(applyTiptapToPrdDocument(source, projected));
+    const rebuilt = result.sections.introduction.background.blocks.at(-1);
     expect(rebuilt).toMatchObject({
       id: "summary-table",
       type: "table",
@@ -298,14 +296,14 @@ describe("PRD Tiptap projection", () => {
   it("does not silently restore a deleted required card field", () => {
     const source = prdDocument();
     const projected = prdDocumentToTiptap(source);
-    const goal = findJsonNode(projected, (node) => node.attrs?.dataId === "goal-1");
+    const goal = findJsonNode(projected, (node) => node.attrs?.dataId === "goal-main");
     expect(goal).not.toBeNull();
     goal!.content = goal!.content?.filter((node) => (
-      node.attrs?.prdPath !== JSON.stringify(["sections", "goals", "blocks", 0, "successMetric"])
+      node.attrs?.prdPath !== JSON.stringify(["sections", "businessRequirements", "functionSections", 0, "blocks", 0, "successMetric"])
     ));
 
     const result = applyTiptapToPrdDocument(source, projected);
-    expect(result.sections.goals.blocks[0]).toMatchObject({ successMetric: "" });
+    expect(result.sections.businessRequirements.functionSections[0]!.blocks[0]).toMatchObject({ successMetric: "" });
     expect(prdDocumentSchema.safeParse(result).success).toBe(false);
   });
 });

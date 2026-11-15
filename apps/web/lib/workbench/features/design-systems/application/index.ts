@@ -1,13 +1,6 @@
 "use client";
-
-import type {
-  CreateDesignSystemRequest,
-  ImportDesignSystemRequest,
-} from "@workbench/workbench-contracts";
 import {
   useInfiniteQuery,
-  useMutation,
-  useQueryClient,
 } from "@tanstack/react-query";
 
 import { workbenchQueryKeys } from "../../../query/keys";
@@ -40,47 +33,5 @@ export function useInfiniteWorkbenchDesignSystemCatalog(
     initialPageParam: undefined as string | undefined,
     getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
     enabled: Boolean(workspaceId),
-  });
-}
-
-export function useCreateWorkbenchDesignSystem(projectId: string, workspaceId: string) {
-  const api = useWorkbenchDesignSystemsApi();
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: ({
-      request,
-      idempotencyKey,
-    }: {
-      request: CreateDesignSystemRequest;
-      idempotencyKey?: string;
-    }) => api.createDesignSystem(projectId, request, idempotencyKey),
-    async onSuccess() {
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: workbenchQueryKeys.artifactLists(projectId) }),
-        queryClient.invalidateQueries({ queryKey: workbenchQueryKeys.bootstraps(projectId) }),
-        queryClient.invalidateQueries({ queryKey: workbenchQueryKeys.designSystemCatalogs(workspaceId) }),
-      ]);
-    },
-  });
-}
-
-export function useImportWorkbenchDesignSystem(projectId: string, workspaceId: string) {
-  const api = useWorkbenchDesignSystemsApi();
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: ({
-      request,
-      idempotencyKey,
-    }: {
-      request: ImportDesignSystemRequest;
-      idempotencyKey?: string;
-    }) => api.importDesignSystem(projectId, request, idempotencyKey),
-    async onSuccess() {
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: workbenchQueryKeys.artifactLists(projectId) }),
-        queryClient.invalidateQueries({ queryKey: workbenchQueryKeys.bootstraps(projectId) }),
-        queryClient.invalidateQueries({ queryKey: workbenchQueryKeys.designSystemCatalogs(workspaceId) }),
-      ]);
-    },
   });
 }

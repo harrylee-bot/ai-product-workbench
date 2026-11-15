@@ -96,7 +96,7 @@ test("alert series and labels are emitted by reachable production boundaries", a
   );
   assert.equal(
     alertExpressions.get("WorkbenchRuntimeProjectionInvariant"),
-    "increase(workbench_runtime_provider_state_failures_total{operation=~\"read|update|shadow-verify\",error_code=~\"RUNTIME_PROVIDER_STATE_.*\"}[5m]) > 0",
+    "increase(workbench_runtime_provider_state_failures_total{operation=~\"read|update\",error_code=~\"RUNTIME_PROVIDER_STATE_.*\"}[5m]) > 0",
   );
   assert.equal(
     alertExpressions.get("WorkbenchRuntimeBackfillConflict"),

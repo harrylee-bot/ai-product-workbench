@@ -15,7 +15,7 @@ type PrototypeFontAsset = Extract<PrototypeAsset, { kind: "font" }>;
 type PrototypeIconAsset = Extract<PrototypeAsset, { kind: "icon" }>;
 type PrototypeVectorNode = Extract<PrototypeNode, { kind: "vector" }>;
 
-export const WORKBENCH_PLUGIN_DATA = {
+const WORKBENCH_PLUGIN_DATA = {
   sourceId: "workbench.sourceId",
   kind: "workbench.kind",
   artifactId: "workbench.artifactId",
@@ -85,11 +85,11 @@ export interface FigmaImportPaintNode extends FigmaImportSceneNode {
   effects: ReadonlyArray<FigmaEffect>;
 }
 
-export interface FigmaImportCornerNode extends FigmaImportPaintNode {
+interface FigmaImportCornerNode extends FigmaImportPaintNode {
   cornerRadius: number;
 }
 
-export interface FigmaImportRectangleLikeNode extends FigmaImportCornerNode {
+interface FigmaImportRectangleLikeNode extends FigmaImportCornerNode {
   topLeftRadius: number;
   topRightRadius: number;
   bottomRightRadius: number;
@@ -123,7 +123,6 @@ export interface FigmaImportFrameNode extends FigmaImportRectangleLikeNode {
 export interface FigmaImportRectangleNode extends FigmaImportRectangleLikeNode {}
 export interface FigmaImportVectorNode extends FigmaImportCornerNode {}
 
-type FigmaImportShapeNode = FigmaImportRectangleNode | FigmaImportVectorNode;
 type CreatedNode =
   | { kind: "text"; node: FigmaImportTextNode }
   | { kind: "frame"; node: FigmaImportFrameNode }

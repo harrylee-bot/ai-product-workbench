@@ -138,10 +138,9 @@ export function HomeScreen({
   onLoadMoreProjects,
   onLoadMoreDesignSystems,
   onRetryDesignSystems,
-  onRetryModels,
   onRetryProjects,
   onSubmitPrompt,
-  onCreateExternalSource = async () => null,
+  onCreateExternalSource,
   projectSearch,
   projectPageLoading,
   projects,
@@ -169,10 +168,9 @@ export function HomeScreen({
   onLoadMoreProjects: () => void;
   onLoadMoreDesignSystems: () => void;
   onRetryDesignSystems: () => void;
-  onRetryModels: () => void;
   onRetryProjects: () => void;
   onSubmitPrompt: WorkbenchRunSubmitHandler;
-  onCreateExternalSource?: (request: ImportSourceDraft) => Promise<ImportSource | null>;
+  onCreateExternalSource: (request: ImportSourceDraft) => Promise<ImportSource | null>;
   projectSearch: string;
   projectPageLoading: boolean;
   projects: HomeProjectItem[];
@@ -461,7 +459,6 @@ export function HomeScreen({
             onImportSourcesOpenChange={setImportSourcesOpen}
             onLoadMoreDesignSystems={onLoadMoreDesignSystems}
             onRetryDesignSystems={onRetryDesignSystems}
-            onRetryModels={onRetryModels}
             prompt={prompt}
             setPrompt={setPrompt}
             styleMenuOpen={homeStyleMenuOpen}
@@ -641,7 +638,6 @@ function HomeComposer({
   onImportSourcesOpenChange,
   onLoadMoreDesignSystems,
   onRetryDesignSystems,
-  onRetryModels: _onRetryModels,
   prompt,
   setPrompt,
   styleMenuOpen,
@@ -665,7 +661,6 @@ function HomeComposer({
   onImportSourcesOpenChange: (open: boolean) => void;
   onLoadMoreDesignSystems: () => void;
   onRetryDesignSystems: () => void;
-  onRetryModels: () => void;
   prompt: string;
   setPrompt: (prompt: string) => void;
   styleMenuOpen: boolean;

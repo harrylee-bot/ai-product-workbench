@@ -6,6 +6,8 @@ import json
 import unittest
 from pathlib import Path
 from unittest.mock import patch
+from types import SimpleNamespace
+from prd_acceptance_test_fixture import anonymous_acceptance_collision
 
 from deerflow_workbench_tools.runtime_result_validator import (
     RuntimeResultValidatorError,
@@ -32,6 +34,24 @@ class RuntimeResultValidatorTests(unittest.TestCase):
         self.assertEqual(result["issues"], [])
         self.assertRegex(result["candidateChecksum"], r"^[0-9a-f]{64}$")
         self.assertEqual(len(result["artifactChecksums"]), 1)
+
+    def test_typography_color_uses_the_same_literal_and_token_contract(self) -> None:
+        candidate = copy.deepcopy(self.example)
+        content = candidate["artifacts"][0]["content"]
+        button = next(node for node in content["nodes"] if node["kind"] == "button")
+        button["style"]["typography"] = copy.deepcopy(next(
+            node["style"]["typography"] for node in content["nodes"] if node["style"]["typography"]
+        ))
+        typography = button["style"]["typography"]
+        typography["color"] = {"kind": "literal", "value": "#ffffff"}
+        self.assertTrue(validate_runtime_result(candidate)["ok"])
+        content["tokens"].append({"id": "explicit-foreground", "name": "Foreground", "type": "color", "value": "#ffffff"})
+        typography["color"] = {"kind": "token", "tokenId": "explicit-foreground"}
+        self.assertTrue(validate_runtime_result(candidate)["ok"])
+        content["tokens"][-1] = {"id": "explicit-foreground", "name": "Wrong type", "type": "number", "value": 1}
+        self.assertFalse(validate_runtime_result(candidate)["ok"])
+        typography.pop("color")
+        self.assertTrue(validate_runtime_result(candidate)["ok"])
 
     def test_fails_with_a_fixed_code_when_node_is_missing(self) -> None:
         with patch(
@@ -81,13 +101,30 @@ class RuntimeResultValidatorTests(unittest.TestCase):
         self.assertTrue(repaired["ok"])
         self.assertNotEqual(result["candidateChecksum"], repaired["candidateChecksum"])
 
-    def test_accepts_the_prd_v2_test_fixture_without_business_specific_runtime_rules(self) -> None:
+    def test_accepts_the_prd_v3_test_fixture_without_business_specific_runtime_rules(self) -> None:
         candidate = json.loads(PRD_EXAMPLE_PATH.read_text(encoding="utf-8"))
 
         result = validate_runtime_result(candidate)
 
         self.assertTrue(result["ok"])
         self.assertEqual(result["issues"], [])
+
+    def test_acceptance_hints_are_bound_to_the_exact_artifact_and_never_extend_artifact_issues(self) -> None:
+        draft = anonymous_acceptance_collision()
+        candidate = copy.deepcopy(self.example)
+        candidate["artifacts"].append(draft)
+        result = validate_runtime_result(candidate)
+        self.assertFalse(result["ok"])
+        self.assertEqual(len(result["repairHints"]), 1)
+        hint = result["repairHints"][0]
+        self.assertEqual(hint["artifactIndex"], 1)
+        self.assertEqual(hint["candidateChecksum"], result["artifactChecksums"][1])
+        self.assertTrue(all(set(issue) <= {"code", "path", "message", "expectedType", "expectedValue"} for issue in result["issues"]))
+        forged = copy.deepcopy(result)
+        forged["repairHints"][0]["candidateChecksum"] = result["artifactChecksums"][0]
+        with patch("deerflow_workbench_tools.runtime_result_validator.subprocess.run", return_value=SimpleNamespace(returncode=0, stdout=json.dumps(forged).encode())):
+            with self.assertRaisesRegex(RuntimeResultValidatorError, "^WORKBENCH_RUNTIME_VALIDATOR_OUTPUT_INVALID$"):
+                validate_runtime_result(candidate)
 
     def test_prd_expected_metadata_is_contract_owned_and_does_not_echo_candidate_values(self) -> None:
         draft = json.loads(PRD_EXAMPLE_PATH.read_text(encoding="utf-8"))["artifacts"][0]
@@ -115,12 +152,13 @@ class RuntimeResultValidatorTests(unittest.TestCase):
     def test_toc_expected_values_skip_authored_headings_and_account_for_their_offset(self) -> None:
         draft = json.loads(PRD_EXAMPLE_PATH.read_text(encoding="utf-8"))["artifacts"][0]
         content = draft["content"]
-        content["sections"]["businessRequirements"]["additionalSections"] = [{
+        content["sections"]["businessRequirements"]["functionSections"].append({
+            "id": "section-extra", "diagrams": [],
             "title": "2.5 PRIVATE_AUTHORED_HEADING",
             "blocks": [{"id": "extra_section_text", "type": "paragraph", "content": [
                 {"type": "text", "text": "沿用正文已经说明的业务范围。", "marks": []},
             ]}],
-        }]
+        })
         content["tableOfContents"]["entries"][9:9] = ["2.5 WRONG"]
         content["tableOfContents"]["entries"][-2:] = ["3 无点", "4 无点"]
 
@@ -143,7 +181,7 @@ class RuntimeResultValidatorTests(unittest.TestCase):
 
     def test_rejects_vague_acceptance_text_before_publishing_a_prd(self) -> None:
         candidate = json.loads(PRD_EXAMPLE_PATH.read_text(encoding="utf-8"))
-        section = candidate["artifacts"][0]["content"]["sections"]["businessRequirements"]["acceptanceCriteria"]
+        section = candidate["artifacts"][0]["content"]["sections"]["businessRequirements"]["functionSections"][2]
         table = next(block for block in section["blocks"] if block["type"] == "table")
         standard_column_id = table["columns"][2]["id"]
         standard = next(
@@ -158,7 +196,7 @@ class RuntimeResultValidatorTests(unittest.TestCase):
         self.assertTrue(any(
             issue["path"] == [
                 "artifacts", 0, "content", "sections", "businessRequirements",
-                "acceptanceCriteria", "blocks", "rows", 0,
+                "functionSections", 2, "blocks", section["blocks"].index(table), "rows", 0,
             ]
             and "observable results" in issue["message"]
             for issue in result["issues"]
@@ -168,7 +206,7 @@ class RuntimeResultValidatorTests(unittest.TestCase):
         candidate = json.loads(PRD_EXAMPLE_PATH.read_text(encoding="utf-8"))
         content = candidate["artifacts"][0]["content"]
         self.assertTrue(content["sections"]["degradation"]["applicable"])
-        flow = content["sections"]["businessRequirements"]["flowAndPages"]["diagrams"][0]
+        flow = content["sections"]["businessRequirements"]["functionSections"][1]["diagrams"][0]
         flow["edges"] = [
             {
                 "id": f"validation-linear-edge-{index}",
@@ -185,7 +223,7 @@ class RuntimeResultValidatorTests(unittest.TestCase):
         self.assertTrue(any(
             issue["path"] == [
                 "artifacts", 0, "content", "sections", "businessRequirements",
-                "flowAndPages", "diagrams", 0,
+                "functionSections", 1, "diagrams", 0,
             ]
             and "failure and recovery branch" in issue["message"]
             for issue in result["issues"]
@@ -200,14 +238,13 @@ class RuntimeResultValidatorTests(unittest.TestCase):
         self.assertFalse(result["ok"])
         self.assertIn(("title",), {tuple(issue["path"]) for issue in result["issues"]})
 
-    def test_reports_actionable_prd_v2_paths_for_misnested_sections(self) -> None:
+    def test_reports_actionable_prd_v3_paths_for_misnested_sections(self) -> None:
         candidate = json.loads(PRD_EXAMPLE_PATH.read_text(encoding="utf-8"))
         draft = candidate["artifacts"][0]
         content = draft["content"]
         sections = content["sections"]
         business = sections["businessRequirements"]
-        sections["acceptanceCriteria"] = business.pop("acceptanceCriteria")
-        sections["additionalSections"] = business.pop("additionalSections")
+        sections["functionSections"] = business.pop("functionSections")
         content["degradation"] = sections.pop("degradation")
         content["safetyBaseline"] = sections.pop("safetyBaseline")
 
@@ -217,14 +254,14 @@ class RuntimeResultValidatorTests(unittest.TestCase):
         self.assertNotIn("invalid_union", {issue["code"] for issue in result["issues"]})
         paths = {tuple(issue["path"]) for issue in result["issues"]}
         self.assertIn(
-            ("content", "sections", "businessRequirements", "acceptanceCriteria"),
+            ("content", "sections", "businessRequirements", "functionSections"),
             paths,
         )
         self.assertIn(("content", "sections", "degradation"), paths)
         self.assertIn(("content", "sections", "safetyBaseline"), paths)
         self.assertNotIn(("content", "sections", "executiveSummary"), paths)
 
-    def test_keeps_an_ambiguous_union_when_no_schema_version_matches(self) -> None:
+    def test_rejects_unsupported_prd_schema_version_at_its_exact_path(self) -> None:
         candidate = json.loads(PRD_EXAMPLE_PATH.read_text(encoding="utf-8"))
         draft = candidate["artifacts"][0]
         draft["schemaVersion"] = 4
@@ -233,10 +270,6 @@ class RuntimeResultValidatorTests(unittest.TestCase):
 
         self.assertFalse(result["ok"])
         self.assertTrue(any(
-            issue["code"] == "invalid_union" and issue["path"] == ["schemaVersion"]
-            for issue in result["issues"]
-        ))
-        self.assertFalse(any(
             issue["code"] == "invalid_literal" and issue["path"] == ["schemaVersion"]
             for issue in result["issues"]
         ))

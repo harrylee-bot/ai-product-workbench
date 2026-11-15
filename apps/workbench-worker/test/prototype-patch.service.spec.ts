@@ -44,12 +44,9 @@ function replayHarness(event: PatchEvent) {
       findUnique: vi.fn().mockResolvedValue(receipt),
     },
   };
-  const db = {
-    $transaction: vi.fn(async (callback: (client: typeof tx) => unknown) => callback(tx)),
-  };
   return {
     receipt,
-    service: new PrototypePatchService(db as never),
+    service: new PrototypePatchService(),
     tx,
   };
 }
@@ -59,7 +56,7 @@ describe("PrototypePatchService terminal receipt replay", () => {
     const event = patchEvent();
     const { receipt, service, tx } = replayHarness(event);
 
-    await expect(service.persistPatch("run-1", "attempt-1", event)).resolves.toEqual({
+    await expect(service.persistPatchTx(tx as never, "run-1", "attempt-1", event)).resolves.toEqual({
       created: false,
       ...receipt,
     });
@@ -86,7 +83,8 @@ describe("PrototypePatchService terminal receipt replay", () => {
     const original = patchEvent();
     const { service, tx } = replayHarness(original);
 
-    await expect(service.persistPatch(
+    await expect(service.persistPatchTx(
+      tx as never,
       "run-1",
       "attempt-1",
       patchEvent("b".repeat(64)),
@@ -98,7 +96,7 @@ describe("PrototypePatchService terminal receipt replay", () => {
     const event = patchEvent();
     const { service, tx } = replayHarness(event);
 
-    await expect(service.persistPatch("run-2", "attempt-1", event))
+    await expect(service.persistPatchTx(tx as never, "run-2", "attempt-1", event))
       .rejects.toThrow("RUNTIME_PROTOTYPE_PATCH_SOURCE_CONFLICT");
     expect(tx.$queryRaw).not.toHaveBeenCalled();
   });
@@ -111,7 +109,7 @@ describe("PrototypePatchService terminal receipt replay", () => {
       .mockResolvedValueOnce(receipt);
     tx.$queryRaw.mockResolvedValueOnce([{ locked: null }]);
 
-    await expect(service.persistPatch("run-1", "attempt-1", event)).resolves.toEqual({
+    await expect(service.persistPatchTx(tx as never, "run-1", "attempt-1", event)).resolves.toEqual({
       created: false,
       ...receipt,
     });

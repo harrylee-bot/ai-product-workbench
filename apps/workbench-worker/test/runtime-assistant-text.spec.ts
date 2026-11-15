@@ -3,11 +3,10 @@ import {
   createRuntimeProviderProjection,
   createRuntimeProviderTextCheckpoint,
   extractAssistantTextFrame,
+  parseRuntimeFinalizationPayload,
   projectIncompleteVisibleAssistantText,
   reduceRuntimeProviderProjection,
-  rebuildRuntimeProviderTextState,
   runtimeExternalFinalizationEvent,
-  runtimeProviderTextStateFromLegacy,
   runtimeProviderTextStateFromProjection,
   sha256Canonical,
   type RuntimeProviderTextEvent,
@@ -140,91 +139,58 @@ describe("Runtime assistant text frame extraction", () => {
 });
 
 describe("durable Runtime provider text state", () => {
-  it("rebuilds the raw cumulative baseline and redaction buffer from processed provider events", () => {
+  it("retains the raw cumulative baseline and redaction buffer in the projection", () => {
     const token = `wbkg1.${"a".repeat(80)}.${"b".repeat(43)}`;
-    const payload = {
-      messages: [{ type: "ai", content: `before ${token}` }],
-    };
+    const payload = { messages: [{ type: "ai", content: `before ${token}` }] };
+    const initial = createRuntimeProviderProjection({
+      runtimeAttemptId: "attempt-1",
+      runId: "run-1",
+    });
+    const projection = reduceRuntimeProviderProjection(initial, {
+      runtimeAttemptId: initial.runtimeAttemptId,
+      runId: initial.runId,
+      attempt: 1,
+      externalEventId: "provider-values-1",
+      sequence: 1,
+      event: "values",
+      payload,
+      payloadSha256: sha256Canonical(payload),
+    }).state;
 
-    expect(rebuildRuntimeProviderTextState({
-      currentRuntimeAttemptId: "attempt-1",
-      durableVisibleAssistantText: "before ",
-      truncated: false,
-      events: [{
-        runtimeAttemptId: "attempt-1",
-        attempt: 1,
-        externalEventId: "provider-values-1",
-        sequence: 1,
-        event: "values",
-        payload,
-        payloadSha256: sha256Canonical(payload),
-      }],
-    })).toMatchObject({
+    expect(runtimeProviderTextStateFromProjection(projection, "before ")).toEqual({
+      protocol: "workbench.runtime-provider-text-state.v2",
       rawAssistantText: `before ${token}`,
       visibleAssistantText: "before ",
       durableVisibleAssistantText: "before ",
       redactionBuffer: token,
-      processedExternalEventIds: ["provider-values-1"],
       committedFinalization: null,
     });
   });
 
-  it("restores the exact pre-finalization state and verifies bound effects plus checkpoint hashes", () => {
-    const token = `wbkg1.${"a".repeat(80)}.${"b".repeat(43)}`;
-    const before = projectIncompleteVisibleAssistantText(`before ${token}`);
-    const checkpoint = createRuntimeProviderTextCheckpoint(before, `before ${token}`);
+  it("rejects tampered finalization effects and checkpoint hashes", () => {
+    const before = projectIncompleteVisibleAssistantText("before");
     const payload = createRuntimeFinalizationPayload({
       messagesSha256: "a".repeat(64),
       outcomeSha256: "b".repeat(64),
       effects: [],
-      visibleAssistantText: "before [knowledge capability redacted]",
-      providerTextCheckpoint: checkpoint,
+      visibleAssistantText: "before done",
+      providerTextCheckpoint: createRuntimeProviderTextCheckpoint(before, "before done"),
     });
 
-    const state = rebuildRuntimeProviderTextState({
-      currentRuntimeAttemptId: "attempt-1",
-      durableVisibleAssistantText: "before [knowledge capability redacted]",
-      truncated: false,
-      events: [{
-        runtimeAttemptId: "attempt-1",
-        attempt: 1,
-        externalEventId: "workbench-finalization-1",
-        sequence: 2,
-        event: runtimeExternalFinalizationEvent,
-        payload,
-        payloadSha256: sha256Canonical(payload),
-      }],
-    });
-
-    expect(state).toMatchObject({
-      ...before,
-      durableVisibleAssistantText: "before [knowledge capability redacted]",
-      processedExternalEventIds: ["workbench-finalization-1"],
-      committedFinalization: { externalEventId: "workbench-finalization-1", payload },
-    });
-  });
-
-  it("fails closed when a truncated replay window has no cumulative or finalization anchor", () => {
-    const payload = { type: "ai", content: "delta" };
-    expect(() => rebuildRuntimeProviderTextState({
-      currentRuntimeAttemptId: "attempt-1",
-      durableVisibleAssistantText: "delta",
-      truncated: true,
-      events: [{
-        runtimeAttemptId: "attempt-1",
-        attempt: 1,
-        externalEventId: "provider-message-1",
-        sequence: 9_999,
-        event: "messages",
-        payload,
-        payloadSha256: sha256Canonical(payload),
-      }],
-    })).toThrow("RUNTIME_PROVIDER_TEXT_REPLAY_LIMIT_EXCEEDED");
+    expect(parseRuntimeFinalizationPayload(payload)).toEqual(payload);
+    expect(() => parseRuntimeFinalizationPayload({
+      ...payload,
+      effects: [{ type: "text.delta", delta: "tampered" }],
+    })).toThrow("RUNTIME_FINALIZATION_EFFECTS_INTEGRITY_ERROR");
+    expect(() => parseRuntimeFinalizationPayload({
+      ...payload,
+      providerTextCheckpointSha256: "f".repeat(64),
+    })).toThrow("RUNTIME_FINALIZATION_CHECKPOINT_INTEGRITY_ERROR");
   });
 });
 
 describe("Runtime provider-state v2 reducer", () => {
-  it("matches legacy replay across 7,686 representative events and the durable draft", () => {
+  it("reduces 7,686 representative events into the current durable state", () => {
     const eventCount = 7_686;
     const events: RuntimeProviderTextEvent[] = [];
     let projection = createRuntimeProviderProjection({
@@ -279,13 +245,6 @@ describe("Runtime provider-state v2 reducer", () => {
     append(eventCount, runtimeExternalFinalizationEvent, finalization);
 
     const durableDraftText = "alpha beta gamma";
-    const replayed = rebuildRuntimeProviderTextState({
-      currentRuntimeAttemptId: projection.runtimeAttemptId,
-      durableVisibleAssistantText: durableDraftText,
-      events,
-      truncated: false,
-    });
-
     expect(events).toHaveLength(eventCount);
     expect(finalization.effects).toEqual([{
       type: "phase",
@@ -293,9 +252,17 @@ describe("Runtime provider-state v2 reducer", () => {
       label: "Synthetic validation",
       progress: 1,
     }]);
-    expect(runtimeProviderTextStateFromLegacy(replayed)).toEqual(
-      runtimeProviderTextStateFromProjection(projection, durableDraftText),
-    );
+    expect(runtimeProviderTextStateFromProjection(projection, durableDraftText)).toEqual({
+      protocol: "workbench.runtime-provider-text-state.v2",
+      rawAssistantText: durableDraftText,
+      visibleAssistantText: durableDraftText,
+      durableVisibleAssistantText: durableDraftText,
+      redactionBuffer: "",
+      committedFinalization: {
+        externalEventId: `synthetic-${eventCount}`,
+        payloadSha256: sha256Canonical(finalization),
+      },
+    });
     expect(projection).toMatchObject({
       lastAppliedSequence: eventCount,
       rawAssistantText: "alpha beta gamma",

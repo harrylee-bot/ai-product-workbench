@@ -5,6 +5,27 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ProjectComposer } from "./workbench-project-composer";
 
+vi.mock("@/lib/workbench/features/import-sources", async () => {
+  const actual = await vi.importActual<typeof import("@/lib/workbench/features/import-sources")>("@/lib/workbench/features/import-sources");
+  return {
+    ...actual,
+    useWorkbenchImportSources: () => ({
+      data: { items: [] },
+      error: null,
+      isFetching: false,
+      isPending: false,
+      isSuccess: true,
+      refetch: vi.fn(),
+    }),
+  };
+});
+
+vi.mock("./workbench-import-sources-dialog", () => ({
+  WorkbenchImportSourcesDialog: ({ open }: { open: boolean }) => (
+    open ? <div data-testid="mock-import-sources-dialog" /> : null
+  ),
+}));
+
 const editChoice = {
   description: "Edit the selected immutable Artifact version.",
   key: "workflow:edit:quality",
@@ -260,7 +281,6 @@ describe("Project Composer PRD context", () => {
       modelMenuOpen={false}
       onRefresh={vi.fn(async () => undefined)}
       onRetryDesignPresets={vi.fn()}
-      onRetryModels={vi.fn()}
       onSelectModel={vi.fn()}
       onSubmitPrompt={onSubmitPrompt}
       onTargetSurfaceChange={vi.fn()}
@@ -427,7 +447,6 @@ function projectComposerElement({
     onClearContext={onClearContext}
     onCloseModel={onCloseModel}
     onRetryDesignPresets={vi.fn()}
-    onRetryModels={vi.fn()}
     onSelectModel={onSelectModel}
     onSubmitPrompt={onSubmitPrompt}
     onTargetSurfaceChange={onTargetSurfaceChange ?? vi.fn()}

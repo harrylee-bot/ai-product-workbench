@@ -13,7 +13,6 @@ import {
   prototypeStateSchema,
   prototypeTokenSchema,
   prototypeVariableSchema,
-  type PrototypeAsset,
   type PrototypeBinding,
   type PrototypeDocument,
   type PrototypeNode,

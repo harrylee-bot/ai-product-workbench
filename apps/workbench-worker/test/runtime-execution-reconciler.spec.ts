@@ -79,9 +79,11 @@ describe("RuntimeExecutionReconciler", () => {
     expect(sql).toContain("execution_owner_id");
     expect(sql).toContain("execution_lease_expires_at");
     expect(sql).toContain("CURRENT_TIMESTAMP");
+    expect(sql).toMatch(/NOT EXISTS\s*\(SELECT 1 FROM "prototype_plans" AS plan WHERE plan\."runtime_run_id" = run\."id"\)/u);
     const lockedSql = rawSqlText(transactionQueries.mock.calls[0]?.[0]);
     expect(lockedSql).toContain("FOR UPDATE SKIP LOCKED");
     expect(lockedSql).toContain("thread_id");
+    expect(lockedSql).toMatch(/NOT EXISTS\s*\(SELECT 1 FROM "prototype_plans" AS plan WHERE plan\."runtime_run_id" = run\."id"\)/u);
     expect(recordRuntimeLivenessMetric).toHaveBeenCalledTimes(2);
     expect(recordRuntimeLivenessMetric).toHaveBeenCalledWith(expect.objectContaining({
       operation: "reconcile",

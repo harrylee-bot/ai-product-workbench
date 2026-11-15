@@ -113,7 +113,7 @@ export type PrototypeTransformPatchBatch = Readonly<{
   patches: readonly PrototypeTransformPatch[];
 }>;
 
-export type PrototypeEditorErrorCode =
+type PrototypeEditorErrorCode =
   | "missing_dom_node_id"
   | "invalid_transform_number"
   | "empty_transform_batch"
@@ -214,17 +214,6 @@ export function rendererSizeToDocument(
   return {
     width: normalizeNumber(size.width / transform.zoom),
     height: normalizeNumber(size.height / transform.zoom),
-  };
-}
-
-export function rendererDeltaToDocument(
-  delta: PrototypePoint,
-  transform: PrototypeRendererTransform,
-): PrototypePoint {
-  assertRendererTransform(transform);
-  return {
-    x: normalizeNumber(delta.x / transform.zoom),
-    y: normalizeNumber(delta.y / transform.zoom),
   };
 }
 
@@ -536,29 +525,6 @@ export function patchBatchFromTransformCommand(
       patches,
     },
   };
-}
-
-export function applyPrototypeTransformPatch(
-  document: PrototypeDocument,
-  patch: PrototypeTransformPatch,
-): PrototypeDocument {
-  const node = document.nodes.find((candidate) => candidate.id === patch.nodeId);
-  if (!node) throw new RangeError(`Prototype transform patch node not found: ${patch.nodeId}`);
-  if (node.screenId !== patch.screenId) {
-    throw new RangeError(`Prototype transform patch screen mismatch: ${patch.nodeId}`);
-  }
-  const candidate = {
-    ...document,
-    revision: document.revision + 1,
-    nodes: document.nodes.map((node) => node.id === patch.nodeId
-      ? {
-          ...node,
-          ...(patch.layout ? { layout: { ...node.layout, ...patch.layout } } : {}),
-          ...(patch.style ? { style: { ...node.style, ...patch.style } } : {}),
-        }
-      : node),
-  };
-  return prototypeDocumentSchema.parse(candidate);
 }
 
 export function applyPrototypeTransformPatchBatch(

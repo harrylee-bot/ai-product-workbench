@@ -149,6 +149,7 @@ try {
   await run("node", ["scripts/e2e/workbench-design-system-import-smoke.mjs"]);
   await run("node", ["scripts/e2e/workbench-export-recovery-smoke.mjs"]);
   await run("node", ["scripts/e2e/workbench-isolated-preview-smoke.mjs"]);
+  await run("node", ["--test", "scripts/e2e/workbench-source-preview-bridge.test.mjs"]);
   if (completedSmokeCount === 0) throw new Error("No browser smoke test matched WORKBENCH_E2E_SMOKE_FILTER");
 } finally {
   if (server && serverExit) await stopServer(server, serverExit);

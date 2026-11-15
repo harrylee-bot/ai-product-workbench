@@ -1,5 +1,5 @@
 import { boardNodeProtocol, type ArtifactVersionDetail } from "@workbench/workbench-contracts";
-import { prdDocumentV2Example } from "@workbench/workbench-contracts/test-fixtures";
+import { prdDocumentV3Example } from "@workbench/workbench-contracts/test-fixtures";
 import { describe, expect, it } from "vitest";
 
 import type { BoardFlowNode } from "./board";
@@ -12,9 +12,9 @@ function prdVersion() {
   return {
     artifactVersionId: reference.artifactVersionId,
     artifactId: reference.artifactId,
-    kind: "document" as const,
+    kind: "prd" as const,
     version: 1,
-    schemaVersion: 2,
+    schemaVersion: 3 as const,
     status: "ready" as const,
     checksum: "a".repeat(64),
     citations: [],
@@ -22,7 +22,7 @@ function prdVersion() {
     knowledgeReleaseId: null,
     createdAt: "2026-09-16T00:00:00.000Z",
     contentMode: "inline" as const,
-    content: structuredClone(prdDocumentV2Example),
+    content: structuredClone(prdDocumentV3Example),
   };
 }
 
@@ -41,7 +41,7 @@ describe("document export selection", () => {
   it("requires a choice when both a PRD and a business document can be exported", () => {
     const selection = { kind: "board" as const };
     const references = documentExportReferences([node("short", "document"), node("prd", "document"), node("ui", "prototype")], selection);
-    const short = { ...prdVersion(), artifactVersionId: "version-short", artifactId: "artifact-short", content: { text: "Short note" } };
+    const short = { ...prdVersion(), kind: "document" as const, schemaVersion: 1, artifactVersionId: "version-short", artifactId: "artifact-short", content: { text: "Short note" } };
     const result = resolveDocumentExportSelection(selection, references, [{ value: short }, { value: prdVersion() }]);
     expect(references).toHaveLength(2);
     expect(result).toEqual({ selection: null, title: null, reason: "项目中有多个文档，请先选择一个" });
@@ -51,11 +51,10 @@ describe("document export selection", () => {
     ).selection).toEqual({ kind: "artifact", artifactId: short.artifactId, artifactVersionId: short.artifactVersionId });
   });
 
-  it("accepts both PRD artifact kinds using the actual version protocol", () => {
-    for (const kind of ["prd", "document"] as const) {
-      const value = { ...prdVersion(), kind } as ArtifactVersionDetail;
-      expect(resolveDocumentExportSelection(selected, [reference], [{ value }]).selection).toEqual(selected);
-    }
+  it("accepts current PRD artifacts and rejects PRD payloads mislabeled as ordinary documents", () => {
+    expect(resolveDocumentExportSelection(selected, [reference], [{ value: prdVersion() }]).selection).toEqual(selected);
+    const mislabeled = { ...prdVersion(), kind: "document" as const };
+    expect(resolveDocumentExportSelection(selected, [reference], [{ value: mislabeled }]).selection).toBeNull();
   });
 
   it("does not silently export one document from a mixed explicit selection", () => {
@@ -86,7 +85,7 @@ describe("document export selection", () => {
   });
 
   it("keeps non-PRD, invalid PRD, pending and failed versions unavailable", () => {
-    const invalid = { ...prdVersion(), content: { protocol: "workbench.prd.v2" } };
+    const invalid = { ...prdVersion(), content: { protocol: "workbench.prd.v2" } } as unknown as ArtifactVersionDetail;
     expect(resolveDocumentExportSelection(selected, [reference], [{ value: invalid }]).selection).toBeNull();
     expect(resolveDocumentExportSelection(selected, [reference], [{ pending: true }]).reason).toBe("正在检查文档");
     expect(resolveDocumentExportSelection(selected, [reference], [{ error: true }]).reason).toContain("读取失败");

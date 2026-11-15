@@ -1,21 +1,5 @@
 export const workbenchEase = [0.16, 1, 0.3, 1] as const;
 
-// Shared timing tokens keep interactive controls predictable across the workbench.
-export const tactileTransition = {
-  duration: 0.15,
-  ease: [0.2, 0, 0, 1],
-} as const;
-
-export const spatialTransition = {
-  duration: 0.5,
-  ease: workbenchEase,
-} as const;
-
-export const menuItemTransition = {
-  duration: 0.2,
-  ease: [0.2, 0, 0, 1],
-} as const;
-
 // A motion update subscriber keeps route opacity on Framer's main-thread driver,
 // avoiding a one-frame WAAPI fallback to the initial value at animation handoff.
 export const keepWorkbenchRouteMotionOnMainThread = () => undefined;

@@ -7,7 +7,7 @@ export type BoardAutosaveResult = {
   etag?: string;
 };
 
-export type BoardAutosaveSave = (snapshot: BoardSaveSnapshot) => Promise<BoardAutosaveResult>;
+type BoardAutosaveSave = (snapshot: BoardSaveSnapshot) => Promise<BoardAutosaveResult>;
 
 export type BoardAutosaveEventTarget = {
   addEventListener: (type: string, listener: () => void) => void;
@@ -27,7 +27,7 @@ export type BoardAutosaveCoordinatorOptions = {
   pageLifecycleTarget?: BoardAutosaveEventTarget | null;
 };
 
-export type BoardAutosaveCoordinatorState = {
+type BoardAutosaveCoordinatorState = {
   disposed: boolean;
   inFlight: boolean;
   paused: boolean;

@@ -9,7 +9,7 @@ import {
   createGatewayServer,
   safeGristPath,
 } from "../src/gateway.mjs";
-import { signSsoToken } from "../src/sso-token.mjs";
+import { signSsoToken } from "./sso-token.fixture.mjs";
 
 let upstream;
 let gateway;

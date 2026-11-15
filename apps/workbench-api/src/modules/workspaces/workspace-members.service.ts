@@ -113,7 +113,7 @@ export function decodeWorkspaceMemberCursor(value: string): WorkspaceMemberCurso
   }
 }
 
-export function normalizeWorkspaceMemberQuery(value?: string) {
+function normalizeWorkspaceMemberQuery(value?: string) {
   if (value === undefined) return undefined;
   const normalized = value.trim().replace(/\s+/g, " ");
   if (!normalized) throw validationProblem("q must not be blank");
@@ -121,6 +121,6 @@ export function normalizeWorkspaceMemberQuery(value?: string) {
   return normalized;
 }
 
-export function escapeWorkspaceMemberContainsPattern(value: string) {
+function escapeWorkspaceMemberContainsPattern(value: string) {
   return value.replace(/[\\%_]/g, "\\$&");
 }

@@ -14,7 +14,7 @@ import {
   type RuntimeProgressEvent,
   type RuntimeArtifactDraft,
 } from "@workbench/workbench-contracts";
-import { Prisma, type PrismaClient } from "@workbench/workbench-db";
+import { Prisma } from "@workbench/workbench-db";
 import { applyAndVerifyPrototypePatch, prototypeScreenProjectionChecksum } from "./prototype-patch-applier.js";
 import { RunEventStore } from "./run-event.store.js";
 import { lockRunStatus } from "./run-state-lock.js";
@@ -58,24 +58,7 @@ export type PrototypeCheckpointScreenState = {
 };
 
 export class PrototypePatchService {
-  private readonly events: RunEventStore;
-
-  constructor(private readonly db: PrismaClient) {
-    this.events = new RunEventStore(db);
-  }
-
-  async persistPatch(
-    runId: string,
-    runtimeAttemptId: string,
-    progressEvent: PrototypePatchProgressEvent,
-  ) {
-    return this.db.$transaction((tx) => this.persistPatchTx(
-      tx,
-      runId,
-      runtimeAttemptId,
-      progressEvent,
-    ));
-  }
+  private readonly events = new RunEventStore();
 
   async persistPatchTx(
     tx: Prisma.TransactionClient,

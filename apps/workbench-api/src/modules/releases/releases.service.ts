@@ -208,14 +208,14 @@ export class ReleasesService {
 
 type Receipt = { requestHash: string };
 
-export function encodeReleaseCursor(cursor: ReleaseCursor) {
+function encodeReleaseCursor(cursor: ReleaseCursor) {
   return Buffer.from(JSON.stringify(cursor)).toString("base64url");
 }
 
-export function decodeReleaseCursor(value: string): ReleaseCursor {
+function decodeReleaseCursor(value: string): ReleaseCursor {
   try {
     const parsed = JSON.parse(Buffer.from(value, "base64url").toString("utf8")) as Partial<ReleaseCursor>;
-    if (!parsed.id || !Number.isSafeInteger(parsed.version) || parsed.version! < 1) throw new Error();
+    if (typeof parsed.id !== "string" || !parsed.id || !Number.isSafeInteger(parsed.version) || parsed.version! < 1) throw new Error();
     return { id: parsed.id, version: parsed.version! };
   } catch {
     throw validationProblem("The Project release cursor is invalid");

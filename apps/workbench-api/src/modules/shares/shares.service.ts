@@ -358,7 +358,7 @@ export class SharesService {
     const pin = release.artifactPins.find((candidate) => (
       candidate.artifactId === artifactId
       && candidate.artifactVersionId === artifactVersionId
-      && (candidate.kind === "prototype" || candidate.kind === "design_system")
+      && candidate.kind === "prototype"
     ));
     const assetPin = pin?.assets.find((candidate) => candidate.assetId === assetId);
     if (!pin || !assetPin) throw notFoundProblem("Shared artifact asset");
@@ -573,7 +573,7 @@ export class SharesService {
   }
 }
 
-export function createShareToken() {
+function createShareToken() {
   return shareTokenSchema.parse(`wbs_${randomBytes(32).toString("base64url")}`);
 }
 
@@ -590,14 +590,14 @@ function isShareTokenHashCollision(error: unknown) {
   return fields.some((field) => String(field).includes("token_hash"));
 }
 
-export function encodeShareCursor(cursor: ShareCursor) {
+function encodeShareCursor(cursor: ShareCursor) {
   return Buffer.from(JSON.stringify(cursor)).toString("base64url");
 }
 
-export function decodeShareCursor(value: string): ShareCursor {
+function decodeShareCursor(value: string): ShareCursor {
   try {
     const parsed = JSON.parse(Buffer.from(value, "base64url").toString("utf8")) as Partial<ShareCursor>;
-    if (!parsed.id || !parsed.createdAt || Number.isNaN(Date.parse(parsed.createdAt))) throw new Error();
+    if (typeof parsed.id !== "string" || !parsed.id || typeof parsed.createdAt !== "string" || Number.isNaN(Date.parse(parsed.createdAt))) throw new Error();
     return { id: parsed.id, createdAt: parsed.createdAt };
   } catch {
     throw validationProblem("The Share cursor is invalid");

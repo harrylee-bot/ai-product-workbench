@@ -1,6 +1,7 @@
+import { persistArtifactDraft, persistDelta } from "./run-persistence.fixture.js";
 import { createHash, randomUUID } from "node:crypto";
 import { boardNodeProtocol, type RuntimeArtifactDraft } from "@workbench/workbench-contracts";
-import { prdDocumentV2Example } from "@workbench/workbench-contracts/test-fixtures";
+import { prdDocumentV3Example } from "@workbench/workbench-contracts/test-fixtures";
 import { Prisma, PrismaClient } from "@workbench/workbench-db";
 import { RunProcessor, sha256Canonical } from "../src/runs/run-processor.js";
 import { RunEventStore } from "../src/runs/run-event.store.js";
@@ -47,14 +48,6 @@ type ProcessorInternals = {
     }>;
   }): Promise<void>;
   persistProgress(claim: RuntimeExecutionClaim, event: unknown): Promise<void>;
-  persistDelta(claim: RuntimeExecutionClaim, entryId: string, fullText: string, delta: string): Promise<void>;
-  persistArtifactDraft(claim: RuntimeExecutionClaim, event: {
-    type: "artifact.draft";
-    artifactIndex: number;
-    sourceEventId: string;
-    draft: unknown;
-    checkpointScreens: Array<{ screenId: string; revision: number; checksum: string }>;
-  }, sources: [], designAssets: [], artifactTargets?: RuntimeArtifactTarget[]): Promise<void>;
   publishResult(claim: RuntimeExecutionClaim, entryId: string, streamedText: string, result: {
     protocol: "workbench.runtime.result.v1";
     message: string;
@@ -119,7 +112,7 @@ describeWithPostgres("Run processor PostgreSQL cancellation fences", () => {
     const lockRequested = deferred<void>();
     const releaseLock = deferred<void>();
     const processor = processorWithRunLockFence(worker, lockRequested, releaseLock);
-    const outcome = processor.persistDelta(
+    const outcome = persistDelta(processor,
       claim,
       fixture.outputEntryId!,
       "partial response",
@@ -252,7 +245,7 @@ describeWithPostgres("Run processor PostgreSQL cancellation fences", () => {
       {} as never,
       noKnowledgeToolGrants(),
     ) as unknown as ProcessorInternals;
-    await checkpointProcessor.persistArtifactDraft(
+    await persistArtifactDraft(checkpointProcessor,
       claim,
       {
         type: "artifact.draft",
@@ -353,7 +346,7 @@ describeWithPostgres("Run processor PostgreSQL cancellation fences", () => {
     const draft = documentDraft("Published document", "committed", fixture.citations);
 
     try {
-      await processor.persistArtifactDraft(
+      await persistArtifactDraft(processor,
         claim,
         {
           type: "artifact.draft",
@@ -428,8 +421,8 @@ describeWithPostgres("Run processor PostgreSQL cancellation fences", () => {
     const claim = await claimRunFixture(worker, fixture);
     const processor = new RunProcessor(worker, {} as never, noKnowledgeToolGrants()) as unknown as ProcessorInternals;
     const prd: RuntimeArtifactDraft = {
-      kind: "prd", schemaVersion: 2, title: prdDocumentV2Example.title, operation: { kind: "create" },
-      citations: fixture.citations, content: { ...prdDocumentV2Example, citations: fixture.citations },
+      kind: "prd", schemaVersion: 3, title: prdDocumentV3Example.title, operation: { kind: "create" },
+      citations: fixture.citations, content: { ...prdDocumentV3Example, citations: fixture.citations },
     };
     const content = prototypeDocumentFixture();
     const prototype: RuntimeArtifactDraft = {
@@ -443,13 +436,13 @@ describeWithPostgres("Run processor PostgreSQL cancellation fences", () => {
       for (const stage of ["collecting-prd-context", "structuring-prd", "drafting-prd", "validating-prd"]) {
         await processor.persistProgress(claim, { type: "generation.stage", stage, sourceEventId: `linked:${stage}` });
       }
-      await processor.persistArtifactDraft(claim, {
+      await persistArtifactDraft(processor, claim, {
         type: "artifact.draft", artifactIndex: 0, sourceEventId: "linked:prd", draft: prd, checkpointScreens: [],
       }, [], []);
       for (const stage of ["design-system", "mapping-components", "creating-flows", "generating-ui"]) {
         await processor.persistProgress(claim, { type: "generation.stage", stage, sourceEventId: `linked:${stage}` });
       }
-      await processor.persistArtifactDraft(claim, {
+      await persistArtifactDraft(processor, claim, {
         type: "artifact.draft", artifactIndex: 1, sourceEventId: "linked:prototype", draft: prototype,
         checkpointScreens: content.screens.map(({ id }) => ({
           screenId: id, revision: 0, checksum: prototypeScreenProjectionChecksum(content, id, 0),
@@ -649,7 +642,7 @@ describeWithPostgres("Run processor PostgreSQL cancellation fences", () => {
           sourceEventId: `deerflow:generate-source-${stage}`,
         });
       }
-      await processor.persistArtifactDraft(
+      await persistArtifactDraft(processor,
         claim,
         {
           type: "artifact.draft",
@@ -857,7 +850,7 @@ describeWithPostgres("Run processor PostgreSQL cancellation fences", () => {
     }, { timeout: 30_000 });
 
     try {
-      await fixture.draftProcessor.persistArtifactDraft(
+      await persistArtifactDraft(fixture.draftProcessor,
         fixture.claim,
         fixture.draftEvent,
         [],
@@ -2139,7 +2132,7 @@ async function seedCanvasEditPublicationFixture(
       checksum: prototypeScreenProjectionChecksum(draft.content, id, 0),
     })),
   };
-  await draftProcessor.persistArtifactDraft(
+  await persistArtifactDraft(draftProcessor,
     claim,
     draftEvent,
     [],

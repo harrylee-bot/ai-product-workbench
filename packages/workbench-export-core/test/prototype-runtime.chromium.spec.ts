@@ -6,7 +6,7 @@ import { describe, expect, it } from "vitest";
 import { buildExport, renderExportHtml } from "../src/index.js";
 import { interactiveExportRequest } from "./fixtures.js";
 
-const executablePath = chromium.executablePath();
+const executablePath = process.env.WORKBENCH_EXPORT_CHROMIUM_PATH ?? chromium.executablePath();
 const chromiumAvailable = existsSync(executablePath);
 
 describe("Prototype HTML export runtime", () => {

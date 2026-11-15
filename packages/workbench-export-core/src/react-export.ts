@@ -1,19 +1,27 @@
 import { build } from "esbuild";
 import { htmlToJsx } from "html-to-jsx-transform";
+import { parseFragment, serialize, type DefaultTreeAdapterMap } from "parse5";
 import { format } from "prettier";
 import { createDeterministicZip, type ArchiveEntry } from "./archive.js";
 import { safeFileStem, safeScriptJson } from "./encoding.js";
 import { TerminalExportError } from "./errors.js";
-import { renderExportHtml } from "./html-renderer.js";
+import { renderExportHtml, renderPrototypeDocumentHtml } from "./html-renderer.js";
 import { exportedReactViteVersion } from "./react-package-toolchain.js";
 import { reactRuntimeModuleSource } from "./runtime-source.js";
-import type { ExportBuildRequest } from "./types.js";
+import type { ExportBinaryAsset, ExportBuildRequest, RenderedHtml } from "./types.js";
 
 export async function reactOutput(request: ExportBuildRequest) {
-  const rendered = renderExportHtml(request);
+  return renderedReactOutput(renderExportHtml(request), reactPackageName(request));
+}
+
+export async function prototypeDocumentReactOutput(value: unknown, options: { assets?: ExportBinaryAsset[]; revisionId?: string } = {}) {
+  return renderedReactOutput(renderPrototypeDocumentHtml(value, options), "workbench-prototype");
+}
+
+async function renderedReactOutput(rendered: RenderedHtml, packageName: string) {
   let jsx: string;
   try {
-    jsx = htmlToJsx(rendered.bodyMarkup);
+    jsx = htmlToReactJsx(rendered.bodyMarkup);
   } catch (cause) {
     throw new TerminalExportError("EXPORT_REACT_TRANSFORM_FAILED", "Generated HTML could not be converted to JSX", { cause });
   }
@@ -38,7 +46,6 @@ export async function reactOutput(request: ExportBuildRequest) {
     createRoot(document.getElementById("root")).render(<StrictMode><App /></StrictMode>);
   `, { parser: "babel" });
   const runtimeSource = await format(reactRuntimeModuleSource(), { parser: "babel" });
-  const packageName = reactPackageName(request);
   const packageJson = `${JSON.stringify({
     name: packageName,
     private: true,
@@ -93,6 +100,7 @@ export async function reactOutput(request: ExportBuildRequest) {
     throw new TerminalExportError("EXPORT_REACT_BUILD_EMPTY", "Generated React browser bundle was empty");
   }
 
+  const browserDocument = productionIndex(rendered.title, appJavaScript.contents, appStyles?.contents);
   const entries: ArchiveEntry[] = [
     { name: "package.json", content: packageJson },
     { name: "index.html", content: indexHtml },
@@ -104,7 +112,7 @@ export async function reactOutput(request: ExportBuildRequest) {
     { name: "README.md", content: "# 产品工作台 React 导出\n\nThis archive contains editable React source and a self-contained prebuilt browser document at `dist/index.html`. Open that file directly for offline viewing. Run `npm install && npm run dev` for local editing.\n" },
     {
       name: "dist/index.html",
-      content: productionIndex(rendered.title, appJavaScript.contents, appStyles?.contents),
+      content: browserDocument,
     },
   ];
   for (const output of built.outputFiles) {
@@ -117,7 +125,39 @@ export async function reactOutput(request: ExportBuildRequest) {
     mediaType: "application/zip",
     fileName: `${safeFileStem(rendered.title)}-react.zip`,
     validationTarget: "archive" as const,
+    validationBytes: Buffer.from(browserDocument, "utf8"),
   };
+}
+
+function htmlToReactJsx(html: string) {
+  // html-to-jsx emits JavaScript escapes inside JSX quoted attributes, where
+  // backslashes are literal text. Protect affected HTML values before that
+  // conversion, then restore them as real JavaScript string expressions.
+  let prefix = "WORKBENCH_JSX_ATTRIBUTE_";
+  while (html.includes(prefix)) prefix = `_${prefix}`;
+  const values: string[] = [];
+  const fragment = parseFragment(html);
+  const visit = (node: DefaultTreeAdapterMap["node"]): void => {
+    if ("attrs" in node) {
+      for (const attribute of node.attrs) {
+        // Styles already become JS object expressions in the converter.
+        if (attribute.name === "style" || !/[^\x20-\x7e]|["\\&]/u.test(attribute.value)) continue;
+        values.push(attribute.value);
+        attribute.value = `${prefix}${values.length - 1}`;
+      }
+    }
+    if ("childNodes" in node) node.childNodes.forEach(visit);
+  };
+  visit(fragment);
+  let restored = 0;
+  const jsx = htmlToJsx(serialize(fragment)).replace(new RegExp(`="${prefix}(\\d+)"`, "gu"), (_match, index: string) => {
+    const value = values[Number(index)];
+    if (value === undefined) throw new Error("REACT_ATTRIBUTE_VALUE_MISSING");
+    restored += 1;
+    return `={${JSON.stringify(value)}}`;
+  });
+  if (restored !== values.length) throw new Error("REACT_ATTRIBUTE_VALUE_NOT_RESTORED");
+  return jsx;
 }
 
 function productionIndex(title: string, javaScript: Uint8Array, styles?: Uint8Array) {

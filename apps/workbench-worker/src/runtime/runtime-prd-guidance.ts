@@ -24,8 +24,8 @@ export function runtimePrdResultGuidance(
       "<workbench_prd_result_contract>",
       requiredReferenceReads,
       ...sourceBoundProfile,
-      "Use the installed requirement-doc-template skill as the canonical authoring source. Apply every content rule expressible by the targeted protocol: keep concrete source-backed content, remove placeholders and unrelated business content, preserve citations and valid existing references, and do not add fields or sections absent from that protocol.",
-      "Revise the complete targeted PRD without changing its protocol or Artifact schemaVersion. Legacy workbench.prd.v1 targets remain v1; workbench.prd.v2 targets remain v2; workbench.prd.v3 targets remain v3. Retain documentId, advance revision.number, preserve citations, and publish the complete next document with workbench_artifact_draft_publish at artifact_index 0.",
+      "Use the installed requirement-doc-template skill as the canonical authoring source. Apply every current content rule: keep concrete source-backed content, remove placeholders and unrelated business content, preserve citations and valid existing references, and keep the current function-section structure.",
+      "Revise the complete targeted PRD using workbench.prd.v3 and Artifact schemaVersion 3. Retain documentId, advance revision.number, preserve citations, and publish the complete next document with workbench_artifact_draft_publish at artifact_index 0.",
       linkedPrototype
         ? "After the revised PRD Draft succeeds, keep it immutable, complete the linked Prototype at artifact_index 1, and submit both accepted ACKs' finalSubmissionArtifact references together. A revised PRD alone does not complete this linked Run."
         : "After that Draft succeeds, do not call a Draft or Result tool; the trusted Runtime submits the exact normalized Draft once. If automatic Result validation fails, keep the Draft immutable and repair only the reported paths in one complete manual Result.",

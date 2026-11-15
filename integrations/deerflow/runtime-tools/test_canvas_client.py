@@ -4,6 +4,10 @@ import base64
 import hashlib
 import io
 import json
+import os
+from pathlib import Path
+import subprocess
+import sys
 import unittest
 from datetime import datetime, timedelta, timezone
 from unittest.mock import patch
@@ -19,7 +23,6 @@ from deerflow_workbench_tools.canvas_client import (
     _normalize_tool_input,
     _parse_capability,
     _validate_result,
-    ainvoke_canvas_tool,
     invoke_canvas_tool,
 )
 
@@ -688,25 +691,40 @@ class CanvasClientTest(unittest.TestCase):
         )
 
 
-class CanvasClientAsyncTest(unittest.IsolatedAsyncioTestCase):
-    async def test_async_view_uses_the_same_verified_visual_contract(self) -> None:
-        opener = FakeOpener([
-            FakeResponse(succeeded_result("view_screen")),
-            FakeVisualResponse(content_type="image/png"),
-        ])
-        with patch(
-            "deerflow_workbench_tools.canvas_client.build_opener",
-            return_value=opener,
-        ):
-            outcome = await ainvoke_canvas_tool(
-                capability(),
-                "view_screen",
-                "call_1",
-                {"target": screen_reference()},
-            )
-        self.assertEqual(outcome.image_content_block["type"], "image")
-        self.assertEqual(outcome.image_content_block["mime_type"], "image/png")
-        self.assertNotIn("base64", json.dumps(outcome.result))
+class CanvasClientAsyncTest(unittest.TestCase):
+    def test_real_toolnode_async_view_uses_the_verified_visual_contract(self):
+        probe = subprocess.run([sys.executable, "-c", "import langgraph.prebuilt; import deerflow.tools.types"], capture_output=True)
+        if probe.returncode:
+            self.skipTest("requires the pinned real LangChain/LangGraph runtime")
+        source = r'''
+import asyncio, json
+from unittest.mock import patch
+from langgraph.prebuilt import ToolNode
+from langgraph.runtime import Runtime
+from langchain_core.messages import HumanMessage, AIMessage
+from deerflow_workbench_tools.canvas_tool import view_screen
+from test_canvas_client import FakeOpener, FakeResponse, FakeVisualResponse, capability, succeeded_result, screen_reference
+async def check():
+    assert set(view_screen.tool_call_schema.model_json_schema()['properties']) == {'target'}
+    opener = FakeOpener([FakeResponse(succeeded_result('view_screen')), FakeVisualResponse(content_type='image/png')])
+    state = {'messages': [HumanMessage('Inspect the screen'), AIMessage(content='', tool_calls=[{
+        'name': 'view_screen', 'id': 'call_1', 'args': {'target': screen_reference()},
+    }])]}
+    node = ToolNode([view_screen], handle_tool_errors=False)
+    with patch('deerflow_workbench_tools.canvas_client.build_opener', return_value=opener):
+        result = await node.ainvoke(state, runtime=Runtime(context={'secrets': {'WORKBENCH_CANVAS_CAPABILITY': capability()}}))
+    message = result['messages'][0]
+    assert message.status == 'success'
+    assert message.content[1]['type'] == 'image' and message.content[1]['mime_type'] == 'image/png'
+    assert message.artifact == succeeded_result('view_screen')
+    assert 'base64' not in json.dumps(message.artifact)
+    assert len(opener.requests) == 2
+asyncio.run(check())
+'''
+        result = subprocess.run([sys.executable, "-c", source], cwd=Path(__file__).resolve().parent,
+                                capture_output=True, text=True, timeout=45,
+                                env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"})
+        self.assertEqual(result.returncode, 0, result.stderr)
 
 
 def screen_reference() -> dict[str, str]:

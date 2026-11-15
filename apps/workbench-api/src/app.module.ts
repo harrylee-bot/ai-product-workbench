@@ -14,7 +14,6 @@ import { FilesModule } from "./modules/files/files.module.js";
 import { ExportsModule } from "./modules/exports/exports.module.js";
 import { ProjectsModule } from "./modules/projects/projects.module.js";
 import { ReleasesModule } from "./modules/releases/releases.module.js";
-import { RemixesModule } from "./modules/remixes/remixes.module.js";
 import { RunsModule } from "./modules/runs/runs.module.js";
 import { RuntimeModule } from "./modules/runtime/runtime.module.js";
 import { SystemModule } from "./modules/system/system.module.js";
@@ -25,6 +24,7 @@ import { SubmissionIntentsModule } from "./modules/submission-intents/submission
 import { CanvasAgentModule } from "./modules/canvas-agent/canvas-agent.module.js";
 import { PrototypePatchesModule } from "./modules/prototype-patches/prototype-patches.module.js";
 import { ImportSourcesModule } from "./modules/import-sources/import-sources.module.js";
+import { PrototypesModule } from "./modules/prototypes/prototypes.module.js";
 
 @Module({
   imports: [
@@ -47,8 +47,8 @@ import { ImportSourcesModule } from "./modules/import-sources/import-sources.mod
     ProjectsModule,
     PrototypePatchesModule,
     ImportSourcesModule,
+    PrototypesModule,
     ReleasesModule,
-    RemixesModule,
     RunsModule,
     RuntimeModule,
     SystemModule,

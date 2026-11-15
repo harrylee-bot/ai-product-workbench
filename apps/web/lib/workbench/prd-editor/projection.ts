@@ -2,14 +2,9 @@ import type { JSONContent } from "@tiptap/core";
 import {
   prdChannelLabels,
   prdSafetyBaselineItems,
-  prdSectionKeys,
-  prdTableOfContentsEntriesFor,
   prdTableOfContentsEntriesForV3,
   type PrdBlock,
   type PrdDocument,
-  type PrdDocumentV1,
-  type PrdDocumentV2,
-  type PrdDocumentV3,
   type PrdTemplateDocument,
   type PrdInline,
 } from "@workbench/workbench-contracts";
@@ -24,40 +19,14 @@ type PrdSectionProjection = {
   section: PrdEditableSection;
 };
 
-const prdV2TitleSuffix = "需求说明书";
+const prdTitleSuffix = "需求说明书";
 
 export function prdDocumentToTiptap(document: PrdDocument): JSONContent {
-  return document.protocol !== "workbench.prd.v1"
-    ? prdDocumentV2ToTiptap(document)
-    : prdDocumentV1ToTiptap(document);
-}
-
-function prdDocumentV1ToTiptap(document: PrdDocumentV1): JSONContent {
-  return {
-    type: "doc",
-    content: [
-      stringField(["title"], document.title, "title", "heading", 1, undefined, document.documentId),
-      ...v1SectionProjections(document).map((projection, index) => sectionToTiptap(
-        projection,
-        stringField(
-          [...projection.path, "title"],
-          projection.section.title,
-          "section-title",
-          "heading",
-          2,
-          `${index + 1}. `,
-        ),
-      )),
-    ],
-  };
-}
-
-function prdDocumentV2ToTiptap(document: PrdTemplateDocument): JSONContent {
   const sections = templateSectionProjections(document);
   const byKey = new Map(sections.map((section) => [section.key, section]));
   const section = (key: string, trailing: JSONContent[] = []) => {
     const projection = byKey.get(key);
-    if (!projection) throw new Error(`Missing PRD v2 editor section: ${key}`);
+    if (!projection) throw new Error(`Missing PRD editor section: ${key}`);
     return sectionToTiptap(
       projection,
       fixedBlock(projection.section.title, "subsection-title"),
@@ -75,9 +44,9 @@ function prdDocumentV2ToTiptap(document: PrdTemplateDocument): JSONContent {
         ...document.tableOfContents.entries,
       ].join("\n"), "table"),
       fixedBlock(document.sections.introduction.title, "section-title"),
-      section("v2:introduction.background"),
-      section("v2:introduction.scope"),
-      section("v2:introduction.usageScenarios", [
+      section("prd:introduction.background"),
+      section("prd:introduction.scope"),
+      section("prd:introduction.usageScenarios", [
         fixedBlock(channelTableText(document), "table"),
       ]),
       fixedBlock(document.sections.businessRequirements.title, "section-title"),
@@ -86,38 +55,19 @@ function prdDocumentV2ToTiptap(document: PrdTemplateDocument): JSONContent {
         document.sections.businessRequirements.summary,
         "body",
       ),
-      section("v2:businessRequirements.pageLinks"),
-      ...(document.protocol === "workbench.prd.v2" ? [
-        section("v2:businessRequirements.coreRules"),
-        section("v2:businessRequirements.flowAndPages"),
-        section("v2:businessRequirements.acceptanceCriteria"),
-        ...document.sections.businessRequirements.additionalSections.map((additionalSection, index) => {
-        const key = `v2:businessRequirements.additionalSections.${index}`;
-        const projection = byKey.get(key);
-        if (!projection) throw new Error(`Missing PRD v2 editor section: ${key}`);
-        return sectionToTiptap(
-          projection,
-          stringField(
-            [...projection.path, "title"],
-            additionalSection.title,
-            "section-title",
-            "heading",
-            2,
-          ),
-        );
-        }),
-      ] : document.sections.businessRequirements.functionSections.map((functionSection, index) => {
-        const projection = byKey.get(`v3:function:${functionSection.id}`)!;
+      section("prd:businessRequirements.pageLinks"),
+      ...document.sections.businessRequirements.functionSections.map((functionSection, index) => {
+        const projection = byKey.get(`prd:function:${functionSection.id}`)!;
         return sectionToTiptap(projection, stringField(
           [...projection.path, "title"], functionSection.title, "section-title", "heading", 2,
         ), functionSection.diagrams.map((diagram) => ({
           type: "prdDiagram",
           attrs: { diagram, sectionIndex: index },
         })));
-      })),
+      }),
       {
         type: "prdSection",
-        attrs: { sectionKey: "v2:degradation", dataId: "section-v2-degradation" },
+        attrs: { sectionKey: "prd:degradation", dataId: "section-prd-degradation" },
         content: [
           fixedBlock(document.sections.degradation.title, "section-title"),
           inlineField(
@@ -129,7 +79,7 @@ function prdDocumentV2ToTiptap(document: PrdTemplateDocument): JSONContent {
       },
       {
         type: "prdSection",
-        attrs: { sectionKey: "v2:safetyBaseline", dataId: "section-v2-safety-baseline" },
+        attrs: { sectionKey: "prd:safetyBaseline", dataId: "section-prd-safety-baseline" },
         content: [
           fixedBlock(document.sections.safetyBaseline.title, "section-title"),
           fixedBlock(safetyBaselineText(document), "table"),
@@ -140,22 +90,6 @@ function prdDocumentV2ToTiptap(document: PrdTemplateDocument): JSONContent {
 }
 
 export function applyTiptapToPrdDocument(
-  base: PrdDocumentV1,
-  content: JSONContent,
-): PrdDocumentV1;
-export function applyTiptapToPrdDocument(
-  base: PrdDocumentV2,
-  content: JSONContent,
-): PrdDocumentV2;
-export function applyTiptapToPrdDocument(
-  base: PrdDocumentV3,
-  content: JSONContent,
-): PrdDocumentV3;
-export function applyTiptapToPrdDocument(
-  base: PrdDocument,
-  content: JSONContent,
-): PrdDocument;
-export function applyTiptapToPrdDocument(
   base: PrdDocument,
   content: JSONContent,
 ): PrdDocument {
@@ -165,26 +99,17 @@ export function applyTiptapToPrdDocument(
     const valueKind = stringAttribute(node, "prdValueKind");
     if (!encodedPath || (valueKind !== "string" && valueKind !== "inline")) return;
     const path = decodePath(encodedPath);
-    if (!path
-      || (next.protocol === "workbench.prd.v2" && !isV2EditablePath(path))
-      || (next.protocol === "workbench.prd.v3" && !isV3EditablePath(path))) return;
+    if (!path || !isEditablePath(path)) return;
     const value = valueKind === "string"
       ? stringFromContent(node.content)
       : inlinesFromContent(node.content);
     setPathValue(next, path, value);
   });
 
-  if (next.protocol !== "workbench.prd.v1") {
-    normalizeV2Title(next);
-    rebuildSectionBlocks(templateSectionProjections(next), content);
-    next.tableOfContents.entries = next.protocol === "workbench.prd.v3"
-      ? prdTableOfContentsEntriesForV3(next.sections.businessRequirements.functionSections.map((section) => section.title))
-      : prdTableOfContentsEntriesFor(next.sections.businessRequirements.additionalSections.map((section) => section.title));
-    next.sections.degradation.applicable = inlinePlainText(next.sections.degradation.content).trim() !== "不涉及";
-    return next;
-  }
-
-  rebuildSectionBlocks(v1SectionProjections(next), content);
+  normalizeTitle(next);
+  rebuildSectionBlocks(templateSectionProjections(next), content);
+  next.tableOfContents.entries = prdTableOfContentsEntriesForV3(next.sections.businessRequirements.functionSections.map((section) => section.title));
+  next.sections.degradation.applicable = inlinePlainText(next.sections.degradation.content).trim() !== "不涉及";
   return next;
 }
 
@@ -214,74 +139,20 @@ function rebuildSectionBlocks(
   }
 }
 
-function v1SectionProjections(document: PrdDocumentV1): PrdSectionProjection[] {
-  return prdSectionKeys.map((key) => ({
-    key,
-    path: ["sections", key],
-    section: document.sections[key],
-  }));
-}
-
-function v2SectionProjections(document: PrdDocumentV2): PrdSectionProjection[] {
-  return [
-    {
-      key: "v2:introduction.background",
-      path: ["sections", "introduction", "background"],
-      section: document.sections.introduction.background,
-    },
-    {
-      key: "v2:introduction.scope",
-      path: ["sections", "introduction", "scope"],
-      section: document.sections.introduction.scope,
-    },
-    {
-      key: "v2:introduction.usageScenarios",
-      path: ["sections", "introduction", "usageScenarios"],
-      section: document.sections.introduction.usageScenarios,
-    },
-    {
-      key: "v2:businessRequirements.pageLinks",
-      path: ["sections", "businessRequirements", "pageLinks"],
-      section: document.sections.businessRequirements.pageLinks,
-    },
-    {
-      key: "v2:businessRequirements.coreRules",
-      path: ["sections", "businessRequirements", "coreRules"],
-      section: document.sections.businessRequirements.coreRules,
-    },
-    {
-      key: "v2:businessRequirements.flowAndPages",
-      path: ["sections", "businessRequirements", "flowAndPages"],
-      section: document.sections.businessRequirements.flowAndPages,
-    },
-    {
-      key: "v2:businessRequirements.acceptanceCriteria",
-      path: ["sections", "businessRequirements", "acceptanceCriteria"],
-      section: document.sections.businessRequirements.acceptanceCriteria,
-    },
-    ...document.sections.businessRequirements.additionalSections.map((section, index) => ({
-      key: `v2:businessRequirements.additionalSections.${index}`,
-      path: ["sections", "businessRequirements", "additionalSections", index],
-      section,
-    })),
-  ];
-}
-
 function templateSectionProjections(document: PrdTemplateDocument): PrdSectionProjection[] {
-  if (document.protocol === "workbench.prd.v2") return v2SectionProjections(document);
   return [
     ...(["background", "scope", "usageScenarios"] as const).map((key) => ({
-      key: `v2:introduction.${key}`,
+      key: `prd:introduction.${key}`,
       path: ["sections", "introduction", key],
       section: document.sections.introduction[key],
     })),
     {
-      key: "v2:businessRequirements.pageLinks",
+      key: "prd:businessRequirements.pageLinks",
       path: ["sections", "businessRequirements", "pageLinks"],
       section: document.sections.businessRequirements.pageLinks,
     },
     ...document.sections.businessRequirements.functionSections.map((section, index) => ({
-      key: `v3:function:${section.id}`,
+      key: `prd:function:${section.id}`,
       path: ["sections", "businessRequirements", "functionSections", index],
       section,
     })),
@@ -843,27 +714,7 @@ function editorIrId(value: string | null, fallback: string): string {
   return `editor-${seed || "block"}`;
 }
 
-function isV2EditablePath(path: readonly PathPart[]): boolean {
-  if (pathEquals(path, ["title"])) return true;
-  if (pathEquals(path, ["sections", "businessRequirements", "summary"])) return true;
-  if (pathEquals(path, ["sections", "degradation", "content"])) return true;
-  if (
-    pathStartsWith(path, ["sections", "businessRequirements", "additionalSections"])
-    && typeof path[3] === "number"
-    && (path[4] === "title" || path[4] === "blocks")
-  ) return true;
-  return [
-    ["sections", "introduction", "background", "blocks"],
-    ["sections", "introduction", "scope", "blocks"],
-    ["sections", "introduction", "usageScenarios", "blocks"],
-    ["sections", "businessRequirements", "pageLinks", "blocks"],
-    ["sections", "businessRequirements", "coreRules", "blocks"],
-    ["sections", "businessRequirements", "flowAndPages", "blocks"],
-    ["sections", "businessRequirements", "acceptanceCriteria", "blocks"],
-  ].some((prefix) => pathStartsWith(path, prefix));
-}
-
-function isV3EditablePath(path: readonly PathPart[]): boolean {
+function isEditablePath(path: readonly PathPart[]): boolean {
   if (pathEquals(path, ["title"])
     || pathEquals(path, ["sections", "businessRequirements", "summary"])
     || pathEquals(path, ["sections", "degradation", "content"])) return true;
@@ -886,12 +737,12 @@ function pathStartsWith(path: readonly PathPart[], prefix: readonly PathPart[]):
   return prefix.every((part, index) => path[index] === part);
 }
 
-function normalizeV2Title(document: PrdTemplateDocument) {
+function normalizeTitle(document: PrdTemplateDocument) {
   const editedTitle = document.title.trim();
-  const workOrderName = editedTitle.endsWith(prdV2TitleSuffix)
-    ? editedTitle.slice(0, -prdV2TitleSuffix.length).trim()
+  const workOrderName = editedTitle.endsWith(prdTitleSuffix)
+    ? editedTitle.slice(0, -prdTitleSuffix.length).trim()
     : editedTitle;
-  const title = workOrderName ? `${workOrderName}${prdV2TitleSuffix}` : "";
+  const title = workOrderName ? `${workOrderName}${prdTitleSuffix}` : "";
   document.title = title;
   document.cover.workOrderName = workOrderName;
   document.cover.title = title;

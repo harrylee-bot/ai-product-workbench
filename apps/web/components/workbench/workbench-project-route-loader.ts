@@ -19,11 +19,3 @@ export function preloadWorkbenchProjectRoute(): Promise<WorkbenchProjectRouteMod
 export function readWorkbenchProjectRoute(): WorkbenchProjectRouteModule | null {
   return projectRouteModule;
 }
-
-export async function continueAfterWorkbenchProjectRoutePreload<T>(
-  continueTransition: () => T | Promise<T>,
-  loadRoute: () => Promise<unknown> = preloadWorkbenchProjectRoute,
-): Promise<T> {
-  await loadRoute();
-  return continueTransition();
-}

@@ -455,9 +455,7 @@ export class ArtifactsService {
           || artifact.currentVersionId !== base.id
           || base.projectId !== artifact.projectId
           || base.status !== "ready"
-          || (request.kind === "prototype"
-            ? base.schemaVersion !== documentSchemaVersion
-            : base.schemaVersion !== 1 && base.schemaVersion !== 2 && base.schemaVersion !== 3)
+          || base.schemaVersion !== documentSchemaVersion
           || base.content === null
           || base.contentBlobId !== null
         ) {
@@ -478,18 +476,6 @@ export class ArtifactsService {
           }
         } else {
           const baseDocument = prdDocumentSchema.parse(base.content);
-          if (prdDocumentSchemaVersion(baseDocument) !== base.schemaVersion) {
-            throw artifactVersionWriteConflictProblem(
-              "ARTIFACT_VERSION_BASE_NOT_CURRENT",
-              "baseArtifactVersionId must be the current ready inline version",
-            );
-          }
-          if (base.schemaVersion !== documentSchemaVersion) {
-            throw artifactVersionWriteConflictProblem(
-              "ARTIFACT_DOCUMENT_SCHEMA_VERSION_MISMATCH",
-              "Edited PrdDocument must retain the base schema version",
-            );
-          }
           assertPrdEditContinuity(baseDocument, request.document);
           if (base.assets.length > 0) {
             throw artifactVersionWriteConflictProblem(
@@ -1146,12 +1132,8 @@ function assertPrdEditContinuity(base: PrdDocument, next: PrdDocument) {
 }
 
 function editableDocumentSchemaVersion(request: CreateArtifactVersionRequest): 1 | 2 | 3 {
-  return request.kind === "prd" ? prdDocumentSchemaVersion(request.document)
+  return request.kind === "prd" ? 3
     : request.document.protocol === "workbench.prototype-source-input.v1" ? 2 : 1;
-}
-
-function prdDocumentSchemaVersion(document: PrdDocument): 1 | 2 | 3 {
-  return document.protocol === "workbench.prd.v3" ? 3 : document.protocol === "workbench.prd.v2" ? 2 : 1;
 }
 
 function assertPrototypeEditContinuity(
@@ -1185,11 +1167,11 @@ function assertPrototypeEditContinuity(
   }
 }
 
-function hasValidCurrentVersion(artifact: {
+function hasValidCurrentVersion<T extends {
   id: string;
   currentVersionId: string | null;
   currentVersion: { id: string; artifactId: string; status: string } | null;
-}) {
+}>(artifact: T): artifact is T & { currentVersion: NonNullable<T["currentVersion"]> } {
   return artifact.currentVersionId !== null
     && artifact.currentVersion?.id === artifact.currentVersionId
     && artifact.currentVersion.artifactId === artifact.id
@@ -1240,19 +1222,17 @@ function mapArtifact(artifact: {
     kind: artifact.kind,
     title: artifact.title,
     revision: artifact.revision,
-    currentVersion: artifact.currentVersion
-      ? {
-          artifactId: artifact.id,
-          artifactVersionId: artifact.currentVersion.id,
-          version: artifact.currentVersion.version,
-          kind: artifact.kind,
-          schemaVersion: artifact.currentVersion.schemaVersion,
-          status: artifact.currentVersion.status,
-          checksum: artifact.currentVersion.checksum,
-          createdByRunId: artifact.currentVersion.createdByRunId,
-          createdAt: artifact.currentVersion.createdAt.toISOString(),
-        }
-      : null,
+    currentVersion: {
+      artifactId: artifact.id,
+      artifactVersionId: artifact.currentVersion.id,
+      version: artifact.currentVersion.version,
+      kind: artifact.kind,
+      schemaVersion: artifact.currentVersion.schemaVersion,
+      status: artifact.currentVersion.status,
+      checksum: artifact.currentVersion.checksum,
+      createdByRunId: artifact.currentVersion.createdByRunId,
+      createdAt: artifact.currentVersion.createdAt.toISOString(),
+    },
     createdAt: artifact.createdAt.toISOString(),
     updatedAt: artifact.updatedAt.toISOString(),
   });
@@ -1282,7 +1262,10 @@ export function encodeArtifactCursor(cursor: ArtifactCursor) {
 export function decodeArtifactCursor(value: string): ArtifactCursor {
   try {
     const parsed = JSON.parse(Buffer.from(value, "base64url").toString("utf8")) as Partial<ArtifactCursor>;
-    if (!parsed.id || !parsed.updatedAt || Number.isNaN(Date.parse(parsed.updatedAt))) throw new Error("invalid cursor");
+    if (typeof parsed.id !== "string" || !parsed.id
+      || typeof parsed.updatedAt !== "string" || Number.isNaN(Date.parse(parsed.updatedAt))) {
+      throw new Error("invalid cursor");
+    }
     return { id: parsed.id, updatedAt: parsed.updatedAt };
   } catch {
     throw validationProblem("The Artifact cursor is invalid");
@@ -1296,10 +1279,11 @@ export function encodeArtifactVersionCursor(cursor: ArtifactVersionCursor) {
 export function decodeArtifactVersionCursor(value: string): ArtifactVersionCursor {
   try {
     const parsed = JSON.parse(Buffer.from(value, "base64url").toString("utf8")) as Partial<ArtifactVersionCursor>;
-    if (!parsed.id || !Number.isSafeInteger(parsed.version) || (parsed.version ?? 0) < 1) {
+    if (typeof parsed.id !== "string" || !parsed.id
+      || typeof parsed.version !== "number" || !Number.isSafeInteger(parsed.version) || parsed.version < 1) {
       throw new Error("invalid cursor");
     }
-    return { id: parsed.id, version: parsed.version } as ArtifactVersionCursor;
+    return { id: parsed.id, version: parsed.version };
   } catch {
     throw validationProblem("The Artifact version cursor is invalid");
   }

@@ -8,11 +8,10 @@ import {
 import { z } from "zod";
 
 export const runtimeExternalFinalizationEvent = "workbench.runtime.finalization.v2";
-export const runtimeProviderTextReplayEventLimit = 10_000;
-export const runtimeProviderStateProjectionVersion = 2;
+const runtimeProviderStateProjectionVersion = 2;
 
-export const runtimeProviderTextMaxLength = 16_000_000;
-export const runtimeRedactionBufferMaxLength = 4_096;
+const runtimeProviderTextMaxLength = 16_000_000;
+const runtimeRedactionBufferMaxLength = 4_096;
 const KNOWLEDGE_GRANT_PREFIX = "wbkg1.";
 const CANVAS_GRANT_PREFIX = "wbct1.";
 const CAPABILITY_TOKEN_CHARACTER = /^[A-Za-z0-9_.-]$/u;
@@ -31,13 +30,13 @@ const providerTextSnapshotSchema = z.object({
   redactionBuffer: z.string().max(runtimeRedactionBufferMaxLength),
 }).strict();
 
-export const runtimeProviderTextCheckpointSchema = z.object({
+const runtimeProviderTextCheckpointSchema = z.object({
   protocol: z.literal("workbench.runtime-provider-text-checkpoint.v1"),
   before: providerTextSnapshotSchema,
   terminal: providerTextSnapshotSchema,
 }).strict();
 
-export const runtimeFinalizationPayloadSchema = z.object({
+const runtimeFinalizationPayloadSchema = z.object({
   protocol: z.literal("workbench.runtime-finalization.v2"),
   messagesSha256: sha256Schema,
   outcomeSha256: sha256Schema,
@@ -54,16 +53,6 @@ export const runtimeFinalizationPayloadSchema = z.object({
 export type RuntimeProviderTextSnapshot = z.infer<typeof providerTextSnapshotSchema>;
 export type RuntimeProviderTextCheckpoint = z.infer<typeof runtimeProviderTextCheckpointSchema>;
 export type RuntimeFinalizationPayload = z.infer<typeof runtimeFinalizationPayloadSchema>;
-
-export type LegacyRuntimeProviderTextState = RuntimeProviderTextSnapshot & {
-  protocol: "workbench.runtime-provider-text-state.v1";
-  durableVisibleAssistantText: string;
-  processedExternalEventIds: string[];
-  committedFinalization: {
-    externalEventId: string;
-    payload: RuntimeFinalizationPayload;
-  } | null;
-};
 
 export type RuntimeProviderTextState = RuntimeProviderTextSnapshot & {
   protocol: "workbench.runtime-provider-text-state.v2";
@@ -267,88 +256,6 @@ export function parseRuntimeFinalizationPayload(value: unknown): RuntimeFinaliza
   return payload;
 }
 
-export function rebuildRuntimeProviderTextState(input: {
-  currentRuntimeAttemptId: string;
-  durableVisibleAssistantText: string;
-  events: RuntimeProviderTextEvent[];
-  truncated: boolean;
-}): LegacyRuntimeProviderTextState {
-  const events = [...input.events].sort(compareProviderTextEvents);
-  for (const event of events) {
-    if (sha256Canonical(event.payload) !== event.payloadSha256) {
-      throw new Error("RUNTIME_PROVIDER_TEXT_EVENT_INTEGRITY_ERROR");
-    }
-  }
-  const currentFinalizations = events.filter((event) => (
-    event.runtimeAttemptId === input.currentRuntimeAttemptId
-    && event.event === runtimeExternalFinalizationEvent
-  ));
-  if (currentFinalizations.length > 1) {
-    throw new Error("RUNTIME_PROVIDER_TEXT_FINALIZATION_MULTIPLE");
-  }
-  const processedExternalEventIds = events
-    .filter((event) => event.runtimeAttemptId === input.currentRuntimeAttemptId)
-    .map((event) => event.externalEventId);
-  const currentFinalization = currentFinalizations[0];
-  if (currentFinalization) {
-    const laterProviderEvent = events.some((event) => (
-      event.runtimeAttemptId === input.currentRuntimeAttemptId
-      && event.sequence > currentFinalization.sequence
-      && event.event !== runtimeExternalFinalizationEvent
-    ));
-    if (laterProviderEvent) throw new Error("RUNTIME_PROVIDER_TEXT_EVENT_AFTER_FINALIZATION");
-    const payload = parseRuntimeFinalizationPayload(currentFinalization.payload);
-    return {
-      protocol: "workbench.runtime-provider-text-state.v1",
-      ...payload.providerTextCheckpoint.before,
-      durableVisibleAssistantText: input.durableVisibleAssistantText,
-      processedExternalEventIds,
-      committedFinalization: {
-        externalEventId: currentFinalization.externalEventId,
-        payload,
-      },
-    };
-  }
-
-  const anchorIndex = latestProviderTextAnchorIndex(events);
-  if (input.truncated && anchorIndex < 0) {
-    throw new Error("RUNTIME_PROVIDER_TEXT_REPLAY_LIMIT_EXCEEDED");
-  }
-  let state = emptyProviderTextSnapshot();
-  let startIndex = 0;
-  if (anchorIndex >= 0) {
-    const anchor = events[anchorIndex]!;
-    if (anchor.event === runtimeExternalFinalizationEvent) {
-      state = parseRuntimeFinalizationPayload(anchor.payload).providerTextCheckpoint.terminal;
-    } else {
-      const frame = extractAssistantTextFrame(anchor.event, anchor.payload);
-      if (!frame || frame.kind !== "cumulative") {
-        throw new Error("RUNTIME_PROVIDER_TEXT_ANCHOR_INVALID");
-      }
-      state = projectIncompleteVisibleAssistantText(frame.text);
-    }
-    startIndex = anchorIndex + 1;
-  }
-  for (const event of events.slice(startIndex)) {
-    if (event.event === runtimeExternalFinalizationEvent) {
-      state = parseRuntimeFinalizationPayload(event.payload).providerTextCheckpoint.terminal;
-      continue;
-    }
-    state = applyProviderTextEvent(state, event.event, event.payload);
-  }
-  assertProviderTextSnapshot(state, false);
-  if (state.visibleAssistantText !== input.durableVisibleAssistantText) {
-    throw new Error("RUNTIME_PROVIDER_TEXT_DRAFT_CONFLICT");
-  }
-  return {
-    protocol: "workbench.runtime-provider-text-state.v1",
-    ...state,
-    durableVisibleAssistantText: input.durableVisibleAssistantText,
-    processedExternalEventIds,
-    committedFinalization: null,
-  };
-}
-
 export function runtimeProviderTextStateFromProjection(
   projection: RuntimeProviderProjection,
   durableVisibleAssistantText: string,
@@ -367,29 +274,6 @@ export function runtimeProviderTextStateFromProjection(
       ? {
           externalEventId: projection.finalizationExternalEventId,
           payloadSha256: projection.finalizationPayloadSha256!,
-        }
-      : null,
-  };
-}
-
-export function runtimeProviderTextStateFromLegacy(
-  legacy: LegacyRuntimeProviderTextState,
-): RuntimeProviderTextState {
-  const snapshot = legacy.committedFinalization
-    ? legacy.committedFinalization.payload.providerTextCheckpoint.terminal
-    : {
-        rawAssistantText: legacy.rawAssistantText,
-        visibleAssistantText: legacy.visibleAssistantText,
-        redactionBuffer: legacy.redactionBuffer,
-      };
-  return {
-    protocol: "workbench.runtime-provider-text-state.v2",
-    ...snapshot,
-    durableVisibleAssistantText: legacy.durableVisibleAssistantText,
-    committedFinalization: legacy.committedFinalization
-      ? {
-          externalEventId: legacy.committedFinalization.externalEventId,
-          payloadSha256: sha256Canonical(legacy.committedFinalization.payload),
         }
       : null,
   };
@@ -523,7 +407,7 @@ export function assertRuntimeProviderProjection(
   return state;
 }
 
-export function withRuntimeProviderProjectionHash(
+function withRuntimeProviderProjectionHash(
   state: Omit<RuntimeProviderProjection, "stateSha256">,
 ): RuntimeProviderProjection {
   const projected = {
@@ -554,15 +438,6 @@ function applyProviderTextEvent(
   };
   assertProviderTextSnapshot(next, false);
   return next;
-}
-
-function latestProviderTextAnchorIndex(events: RuntimeProviderTextEvent[]) {
-  for (let index = events.length - 1; index >= 0; index -= 1) {
-    const event = events[index]!;
-    if (event.event === runtimeExternalFinalizationEvent) return index;
-    if (extractAssistantTextFrame(event.event, event.payload)?.kind === "cumulative") return index;
-  }
-  return -1;
 }
 
 function assertRuntimeFinalizationPayload(payload: RuntimeFinalizationPayload) {
@@ -643,10 +518,6 @@ function assertProjectionIdentity(runtimeAttemptId: string, runId: string) {
   if (!runtimeAttemptId || runtimeAttemptId.length > 1_024 || !runId || runId.length > 1_024) {
     throw new Error("RUNTIME_PROVIDER_STATE_IDENTITY_INVALID");
   }
-}
-
-function compareProviderTextEvents(left: RuntimeProviderTextEvent, right: RuntimeProviderTextEvent) {
-  return left.attempt - right.attempt || left.sequence - right.sequence;
 }
 
 function retainedPrefixLength(value: string): number {

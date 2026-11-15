@@ -1,7 +1,7 @@
 "use client";
 
-import type { CreateProjectRemixRequest, ExportSelection } from "@workbench/workbench-contracts";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import type { ExportSelection } from "@workbench/workbench-contracts";
+import { useQuery } from "@tanstack/react-query";
 
 import { useCallback } from "react";
 
@@ -92,22 +92,6 @@ export function useWorkbenchPublicSharedArtifactContent(
     ),
     enabled: enabled && Boolean(shareToken && artifactId && artifactVersionId),
     staleTime: Number.POSITIVE_INFINITY,
-  });
-}
-
-export function useCreateWorkbenchProjectRemix(shareToken: string) {
-  const service = useWorkbenchPublicSharesApi();
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: ({ request, idempotencyKey }: {
-      request: CreateProjectRemixRequest;
-      idempotencyKey?: string;
-    }) => service.createProjectRemix(shareToken, request, idempotencyKey),
-    async onSuccess() {
-      await queryClient.invalidateQueries({
-        queryKey: workbenchQueryKeys.projectLists(),
-      });
-    },
   });
 }
 

@@ -2,7 +2,7 @@ import {
   runtimeResultSchema,
   type RuntimeResult,
 } from "@workbench/workbench-contracts";
-import { prdDocumentV2Example } from "@workbench/workbench-contracts/test-fixtures";
+import { prdDocumentV3Example } from "@workbench/workbench-contracts/test-fixtures";
 import { sourceCitations } from "../../../packages/workbench-contracts/test/knowledge-citation.fixture.js";
 
 export const knowledgeCitationFixture = {
@@ -14,10 +14,10 @@ export const runtimePrdResultFixture: RuntimeResult = runtimeResultSchema.parse(
   message: "需求说明书已生成。",
   artifacts: [{
     kind: "prd",
-    schemaVersion: 2,
-    title: prdDocumentV2Example.title,
+    schemaVersion: 3,
+    title: prdDocumentV3Example.title,
     operation: { kind: "create" },
     citations: sourceCitations,
-    content: { ...prdDocumentV2Example, citations: sourceCitations },
+    content: { ...prdDocumentV3Example, citations: sourceCitations },
   }],
 });

@@ -4,6 +4,7 @@ import { PrismaClient } from "@workbench/workbench-db";
 import { createPreviewToken } from "@workbench/workbench-preview-token";
 import { describe, expect, it, vi } from "vitest";
 import { PreviewService } from "../src/preview.service.js";
+import { getPreview } from "./preview-request.fixture.js";
 
 const databaseUrl = process.env.WORKBENCH_TEST_DATABASE_URL;
 const describeWithPostgres = databaseUrl ? describe : describe.skip;
@@ -166,7 +167,7 @@ describeWithPostgres("PreviewService PostgreSQL authorization", () => {
           expiresAt: new Date(Date.now() + 60_000),
         }, secret);
 
-        const rendered = await service.get(token);
+        const rendered = await getPreview(service, token);
         expect(rendered).toMatchObject({
           etag: expect.stringMatching(/^"[a-f0-9]{64}"$/),
         });
@@ -181,7 +182,7 @@ describeWithPostgres("PreviewService PostgreSQL authorization", () => {
             },
           },
         });
-        await expect(service.get(token)).rejects.toThrow("PREVIEW_NOT_FOUND");
+        await expect(getPreview(service, token)).rejects.toThrow("PREVIEW_NOT_FOUND");
         expect(await tx.projectRelease.count({ where: { projectId: project.id } })).toBe(0);
         expect(projectPreview.exportJobId).toBe(exportJob.id);
 

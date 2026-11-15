@@ -1,25 +1,19 @@
 "use client";
 
 import {
-  createExternalExportDeliveryRequestSchema,
   createExportJobRequestSchema,
   createProjectPreviewRequestSchema,
   exportCapabilitiesSchema,
-  externalExportDeliveryListSchema,
-  externalExportDeliverySchema,
   exportJobListSchema,
   exportJobSchema,
   exportPreviewTokenResponseSchema,
   projectPreviewSchema,
   type CreateExportJobRequest,
-  type CreateExternalExportDeliveryRequest,
   type CreateProjectPreviewRequest,
   type ExportCapabilities,
   type ExportJob,
   type ExportJobList,
   type ExportPreviewTokenResponse,
-  type ExternalExportDelivery,
-  type ExternalExportDeliveryList,
   type ProjectPreview,
 } from "@workbench/workbench-contracts";
 import { useMemo } from "react";
@@ -160,62 +154,6 @@ export class WorkbenchExportsApi {
     return { value: content, etag: normalizeStrongEtag(etag) };
   }
 
-  async listExternalExportDeliveries(exportId: string): Promise<ExternalExportDeliveryList> {
-    const result = await this.api.GET("/exports/{exportId}/deliveries", {
-      params: { path: { exportId } },
-    });
-    return parseContract(externalExportDeliveryListSchema, result.data, "list external export deliveries");
-  }
-
-  async createExternalExportDelivery(
-    exportId: string,
-    request: CreateExternalExportDeliveryRequest,
-    idempotencyKey = createIdempotencyKey("export-delivery"),
-  ): Promise<Versioned<ExternalExportDelivery>> {
-    const body = createExternalExportDeliveryRequestSchema.parse(request);
-    const result = await this.api.POST("/exports/{exportId}/deliveries", {
-      params: {
-        path: { exportId },
-        header: { "Idempotency-Key": normalizeIdempotencyKey(idempotencyKey) },
-      },
-      body,
-    });
-    return versioned(externalExportDeliverySchema, result.data, result.response, "create external export delivery");
-  }
-
-  async getExternalExportDelivery(deliveryId: string): Promise<Versioned<ExternalExportDelivery>> {
-    const result = await this.api.GET("/export-deliveries/{deliveryId}", {
-      params: { path: { deliveryId } },
-    });
-    return versioned(externalExportDeliverySchema, result.data, result.response, "get external export delivery");
-  }
-
-  async confirmExternalExportDelivery(deliveryId: string, ifMatch: string): Promise<Versioned<ExternalExportDelivery>> {
-    return this.mutateExternalExportDelivery(deliveryId, "confirm", ifMatch);
-  }
-
-  async retryExternalExportDelivery(deliveryId: string, ifMatch: string): Promise<Versioned<ExternalExportDelivery>> {
-    return this.mutateExternalExportDelivery(deliveryId, "retry", ifMatch);
-  }
-
-  async cancelExternalExportDelivery(deliveryId: string, ifMatch: string): Promise<Versioned<ExternalExportDelivery>> {
-    return this.mutateExternalExportDelivery(deliveryId, "cancel", ifMatch);
-  }
-
-  private async mutateExternalExportDelivery(
-    deliveryId: string,
-    action: "confirm" | "retry" | "cancel",
-    ifMatch: string,
-  ): Promise<Versioned<ExternalExportDelivery>> {
-    const path = `/export-deliveries/{deliveryId}/${action}` as const;
-    const result = await this.api.POST(path, {
-      params: {
-        path: { deliveryId },
-        header: { "If-Match": normalizeEtag(ifMatch) },
-      },
-    });
-    return versioned(externalExportDeliverySchema, result.data, result.response, `${action} external export delivery`);
-  }
 }
 
 export function useWorkbenchExportsApi(): WorkbenchExportsApi {

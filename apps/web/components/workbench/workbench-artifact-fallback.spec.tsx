@@ -6,7 +6,6 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   WorkbenchArtifactFallback,
   WorkbenchDocumentLoading,
-  workbenchPendingArtifactTitle,
 } from "./workbench-artifact-fallback";
 
 afterEach(cleanup);
@@ -81,14 +80,5 @@ describe("Workbench artifact fallback", () => {
     expect(screen.getByText("结算流程 · 需求文档 尚无可用的持久化版本，请重新运行生成。")).toBeTruthy();
     expect(rendered.container.querySelector('[data-workbench-artifact-state="unavailable"]')).toBeTruthy();
     expect(rendered.container.querySelector("[data-workbench-artifact-skeleton]")).toBeNull();
-  });
-
-  it("derives bounded node titles from the current prompt", () => {
-    expect(workbenchPendingArtifactTitle("  创建\n会员中心  ", "document"))
-      .toBe("创建 会员中心 · 需求文档");
-    expect(workbenchPendingArtifactTitle("", "prototype", 2))
-      .toBe("当前请求 · 界面 3");
-    expect(workbenchPendingArtifactTitle("一".repeat(40), "prototype", 0))
-      .toBe(`${"一".repeat(36)}... · 界面 1`);
   });
 });

@@ -1,19 +1,13 @@
 "use client";
 
 import type { PublicShare } from "@workbench/workbench-contracts";
-import { FileTextIcon, FrameIcon, GitForkIcon, Share2Icon } from "lucide-react";
+import { FileTextIcon, FrameIcon, Share2Icon } from "lucide-react";
 import { useMemo, useState } from "react";
 
 import {
   WorkbenchArtifactContent,
   type WorkbenchArtifactReference,
 } from "@/components/workbench/workbench-artifact-content";
-import { useWorkbenchAuth } from "@/lib/auth/workbench-auth";
-import {
-  createWorkbenchProjectPath,
-  useCreateWorkbenchProjectRemix,
-  useWorkbenchIdentityReader,
-} from "@/lib/workbench/features";
 import { publicSharePreviewEntries } from "@/lib/workbench/features/public-share-preview";
 import { cn } from "@/lib/utils";
 
@@ -24,13 +18,8 @@ export function ShareView({
   share: PublicShare;
   token: string;
 }) {
-  const { user } = useWorkbenchAuth();
-  const identityReader = useWorkbenchIdentityReader();
-  const createRemix = useCreateWorkbenchProjectRemix(token);
   const artifacts = useMemo(() => publicSharePreviewEntries(share.release), [share.release]);
   const [selectedArtifactKey, setSelectedArtifactKey] = useState(artifacts[0]?.key ?? "");
-  const [remixing, setRemixing] = useState(false);
-  const [remixFailed, setRemixFailed] = useState(false);
   const selected = artifacts.find((artifact) => artifact.key === selectedArtifactKey)
     ?? artifacts[0];
   const reference = useMemo<WorkbenchArtifactReference | null>(() => selected ? {
@@ -40,28 +29,6 @@ export function ShareView({
     ...(selected.screenId === undefined ? {} : { screenId: selected.screenId }),
     shareToken: token,
   } : null, [selected, share.release.projectId, token]);
-
-  const remix = async () => {
-    if (!user) {
-      window.location.assign(`/login?next=${encodeURIComponent(`/share/${encodeURIComponent(token)}`)}`);
-      return;
-    }
-    setRemixing(true);
-    setRemixFailed(false);
-    try {
-      const identity = await identityReader.getIdentity();
-      const result = await createRemix.mutateAsync({
-        request: {
-          workspaceId: identity.defaultWorkspaceId,
-          title: `重混项目 v${share.release.version}`,
-        },
-      });
-      window.location.assign(createWorkbenchProjectPath(result.value.project.id));
-    } catch {
-      setRemixFailed(true);
-      setRemixing(false);
-    }
-  };
 
   return (
     <div className="flex min-h-screen flex-col bg-[#111214] text-[#e8eaed]">
@@ -79,24 +46,7 @@ export function ShareView({
             </p>
           </div>
         </div>
-        {share.scope === "remix" && (
-          <button
-            className="flex h-[36px] shrink-0 items-center gap-[8px] rounded-full bg-[#c9b3ff] px-[15px] text-[13px] font-semibold text-[#241832] disabled:opacity-60"
-            disabled={remixing}
-            onClick={() => void remix()}
-            type="button"
-          >
-            <GitForkIcon className="size-[15px]" />
-            {remixing ? "正在重混..." : "重混项目"}
-          </button>
-        )}
       </header>
-
-      {remixFailed && (
-        <div className="border-b border-[#f2a7a7]/20 bg-[#f2a7a7]/[0.06] px-[20px] py-[9px] text-center text-[12px] text-[#f2a7a7]">
-          重混失败，请重试
-        </div>
-      )}
 
       <main className="grid min-h-0 flex-1 grid-cols-1 lg:grid-cols-[260px_minmax(0,1fr)]">
         <aside className="min-w-0 border-b border-white/[0.08] bg-[#18191b]/70 p-[12px] lg:border-b-0 lg:border-r">

@@ -76,6 +76,33 @@ describe("auth-owned presentation components", () => {
     );
   });
 
+  it("toggles password visibility without changing the value or submitting the form", async () => {
+    const action = vi.fn();
+    const { container } = render(
+      <AuthForm action={action} defaultAccount="owner">
+        <button type="submit">登录</button>
+      </AuthForm>,
+    );
+    const password = screen.getByLabelText("密码") as HTMLInputElement;
+    fireEvent.change(password, { target: { value: "visibility-test-password" } });
+
+    fireEvent.click(screen.getByRole("button", { name: "显示密码" }));
+    expect(password.type).toBe("text");
+    expect(password.value).toBe("visibility-test-password");
+    expect(action).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: "隐藏密码" }));
+    expect(password.type).toBe("password");
+    expect(password.value).toBe("visibility-test-password");
+    expect(action).not.toHaveBeenCalled();
+
+    await act(async () => {
+      fireEvent.submit(container.querySelector("form")!);
+    });
+    expect(action).toHaveBeenCalledTimes(1);
+    expect((action.mock.calls[0]?.[0] as FormData).get("password")).toBe("visibility-test-password");
+  });
+
   it("submits through the client handler instead of a Next Server Action", async () => {
     const action = vi.fn();
     const { container } = render(

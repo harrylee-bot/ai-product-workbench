@@ -70,8 +70,8 @@ export function toWorkbenchModelChoices(models: readonly RuntimeModel[]): Workbe
 export type WorkbenchProjectPhase = "idle" | "generating" | "refining" | "complete";
 export type WorkbenchProjectMode = "board" | "document" | "generated";
 export type WorkbenchRunMotionKind = "neutral" | "prd" | "prototype";
-export type WorkbenchRunStatus = RunStatus | "idle";
-export type WorkbenchGenerationProgress = 0 | 1 | 2 | 3;
+type WorkbenchRunStatus = RunStatus | "idle";
+type WorkbenchGenerationProgress = 0 | 1 | 2 | 3;
 
 export function toWorkbenchRunMotionKind(
   requestedArtifactKinds: Run["requestedArtifactKinds"],
@@ -197,7 +197,7 @@ const supportedThreadEntrySchema = z.discriminatedUnion("role", [
   }).strict(),
 ]);
 
-export type WorkbenchParsedThreadEntry =
+type WorkbenchParsedThreadEntry =
   | ThreadEntryMetadata & {
       role: "user";
       content: z.infer<typeof threadUserPromptContentSchema>;
@@ -240,32 +240,6 @@ export function safeParseWorkbenchThreadEntry(entry: ThreadEntry): WorkbenchThre
     return { success: true, data: { ...metadata, role: "user", content: parsed.data.content } };
   }
   return { success: true, data: { ...metadata, role: "assistant", content: parsed.data.content } };
-}
-
-export function parseWorkbenchThreadEntry(entry: ThreadEntry): WorkbenchParsedThreadEntry {
-  const result = safeParseWorkbenchThreadEntry(entry);
-  if (!result.success) throw result.error;
-  return result.data;
-}
-
-export type WorkbenchThreadMessageItem = {
-  createdAt: string;
-  id: string;
-  producedByRunId: string | null;
-  role: "user" | "assistant";
-  sequence: number;
-  text: string;
-};
-
-export function toWorkbenchThreadMessageItem(entry: WorkbenchParsedThreadEntry): WorkbenchThreadMessageItem {
-  return {
-    createdAt: entry.createdAt,
-    id: entry.id,
-    producedByRunId: entry.producedByRunId,
-    role: entry.role,
-    sequence: entry.sequence,
-    text: entry.content.text,
-  };
 }
 
 export class WorkbenchPresenterInvariantError extends Error {

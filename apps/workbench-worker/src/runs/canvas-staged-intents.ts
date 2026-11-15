@@ -43,13 +43,13 @@ export type CanvasPublicationIntents =
   | { mode: "quick_edit"; invocationIds: string[]; target: CanvasScreenReference }
   | { mode: "direct"; intents: CanvasDirectIntent[] };
 
-export type CanvasDuplicateEffect = {
+type CanvasDuplicateEffect = {
   invocationId: string;
   nodeKey: string;
   screen: PrototypeDocument["screens"][number];
 };
 
-export type AppliedCanvasDirectIntents = {
+type AppliedCanvasDirectIntents = {
   document: PrototypeDocument;
   duplicateEffects: CanvasDuplicateEffect[];
 };
@@ -153,7 +153,7 @@ export function assertExactCanvasQuickEditTarget(
   return runTarget;
 }
 
-export function exactCanvasDirectIntentTarget(
+function exactCanvasDirectIntentTarget(
   request: StartRunRequest,
   intents: readonly CanvasDirectIntent[],
 ) {
@@ -216,7 +216,7 @@ export function planCanvasDirectIntentsOverRuntimeResult(
   };
 }
 
-export function applyCanvasDirectIntents(
+function applyCanvasDirectIntents(
   baseDocument: PrototypeDocument,
   intents: readonly CanvasDirectIntent[],
 ): AppliedCanvasDirectIntents {

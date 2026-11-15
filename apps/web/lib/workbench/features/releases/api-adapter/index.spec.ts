@@ -67,9 +67,7 @@ describe("Workbench Releases API adapter", () => {
       ' "1" ',
       "release:req_123",
     )).resolves.toEqual({ value: release, etag: `"${manifestSha256}"` });
-    await expect(adapter.getProjectRelease("release-1"))
-      .resolves.toEqual({ value: release, etag: `"${manifestSha256}"` });
-    expect(requests).toHaveLength(3);
+    expect(requests).toHaveLength(2);
     expect(() => normalizeEtag('W/"1"')).toThrow(/Invalid ETag/);
   });
 
@@ -77,12 +75,12 @@ describe("Workbench Releases API adapter", () => {
     const weak = createAdapter(async () => Response.json(release, {
       headers: { ETag: `W/"${manifestSha256}"` },
     }));
-    await expect(weak.getProjectRelease("release-1")).rejects.toThrow(/strong ETag/);
+    await expect(weak.createProjectRelease("project-1", { boardId: "board-1", boardRevision: 1 }, '"1"')).rejects.toThrow(/strong ETag/);
 
     const invalid = createAdapter(async () => Response.json({ ...release, unexpected: true }, {
       headers: { ETag: `"${manifestSha256}"` },
     }));
-    await expect(invalid.getProjectRelease("release-1"))
+    await expect(invalid.createProjectRelease("project-1", { boardId: "board-1", boardRevision: 1 }, '"1"'))
       .rejects.toBeInstanceOf(WorkbenchContractError);
   });
 });

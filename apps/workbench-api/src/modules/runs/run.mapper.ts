@@ -76,7 +76,7 @@ export function mapRun(run: {
   });
 }
 
-export function mapRunSourceSnapshot(
+function mapRunSourceSnapshot(
   snapshot: Parameters<typeof mapRun>[0]["sourceSnapshots"][number],
 ): RunSourceSnapshot {
   return runSourceSnapshotSchema.parse({

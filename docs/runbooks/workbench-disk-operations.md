@@ -18,6 +18,20 @@ npm、pip 下载缓存可在确认没有构建/安装进程后按明确目录清
 
 以上源码修改只有被正式发布流程使用时才生效；单独验证脚本或运行隔离构建探针不等于发布了应用。
 
+## 固定 builder 与缓存存储
+
+增量发布依赖固定的 `workbench-direct-release` builder 及其缓存卷；发布完成只执行 `docker buildx stop`，不能把该停止容器当作历史垃圾删除。`.next/cache` 与 npm 缓存随 builder 保留。服务器 `current/release-plan.json` 是最近健康发布的增量基线，不能与旧镜像一起删除；私有 `base.env` 供失败恢复，不复制回仓库。
+
+生产缓存位于数据盘 `[SERVER_PRIVATE_PATH]`，通过宿主机 bind mount 挂到 Docker 卷目录 `/var/lib/docker/volumes/buildx_buildkit_workbench-direct-release0_state/_data`。`/etc/fstab` 为该条目设置 `x-systemd.requires-mounts-for=/home/data`。发布前及主机重启后，用 `findmnt` 确认这两个路径指向同一数据盘缓存，并核验固定 builder 的卷挂载；不能在数据盘或 bind mount 缺失时启动构建，否则可能把新缓存写回根盘。空间检查须同时覆盖根盘、数据盘和 containerd。
+
+迁移或回退缓存时，同时取得私有目录的 `direct-release.lock` 和 `/run/lock/workbench-direct-build.lock`，确认没有构建进行，并停止固定 builder。先备份 fstab、核对源/目标设备与足够容量，再复制缓存并校验内容、权限和硬链接。切换挂载后验证 `findmnt`、builder 的卷挂载及缓存可读，成功后才移除旧副本；不需要重启 Docker 或业务容器。
+
+回退到根盘时，先确认根盘能容纳完整缓存并仍满足 20 GiB 余量，在停止 builder 后把数据盘缓存复制并校验到根盘临时目录；解除 bind mount，将已校验副本放回卷目录，撤销对应 fstab 条目并执行 `systemctl daemon-reload`，再核验 builder。回退验收前保留数据盘原副本。不得在仍挂载数据盘时删除 `_data` 内的内容，也不得直接删除该 builder 或卷来处理挂载问题。
+
+确因磁盘压力需要清理缓存时，先取得上述锁并核对目标；清理会使后续发布失去热缓存，不能作为每次发布的默认收尾。非运行发布源码目录的 `node_modules` 可以重装，但删除前仍须确认没有宿主机安装/编译进程，也没有容器挂载该目录；保留源码、私有配置和回退镜像。
+
+需要保留宿主机依赖而数据盘空间不足时，可以把指定发布的 `node_modules` 放在根盘 `/var/cache/workbench-host-dependencies/<完整提交>/`，在原源码位置建立符号链接。先取得上述两把锁，确认相关安装/构建进程已经结束、容器未挂载该目录，并核对根盘复制后的余量。逐文件验证内容、权限、所有者和符号链接；npm workspace 的相对链接还需要缓存目录中的 `apps`、`packages` 指回同一发布源码。先保留原依赖目录，切换链接并验证实际包解析；成功后才删除已验证的重复副本，失败则恢复原目录。缓存所引用的源码不能提前删除；此目录不是 BuildKit 缓存，也不包含生产环境配置。
+
 ## 日志保护
 
 宿主机策略源为 `deploy/workbench-host-journald.conf`，安装到 `/etc/systemd/journald.conf.d/70-workbench-disk.conf` 前备份已存在的同名文件。策略为持久 journal 目标上限 1 GiB、预留 5 GiB、临时 journal 128 MiB、保留时间最长 30 天；通过重启 `systemd-journald` 应用，不能以重启 Docker 代替。活动日志文件会造成短时超额，语义见 [systemd 官方说明](https://www.freedesktop.org/software/systemd/man/latest/journald.conf.html)。回退时恢复原文件（之前不存在则删除该 drop-in），再重启 journald。

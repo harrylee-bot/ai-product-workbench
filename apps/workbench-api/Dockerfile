@@ -6,8 +6,7 @@ ENV NPM_CONFIG_UPDATE_NOTIFIER=false \
     NPM_CONFIG_AUDIT=false \
     NPM_CONFIG_FUND=false \
     NPM_CONFIG_REGISTRY=https://registry.npmmirror.com \
-    NPM_CONFIG_REPLACE_REGISTRY_HOST=always \
-    DEBIAN_FRONTEND=noninteractive
+    NPM_CONFIG_REPLACE_REGISTRY_HOST=always
 
 COPY --chmod=0555 deploy/prepare-node-image.sh /usr/local/bin/prepare-node-image
 RUN prepare-node-image ca-certificates openssl

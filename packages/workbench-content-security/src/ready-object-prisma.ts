@@ -9,7 +9,7 @@ export const READY_OBJECT_INTEGRITY_QUARANTINE_CODE = "READY_OBJECT_INTEGRITY_FA
 export const READY_OBJECT_INTEGRITY_QUARANTINE_DETAIL =
   "Object bytes failed immutable manifest verification";
 
-export type ReadyObjectIntegrityRecordResult = {
+type ReadyObjectIntegrityRecordResult = {
   incidentId: string;
   fingerprint: string;
   failureCode: ReadyObjectIntegrityFailure["failureCode"];

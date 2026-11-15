@@ -1,4 +1,4 @@
-import { exportDeliveryQueueOptions } from "@workbench/workbench-contracts";
+import { exportBuildQueueOptions } from "@workbench/workbench-contracts";
 import { parseConditionalObjectCreateMode } from "@workbench/workbench-content-security";
 
 export type ExportWorkerConfig = ReturnType<typeof loadExportWorkerConfig>;
@@ -13,9 +13,9 @@ export function loadExportWorkerConfig() {
     20 * 60 * 1_000,
     24 * 60 * 60 * 1_000,
   );
-  const deliveryJobExpireMs = exportDeliveryQueueOptions.expireInSeconds * 1_000;
-  if (staleRunningMs <= deliveryJobExpireMs) {
-    throw new Error("WORKBENCH_EXPORT_STALE_RUNNING_MS must exceed the export.delivery job expiration");
+  const buildJobExpireMs = exportBuildQueueOptions.expireInSeconds * 1_000;
+  if (staleRunningMs <= buildJobExpireMs) {
+    throw new Error("WORKBENCH_EXPORT_STALE_RUNNING_MS must exceed the export.build job expiration");
   }
   return {
     databaseUrl,
@@ -44,7 +44,7 @@ export function loadExportWorkerConfig() {
   };
 }
 
-export function pgConnectionString(value: string) {
+function pgConnectionString(value: string) {
   const url = new URL(value);
   url.searchParams.delete("schema");
   return url.toString();

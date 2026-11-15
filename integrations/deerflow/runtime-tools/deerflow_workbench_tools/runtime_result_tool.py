@@ -1,24 +1,19 @@
 from __future__ import annotations
 
-import copy
 import hashlib
 import json
-from collections.abc import Mapping
 from typing import Any
 
 from langchain.tools import tool
 
 from deerflow.tools.types import Runtime
 
-from .artifact_draft_repair import latest_accepted_artifact_draft, resolve_runtime_result_draft_references
+from .artifact_draft_repair import resolve_runtime_result_draft_references
 from .prd_reference_normalizer import normalize_runtime_result_prd_references
-from .prototype_runtime_normalizer import normalize_runtime_result_prototype_layout_aliases
 from .runtime_result_validator import validate_runtime_result
 
 
 VALIDATED_RESULT_PROTOCOL = "workbench.runtime.validated-result.v1"
-_DRAFT_RECOVERY_KINDS = frozenset({"prd", "prototype"})
-_DRAFT_RECOVERY_FIELDS = ("title", "content", "operation")
 
 
 @tool(
@@ -46,6 +41,11 @@ def workbench_runtime_result_submit(
     never the string "create". For an edit, use {"kind":"revise","target":<the exact
     supplied target>} instead. PRD and Prototype require their own complete content
     schemas; the document example does not replace those schemas.
+    New and edited Prototypes must first complete this run's four real stages:
+    design-system, mapping-components, creating-flows, generating-ui. Record each
+    through workbench_generation_stage_update in a separate model tool-call batch
+    and wait for its successful ACK before publishing the draft or final result.
+    Earlier runs and unacknowledged stages in the current batch do not count.
 
     For an accepted PRD or Prototype draft, copy its ACK's finalSubmissionArtifact
     into the same artifacts array position instead of retyping its body:
@@ -79,23 +79,12 @@ def workbench_runtime_result_submit(
         maximum_length=512,
     )
     normalized_candidate, normalizations = normalize_runtime_result_prd_references(candidate)
-    normalized_candidate, prototype_normalizations = normalize_runtime_result_prototype_layout_aliases(
-        normalized_candidate,
-    )
-    normalizations.extend(prototype_normalizations)
     normalized_candidate, reference_normalizations = resolve_runtime_result_draft_references(
         getattr(runtime, "state", None), normalized_candidate,
         run_id=run_id, runtime_attempt_id=runtime_attempt_id,
         requested_artifact_kinds=scope.get("requestedArtifactKinds"),
     )
     normalizations.extend(reference_normalizations)
-    normalized_candidate, draft_normalizations = _recover_draft_placeholders(
-        runtime,
-        normalized_candidate,
-        run_id=run_id,
-        runtime_attempt_id=runtime_attempt_id,
-    )
-    normalizations.extend(draft_normalizations)
     validation = validate_runtime_result(normalized_candidate)
     if validation["ok"] is not True:
         artifact = _validated_artifact(
@@ -124,81 +113,6 @@ def workbench_runtime_result_submit(
         result=normalized_candidate,
         result_checksum=validation["candidateChecksum"],
     )
-
-
-def _recover_draft_placeholders(
-    runtime: Runtime,
-    candidate: Any,
-    *,
-    run_id: str,
-    runtime_attempt_id: str,
-) -> tuple[Any, list[dict[str, Any]]]:
-    """Recover only the observed [null] artifact fields from a trusted draft."""
-    if not isinstance(candidate, dict):
-        return candidate, []
-    artifacts = candidate.get("artifacts")
-    if not isinstance(artifacts, list):
-        return candidate, []
-    if not any(
-        isinstance(artifact, dict)
-        and artifact.get("kind") in _DRAFT_RECOVERY_KINDS
-        and any(_is_null_array(artifact.get(field)) for field in _DRAFT_RECOVERY_FIELDS)
-        for artifact in artifacts
-    ):
-        return candidate, []
-
-    normalized = copy.deepcopy(candidate)
-    normalized_artifacts = normalized.get("artifacts")
-    if not isinstance(normalized_artifacts, list):
-        return candidate, []
-
-    normalizations: list[dict[str, Any]] = []
-    for artifact_index, artifact in enumerate(normalized_artifacts):
-        if (
-            not isinstance(artifact, dict)
-            or artifact.get("kind") not in _DRAFT_RECOVERY_KINDS
-            or not any(_is_null_array(artifact.get(field)) for field in _DRAFT_RECOVERY_FIELDS)
-        ):
-            continue
-        draft = _latest_successful_draft(
-            runtime,
-            artifact_index,
-            run_id=run_id,
-            runtime_attempt_id=runtime_attempt_id,
-        )
-        if (
-            not isinstance(draft, Mapping)
-            or draft.get("kind") != artifact.get("kind")
-        ):
-            continue
-        for field in _DRAFT_RECOVERY_FIELDS:
-            if not _is_null_array(artifact.get(field)) or field not in draft:
-                continue
-            artifact[field] = copy.deepcopy(draft[field])
-            normalizations.append({
-                "path": ["artifacts", artifact_index, field],
-                "from": [None],
-                "action": "recovered-from-artifact-draft",
-                "artifactIndex": artifact_index,
-            })
-    return normalized, normalizations
-
-
-def _latest_successful_draft(
-    runtime: Runtime,
-    artifact_index: int,
-    *,
-    run_id: str,
-    runtime_attempt_id: str,
-) -> Mapping[str, Any] | None:
-    return latest_accepted_artifact_draft(
-        getattr(runtime, "state", None), run_id=run_id,
-        runtime_attempt_id=runtime_attempt_id, artifact_index=artifact_index,
-    )
-
-
-def _is_null_array(value: Any) -> bool:
-    return isinstance(value, list) and len(value) == 1 and value[0] is None
 
 
 def _validation_feedback(

@@ -276,7 +276,7 @@ function miniWorkbenchRunStatusCopy(status: Run["status"] | null, phase: Phase):
   }
 }
 
-export function compactWorkbenchRunCopy(value: string): string {
+function compactWorkbenchRunCopy(value: string): string {
   const normalized = value.replace(/\s+/g, " ").trim();
   return normalized.length > 48 ? `${normalized.slice(0, 47)}…` : normalized;
 }

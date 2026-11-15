@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import base64
 import hashlib
 import hmac
@@ -175,21 +174,6 @@ def invoke_canvas_tool(
     return CanvasToolInvocationOutcome(
         result=result,
         image_content_block=image_content_block,
-    )
-
-
-async def ainvoke_canvas_tool(
-    capability_json: str,
-    tool_name: str,
-    tool_call_id: str,
-    tool_input: dict[str, Any],
-) -> CanvasToolInvocationOutcome:
-    return await asyncio.to_thread(
-        invoke_canvas_tool,
-        capability_json,
-        tool_name,
-        tool_call_id,
-        tool_input,
     )
 
 
@@ -595,7 +579,7 @@ def _normalize_screen_reference(value: Any) -> dict[str, str]:
 def _validate_result(value: Any, tool_name: str, tool_call_id: str) -> dict[str, Any]:
     if not isinstance(value, dict) or frozenset(value.keys()) != _RESULT_KEYS:
         raise CanvasToolError("WORKBENCH_CANVAS_RESPONSE_INVALID")
-    status = value.get("status") if isinstance(value, dict) else None
+    status = value.get("status")
     if (
         value.get("protocol") != CANVAS_TOOL_PROTOCOL
         or value.get("toolName") != tool_name
@@ -663,15 +647,7 @@ def _validate_tool_output(tool_name: str, value: Any) -> None:
         _require_result_keys(value, frozenset({"selection"}))
         _validate_selection(value["selection"])
         return
-    if tool_name == "quick_edit":
-        _require_result_keys(value, frozenset({"runId", "target", "accepted"}))
-        if not _is_identifier(value["runId"]):
-            raise CanvasToolError("WORKBENCH_CANVAS_RESPONSE_INVALID")
-        _validate_screen_reference(value["target"])
-        if value["accepted"] is not True:
-            raise CanvasToolError("WORKBENCH_CANVAS_RESPONSE_INVALID")
-        return
-    if tool_name == "duplicate_screen":
+    if tool_name in {"quick_edit", "duplicate_screen"}:
         _require_result_keys(value, frozenset({"runId", "target", "accepted"}))
         if not _is_identifier(value["runId"]):
             raise CanvasToolError("WORKBENCH_CANVAS_RESPONSE_INVALID")

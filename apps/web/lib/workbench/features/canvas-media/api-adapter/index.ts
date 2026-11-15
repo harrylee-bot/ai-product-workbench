@@ -15,7 +15,7 @@ import {
 
 type CreateImageArtifactRequest = Extract<CreateArtifactRequest, { kind: "image" }>;
 
-export type WorkbenchCanvasMediaArtifactPort = {
+type WorkbenchCanvasMediaArtifactPort = {
   create: (input: {
     idempotencyKey: string;
     request: CreateImageArtifactRequest;

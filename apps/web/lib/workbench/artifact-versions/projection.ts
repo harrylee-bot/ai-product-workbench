@@ -3,18 +3,15 @@ import {
   prdDocumentSchema,
   prdBusinessSections,
   prdSafetyBaselineItems,
-  prdSectionKeys,
   type ArtifactVersionDetail,
   type PrdBlock,
   type PrdDocument,
-  type PrdDocumentV1,
-  type PrdDocumentV2,
   type PrdTemplateDocument,
   type PrdInline,
   type PrototypeDocument,
 } from "@workbench/workbench-contracts";
 
-export const artifactVersionComparisonByteLimit = 1_000_000;
+const artifactVersionComparisonByteLimit = 1_000_000;
 
 export type ArtifactVersionProjection = {
   note: string | null;
@@ -129,46 +126,7 @@ function parsePrdBlob(value: string): PrdDocument | null {
   }
 }
 
-function projectPrdDocument(document: PrdDocument): string {
-  return document.protocol !== "workbench.prd.v1"
-    ? projectPrdV2Document(document)
-    : projectPrdV1Document(document);
-}
-
-function projectPrdV1Document(document: PrdDocumentV1): string {
-  const lines = [
-    `# ${document.title}`,
-    "",
-    `Revision: ${document.revision.number} (${document.revision.status})`,
-    `Summary: ${document.revision.summary}`,
-  ];
-  for (const [index, key] of prdSectionKeys.entries()) {
-    const section = document.sections[key];
-    lines.push("", `## ${formatPrdSectionTitle(section.title, index + 1)}`, "");
-    for (const block of section.blocks) {
-      lines.push(...projectPrdBlock(block), "");
-    }
-  }
-  if (document.assumptions.length > 0) {
-    lines.push(
-      "## Assumptions",
-      "",
-      ...document.assumptions.map((assumption) => (
-        `- [${assumption.status}/${assumption.impact}] ${assumption.statement}`
-      )),
-      "",
-    );
-  }
-  if (document.citations.length > 0) {
-    lines.push("## Citations", "");
-    for (const citation of document.citations) {
-      lines.push(`- [${citation.id}] ${citation.title} | ${citation.sourcePath} | ${citation.quote}`);
-    }
-  }
-  return lines.join("\n").replace(/\n{3,}/gu, "\n\n").trimEnd();
-}
-
-function projectPrdV2Document(document: PrdTemplateDocument): string {
+function projectPrdDocument(document: PrdTemplateDocument): string {
   const { businessRequirements, degradation, introduction, safetyBaseline } = document.sections;
   const lines = [
     `# ${document.cover.title}`,
@@ -198,9 +156,9 @@ function projectPrdV2Document(document: PrdTemplateDocument): string {
     "",
     `## ${introduction.title}`,
   ];
-  appendPrdV2Section(lines, introduction.background);
-  appendPrdV2Section(lines, introduction.scope);
-  appendPrdV2Section(lines, introduction.usageScenarios);
+  appendPrdSection(lines, introduction.background);
+  appendPrdSection(lines, introduction.scope);
+  appendPrdSection(lines, introduction.usageScenarios);
   lines.push(
     "",
     `#### ${introduction.usageScenarios.channelTable.title}`,
@@ -219,7 +177,7 @@ function projectPrdV2Document(document: PrdTemplateDocument): string {
     projectPrdInline(businessRequirements.summary),
   );
   for (const section of prdBusinessSections(document)) {
-    appendPrdV2Section(lines, section);
+    appendPrdSection(lines, section);
     for (const diagram of "diagrams" in section ? section.diagrams ?? [] : []) {
       const nodeLabels = new Map(diagram.nodes.map((node) => [node.id, node.label]));
       lines.push(
@@ -282,17 +240,7 @@ function projectPrdV2Document(document: PrdTemplateDocument): string {
   return lines.join("\n").replace(/\n{3,}/gu, "\n\n").trimEnd();
 }
 
-type PrdV2ProjectionSection =
-  | PrdDocumentV2["sections"]["introduction"]["background"]
-  | PrdDocumentV2["sections"]["introduction"]["scope"]
-  | PrdDocumentV2["sections"]["introduction"]["usageScenarios"]
-  | PrdDocumentV2["sections"]["businessRequirements"]["pageLinks"]
-  | PrdDocumentV2["sections"]["businessRequirements"]["coreRules"]
-  | PrdDocumentV2["sections"]["businessRequirements"]["flowAndPages"]
-  | PrdDocumentV2["sections"]["businessRequirements"]["acceptanceCriteria"]
-  | PrdDocumentV2["sections"]["businessRequirements"]["additionalSections"][number];
-
-function appendPrdV2Section(lines: string[], section: PrdV2ProjectionSection) {
+function appendPrdSection(lines: string[], section: { title: string; blocks: readonly PrdBlock[] }) {
   lines.push("", `### ${section.title}`, "");
   for (const block of section.blocks) lines.push(...projectPrdBlock(block), "");
 }
@@ -307,12 +255,6 @@ function projectMarkdownTable(headers: readonly string[], rows: readonly (readon
 
 function projectMarkdownCell(value: string) {
   return value.replace(/\|/gu, "\\|").replace(/\r?\n/gu, "<br>");
-}
-
-function formatPrdSectionTitle(title: string, sectionNumber: number) {
-  return /^\s*\d+(?:\.\d+)*(?:[.)、]|\s|(?=[\u3400-\u9fff]))/u.test(title)
-    ? title
-    : `${sectionNumber}. ${title}`;
 }
 
 function prdRevisionStatusLabel(status: PrdDocument["revision"]["status"]) {

@@ -3,9 +3,9 @@ import type {
   PrototypeScreen,
 } from "@workbench/workbench-contracts";
 
-export type ScreenContextPhase = "idle" | "generating" | "refining" | "complete";
+type ScreenContextPhase = "idle" | "generating" | "refining" | "complete";
 
-export type ScreenContextReference = {
+type ScreenContextReference = {
   artifactId: string;
   artifactVersionId: string;
   projectId: string;
@@ -25,7 +25,7 @@ export type ScreenContextTarget = {
   version: ArtifactVersionDetail | null;
 };
 
-export type ScreenContextCapabilities = {
+type ScreenContextCapabilities = {
   canEdit: boolean;
   canExport: boolean;
   canPreview: boolean;
@@ -41,7 +41,7 @@ export type ScreenContextEnvironment = {
   generatePrototypeTargetsValid: boolean;
 };
 
-export type ScreenContextBlockReason =
+type ScreenContextBlockReason =
   | "active-run"
   | "artifact-mismatch"
   | "artifact-not-inline-prototype"
@@ -60,7 +60,7 @@ export type ScreenContextBlockReason =
   | "target-not-complete"
   | "target-not-persisted";
 
-export type ScreenContextAvailability =
+type ScreenContextAvailability =
   | { enabled: true; reason: null }
   | { enabled: false; reason: ScreenContextBlockReason };
 
@@ -90,12 +90,12 @@ export type PrototypeScreenRuntimeAnalysis =
       screen: null;
     };
 
-export type ScreenModifyDisposition =
+type ScreenModifyDisposition =
   | { kind: "direct-edit"; reason: null }
   | { kind: "agent-edit"; reason: null }
   | { kind: "blocked"; reason: ScreenContextBlockReason };
 
-export type ScreenPreviewDisposition =
+type ScreenPreviewDisposition =
   | {
       kind: "open-existing";
       reason: null;
@@ -111,7 +111,7 @@ export type ScreenPreviewDisposition =
       reason: ScreenContextBlockReason;
     };
 
-export type MultipleScreenPreviewDisposition =
+type MultipleScreenPreviewDisposition =
   | {
       kind: "open-existing";
       reason: null;
@@ -127,7 +127,7 @@ export type MultipleScreenPreviewDisposition =
       reason: ScreenContextBlockReason;
     };
 
-export type SingleScreenContextAvailability = {
+type SingleScreenContextAvailability = {
   delete: ScreenContextAvailability;
   duplicate: ScreenContextAvailability;
   export: ScreenContextAvailability;
@@ -140,7 +140,7 @@ export type SingleScreenContextAvailability = {
   versionHistory: ScreenContextAvailability;
 };
 
-export type MultipleScreenContextAvailability = {
+type MultipleScreenContextAvailability = {
   align: ScreenContextAvailability;
   delete: ScreenContextAvailability;
   distribute: ScreenContextAvailability;

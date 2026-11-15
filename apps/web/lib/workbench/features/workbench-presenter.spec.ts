@@ -11,7 +11,6 @@ import { describe, expect, it } from "vitest";
 import { createRunProjection, type RunProjectionState } from "../run/reducer";
 import { resolveWorkbenchModelChoiceKey } from "./runtime-models";
 import {
-  parseWorkbenchThreadEntry,
   safeParseWorkbenchThreadEntry,
   WorkbenchPresenterInvariantError,
   toWorkbenchModelChoices,
@@ -20,7 +19,6 @@ import {
   toWorkbenchRunMessageItems,
   toWorkbenchRunMotionKind,
   toWorkbenchRunPresentation,
-  toWorkbenchThreadMessageItem,
   visibleWorkbenchModelChoices,
 } from "./workbench-presenter";
 
@@ -69,8 +67,8 @@ const run: Run = {
 describe("Workbench runtime choices and project mode", () => {
   it("keeps runtime models real while expressing specialized actions as workflows", () => {
     const models: RuntimeModel[] = [{
-      id: "gemini-3-flash",
-      displayName: "Gemini 3 Flash",
+      id: "deepseek-flash",
+      displayName: "DeepSeek Flash",
       description: "Fast design model",
       supportedWorkflows: ["generate", "redesign", "ideate", "edit"],
       supportsThinking: false,
@@ -78,10 +76,10 @@ describe("Workbench runtime choices and project mode", () => {
     }];
 
     expect(toWorkbenchModelChoices(models)).toEqual([
-      expect.objectContaining({ key: "model:gemini-3-flash", modelId: "gemini-3-flash", workflow: "generate" }),
-      expect.objectContaining({ label: "Redesign", modelId: "gemini-3-flash", workflow: "redesign" }),
-      expect.objectContaining({ label: "Ideate", modelId: "gemini-3-flash", workflow: "ideate" }),
-      expect.objectContaining({ label: "Edit", modelId: "gemini-3-flash", workflow: "edit" }),
+      expect.objectContaining({ key: "model:deepseek-flash", modelId: "deepseek-flash", workflow: "generate" }),
+      expect.objectContaining({ label: "Redesign", modelId: "deepseek-flash", workflow: "redesign" }),
+      expect.objectContaining({ label: "Ideate", modelId: "deepseek-flash", workflow: "ideate" }),
+      expect.objectContaining({ label: "Edit", modelId: "deepseek-flash", workflow: "edit" }),
     ]);
     expect(toWorkbenchModelChoices([])).toEqual([]);
   });
@@ -278,10 +276,9 @@ describe("Workbench ThreadEntry presenter", () => {
 
     const userResult = safeParseWorkbenchThreadEntry(userEntry);
     expect(userResult.success).toBe(true);
-    expect(toWorkbenchThreadMessageItem(parseWorkbenchThreadEntry(assistantEntry))).toMatchObject({
-      role: "assistant",
-      text: "Done",
-      sequence: 1,
+    expect(safeParseWorkbenchThreadEntry(assistantEntry)).toMatchObject({
+      success: true,
+      data: { role: "assistant", content: { text: "Done" }, sequence: 1 },
     });
   });
 
@@ -302,7 +299,6 @@ describe("Workbench ThreadEntry presenter", () => {
     expect(unversioned.success).toBe(false);
     expect(wrongRole.success).toBe(false);
     expect(extraFields.success).toBe(false);
-    expect(() => parseWorkbenchThreadEntry(entry("assistant", { text: "legacy" }))).toThrow();
   });
 });
 

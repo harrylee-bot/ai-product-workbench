@@ -2,13 +2,11 @@
 
 import type {
   CreateProjectInvitationRequest,
-  CreateProjectRequest,
   ProjectBootstrap,
   SetProjectMemberRoleRequest,
   UpdateProjectRequest,
 } from "@workbench/workbench-contracts";
 import {
-  keepPreviousData,
   useInfiniteQuery,
   useMutation,
   useQuery,
@@ -46,15 +44,6 @@ export function useInfiniteWorkbenchWorkspaceMembers(
   });
 }
 
-export function useWorkbenchProjects(options: ProjectListOptions = {}) {
-  const api = useWorkbenchProjectsApi();
-  return useQuery({
-    queryKey: workbenchQueryKeys.projectList(options),
-    queryFn: () => api.listProjects(options),
-    placeholderData: keepPreviousData,
-  });
-}
-
 export function useInfiniteWorkbenchProjects(
   options: Omit<ProjectListOptions, "cursor"> = {},
 ) {
@@ -67,17 +56,6 @@ export function useInfiniteWorkbenchProjects(
     }),
     initialPageParam: undefined as string | undefined,
     getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
-  });
-}
-
-export function useCreateWorkbenchProject(workspaceId: string) {
-  const api = useWorkbenchProjectsApi();
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: (request: CreateProjectRequest) => api.createProject(workspaceId, request),
-    async onSuccess() {
-      await queryClient.invalidateQueries({ queryKey: workbenchQueryKeys.projectLists() });
-    },
   });
 }
 

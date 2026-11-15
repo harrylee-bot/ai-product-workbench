@@ -4,11 +4,8 @@ import {
   isSafePrototypeOpenUrl,
   prdChannelLabels,
   prdSafetyBaselineItems,
-  prdSectionKeys,
   type PrdBlock,
   type PrdDocument,
-  type PrdDocumentV1,
-  type PrdDocumentV2,
   type PrdTemplateDocument,
   prdBusinessSections,
   type PrdInline,
@@ -497,36 +494,7 @@ function PrdDraftArtifact({ document, reference }: { document: PrdDocument; refe
   </div>;
 }
 
-function PrdArtifact({ document }: { document: PrdDocument }) {
-  return document.protocol !== "workbench.prd.v1"
-    ? <PrdArtifactV2 document={document} />
-    : <PrdArtifactV1 document={document} />;
-}
-
-function PrdArtifactV1({ document }: { document: PrdDocumentV1 }) {
-  return (
-    <article className="workbench-prd-document nowheel h-full w-full overflow-auto break-words bg-[#1d1d1f] [container-type:inline-size] px-[clamp(16px,4%,38px)] py-[24px] text-[#e8eaed] [overflow-wrap:anywhere]">
-      <h2 className="mb-[28px] text-[clamp(24px,5cqi,32px)] font-semibold leading-[1.35] tracking-normal text-[#f1f3f4]">
-        {document.title}
-      </h2>
-      {prdSectionKeys.map((key, sectionIndex) => {
-        const section = document.sections[key];
-        return (
-          <section className="mb-[32px] text-[16px] leading-[27px]" key={key}>
-            <h3 className="mb-[16px] text-[clamp(20px,4cqi,24px)] font-semibold leading-[1.4] text-[#f1f3f4]">
-              {formatPrdSectionTitle(section.title, sectionIndex + 1)}
-            </h3>
-            <div className="space-y-[18px]">
-              {section.blocks.map((block) => <PrdBlockView block={block} key={block.id} />)}
-            </div>
-          </section>
-        );
-      })}
-    </article>
-  );
-}
-
-function PrdArtifactV2({ document }: { document: PrdTemplateDocument }) {
+function PrdArtifact({ document }: { document: PrdTemplateDocument }) {
   const { businessRequirements, degradation, introduction, safetyBaseline } = document.sections;
   return (
     <article
@@ -587,39 +555,39 @@ function PrdArtifactV2({ document }: { document: PrdTemplateDocument }) {
           </ol>
         </nav>
 
-        <section className="border-b border-white/[0.12] py-[46px]" aria-labelledby="prd-v2-introduction">
-          <h2 className="text-[30px] font-semibold text-[#f1f3f4]" id="prd-v2-introduction">{introduction.title}</h2>
-          <PrdV2BlockSection section={introduction.background} />
-          <PrdV2BlockSection section={introduction.scope} />
-          <PrdV2BlockSection section={introduction.usageScenarios}>
+        <section className="border-b border-white/[0.12] py-[46px]" aria-labelledby="prd-introduction">
+          <h2 className="text-[30px] font-semibold text-[#f1f3f4]" id="prd-introduction">{introduction.title}</h2>
+          <PrdBlockSection section={introduction.background} />
+          <PrdBlockSection section={introduction.scope} />
+          <PrdBlockSection section={introduction.usageScenarios}>
             <PrdChannelTable table={introduction.usageScenarios.channelTable} />
-          </PrdV2BlockSection>
+          </PrdBlockSection>
         </section>
 
-        <section className="border-b border-white/[0.12] py-[46px]" aria-labelledby="prd-v2-business-requirements">
-          <h2 className="text-[30px] font-semibold text-[#f1f3f4]" id="prd-v2-business-requirements">{businessRequirements.title}</h2>
+        <section className="border-b border-white/[0.12] py-[46px]" aria-labelledby="prd-business-requirements">
+          <h2 className="text-[30px] font-semibold text-[#f1f3f4]" id="prd-business-requirements">{businessRequirements.title}</h2>
           <p className="mt-[16px] max-w-[900px] text-[#d8dce2]">{renderPrdInlines(businessRequirements.summary)}</p>
           {prdBusinessSections(document).map((section) => (
-            <PrdV2BlockSection section={section} key={section.title}>
+            <PrdBlockSection section={section} key={section.title}>
               {"diagrams" in section && (section.diagrams?.length ?? 0) > 0 && (
                 <div className="mt-[26px] space-y-[34px]">
                   {section.diagrams?.map((diagram) => <PrdDiagramView diagram={diagram} key={diagram.id} />)}
                 </div>
               )}
-            </PrdV2BlockSection>
+            </PrdBlockSection>
           ))}
         </section>
 
-        <section className="border-b border-white/[0.12] py-[46px]" aria-labelledby="prd-v2-degradation">
+        <section className="border-b border-white/[0.12] py-[46px]" aria-labelledby="prd-degradation">
           <div className="flex flex-wrap items-baseline gap-x-[14px] gap-y-[6px]">
-            <h2 className="text-[30px] font-semibold text-[#f1f3f4]" id="prd-v2-degradation">{degradation.title}</h2>
+            <h2 className="text-[30px] font-semibold text-[#f1f3f4]" id="prd-degradation">{degradation.title}</h2>
             <span className="text-[13px] font-semibold text-[#aeb4bd]">{degradation.applicable ? "适用" : "不涉及"}</span>
           </div>
           <p className="mt-[18px] max-w-[920px] text-[#d8dce2]">{renderPrdInlines(degradation.content)}</p>
         </section>
 
-        <section className="py-[46px]" aria-labelledby="prd-v2-safety-baseline">
-          <h2 className="text-[30px] font-semibold text-[#f1f3f4]" id="prd-v2-safety-baseline">{safetyBaseline.title}</h2>
+        <section className="py-[46px]" aria-labelledby="prd-safety-baseline">
+          <h2 className="text-[30px] font-semibold text-[#f1f3f4]" id="prd-safety-baseline">{safetyBaseline.title}</h2>
           <p className="mt-[18px] max-w-[980px] whitespace-pre-line text-[14px] leading-[24px] text-[#c7cad0]">{safetyBaseline.intro}</p>
           <PrdSafetyBaselineTable rows={safetyBaseline.rows} />
         </section>
@@ -657,22 +625,12 @@ function PrdArtifactV2({ document }: { document: PrdTemplateDocument }) {
   );
 }
 
-type PrdV2BlockSectionValue =
-  | PrdDocumentV2["sections"]["introduction"]["background"]
-  | PrdDocumentV2["sections"]["introduction"]["scope"]
-  | PrdDocumentV2["sections"]["introduction"]["usageScenarios"]
-  | PrdDocumentV2["sections"]["businessRequirements"]["pageLinks"]
-  | PrdDocumentV2["sections"]["businessRequirements"]["coreRules"]
-  | PrdDocumentV2["sections"]["businessRequirements"]["flowAndPages"]
-  | PrdDocumentV2["sections"]["businessRequirements"]["acceptanceCriteria"]
-  | PrdDocumentV2["sections"]["businessRequirements"]["additionalSections"][number];
-
-function PrdV2BlockSection({
+function PrdBlockSection({
   children,
   section,
 }: {
   children?: ReactNode;
-  section: PrdV2BlockSectionValue;
+  section: { title: string; blocks: readonly PrdBlock[] };
 }) {
   return (
     <section className="mt-[34px]">
@@ -688,7 +646,7 @@ function PrdV2BlockSection({
 function PrdChannelTable({
   table,
 }: {
-  table: PrdDocumentV2["sections"]["introduction"]["usageScenarios"]["channelTable"];
+  table: PrdDocument["sections"]["introduction"]["usageScenarios"]["channelTable"];
 }) {
   return (
     <div className="mt-[24px] overflow-x-auto border border-white/[0.12]" data-prd-channel-table>
@@ -754,7 +712,7 @@ function PrdDiagramView({ diagram }: { diagram: PrdDiagram }) {
 function PrdSafetyBaselineTable({
   rows,
 }: {
-  rows: PrdDocumentV2["sections"]["safetyBaseline"]["rows"];
+  rows: PrdDocument["sections"]["safetyBaseline"]["rows"];
 }) {
   return (
     <div className="mt-[24px] overflow-x-auto border border-white/[0.12]" data-prd-safety-table>
@@ -786,12 +744,6 @@ function PrdSafetyBaselineTable({
       </table>
     </div>
   );
-}
-
-function formatPrdSectionTitle(title: string, sectionNumber: number) {
-  return /^\s*\d+(?:\.\d+)*(?:[.)、]|\s|(?=[\u3400-\u9fff]))/u.test(title)
-    ? title
-    : `${sectionNumber}. ${title}`;
 }
 
 function prdRevisionStatusLabel(status: PrdDocument["revision"]["status"]) {

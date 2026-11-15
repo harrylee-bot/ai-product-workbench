@@ -3,7 +3,7 @@ import { hashRequest } from "../src/common/idempotency.js";
 import {
   canonicalSha256,
   mapProjectRelease,
-  mapPublicProjectRelease,
+  projectPublicProjectRelease,
   type ReleaseRecord,
 } from "../src/modules/releases/release.mapper.js";
 import { ReleasesService } from "../src/modules/releases/releases.service.js";
@@ -103,6 +103,14 @@ function releaseRecord(): ReleaseRecord & { requestHash: string } {
 }
 
 describe("ProjectRelease integrity", () => {
+  it.each([42, ["release_1"], { lt: "release_1" }])("rejects a non-string cursor id %j before querying releases", async (id) => {
+    const db = { projectRelease: { findMany: vi.fn().mockResolvedValue([]) } };
+    const service = new ReleasesService(db as never, { findProject: vi.fn() } as never);
+    const cursor = Buffer.from(JSON.stringify({ id, version: 1 })).toString("base64url");
+    await expect(service.list("principal_1", "project_1", cursor)).rejects.toMatchObject({ status: 400 });
+    expect(db.projectRelease.findMany).not.toHaveBeenCalled();
+  });
+
   it("recomputes canonical Board and manifest digests on every projection", () => {
     const record = releaseRecord();
     expect(mapProjectRelease(record)).toMatchObject({
@@ -177,7 +185,7 @@ describe("ProjectRelease integrity", () => {
       blobId: "blob_internal",
       sha256: "b".repeat(64),
     });
-    const publicRelease = mapPublicProjectRelease(record);
+    const publicRelease = projectPublicProjectRelease(internal);
     expect(publicRelease.artifactPins[0]).not.toHaveProperty("assets");
     expect(publicRelease.manifest.artifacts[0]).not.toHaveProperty("assets");
     expect(JSON.stringify(publicRelease)).not.toContain("blob_internal");

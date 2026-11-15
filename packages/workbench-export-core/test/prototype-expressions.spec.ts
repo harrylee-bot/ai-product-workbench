@@ -9,7 +9,7 @@ import { buildExport, renderExportHtml } from "../src/index.js";
 import type { ExportBuildRequest } from "../src/types.js";
 import { catalogueExportRequest, interactiveExportRequest, numericExpressionExportRequest } from "./fixtures.js";
 
-const executablePath = chromium.executablePath();
+const executablePath = process.env.WORKBENCH_EXPORT_CHROMIUM_PATH ?? chromium.executablePath();
 const chromiumAvailable = existsSync(executablePath);
 const entryIds = ["entry-network", "entry-typescript", "entry-design"];
 

@@ -2,15 +2,9 @@
 
 import "@testing-library/jest-dom/vitest";
 import {
-  prdSafetyBaselineIntro,
   prdSafetyBaselineItems,
-  prdTableOfContentsEntriesFor,
   prototypeDocumentSchema,
-  type PrdBlock,
   type PrdDocument,
-  type PrdDocumentV1,
-  type PrdDocumentV2,
-  type PrdInline,
   type PrototypeDocument,
   type PrototypeNode,
 } from "@workbench/workbench-contracts";
@@ -18,6 +12,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { prdDocument } from "./workbench-prd-test-fixture";
 import { WorkbenchArtifactContent } from "./workbench-artifact-content";
 import { workbenchPrototypeSubmitEventName } from "../../lib/workbench/prototype-runtime";
 import { WorkbenchPrdDraftProvider } from "../../lib/workbench/prd-editor/draft-context";
@@ -169,8 +164,8 @@ describe("Workbench Artifact content", () => {
     );
 
     await waitFor(() => expect(onStateChange).toHaveBeenLastCalledWith("ready"));
-    await waitFor(() => expect(onTitleChange).toHaveBeenLastCalledWith("Production PRD"));
-    expect(screen.getByRole("heading", { name: "Production PRD" })).not.toBeNull();
+    await waitFor(() => expect(onTitleChange).toHaveBeenLastCalledWith("示例工单需求说明书"));
+    expect(screen.getByRole("heading", { name: "示例工单需求说明书" })).not.toBeNull();
   });
 
   it("retries the selected ArtifactVersion query from its error state", async () => {
@@ -320,18 +315,18 @@ describe("Workbench Artifact content", () => {
 
     const rendered = render(<WorkbenchArtifactContent reference={reference()} />);
 
-    expect(screen.getByRole("heading", { name: "Production PRD" })).not.toBeNull();
-    expect(screen.getByText("Real executive summary")).not.toBeNull();
+    expect(screen.getByRole("heading", { name: "示例工单需求说明书" })).not.toBeNull();
+    expect(screen.getByText("Initial summary")).not.toBeNull();
     expect(screen.queryByText(/打卡签到功能需求文档/)).toBeNull();
     const article = rendered.container.querySelector("article");
     expect(article?.classList.contains("nowheel")).toBe(true);
     expect(article?.classList.contains("overflow-auto")).toBe(true);
   });
 
-  it("keeps numbered v1 headings singular and localizes scenario labels", () => {
+  it("keeps numbered headings singular and localizes scenario labels", () => {
     const document = prdDocument();
-    document.sections.executiveSummary.title = "1 引言";
-    document.sections.acceptanceCriteria.blocks = [{
+    document.sections.introduction.title = "1 引言";
+    document.sections.businessRequirements.functionSections[2]!.blocks = [{
       id: "criterion-localized",
       type: "acceptanceCriterion",
       requirementIds: [],
@@ -339,7 +334,7 @@ describe("Workbench Artifact content", () => {
       when: [{ type: "text", text: "用户提交订单", marks: [] }],
       then: [{ type: "text", text: "系统创建订单", marks: [] }],
     }];
-    document.sections.risksAndDependencies.blocks = [{
+    document.sections.businessRequirements.functionSections[0]!.blocks = [{
       id: "risk-localized",
       type: "risk",
       description: [{ type: "text", text: "依赖服务不可用", marks: [] }],
@@ -360,12 +355,12 @@ describe("Workbench Artifact content", () => {
     expect(screen.queryByText(/^(Given|When|Then|Mitigation)/u)).toBeNull();
   });
 
-  it("renders the complete v2 requirement template with canonical channels, diagrams, and 21 safety rows", () => {
-    mocks.useArtifactVersion.mockReturnValue(artifactQuery("prd", prdV2Document()));
+  it("renders the complete current requirement template with canonical channels, diagrams, and 21 safety rows", () => {
+    mocks.useArtifactVersion.mockReturnValue(artifactQuery("prd", prdDocument()));
 
     const rendered = render(<WorkbenchArtifactContent reference={reference()} />);
 
-    expect(screen.getByRole("heading", { name: "支付体验优化需求说明书" })).not.toBeNull();
+    expect(screen.getByRole("heading", { name: "示例工单需求说明书" })).not.toBeNull();
     expect(screen.getByRole("heading", { name: "版 本 历 史" })).not.toBeNull();
     expect(screen.getByText("版本/状态")).not.toBeNull();
     expect(screen.getByRole("navigation", { name: "需求说明书目录" })).not.toBeNull();
@@ -376,10 +371,9 @@ describe("Workbench Artifact content", () => {
       "1.3使用场景（必填）",
       "2 业务需求",
       "2.1页面链接",
-      "2.2 核心业务规则/功能说明",
-      "2.3 核心流程/状态/页面要求",
-      "2.4 验收标准",
-      "2.5 支付结果说明",
+      "2.2 任务提交与业务校验",
+      "2.3 任务状态与失败恢复",
+      "2.4 任务处理验收标准",
       "3 业务降级方案（必填）",
       "4 需求安全基线要求（必填）",
     ]) {
@@ -389,8 +383,8 @@ describe("Workbench Artifact content", () => {
     expect(screen.getByText("端内渠道")).not.toBeNull();
     expect(screen.getByText("WAP/H5端外渠道")).not.toBeNull();
     expect(screen.getByText("小程序")).not.toBeNull();
-    expect(screen.getAllByText("☑是 □否")).toHaveLength(2);
-    expect(screen.getByText("□是 ☑否")).not.toBeNull();
+    expect(screen.getAllByText("☑是 □否")).toHaveLength(1);
+    expect(screen.getAllByText("□是 ☑否")).toHaveLength(2);
     expect(rendered.container.querySelectorAll("[data-prd-diagram]")).toHaveLength(2);
     expect(rendered.container.querySelectorAll("[data-prd-diagram-canvas]")).toHaveLength(2);
     expect(rendered.container.querySelectorAll("[data-prd-diagram-canvas] svg")).toHaveLength(2);
@@ -399,20 +393,20 @@ describe("Workbench Artifact content", () => {
     expect(rendered.container.querySelector("[data-prd-diagram-canvas] svg")
       ?.classList.contains("min-w-[760px]")).toBe(false);
     expect(rendered.container.querySelectorAll("[data-prd-diagram-canvas] path").length).toBeGreaterThanOrEqual(8);
-    expect(rendered.container.querySelectorAll("[data-prd-diagram-node]")).toHaveLength(8);
-    expect(rendered.container.querySelectorAll("[data-prd-diagram-edge]")).toHaveLength(6);
-    expect(screen.getByText("支付结果页展示订单编号、支付状态和后续操作入口。")).not.toBeNull();
+    expect(rendered.container.querySelectorAll("[data-prd-diagram-node]")).toHaveLength(12);
+    expect(rendered.container.querySelectorAll("[data-prd-diagram-edge]")).toHaveLength(12);
+    expect(screen.getAllByText("校验失败")).toHaveLength(2);
     const safetyRows = rendered.container.querySelectorAll("[data-prd-safety-row]");
     expect(safetyRows).toHaveLength(prdSafetyBaselineItems.length);
     expect(screen.getByText("范围")).not.toBeNull();
     expect(safetyRows[0]?.textContent).toContain(prdSafetyBaselineItems[0].requirement);
     expect(safetyRows[20]?.textContent).toContain(prdSafetyBaselineItems[20].requirement);
-    expect(safetyRows[20]?.textContent).toContain("完整性校验通过");
+    expect(safetyRows[20]?.textContent).toContain(prdDocument().sections.safetyBaseline.rows[20]!.remarks);
   });
 
   it("preserves PRD inline marks, links, citations, and references in view mode", () => {
     const document = prdDocument();
-    document.sections.executiveSummary.blocks = [{
+    document.sections.introduction.background.blocks = [{
       id: "block-inline-semantics",
       type: "paragraph",
       content: [
@@ -459,14 +453,14 @@ describe("Workbench Artifact content", () => {
     );
 
     expect(screen.getByRole("textbox", { name: "PRD 编辑器" })).not.toBeNull();
-    expect(screen.getByRole("heading", { name: "Production PRD" })).not.toBeNull();
+    expect(screen.getByRole("heading", { name: "示例工单需求说明书" })).not.toBeNull();
     expect(screen.getByRole("textbox", { name: "PRD 编辑器" }).closest(".nowheel"))
       .not.toBeNull();
     expect((screen.getByRole("button", { name: "保存 PRD" }) as HTMLButtonElement).disabled).toBe(true);
   });
 
   it("keeps the visible draft when switching from editing to preview and back", async () => {
-    mocks.useArtifactVersion.mockReturnValue(artifactQuery("prd", prdV2Document()));
+    mocks.useArtifactVersion.mockReturnValue(artifactQuery("prd", prdDocument()));
     const commit = vi.fn(async () => "version-2");
     const content = (editable: boolean) => <WorkbenchPrdDraftProvider namespace="principal-1">
       <WorkbenchArtifactContent editable={editable} onPrdDocumentCommit={commit} reference={reference()} />
@@ -481,8 +475,8 @@ describe("Workbench Artifact content", () => {
     expect(commit).not.toHaveBeenCalled();
   });
 
-  it("keeps PRD v2 diagrams visible while editing", () => {
-    mocks.useArtifactVersion.mockReturnValue(artifactQuery("prd", prdV2Document()));
+  it("keeps PRD diagrams visible while editing", async () => {
+    mocks.useArtifactVersion.mockReturnValue(artifactQuery("prd", prdDocument()));
     const onPrdDocumentCommit = vi.fn(async () => undefined);
 
     const rendered = render(
@@ -493,8 +487,7 @@ describe("Workbench Artifact content", () => {
       />,
     );
 
-    expect(rendered.container.querySelectorAll("[data-prd-editor-diagrams]")).toHaveLength(1);
-    expect(rendered.container.querySelectorAll("[data-prd-editor-diagrams] [data-prd-diagram-canvas]")).toHaveLength(2);
+    await waitFor(() => expect(rendered.container.querySelectorAll("[data-prd-inline-diagram] [data-prd-diagram-canvas]")).toHaveLength(2));
     expect(rendered.container.querySelectorAll('[data-prd-editor="active"]')).toHaveLength(1);
   });
 
@@ -1283,217 +1276,6 @@ function assetQuery(content: Blob) {
 
 function disabledQuery() {
   return { data: undefined, isError: false, isPending: false };
-}
-
-function prdDocument(): PrdDocumentV1 {
-  const sections = Object.fromEntries([
-    "executiveSummary",
-    "problem",
-    "goals",
-    "targetUsers",
-    "scope",
-    "requirements",
-    "userFlows",
-    "acceptanceCriteria",
-    "risksAndDependencies",
-  ].map((key) => [key, {
-    title: key,
-    blocks: [{
-      id: `block-${key}`,
-      type: "paragraph",
-      content: [{ type: "text", text: key === "executiveSummary" ? "Real executive summary" : key, marks: [] }],
-    }],
-  }])) as unknown as PrdDocumentV1["sections"];
-  return {
-    protocol: "workbench.prd.v1",
-    documentId: "prd-doc",
-    title: "Production PRD",
-    revision: {
-      number: 1,
-      status: "draft",
-      summary: "Initial",
-      changedAt: "2026-07-13T00:00:00.000Z",
-      changedById: null,
-    },
-    assumptions: [],
-    citations: [],
-    sections,
-  };
-}
-
-function prdV2Document(): PrdDocumentV2 {
-  const text = (value: string): PrdInline[] => [{ type: "text", text: value, marks: [] }];
-  const paragraph = (id: string, value: string): PrdBlock => ({
-    id,
-    type: "paragraph",
-    content: text(value),
-  });
-  const diagramNodes = (prefix: string) => [
-    { id: `${prefix}-node-1`, label: "用户入口", group: "用户端" },
-    { id: `${prefix}-node-2`, label: "业务服务", group: "服务层" },
-    { id: `${prefix}-node-3`, label: "风控服务", group: "能力层" },
-    { id: `${prefix}-node-4`, label: "结果页面", group: "用户端" },
-  ];
-  const diagramEdges = (prefix: string) => [
-    { id: `${prefix}-edge-1`, from: `${prefix}-node-1`, to: `${prefix}-node-2`, label: "提交请求" },
-    { id: `${prefix}-edge-2`, from: `${prefix}-node-2`, to: `${prefix}-node-3`, label: "风险校验" },
-    { id: `${prefix}-edge-3`, from: `${prefix}-node-3`, to: `${prefix}-node-4`, label: "返回结果" },
-  ];
-  return {
-    protocol: "workbench.prd.v2",
-    documentId: "prd-doc-v2",
-    title: "支付体验优化需求说明书",
-    revision: {
-      number: 2,
-      status: "inReview",
-      summary: "补充业务规则与安全自查结果",
-      changedAt: "2026-07-23T08:00:00.000Z",
-      changedById: null,
-    },
-    cover: {
-      workOrderName: "支付体验优化",
-      title: "支付体验优化需求说明书",
-    },
-    versionHistory: [{
-      status: "评审中",
-      author: "产品经理",
-      participants: ["产品经理", "研发负责人"],
-      startDate: "2026-07-21",
-      endDate: "2026-07-23",
-      notes: "补充完整需求说明",
-    }],
-    tableOfContents: {
-      title: "目 录",
-      entries: prdTableOfContentsEntriesFor(["2.5 支付结果说明"]),
-    },
-    assumptions: [],
-    citations: [],
-    sections: {
-      introduction: {
-        title: "1 引言",
-        background: {
-          title: "1.1项目背景",
-          blocks: [paragraph("v2-background", "现有支付流程步骤较多，需要降低用户操作成本。")],
-        },
-        scope: {
-          title: "1.2文档范围",
-          blocks: [{
-            id: "v2-scope",
-            type: "bulletList",
-            items: [{ id: "v2-scope-item", content: text("覆盖支付确认、风险校验和结果反馈。") }],
-          }],
-        },
-        usageScenarios: {
-          title: "1.3使用场景（必填）",
-          blocks: [paragraph("v2-scenarios", "用户在多个渠道完成订单支付。")],
-          channelTable: {
-            title: "活动投放渠道",
-            rows: [
-              { sequence: 1, channel: "inApp", enabled: true },
-              { sequence: 2, channel: "wapH5", enabled: true },
-              { sequence: 3, channel: "miniProgram", enabled: false },
-            ],
-          },
-        },
-      },
-      businessRequirements: {
-        title: "2 业务需求",
-        summary: text("通过统一流程提升支付成功率并降低异常处理成本。"),
-        pageLinks: {
-          title: "2.1页面链接",
-          blocks: [paragraph("v2-page-links", "支付确认页：/checkout；支付结果页：/result。")],
-        },
-        coreRules: {
-          title: "2.2 核心业务规则/功能说明",
-          blocks: [{
-            id: "v2-rule-table",
-            type: "table",
-            columns: [
-              { id: "rule-name", label: "规则" },
-              { id: "rule-detail", label: "说明" },
-            ],
-            rows: [{
-              id: "rule-row-1",
-              cells: [
-                { columnId: "rule-name", content: text("重复提交") },
-                { columnId: "rule-detail", content: text("同一订单只允许一个有效支付请求。") },
-              ],
-            }],
-          }],
-        },
-        flowAndPages: {
-          title: "2.3 核心流程/状态/页面要求",
-          blocks: [paragraph("v2-flow-pages", "页面必须覆盖处理中、成功与失败状态。")],
-          diagrams: [
-            {
-              id: "product-flow",
-              kind: "productFlow",
-              title: "图1 产品流程图",
-              description: "展示用户发起支付、系统完成风险校验并返回支付结果的完整流程。",
-              nodes: diagramNodes("flow"),
-              edges: diagramEdges("flow"),
-            },
-            {
-              id: "product-architecture",
-              kind: "productArchitecture",
-              title: "图2 产品架构图",
-              description: "展示用户端、业务服务与风险能力之间稳定清晰的调用关系。",
-              nodes: diagramNodes("architecture"),
-              edges: diagramEdges("architecture"),
-            },
-          ],
-        },
-        acceptanceCriteria: {
-          title: "2.4 验收标准",
-          blocks: [{
-            id: "v2-acceptance-table",
-            type: "table",
-            columns: [
-              { id: "acceptance-sequence", label: "序号" },
-              { id: "acceptance-item", label: "验收项" },
-              { id: "acceptance-standard", label: "验收标准" },
-            ],
-            rows: [
-              ["1", "页面可见性", "有支付权限的用户进入确认页后，可以看到订单金额、支付方式和提交操作。"],
-              ["2", "业务规则", "同一订单连续点击提交时，系统只创建一个有效支付请求并禁用重复操作。"],
-              ["3", "权限控制", "无支付权限的用户不能发起请求，页面明确提示无权限且不改变订单状态。"],
-              ["4", "状态反馈", "支付处理中、成功和失败状态按真实结果展示，刷新页面后状态保持一致。"],
-              ["5", "异常恢复", "支付失败时页面保留订单信息、展示失败原因，并提供可执行的重新支付操作。"],
-            ].map(([sequence, item, standard]) => ({
-              id: `acceptance-row-${sequence}`,
-              cells: [
-                { columnId: "acceptance-sequence", content: text(sequence!) },
-                { columnId: "acceptance-item", content: text(item!) },
-                { columnId: "acceptance-standard", content: text(standard!) },
-              ],
-            })),
-          }],
-        },
-        additionalSections: [{
-          title: "2.5 支付结果说明",
-          blocks: [paragraph("v2-payment-result", "支付结果页展示订单编号、支付状态和后续操作入口。")],
-        }],
-      },
-      degradation: {
-        title: "3 业务降级方案（必填）",
-        applicable: false,
-        content: text("不涉及"),
-      },
-      safetyBaseline: {
-        title: "4 需求安全基线要求（必填）",
-        intro: prdSafetyBaselineIntro,
-        rows: prdSafetyBaselineItems.map((item, index) => ({
-          sequence: item.sequence,
-          applicability: index < 3 ? "是" : "不涉及",
-          remarks: index < 3
-            ? "支付页面已按该项要求补充访问控制、数据处理边界和验收标准。"
-            : index === 20
-              ? "完整性校验通过"
-              : null,
-        })),
-      },
-    },
-  };
 }
 
 function prototypeDocument(): PrototypeDocument {

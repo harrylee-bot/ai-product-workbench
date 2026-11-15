@@ -88,22 +88,48 @@ edge_origin_auth_secret=$(require_env WORKBENCH_EDGE_ORIGIN_AUTH_SECRET)
 tokenizer_dir=$(require_env WORKBENCH_KNOWLEDGE_TOKENIZER_HOST_DIR)
 source_commit=$(require_env WORKBENCH_SOURCE_COMMIT)
 scan_mode=$(require_env WORKBENCH_FILE_SCAN_MODE)
+temporal_start_url=$(require_env WORKBENCH_TEMPORAL_WORKFLOW_START_URL)
+temporal_cancel_url=$(require_env WORKBENCH_TEMPORAL_WORKFLOW_CANCEL_URL)
+temporal_execute_url=$(require_env WORKBENCH_TEMPORAL_WORKFLOW_EXECUTE_URL)
+temporal_health_port=$(require_env WORKBENCH_TEMPORAL_WORKER_HEALTH_PORT)
+temporal_address=$(require_env WORKBENCH_TEMPORAL_ADDRESS)
+temporal_namespace=$(require_env WORKBENCH_TEMPORAL_NAMESPACE)
+temporal_task_queue=$(require_env WORKBENCH_TEMPORAL_TASK_QUEUE)
+temporal_managed=$(require_env WORKBENCH_TEMPORAL_MANAGED)
+prototype_artifact_bucket=$(require_env WORKBENCH_PROTOTYPE_ARTIFACT_S3_BUCKET)
+require_env WORKBENCH_PROTOTYPE_ARTIFACT_S3_ACCESS_KEY_ID >/dev/null
+require_env WORKBENCH_PROTOTYPE_ARTIFACT_S3_SECRET_ACCESS_KEY >/dev/null
 postgres_image=$(require_env WORKBENCH_POSTGRES_IMAGE)
 nginx_image=$(require_env WORKBENCH_NGINX_IMAGE)
 node_image=$(require_env WORKBENCH_NODE_IMAGE)
+temporal_node_image=$(require_env WORKBENCH_TEMPORAL_NODE_IMAGE)
 compose_profiles=${WORKBENCH_COMPOSE_PROFILES:-${COMPOSE_PROFILES:-}}
 
 node -e '
-  const [endpointValue, upstreamHost, bucket] = process.argv.slice(1);
+  const [endpointValue, upstreamHost, ...buckets] = process.argv.slice(1);
   const endpoint = new URL(endpointValue);
   const hostname = /^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/u;
   const bucketName = /^(?=.{3,63}$)[a-z0-9](?:[a-z0-9-]*[a-z0-9])$/u;
   if (endpoint.protocol !== "https:" || endpoint.pathname !== "/" || endpoint.port
       || endpoint.username || endpoint.password || endpoint.search || endpoint.hash) process.exit(1);
   if (!hostname.test(upstreamHost) || endpoint.hostname !== upstreamHost) process.exit(1);
-  if (!bucketName.test(bucket)) process.exit(1);
-' "$s3_internal_endpoint" "$s3_egress_upstream_host" "$s3_bucket" >/dev/null 2>&1 \
+  if (buckets.some((bucket) => !bucketName.test(bucket))) process.exit(1);
+' "$s3_internal_endpoint" "$s3_egress_upstream_host" "$s3_bucket" "$prototype_artifact_bucket" >/dev/null 2>&1 \
   || fail "S3 internal endpoint, egress upstream host, or bucket is not a canonical restricted tunnel target"
+
+node -e '
+  const [start, cancel, execute, port, address, namespace, taskQueue] = process.argv.slice(1);
+  for (const value of [start, cancel, execute]) {
+    const url = new URL(value);
+    if (!/^https?:$/u.test(url.protocol) || url.username || url.password || url.search || url.hash) process.exit(1);
+  }
+  if (!/^[1-9][0-9]{3,4}$/u.test(port) || Number(port) < 1024 || Number(port) > 65535) process.exit(1);
+  if (!/^(?=.{1,253}$)[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?:[1-9][0-9]{2,4}$/u.test(address)) process.exit(1);
+  if (!/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,62}$/u.test(namespace)) process.exit(1);
+  if (!/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/u.test(taskQueue)) process.exit(1);
+' \
+  "$temporal_start_url" "$temporal_cancel_url" "$temporal_execute_url" "$temporal_health_port" "$temporal_address" "$temporal_namespace" "$temporal_task_queue" >/dev/null 2>&1 \
+  || fail "Temporal workflow gateway or worker health configuration is invalid"
 
 case "$canvas_tool_url" in
   https://*/api/v1/runtime/canvas/tools/execute) ;;
@@ -146,6 +172,21 @@ printf '%s' "$source_commit" | grep -Eq '^[0-9a-f]{40}$' || fail "WORKBENCH_SOUR
 printf '%s' "$postgres_image" | grep -Eq '@sha256:[a-f0-9]{64}$' || fail "WORKBENCH_POSTGRES_IMAGE must be an immutable digest reference"
 printf '%s' "$nginx_image" | grep -Eq '@sha256:[a-f0-9]{64}$' || fail "WORKBENCH_NGINX_IMAGE must be an immutable digest reference"
 printf '%s' "$node_image" | grep -Eq '@sha256:[a-f0-9]{64}$' || fail "WORKBENCH_NODE_IMAGE must be an immutable digest reference"
+printf '%s' "$temporal_node_image" | grep -Eq '@sha256:[a-f0-9]{64}$' || fail "WORKBENCH_TEMPORAL_NODE_IMAGE must be an immutable digest reference"
+case "$temporal_node_image" in *alpine*) fail "WORKBENCH_TEMPORAL_NODE_IMAGE requires a glibc base; Alpine is not supported by the Temporal SDK" ;; esac
+case "$temporal_managed" in
+  0) ;;
+  1)
+    [ "$temporal_address" = "workbench-temporal:7233" ] || fail "managed Temporal requires the private workbench-temporal:7233 endpoint"
+    for key in WORKBENCH_TEMPORAL_SERVER_IMAGE WORKBENCH_TEMPORAL_ADMIN_IMAGE; do
+      value=$(require_env "$key")
+      printf '%s' "$value" | grep -Eq '@sha256:[a-f0-9]{64}$' || fail "$key must be an immutable digest reference"
+    done
+    require_env WORKBENCH_TEMPORAL_POSTGRES_ADMIN_PASSWORD >/dev/null
+    require_env WORKBENCH_TEMPORAL_DATABASE_PASSWORD >/dev/null
+    ;;
+  *) fail "WORKBENCH_TEMPORAL_MANAGED must be 0 or 1" ;;
+esac
 validate_private_ipv4 WORKBENCH_EDGE_WIREGUARD_IP "$edge_wireguard_ip"
 validate_private_ipv4 WORKBENCH_ORIGIN_WIREGUARD_IP "$origin_wireguard_ip"
 [ "$edge_wireguard_ip" != "$origin_wireguard_ip" ] \

@@ -214,6 +214,14 @@ describe("Project invitations service", () => {
       { status: ["pending", "expired"] },
     )).toThrow(expect.objectContaining({ status: 400 }));
   });
+
+  it("rejects a cursor status array instead of coercing it to a valid status", () => {
+    const cursor = Buffer.from(JSON.stringify({
+      version: 1, projectId: "project-1", status: ["pending"],
+      createdAt: now.toISOString(), id: invitationId,
+    })).toString("base64url");
+    expect(() => decodeProjectInvitationCursor(cursor)).toThrow(expect.objectContaining({ status: 400 }));
+  });
 });
 
 function tokenService(current = secret, previous?: string) {

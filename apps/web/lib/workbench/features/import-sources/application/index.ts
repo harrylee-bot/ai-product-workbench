@@ -6,12 +6,10 @@ import type {
   ImportSourceList,
 } from "@workbench/workbench-contracts";
 import {
-  QueryClient,
-  QueryClientContext,
   useMutation,
   useQuery,
+  useQueryClient,
 } from "@tanstack/react-query";
-import { useContext } from "react";
 
 import { workbenchQueryKeys } from "../../../query/keys";
 import {
@@ -19,7 +17,6 @@ import {
   type Versioned,
 } from "../../../transport/contracts";
 import {
-  useOptionalWorkbenchImportSourcesApi,
   useWorkbenchImportSourcesApi,
   type WorkbenchImportSourcesApi,
 } from "../api-adapter";
@@ -28,10 +25,6 @@ import {
   importSourceRefetchInterval,
   type ImportSourceListOptions,
 } from "../domain";
-
-const fallbackImportSourceQueryClient = new QueryClient({
-  defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
-});
 
 export type WorkbenchImportSourcesOperations = Pick<
   WorkbenchImportSourcesApi,
@@ -46,43 +39,38 @@ export function useWorkbenchImportSources(
   projectId: string,
   options: ImportSourceListOptions = {},
 ) {
-  const service = useOptionalWorkbenchImportSourcesApi();
-  const queryClient = useContext(QueryClientContext) ?? fallbackImportSourceQueryClient;
+  const service = useWorkbenchImportSourcesApi();
   return useQuery({
     queryKey: workbenchQueryKeys.importSourceList(projectId, options),
     queryFn: () => {
-      if (!service) throw new Error("Workbench transport is not available");
       return service.listImportSources(projectId, options);
     },
     enabled: Boolean(projectId && service),
     refetchInterval: (query) => importSourceListRefetchInterval(query.state.data?.items),
-  }, queryClient);
+  });
 }
 
 export function useWorkbenchImportSource(projectId: string, sourceId: string) {
-  const service = useOptionalWorkbenchImportSourcesApi();
-  const queryClient = useContext(QueryClientContext) ?? fallbackImportSourceQueryClient;
+  const service = useWorkbenchImportSourcesApi();
   return useQuery({
     queryKey: workbenchQueryKeys.importSource(projectId, sourceId),
     queryFn: () => {
-      if (!service) throw new Error("Workbench transport is not available");
       return service.getImportSource(sourceId);
     },
     enabled: Boolean(projectId && sourceId && service),
     refetchInterval: (query) => importSourceRefetchInterval(query.state.data?.value),
-  }, queryClient);
+  });
 }
 
 export function useCreateWorkbenchImportSource(projectId: string) {
-  const service = useOptionalWorkbenchImportSourcesApi();
-  const queryClient = useContext(QueryClientContext) ?? fallbackImportSourceQueryClient;
+  const service = useWorkbenchImportSourcesApi();
+  const queryClient = useQueryClient();
   return useMutation({
     mutationKey: [...workbenchQueryKeys.importSources(projectId), "create"],
     mutationFn: ({ request, idempotencyKey }: {
       request: CreateImportSourceRequest;
       idempotencyKey?: string;
     }) => {
-      if (!service) throw new Error("Workbench transport is not available");
       return service.createImportSource(projectId, request, idempotencyKey);
     },
     async onSuccess(result) {
@@ -94,12 +82,12 @@ export function useCreateWorkbenchImportSource(projectId: string) {
         queryKey: workbenchQueryKeys.importSources(projectId),
       });
     },
-  }, queryClient);
+  });
 }
 
 export function useDeleteWorkbenchImportSource(projectId: string) {
-  const service = useOptionalWorkbenchImportSourcesApi();
-  const queryClient = useContext(QueryClientContext) ?? fallbackImportSourceQueryClient;
+  const service = useWorkbenchImportSourcesApi();
+  const queryClient = useQueryClient();
   return useMutation({
     mutationKey: [...workbenchQueryKeys.importSources(projectId), "delete"],
     mutationFn: async ({ sourceId, ifMatch }: { sourceId: string; ifMatch?: string }) => {
@@ -114,7 +102,6 @@ export function useDeleteWorkbenchImportSource(projectId: string) {
           return source ? `"${source.revision}"` : undefined;
         })();
       if (!etag) throw new WorkbenchVersionRequiredError("import source", sourceId);
-      if (!service) throw new Error("Workbench transport is not available");
       await service.deleteImportSource(sourceId, etag);
       return sourceId;
     },
@@ -126,5 +113,5 @@ export function useDeleteWorkbenchImportSource(projectId: string) {
         queryKey: workbenchQueryKeys.importSources(projectId),
       });
     },
-  }, queryClient);
+  });
 }

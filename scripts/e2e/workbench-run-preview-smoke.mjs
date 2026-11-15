@@ -607,27 +607,17 @@ try {
       return json(route, { items: [] });
     }
     if (method === "GET" && requestPath === "/api/v1/exports/capabilities") {
-      const unavailable = {
-        available: false,
-        authentication: "not_required",
-        reasonCode: "EXPORT_EXTERNAL_AI_STUDIO_UNAVAILABLE",
-      };
+      const available = { available: true, reasonCode: null };
       return json(route, {
         formats: {
-          html: unavailable,
-          react: unavailable,
-          figma: unavailable,
-          mcp: unavailable,
-          docx: unavailable,
-          pdf: unavailable,
+          html: available,
+          react: available,
+          figma: { available: false, reasonCode: "EXPORT_FIGMA_UNAVAILABLE" },
+          mcp: available,
+          docx: available,
+          pdf: available,
         },
-        packaging: { single_file: unavailable, zip: unavailable },
-        external: {
-          ai_studio: unavailable,
-          netlify: unavailable,
-          lovable: unavailable,
-          bolt: unavailable,
-        },
+        packaging: { single_file: available, zip: available },
       });
     }
 

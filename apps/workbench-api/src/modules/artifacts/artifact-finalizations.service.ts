@@ -144,8 +144,6 @@ export class ArtifactFinalizationsService {
   }
 }
 
-export { artifactKnowledgeMarkdown } from "./artifact-knowledge-markdown.js";
-
 function digest(value: string) { return createHash("sha256").update(value).digest("hex"); }
 
 async function lockProjectKnowledgeWrite(tx: Prisma.TransactionClient, projectId: string, principalId: string) {

@@ -16,6 +16,10 @@ import {
 
 const mocks = vi.hoisted(() => ({
   archiveProject: vi.fn(),
+  createPrototypePlan: vi.fn(),
+  uploadFiles: vi.fn(),
+  runtimeModels: [] as any[],
+  bootstrapPending: true,
   autosaveDispose: vi.fn(async () => undefined),
   bootstrapEntries: [] as unknown[],
   createImportSource: vi.fn(),
@@ -27,6 +31,7 @@ const mocks = vi.hoisted(() => ({
   savePrdDrafts: vi.fn(),
   selectedStore: null as ReturnType<typeof createBoardStore> | null,
 }));
+vi.mock("./prototype-v2/api-adapter", () => ({ useWorkbenchPrototypeV2Api: () => ({ createPlan: mocks.createPrototypePlan }) }));
 vi.mock("../prd-editor/draft-context", () => ({ useWorkbenchPrdDraftStore: () => ({ saveProject: mocks.savePrdDrafts }) }));
 
 vi.mock("../transport/context", () => ({
@@ -72,7 +77,7 @@ vi.mock("./projects", async (importOriginal) => {
     useWorkbenchProjectOperations: () => mocks,
     useWorkbenchProjectBootstrap: (projectId: string) => ({
       data: projectId ? bootstrap(projectId) : undefined,
-      isPending: Boolean(projectId),
+      isPending: Boolean(projectId) && mocks.bootstrapPending,
     }),
   };
 });
@@ -106,7 +111,7 @@ vi.mock("./files", async (importOriginal) => {
       releaseProjectUploads: mocks.releaseProjectUploads,
       resumeUpload: vi.fn(),
       retryUpload: vi.fn(),
-      uploadFiles: vi.fn(async () => ({ batchId: null, fileAssetIds: [] })),
+      uploadFiles: mocks.uploadFiles,
       uploads: [],
     }),
   };
@@ -126,7 +131,7 @@ vi.mock("./runtime-models", async (importOriginal) => {
   return {
     ...actual,
     useWorkbenchRuntimeModels: () => ({
-      data: { items: [] },
+      data: { items: mocks.runtimeModels },
       error: null,
       isError: false,
       isFetching: false,
@@ -136,6 +141,10 @@ vi.mock("./runtime-models", async (importOriginal) => {
 });
 
 beforeEach(() => {
+  mocks.runtimeModels = [];
+  mocks.bootstrapPending = true;
+  mocks.uploadFiles.mockReset().mockResolvedValue({ batchId: null, fileAssetIds: [] });
+  mocks.createPrototypePlan.mockReset();
   mocks.savePrdDrafts.mockReset().mockResolvedValue([]);
   mocks.getProjectBootstrap.mockImplementation(async (projectId: string) => bootstrap(projectId));
 });
@@ -549,6 +558,30 @@ describe("Workbench controller Project save barriers", () => {
     await openControllerProject(rendered, "project-1");
 
     expect(rendered.result.current.latestPrompt).toBe("Persisted prompt from Bootstrap");
+    rendered.unmount();
+  });
+});
+
+describe("V2 Composer plan preparation", () => {
+  it("pins the prepared model, uploaded sources and design request across a lost create response", async () => {
+    mocks.selectedStore = createBoardStore(board());
+    mocks.bootstrapPending = false;
+    mocks.runtimeModels = [{ id: "quality", displayName: "Quality", description: null, supportedWorkflows: ["generate"] }];
+    mocks.uploadFiles.mockResolvedValue({ batchId: "batch-one", fileAssetIds: ["file-one"] });
+    mocks.createImportSource.mockResolvedValue({ value: { id: "source-upload", status: "ready" }, etag: '"1"' });
+    mocks.createPrototypePlan.mockRejectedValueOnce(new Error("Connection closed after commit"))
+      .mockResolvedValueOnce({ value: { id: "plan-one", status: "draft" }, etag: '"0"' });
+    const rendered = renderController();
+    await openControllerProject(rendered, "project-1");
+    const file = new File(["requirements"], "requirements.txt", { type: "text/plain" });
+    const submission = { prompt: "Create a prototype", modelChoiceKey: "model:quality", requestedArtifactKinds: ["prototype"] as ["prototype"], targetSurface: "app" as const, sourceIds: ["source-existing"], files: [file], designStyle: { kind: "automatic" as const } };
+    await act(async () => { await expect(rendered.result.current.createPrototypePlan(submission)).rejects.toThrow("Connection closed"); });
+    await act(async () => { await expect(rendered.result.current.createPrototypePlan(submission)).resolves.toMatchObject({ id: "plan-one" }); });
+    expect(mocks.uploadFiles).toHaveBeenCalledTimes(1);
+    expect(mocks.createImportSource).toHaveBeenCalledWith("project-1", { kind: "file", fileAssetId: "file-one" }, "prototype-source-file-one");
+    expect(mocks.createPrototypePlan).toHaveBeenCalledTimes(2);
+    expect(mocks.createPrototypePlan.mock.calls[0]).toEqual(mocks.createPrototypePlan.mock.calls[1]);
+    expect(mocks.createPrototypePlan.mock.calls[0]![1]).toMatchObject({ title: "Create a prototype", prompt: "Create a prototype", generationRequest: { modelId: "quality", workflow: "generate", sourceIds: ["source-existing", "source-upload"], targetSurface: "app", designStyle: { kind: "automatic" } } });
     rendered.unmount();
   });
 });

@@ -371,8 +371,3 @@ function safePathSegment(value) {
 function redactedPath(value) {
   return redactKnowledgeCapability(value).slice(0, 512);
 }
-
-export const knowledgeSmokeConstants = Object.freeze({
-  capabilityName: CAPABILITY_NAME,
-  toolName: TOOL_NAME,
-});

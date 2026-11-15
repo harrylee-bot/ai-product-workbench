@@ -128,8 +128,8 @@ describe("Workbench ArtifactVersion dialog", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "比较" }));
     const comparison = await screen.findByRole("region", { name: "版本内容比较" });
-    expect(comparison.textContent).toContain("Revision: 2");
-    expect(comparison.textContent).toContain("Revision: 1");
+    expect(comparison.textContent).toContain("文档版本：V2");
+    expect(comparison.textContent).toContain("文档版本：V1");
 
     fireEvent.click(screen.getByRole("button", { name: "固定到画布" }));
     await waitFor(() => expect(onPinVersion).toHaveBeenCalledWith(
@@ -317,7 +317,7 @@ function versionListItem(artifactVersionId: string, version: number): ArtifactVe
     artifactVersionId,
     version,
     kind: "prd",
-    schemaVersion: 1,
+    schemaVersion: 3,
     status: "ready",
     checksum: String(version).repeat(64).slice(0, 64),
     createdByRunId: null,
@@ -333,7 +333,7 @@ function prdVersion(artifactVersionId: string, version: number): ArtifactVersion
     artifactVersionId,
     version,
     kind: "prd",
-    schemaVersion: 1,
+    schemaVersion: 3,
     status: "ready",
     checksum: String(version).repeat(64).slice(0, 64),
     citations: [],

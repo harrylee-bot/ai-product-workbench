@@ -2,7 +2,7 @@ import {
   canonicalJson,
   type ArtifactVersionDetail,
 } from "@workbench/workbench-contracts";
-import { prdDocumentV2Example } from "@workbench/workbench-contracts/test-fixtures";
+import { prdDocumentV3Example } from "@workbench/workbench-contracts/test-fixtures";
 import { createHash } from "node:crypto";
 import { Readable } from "node:stream";
 import {
@@ -263,13 +263,13 @@ describe("ArtifactsService", () => {
     }));
   });
 
-  it("reads and lists a ready inline PRD v2 version", async () => {
+  it("reads and lists a ready inline PRD v3 version", async () => {
     const prdVersion = {
       ...inlineVersion,
       artifactId: "artifact_prd",
-      schemaVersion: 2,
-      content: prdDocumentV2Example,
-      checksum: createHash("sha256").update(canonicalJson(prdDocumentV2Example)).digest("hex"),
+      schemaVersion: 3,
+      content: prdDocumentV3Example,
+      checksum: createHash("sha256").update(canonicalJson(prdDocumentV3Example)).digest("hex"),
       artifact: { kind: "prd" as const },
     };
     const db = createDb();
@@ -282,14 +282,14 @@ describe("ArtifactsService", () => {
       .resolves.toMatchObject({
         detail: {
           kind: "prd",
-          schemaVersion: 2,
+          schemaVersion: 3,
           contentMode: "inline",
-          content: prdDocumentV2Example,
+          content: prdDocumentV3Example,
         },
       });
     await expect(service.listVersions("principal_1", "artifact_prd"))
       .resolves.toMatchObject({
-        items: [{ kind: "prd", schemaVersion: 2, contentMode: "inline" }],
+        items: [{ kind: "prd", schemaVersion: 3, contentMode: "inline" }],
       });
   });
 
@@ -919,5 +919,16 @@ describe("ArtifactsService", () => {
     expect(decodeArtifactVersionCursor(encodeArtifactVersionCursor(versionCursor))).toEqual(versionCursor);
     expect(() => decodeArtifactCursor("bad")).toThrow();
     expect(() => decodeArtifactVersionCursor("bad")).toThrow();
+  });
+
+  it.each([1, true, [], {}, null])("rejects non-string cursor identifiers (%j)", (id) => {
+    const encode = (value: unknown) => Buffer.from(JSON.stringify(value)).toString("base64url");
+    expect(() => decodeArtifactCursor(encode({ id, updatedAt: createdAt.toISOString() }))).toThrow();
+    expect(() => decodeArtifactVersionCursor(encode({ id, version: 1 }))).toThrow();
+  });
+
+  it.each([1, true, [], {}, null])("rejects non-string artifact cursor timestamps (%j)", (updatedAt) => {
+    const value = Buffer.from(JSON.stringify({ id: "artifact_1", updatedAt })).toString("base64url");
+    expect(() => decodeArtifactCursor(value)).toThrow();
   });
 });

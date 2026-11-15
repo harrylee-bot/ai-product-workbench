@@ -211,15 +211,6 @@ export function projectInvitationStateConflictProblem(detail: string) {
   });
 }
 
-export function releaseStateConflictProblem(detail: string) {
-  return new ProblemException({
-    title: "Project release state conflict",
-    status: HttpStatus.CONFLICT,
-    detail,
-    code: "PROJECT_RELEASE_STATE_CONFLICT",
-  });
-}
-
 export function shareStateConflictProblem(detail: string) {
   return new ProblemException({
     title: "Share state conflict",

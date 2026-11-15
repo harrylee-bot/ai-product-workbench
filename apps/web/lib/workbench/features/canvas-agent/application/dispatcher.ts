@@ -86,8 +86,8 @@ export class ScopedCanvasAgentClientCommandDispatcher {
   readonly #ledger: BoundedLruLedger<CanvasAgentLedgerEntry>;
   readonly #suppression = new CanvasAgentViewportMoveSuppression();
   readonly #ui: CanvasAgentUiPort;
-  #abortController = new AbortController();
-  #scope: CanvasAgentCommandScope;
+  readonly #abortController = new AbortController();
+  readonly #scope: CanvasAgentCommandScope;
   #disposed = false;
 
   constructor(options: ScopedCanvasAgentDispatcherOptions) {
@@ -98,15 +98,6 @@ export class ScopedCanvasAgentClientCommandDispatcher {
 
   get scope(): CanvasAgentCommandScope {
     return cloneScope(this.#scope);
-  }
-
-  replaceScope(nextScope: CanvasAgentCommandScope): void {
-    if (sameScope(this.#scope, nextScope)) return;
-    this.#abortController.abort();
-    this.#abortController = new AbortController();
-    this.#suppression.cancel();
-    this.#ledger.clear();
-    this.#scope = cloneScope(nextScope);
   }
 
   dispose(): void {

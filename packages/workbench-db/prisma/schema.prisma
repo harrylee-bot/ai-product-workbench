@@ -181,6 +181,67 @@ enum PrototypePatchApplicationOutcome {
   degraded
 }
 
+enum PrototypePlanStatus {
+  draft
+  approved
+  generating
+  ready
+  failed
+  cancelled
+}
+
+enum PrototypeRevisionStatus {
+  queued
+  generating
+  ready
+  confirmed
+  rejected
+  failed
+  cancelled
+}
+
+enum PrototypeFeedbackStatus {
+  open
+  resolved
+}
+
+enum PrototypeShareStatus {
+  active
+  revoked
+  expired
+}
+
+enum PrototypeExportFormat {
+  html
+  react
+}
+
+enum PrototypeExportStatus {
+  queued
+  building
+  succeeded
+  failed
+  cancelled
+}
+
+enum PrototypeMutationKind {
+  plan_create
+  plan_approve
+  plan_cancel
+  plan_retry
+  revision_create
+  revision_revise
+  revision_confirmed
+  revision_rejected
+  feedback_create
+  feedback_resolve
+  share_create
+  share_revoke
+  export_create
+  export_retry
+  export_cancel
+}
+
 enum ArtifactVersionReaction {
   like
   dislike
@@ -302,29 +363,6 @@ enum ExportFormat {
 enum ExportPackaging {
   single_file
   zip
-}
-
-enum ExternalExportTarget {
-  ai_studio
-  netlify
-  lovable
-  bolt
-}
-
-enum ExternalExportAuthentication {
-  not_required
-  required
-  authenticated
-}
-
-enum ExternalExportDeliveryStatus {
-  pending_confirmation
-  queued
-  running
-  cancelling
-  succeeded
-  failed
-  cancelled
 }
 
 enum ExportSelectionKind {
@@ -489,7 +527,6 @@ model Principal {
   createdShares                   ShareGrant[]                      @relation("ShareCreator")
   createdReleases                 ProjectRelease[]                  @relation("ProjectReleaseCreator")
   createdExports                  ExportJob[]                       @relation("ExportCreator")
-  createdExternalExportDeliveries ExternalExportDelivery[]          @relation("ExternalExportDeliveryCreator")
   createdPreviews                 ProjectPreview[]                  @relation("PreviewCreator")
   createdLineages                 ProjectLineage[]                  @relation("ProjectLineageCreator")
   createdDuplicates               ProjectDuplicate[]                @relation("ProjectDuplicateCreator")
@@ -809,6 +846,8 @@ model Run {
   prototypePatchProjections    PrototypePatchProjection[]
   sourceSnapshots              RunSourceSnapshot[]
   cancellationReceipts         RunCancellationReceipt[]
+  prototypePlans               PrototypePlan[] @relation("PrototypePlanOwnedRun")
+  prototypeRebuildPlans        PrototypePlan[] @relation("PrototypePlanReusedRun")
 
   @@unique([threadId, idempotencyKey])
   @@unique([id, projectId])
@@ -2173,7 +2212,6 @@ model ExportJob {
   selectedReleaseArtifact    ReleaseArtifactVersion?  @relation("ExportSelectedReleaseArtifact", fields: [releaseId, selectionArtifactId, selectionArtifactVersionId], references: [releaseId, artifactId, artifactVersionId], onDelete: Restrict, onUpdate: Restrict)
   outputBlob                 Blob?                    @relation("ExportOutputBlob", fields: [outputBlobId], references: [id], onDelete: Restrict, onUpdate: Restrict)
   preview                    ProjectPreview?          @relation("PreviewExportJob")
-  externalDeliveries         ExternalExportDelivery[]
 
   @@unique([releaseId, idempotencyKey])
   @@index([releaseId, createdAt])
@@ -2182,40 +2220,6 @@ model ExportJob {
   @@index([outputBlobId])
   @@index([status])
   @@map("export_jobs")
-}
-
-model ExternalExportDelivery {
-  id                   String                       @id @default(cuid())
-  exportJobId          String                       @map("export_job_id")
-  createdById          String                       @map("created_by_id")
-  idempotencyKey       String                       @map("idempotency_key")
-  requestHash          String                       @map("request_hash")
-  target               ExternalExportTarget
-  authentication       ExternalExportAuthentication
-  status               ExternalExportDeliveryStatus @default(pending_confirmation)
-  revision             Int                          @default(0)
-  payload              Json
-  remoteReference      String?                      @map("remote_reference") @db.VarChar(500)
-  failureCode          String?                      @map("failure_code") @db.VarChar(120)
-  failureDetail        String?                      @map("failure_detail") @db.VarChar(4000)
-  attempt              Int                          @default(0)
-  leaseToken           String?                      @unique @map("lease_token") @db.VarChar(128)
-  leaseExpiresAt       DateTime?                    @map("lease_expires_at") @db.Timestamptz(6)
-  transferAuthorizedAt DateTime?                    @map("transfer_authorized_at") @db.Timestamptz(6)
-  confirmedAt          DateTime?                    @map("confirmed_at") @db.Timestamptz(6)
-  startedAt            DateTime?                    @map("started_at") @db.Timestamptz(6)
-  finishedAt           DateTime?                    @map("finished_at") @db.Timestamptz(6)
-  createdAt            DateTime                     @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt            DateTime                     @updatedAt @map("updated_at") @db.Timestamptz(6)
-  exportJob            ExportJob                    @relation(fields: [exportJobId], references: [id], onDelete: Restrict, onUpdate: Restrict)
-  createdBy            Principal                    @relation("ExternalExportDeliveryCreator", fields: [createdById], references: [id], onDelete: Restrict, onUpdate: Restrict)
-
-  @@unique([exportJobId, idempotencyKey])
-  @@index([createdById, createdAt])
-  @@index([exportJobId, createdAt])
-  @@index([status, updatedAt])
-  @@index([status, leaseExpiresAt])
-  @@map("external_export_deliveries")
 }
 
 model ProjectPreview {
@@ -2550,4 +2554,169 @@ model KnowledgeEmbeddingBatch {
   @@index([releaseId, status, sequence])
   @@index([profileId, profileSpecSha256, dimension])
   @@map("knowledge_embedding_batches")
+}
+
+model PrototypePlan {
+  retryOfPlanId String? @map("retry_of_plan_id")
+  reusedRunId String? @map("reused_run_id")
+  reusedRun Run? @relation("PrototypePlanReusedRun", fields: [reusedRunId, projectId], references: [id, projectId], onDelete: Restrict, onUpdate: Restrict, map: "prototype_plans_reused_run_project_fkey")
+  rootPlanId     String?            @map("root_plan_id")
+  sourceRevisionId String?          @map("source_revision_id")
+  contentVersion Int               @default(1) @map("content_version")
+  feedbackIds    Json              @default("[]") @map("feedback_ids")
+  generationRequest Json?          @map("generation_request")
+  runtimeRunId   String?            @unique @map("runtime_run_id")
+  runtimeRun     Run?               @relation("PrototypePlanOwnedRun", fields: [runtimeRunId, projectId], references: [id, projectId], onDelete: Restrict, onUpdate: Restrict, map: "prototype_plans_runtime_run_project_fkey")
+  id             String             @id @default(cuid())
+  projectId      String             @map("project_id")
+  createdById    String             @map("created_by_id")
+  title          String
+  prompt         String
+  status         PrototypePlanStatus @default(draft)
+  revision       Int                @default(0)
+  idempotencyKey String             @map("idempotency_key")
+  requestHash    String             @map("request_hash") @db.Char(64)
+  failureCode    String?            @map("failure_code")
+  failureDetail  String?            @map("failure_detail")
+  createdAt      DateTime           @default(now()) @map("created_at")
+  updatedAt      DateTime           @updatedAt @map("updated_at")
+
+  @@unique([projectId, idempotencyKey])
+  @@index([projectId, status, updatedAt])
+  @@index([createdById])
+  @@map("prototype_plans")
+}
+
+model PrototypeRevision {
+  builtArtifactKey String? @map("built_artifact_key")
+  builtArtifactSha256 String? @map("built_artifact_sha256") @db.Char(64)
+  builtArtifactByteSize Int? @map("built_artifact_byte_size")
+  builtArtifactMediaType String? @map("built_artifact_media_type")
+  version        Int                     @default(1)
+  sourceRevisionId String?                @map("source_revision_id")
+  sourceDocument Json?                    @map("source_document")
+  id             String                  @id @default(cuid())
+  projectId      String                  @map("project_id")
+  planId         String                  @map("plan_id")
+  createdById    String                  @map("created_by_id")
+  revision       Int                     @default(1)
+  status         PrototypeRevisionStatus @default(queued)
+  title          String
+  pages          Json
+  documentSha256 String                  @map("document_sha256") @db.Char(64)
+  idempotencyKey String                  @map("idempotency_key")
+  requestHash    String                  @map("request_hash") @db.Char(64)
+  failureCode    String?                 @map("failure_code")
+  failureDetail  String?                 @map("failure_detail")
+  createdAt      DateTime                @default(now()) @map("created_at")
+  updatedAt      DateTime                @updatedAt @map("updated_at")
+
+  @@unique([projectId, planId, idempotencyKey])
+  @@unique([planId, version])
+  @@index([projectId, createdAt])
+  @@index([projectId, status, updatedAt])
+  @@map("prototype_revisions")
+}
+
+model PrototypeFeedback {
+  id             String                  @id @default(cuid())
+  projectId      String                  @map("project_id")
+  revisionId     String                  @map("revision_id")
+  createdById    String                  @map("created_by_id")
+  body           String
+  anchor         Json?
+  status         PrototypeFeedbackStatus @default(open)
+  revision       Int                     @default(0)
+  idempotencyKey String                  @map("idempotency_key")
+  requestHash    String                  @map("request_hash") @db.Char(64)
+  resolvedAt     DateTime?               @map("resolved_at")
+  createdAt      DateTime                @default(now()) @map("created_at")
+  updatedAt      DateTime                @updatedAt @map("updated_at")
+
+  @@unique([projectId, createdById, idempotencyKey])
+  @@index([projectId, revisionId, status, createdAt])
+  @@map("prototype_feedback")
+}
+
+model PrototypeShare {
+  id             String                @id @default(cuid())
+  projectId      String                @map("project_id")
+  revisionId     String                @map("revision_id")
+  createdById    String                @map("created_by_id")
+  tokenHash      String                @unique @map("token_hash") @db.Char(64)
+  idempotencyKey String                @map("idempotency_key")
+  requestHash    String                @map("request_hash") @db.Char(64)
+  status         PrototypeShareStatus  @default(active)
+  revision       Int                   @default(0)
+  expiresAt      DateTime?             @map("expires_at")
+  revokedAt      DateTime?             @map("revoked_at")
+  createdAt      DateTime              @default(now()) @map("created_at")
+  updatedAt      DateTime              @updatedAt @map("updated_at")
+
+  @@unique([projectId, createdById, idempotencyKey])
+  @@index([projectId, status, createdAt])
+  @@index([revisionId])
+  @@map("prototype_shares")
+}
+
+model PrototypeExport {
+  activeCommandId String? @map("active_command_id")
+  id             String                @id @default(cuid())
+  projectId      String                @map("project_id")
+  revisionId     String                @map("revision_id")
+  createdById    String                @map("created_by_id")
+  format         PrototypeExportFormat
+  status         PrototypeExportStatus @default(queued)
+  revision       Int                   @default(0)
+  idempotencyKey String                @map("idempotency_key")
+  requestHash    String                @map("request_hash") @db.Char(64)
+  artifactKey    String?               @map("artifact_key")
+  artifactSha256 String?               @map("artifact_sha256") @db.Char(64)
+  byteSize       Int?                  @map("byte_size")
+  mediaType      String?               @map("media_type")
+  failureCode    String?               @map("failure_code")
+  failureDetail  String?               @map("failure_detail")
+  createdAt      DateTime              @default(now()) @map("created_at")
+  updatedAt      DateTime              @updatedAt @map("updated_at")
+  finishedAt     DateTime?             @map("finished_at")
+
+  @@unique([projectId, createdById, idempotencyKey])
+  @@index([projectId, status, updatedAt])
+  @@index([revisionId])
+  @@map("prototype_exports")
+}
+
+model PrototypeMutationReceipt {
+  id             String                 @id @default(cuid())
+  projectId      String                 @map("project_id")
+  targetId       String                 @map("target_id")
+  createdById    String                 @map("created_by_id")
+  kind           PrototypeMutationKind
+  idempotencyKey String                 @map("idempotency_key")
+  requestHash    String                 @map("request_hash") @db.Char(64)
+  response       Json
+  createdAt      DateTime               @default(now()) @map("created_at")
+
+  @@unique([projectId, targetId, createdById, kind, idempotencyKey])
+  @@index([projectId, createdAt])
+  @@map("prototype_mutation_receipts")
+}
+
+// Durable delivery obligation, committed with the initiating mutation and receipt.
+model PrototypeWorkflowCommand {
+  sequence BigInt @unique @default(autoincrement())
+  result Json?
+  id String @id
+  projectId String @map("project_id")
+  kind String
+  targetId String @map("target_id")
+  payload Json
+  attempts Int @default(0)
+  availableAt DateTime @default(now()) @map("available_at")
+  leaseUntil DateTime? @map("lease_until")
+  deliveredAt DateTime? @map("delivered_at")
+  lastErrorCode String? @map("last_error_code")
+  createdAt DateTime @default(now()) @map("created_at")
+  @@index([deliveredAt, availableAt])
+  @@map("prototype_workflow_commands")
 }

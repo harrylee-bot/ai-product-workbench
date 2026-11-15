@@ -2,6 +2,8 @@
 
 import type {
   CreateDesignSystemRequest,
+  CreatePrototypePlanRequest,
+  PrototypePlan,
   CanvasSnapshot,
   DesignPresetCatalogItem,
   DesignSystemCatalogItem,
@@ -72,6 +74,7 @@ import {
   type ImportSourceDraft,
 } from "./import-sources";
 import { createIdempotencyKey } from "../transport/contracts";
+import { useWorkbenchPrototypeV2Api } from "./prototype-v2/api-adapter";
 import {
   toWorkbenchModelCatalogState,
   useWorkbenchRuntimeModels,
@@ -125,6 +128,8 @@ export function useWorkbenchController({
   projectRelationship?: ProjectRelationship;
 } = {}) {
   const projectOperations = useWorkbenchProjectOperations();
+  const prototypeApi = useWorkbenchPrototypeV2Api();
+  const preparedPrototypePlan = useRef<{ signature: string; request: CreatePrototypePlanRequest; idempotencyKey: string } | null>(null);
   const prdDrafts = useWorkbenchPrdDraftStore();
   const queryClient = useQueryClient();
   const fileTransferService = useWorkbenchFileTransferService();
@@ -599,6 +604,39 @@ export function useWorkbenchController({
     workspaceId,
   ]);
 
+  const createPrototypePlan = useCallback(async (submission: WorkbenchRunSubmission): Promise<PrototypePlan | null> => {
+    const projectId = selectedProjectId;
+    if (!projectId || submissionBusy || projectSubmissionOwnersRef.current.has(projectId)) return null;
+    if (!capabilities.canRun) throw new Error("当前项目角色不能生成原型");
+    if ((submission.files?.length ?? 0) > 0 && !capabilities.canUpload) throw new Error("当前项目角色不能上传资料");
+    const token = Symbol(`prototype-submission:${projectId}`);
+    if (!addProjectOperationOwner(projectSubmissionOwnersRef, setProjectSubmissionStates, projectId, token)) return null;
+    let failure: { error: unknown } | null = null;
+    try {
+      const model = resolveRunnableSubmissionModel(submission, modelChoices);
+      const signature = JSON.stringify({ projectId, ...submission, files: submission.files?.map((file) => [file.name, file.size, file.lastModified]), modelId: model.modelId });
+      if (preparedPrototypePlan.current?.signature !== signature) {
+        await flushSelectedBoard();
+        const designStyle = await provisionDesignStyle(designSystemOperations, queryClient, workspaceId, projectId, submission);
+        const uploaded = await uploadRegistry.uploadFiles(projectId, (submission.files ?? []).map((file) => ({ file })));
+        if (uploaded.fileAssetIds.length !== (submission.files?.length ?? 0)) throw new Error("资料上传尚未完成，请重试");
+        const sources = await Promise.all(uploaded.fileAssetIds.map((fileAssetId) => importSourcesOperations.createImportSource(projectId, { kind: "file", fileAssetId }, `prototype-source-${fileAssetId}`)));
+        if (sources.some((source) => source.value.status !== "ready")) throw new Error("资料尚未就绪，请在资料列表处理后重试");
+        uploadRegistry.completeUploadBatch(uploaded.batchId);
+        const generationRequest = submissionIntentRunRequest(submission, model, designStyle);
+        generationRequest.sourceIds = [...new Set([...generationRequest.sourceIds, ...sources.map((source) => source.value.id)])];
+        preparedPrototypePlan.current = { signature, idempotencyKey: createIdempotencyKey("prototype-plan"), request: { title: submission.prompt.trim().split("\n")[0]!.slice(0, 100), prompt: submission.prompt.trim(), generationRequest } };
+      }
+      const prepared = preparedPrototypePlan.current;
+      const result = await prototypeApi.createPlan(projectId, prepared.request, prepared.idempotencyKey);
+      preparedPrototypePlan.current = null;
+      queryClient.setQueryData(workbenchQueryKeys.prototypeV2Plan(projectId, result.value.id), result);
+      await queryClient.invalidateQueries({ queryKey: workbenchQueryKeys.prototypeV2(projectId) });
+      return result.value;
+    } catch (error) { failure = { error }; throw error; }
+    finally { settleProjectOperation(projectSubmissionOwnersRef, setProjectSubmissionStates, token, failure); }
+  }, [selectedProjectId, submissionBusy, capabilities.canRun, capabilities.canUpload, modelChoices, flushSelectedBoard, designSystemOperations, queryClient, workspaceId, uploadRegistry, importSourcesOperations, prototypeApi]);
+
   const renameProject = useCallback(async (title: string) => {
     const normalized = title.trim();
     if (!selectedProjectId || !normalized) throw new Error("Project title is required");
@@ -708,6 +746,7 @@ export function useWorkbenchController({
     startNewProject,
     createProjectForImport,
     startProjectRun,
+    createPrototypePlan,
     submissionIntentQuery: currentSubmissionIntentQuery,
     submissionRecovery: submissionCoordinator.recovery,
     submissionError: newProjectOperationState?.error

@@ -2,19 +2,6 @@ import { z } from "zod";
 import { artifactCitationSchema, artifactIrIdSchema } from "./citations.js";
 import { isoDateTimeSchema, opaqueIdSchema } from "./common.js";
 
-export const prdSectionKeys = [
-  "executiveSummary",
-  "problem",
-  "goals",
-  "targetUsers",
-  "scope",
-  "requirements",
-  "userFlows",
-  "acceptanceCriteria",
-  "risksAndDependencies",
-] as const;
-
-export const prdSectionKeySchema = z.enum(prdSectionKeys);
 export const prdReferenceTargetSchema = z.enum([
   "section",
   "goal",
@@ -205,23 +192,6 @@ export const prdBlockSchema = z.discriminatedUnion("type", [
   prdRiskBlockSchema,
 ]);
 
-export const prdSectionSchema = z.object({
-  title: z.string().min(1).max(240),
-  blocks: z.array(prdBlockSchema).min(1).max(500),
-}).strict();
-
-export const prdSectionsSchema = z.object({
-  executiveSummary: prdSectionSchema,
-  problem: prdSectionSchema,
-  goals: prdSectionSchema,
-  targetUsers: prdSectionSchema,
-  scope: prdSectionSchema,
-  requirements: prdSectionSchema,
-  userFlows: prdSectionSchema,
-  acceptanceCriteria: prdSectionSchema,
-  risksAndDependencies: prdSectionSchema,
-}).strict();
-
 export const prdRevisionSchema = z.object({
   number: z.number().int().positive(),
   status: z.enum(["draft", "inReview", "approved"]),
@@ -239,27 +209,6 @@ export const prdAssumptionSchema = z.object({
   introducedInRevision: z.number().int().positive(),
   citationIds: z.array(artifactIrIdSchema).max(100),
 }).strict();
-
-const sectionAllowedBlockTypes: Record<typeof prdSectionKeys[number], ReadonlySet<z.infer<typeof prdBlockSchema>["type"]>> = {
-  executiveSummary: new Set(["paragraph", "heading", "callout", "table"]),
-  problem: new Set(["paragraph", "heading", "callout", "table"]),
-  goals: new Set(["paragraph", "heading", "goal", "table"]),
-  targetUsers: new Set(["paragraph", "heading", "persona", "table"]),
-  scope: new Set(["paragraph", "heading", "bulletList", "orderedList", "callout", "table"]),
-  requirements: new Set(["paragraph", "heading", "requirement", "callout", "table"]),
-  userFlows: new Set(["paragraph", "heading", "flow", "callout"]),
-  acceptanceCriteria: new Set(["paragraph", "heading", "acceptanceCriterion", "callout", "table"]),
-  risksAndDependencies: new Set(["paragraph", "heading", "risk", "callout", "table"]),
-};
-
-const semanticSectionGate: Partial<Record<typeof prdSectionKeys[number], z.infer<typeof prdBlockSchema>["type"]>> = {
-  goals: "goal",
-  targetUsers: "persona",
-  requirements: "requirement",
-  userFlows: "flow",
-  acceptanceCriteria: "acceptanceCriterion",
-  risksAndDependencies: "risk",
-};
 
 function addIssue(context: z.RefinementCtx, path: (string | number)[], message: string) {
   context.addIssue({ code: z.ZodIssueCode.custom, path, message });
@@ -297,167 +246,6 @@ function blockInlines(block: z.infer<typeof prdBlockSchema>) {
     case "flow":
       return [];
   }
-}
-
-export const prdDocumentV1Schema = z.object({
-  protocol: z.literal("workbench.prd.v1"),
-  documentId: artifactIrIdSchema,
-  title: z.string().min(1).max(240),
-  revision: prdRevisionSchema,
-  assumptions: z.array(prdAssumptionSchema).max(500),
-  citations: z.array(artifactCitationSchema).max(1_000),
-  sections: prdSectionsSchema,
-}).strict().superRefine((document, context) => {
-  const allBlocks = prdSectionKeys.flatMap((key) => document.sections[key].blocks);
-  const goals = allBlocks.filter((block): block is z.infer<typeof prdGoalBlockSchema> => block.type === "goal");
-  const requirements = allBlocks.filter((block): block is z.infer<typeof prdRequirementBlockSchema> => block.type === "requirement");
-  const criteria = allBlocks.filter((block): block is z.infer<typeof prdAcceptanceCriterionBlockSchema> => block.type === "acceptanceCriterion");
-  const flows = allBlocks.filter((block): block is z.infer<typeof prdFlowBlockSchema> => block.type === "flow");
-  const goalIds = new Set(goals.map((goal) => goal.id));
-  const requirementIds = new Set(requirements.map((requirement) => requirement.id));
-  const criterionIds = new Set(criteria.map((criterion) => criterion.id));
-  const flowIds = new Set(flows.map((flow) => flow.id));
-  const assumptionIds = new Set(document.assumptions.map((assumption) => assumption.id));
-  const citationIds = new Set(document.citations.map((citation) => citation.id));
-
-  const allIds = [document.documentId];
-  for (const block of allBlocks) {
-    allIds.push(block.id);
-    if (block.type === "bulletList" || block.type === "orderedList") {
-      allIds.push(...block.items.map((item) => item.id));
-    } else if (block.type === "table") {
-      allIds.push(...block.columns.map((column) => column.id), ...block.rows.map((row) => row.id));
-    } else if (block.type === "flow") {
-      allIds.push(...block.steps.map((step) => step.id));
-    }
-  }
-  allIds.push(...document.assumptions.map((assumption) => assumption.id));
-  allIds.push(...document.citations.map((citation) => citation.id));
-  for (const duplicate of duplicateValues(allIds)) {
-    addIssue(context, [], `IR id must be globally unique: ${duplicate}`);
-  }
-
-  for (const key of prdSectionKeys) {
-    const section = document.sections[key];
-    for (const [index, block] of section.blocks.entries()) {
-      if (!sectionAllowedBlockTypes[key].has(block.type)) {
-        addIssue(context, ["sections", key, "blocks", index, "type"], `${block.type} is not allowed in ${key}`);
-      }
-    }
-    const requiredType = semanticSectionGate[key];
-    if (requiredType && !section.blocks.some((block) => block.type === requiredType)) {
-      addIssue(context, ["sections", key, "blocks"], `${key} must contain at least one ${requiredType} block`);
-    }
-  }
-
-  const scopeBlocks = document.sections.scope.blocks;
-  if (!scopeBlocks.some((block) => block.type === "bulletList" || block.type === "orderedList")) {
-    addIssue(context, ["sections", "scope", "blocks"], "scope must contain at least one explicit list");
-  }
-
-  for (const [index, requirement] of requirements.entries()) {
-    for (const duplicate of duplicateValues([...requirement.goalIds, ...requirement.acceptanceCriterionIds])) {
-      addIssue(context, ["sections", "requirements", "blocks", index], `duplicate requirement reference: ${duplicate}`);
-    }
-    for (const goalId of requirement.goalIds) {
-      if (!goalIds.has(goalId)) addIssue(context, ["sections", "requirements", "blocks", index, "goalIds"], `unknown goal: ${goalId}`);
-    }
-    for (const criterionId of requirement.acceptanceCriterionIds) {
-      const criterion = criteria.find((candidate) => candidate.id === criterionId);
-      if (!criterion) {
-        addIssue(context, ["sections", "requirements", "blocks", index, "acceptanceCriterionIds"], `unknown acceptance criterion: ${criterionId}`);
-      } else if (!criterion.requirementIds.includes(requirement.id)) {
-        addIssue(context, ["sections", "requirements", "blocks", index, "acceptanceCriterionIds"], `acceptance criterion ${criterionId} must reference requirement ${requirement.id}`);
-      }
-    }
-  }
-
-  for (const [index, criterion] of criteria.entries()) {
-    for (const requirementId of criterion.requirementIds) {
-      const requirement = requirements.find((candidate) => candidate.id === requirementId);
-      if (!requirement) {
-        addIssue(context, ["sections", "acceptanceCriteria", "blocks", index, "requirementIds"], `unknown requirement: ${requirementId}`);
-      } else if (!requirement.acceptanceCriterionIds.includes(criterion.id)) {
-        addIssue(context, ["sections", "acceptanceCriteria", "blocks", index, "requirementIds"], `requirement ${requirementId} must reference acceptance criterion ${criterion.id}`);
-      }
-    }
-  }
-
-  for (const [flowIndex, flow] of flows.entries()) {
-    for (const [stepIndex, step] of flow.steps.entries()) {
-      for (const requirementId of step.requirementIds) {
-        if (!requirementIds.has(requirementId)) {
-          addIssue(context, ["sections", "userFlows", "blocks", flowIndex, "steps", stepIndex, "requirementIds"], `unknown requirement: ${requirementId}`);
-        }
-      }
-    }
-  }
-
-  for (const [index, assumption] of document.assumptions.entries()) {
-    if (assumption.introducedInRevision > document.revision.number) {
-      addIssue(context, ["assumptions", index, "introducedInRevision"], "assumption cannot be introduced after the current revision");
-    }
-    for (const citationId of assumption.citationIds) {
-      if (!citationIds.has(citationId)) addIssue(context, ["assumptions", index, "citationIds"], `unknown citation: ${citationId}`);
-    }
-  }
-
-  const referenceSets = {
-    section: new Set<string>(prdSectionKeys),
-    goal: goalIds,
-    requirement: requirementIds,
-    acceptanceCriterion: criterionIds,
-    flow: flowIds,
-    assumption: assumptionIds,
-  };
-  for (const [blockIndex, block] of allBlocks.entries()) {
-    if (block.type === "table") {
-      const columnIds = block.columns.map((column) => column.id);
-      for (const duplicate of duplicateValues(columnIds)) addIssue(context, ["sections", "table", blockIndex, "columns"], `duplicate table column: ${duplicate}`);
-      for (const [rowIndex, row] of block.rows.entries()) {
-        const cellIds = row.cells.map((cell) => cell.columnId);
-        if (duplicateValues(cellIds).length > 0 || cellIds.length !== columnIds.length || cellIds.some((id) => !columnIds.includes(id))) {
-          addIssue(context, ["sections", "table", blockIndex, "rows", rowIndex, "cells"], "each table row must contain exactly one cell for every column");
-        }
-      }
-    }
-    for (const content of blockInlines(block)) {
-      for (const inline of content) {
-        if (inline.type === "citation" && !citationIds.has(inline.citationId)) {
-          addIssue(context, ["sections"], `unknown citation: ${inline.citationId}`);
-        } else if (inline.type === "reference" && !referenceSets[inline.targetType].has(inline.targetId)) {
-          addIssue(context, ["sections"], `unknown ${inline.targetType} reference: ${inline.targetId}`);
-        }
-      }
-    }
-  }
-});
-
-export const prdTableOfContentsEntries = [
-  "1 引言",
-  "1.1项目背景",
-  "1.2文档范围",
-  "1.3使用场景（必填）",
-  "2 业务需求",
-  "2.1页面链接",
-  "2.2 核心业务规则/功能说明",
-  "2.3 核心流程/状态/页面要求",
-  "2.4 验收标准",
-  "3. 业务降级方案（必填）",
-  "4. 需求安全基线要求（必填）",
-] as const;
-
-const prdAdditionalSectionTocIndex = 9;
-export const prdAdditionalBusinessSectionLimit = 50;
-
-export function prdTableOfContentsEntriesFor(
-  additionalSectionTitles: readonly string[] = [],
-): string[] {
-  return [
-    ...prdTableOfContentsEntries.slice(0, prdAdditionalSectionTocIndex),
-    ...additionalSectionTitles,
-    ...prdTableOfContentsEntries.slice(prdAdditionalSectionTocIndex),
-  ];
 }
 
 export const prdChannelKinds = ["inApp", "wapH5", "miniProgram"] as const;
@@ -528,13 +316,13 @@ export const prdDiagramEdgeSchema = z.object({
   label: z.string().min(1).max(240).nullable(),
 }).strict();
 
-export const prdDiagramSchema = z.object({
+export const prdTemplateDiagramSchema = z.object({
   id: artifactIrIdSchema,
   kind: z.enum(["productFlow", "productArchitecture"]),
-  title: z.enum(["图1 产品流程图", "图2 产品架构图"]),
+  title: z.string().min(4).max(240).regex(/^图[1-9]\d*\s+\S/u, "diagram title must start with its figure number"),
   description: z.string().min(20).max(2_000),
-  nodes: z.array(prdDiagramNodeSchema).min(4).max(40),
-  edges: z.array(prdDiagramEdgeSchema).min(3).max(80),
+  nodes: z.array(prdDiagramNodeSchema).min(2).max(40),
+  edges: z.array(prdDiagramEdgeSchema).min(1).max(80),
 }).strict();
 
 export const prdSafetyBaselineRowSchema = z.object({
@@ -543,19 +331,12 @@ export const prdSafetyBaselineRowSchema = z.object({
   remarks: z.string().min(1).max(1_000).nullable(),
 }).strict();
 
-const prdV2SectionSchema = z.object({
+export const prdSectionSchema = z.object({
   title: z.string().min(1).max(240),
   blocks: z.array(prdBlockSchema).min(1).max(500),
 }).strict();
 
-export const prdAdditionalBusinessSectionSchema = prdV2SectionSchema.extend({
-  title: z.string()
-    .min(5)
-    .max(240)
-    .regex(/^2\.(?:[5-9]|[1-9]\d+)\s+\S/u, "additional business section title must use 2.5+ numbering"),
-}).strict();
-
-const prdV2ForbiddenPlaceholders = [
+const prdForbiddenPlaceholders = [
   "待确认",
   "以实际为准",
   "以实际上线地址为准",
@@ -571,49 +352,44 @@ const prdV2ForbiddenPlaceholders = [
   "提醒：",
 ] as const;
 
-const prdV2ForbiddenPlaceholderPatterns = [
+const prdForbiddenPlaceholderPatterns = [
   /\b(?:TBD|TBC|TODO|FIXME|PLACEHOLDER)\b/iu,
   /(?:待补充|待完善|待填写|待提供|后续补充|后续确认|暂定|待定)/u,
   /<[^<>\n]{1,80}>/u,
   /https?:\/\/(?:www\.)?example\.(?:com|org|net|test)(?:[\/:?#]|$)/iu,
 ] as const;
 
-const prdV2WeakStandalonePatterns = [
+const prdWeakStandalonePatterns = [
   /^(?:(?:本|该)(?:页面|功能|模块))?与.+逻辑相同[。.]*$/u,
   /^(?:(?:本|该)(?:需求|页面|功能|模块))?在.+基础上[。.]*$/u,
   /^(?:沿用|复用).{1,80}(?:逻辑|规则)[。.]*$/u,
 ] as const;
 
-const prdV2UntestableAcceptancePattern = /(?:正常(?:可见|展示|显示|加载|运行)|友好(?:错误)?提示|状态流转顺畅|正确(?:展示|显示|呈现|加载)(?:对应|最终)?(?:内容|结果)?|符合预期|满足要求)/u;
-const prdV2VagueSuccessMetricPattern = /^(?:提升|优化|增强|改善|保障|确保).{0,120}(?:效率|质量|体验|能力|效果|稳定性)[。.]*$/u;
+const prdUntestableAcceptancePattern = /(?:正常(?:可见|展示|显示|加载|运行)|友好(?:错误)?提示|状态流转顺畅|正确(?:展示|显示|呈现|加载)(?:对应|最终)?(?:内容|结果)?|符合预期|满足要求)/u;
+const prdVagueSuccessMetricPattern = /^(?:提升|优化|增强|改善|保障|确保).{0,120}(?:效率|质量|体验|能力|效果|稳定性)[。.]*$/u;
 
-const prdV2StandaloneApiHeadingPattern = /(?:接口|API)/iu;
-
-type PrdV2EvidenceRule = {
+type PrdEvidenceRule = {
   positive: RegExp;
   negative?: RegExp;
   isAffirmative?: (segment: string) => boolean;
 };
 
-const prdV2AppSurfacePositivePattern = /(?:\bAPP\b|小程序).{0,24}(?:加载|运行|发布|投放|启用|业务|入口|页面|双清单|信息收集)|(?:加载|发布|投放|运行|启用).{0,16}(?:\bAPP\b|小程序)/iu;
-const prdV2AppSurfaceNegativePattern = /(?<!不)(?<!未)(?<!非)(?<!不是)(?<!并非)(?<!不再)(?<!没有)(?<!无需)(?<!无须)(?<!不必)(?<!未曾)(?<!不得)(?<!不能)(?<!不会)(?<!不应)(?<!不可)(?<!不宜)(?<!不建议)(?<!不予)(?<!禁止)(?<!避免)(?:不涉及|排除|禁用|不(?:再)?(?:启用|投放|加载|发布|运行|包含|承载|提供|开放|覆盖|支持)|未(?:启用|投放|加载|发布|运行|包含|承载|提供|开放|覆盖|支持))[^。！？；;\n]{0,48}(?:\bAPP\b|小程序)|(?:\bAPP\b|小程序)[^。！？；;\n]{0,24}(?<!不)(?<!未)(?<!非)(?<!不是)(?<!并非)(?<!不再)(?<!没有)(?<!无需)(?<!无须)(?<!不必)(?<!未曾)(?<!不得)(?<!不能)(?<!不会)(?<!不应)(?<!不可)(?<!不宜)(?<!不建议)(?<!不予)(?<!禁止)(?<!避免)(?:不涉及|排除|禁用|不(?:再)?(?:启用|投放|加载|发布|运行|包含|承载|提供|开放|覆盖|支持)|未(?:启用|投放|加载|发布|运行|包含|承载|提供|开放|覆盖|支持))|(?:\bAPP\b|小程序)[^。！？；;，,\n]{0,24}(?:不在|不属于)[^。！？；;，,\n]{0,16}(?:投放|发布|运行|启用|加载)范围(?![之以]?外)(?:之?内)?/iu;
-const prdV2AppSurfaceStrongActionPattern = /(?:\bAPP\b|小程序).{0,24}(?:加载|运行|发布|投放|启用|存在|提供|使用|开放)|(?:加载|运行|发布|投放|启用|存在|提供|使用|开放).{0,16}(?:\bAPP\b|小程序)/iu;
-const prdV2AppSurfaceIndependentPositivePattern = /(?:\bAPP\b|小程序)[^。！？；;，,\n]{0,24}(?:保持(?:现状|原状|不变|正常)|沿用(?:现状|原状|既有)|正常(?:运行|提供|开放|使用)?)/iu;
-const prdV2AppSurfaceAssertionDelimiterPattern = /([，,；;]|但(?:是)?|而(?:是)?|同时|并且|且)/u;
-const prdV2LegacyAppSurfacePositivePattern = /(?:APP|小程序).{0,24}(?:加载|投放|业务|入口|页面|双清单|信息收集)|(?:加载|发布|投放|运行).{0,16}(?:APP|小程序)/iu;
-const prdV2LegacyAppSurfaceNegativePattern = /(?:不涉及|不启用|未启用|不投放|未投放|排除).{0,12}(?:APP|小程序)|(?:APP|小程序).{0,12}(?:不涉及|不启用|未启用|不投放|未投放|排除)/iu;
-
+const prdAppSurfacePositivePattern = /(?:\bAPP\b|小程序).{0,24}(?:加载|运行|发布|投放|启用|业务|入口|页面|双清单|信息收集)|(?:加载|发布|投放|运行|启用).{0,16}(?:\bAPP\b|小程序)/iu;
+const prdAppSurfaceNegativePattern = /(?<!不)(?<!未)(?<!非)(?<!不是)(?<!并非)(?<!不再)(?<!没有)(?<!无需)(?<!无须)(?<!不必)(?<!未曾)(?<!不得)(?<!不能)(?<!不会)(?<!不应)(?<!不可)(?<!不宜)(?<!不建议)(?<!不予)(?<!禁止)(?<!避免)(?:不涉及|排除|禁用|不(?:再)?(?:启用|投放|加载|发布|运行|包含|承载|提供|开放|覆盖|支持)|未(?:启用|投放|加载|发布|运行|包含|承载|提供|开放|覆盖|支持))[^。！？；;\n]{0,48}(?:\bAPP\b|小程序)|(?:\bAPP\b|小程序)[^。！？；;\n]{0,24}(?<!不)(?<!未)(?<!非)(?<!不是)(?<!并非)(?<!不再)(?<!没有)(?<!无需)(?<!无须)(?<!不必)(?<!未曾)(?<!不得)(?<!不能)(?<!不会)(?<!不应)(?<!不可)(?<!不宜)(?<!不建议)(?<!不予)(?<!禁止)(?<!避免)(?:不涉及|排除|禁用|不(?:再)?(?:启用|投放|加载|发布|运行|包含|承载|提供|开放|覆盖|支持)|未(?:启用|投放|加载|发布|运行|包含|承载|提供|开放|覆盖|支持))|(?:\bAPP\b|小程序)[^。！？；;，,\n]{0,24}(?:不在|不属于)[^。！？；;，,\n]{0,16}(?:投放|发布|运行|启用|加载)范围(?![之以]?外)(?:之?内)?/iu;
+const prdAppSurfaceStrongActionPattern = /(?:\bAPP\b|小程序).{0,24}(?:加载|运行|发布|投放|启用|存在|提供|使用|开放)|(?:加载|运行|发布|投放|启用|存在|提供|使用|开放).{0,16}(?:\bAPP\b|小程序)/iu;
+const prdAppSurfaceIndependentPositivePattern = /(?:\bAPP\b|小程序)[^。！？；;，,\n]{0,24}(?:保持(?:现状|原状|不变|正常)|沿用(?:现状|原状|既有)|正常(?:运行|提供|开放|使用)?)/iu;
+const prdAppSurfaceAssertionDelimiterPattern = /([，,；;]|但(?:是)?|而(?:是)?|同时|并且|且)/u;
 function appSurfaceEvidenceAssertions(segment: string): string[] {
-  const parts = segment.split(prdV2AppSurfaceAssertionDelimiterPattern);
+  const parts = segment.split(prdAppSurfaceAssertionDelimiterPattern);
   const assertions: string[] = [];
   let current = parts[0] ?? "";
   for (let index = 1; index < parts.length; index += 2) {
     const delimiter = parts[index] ?? "";
     const right = parts[index + 1] ?? "";
     if (
-      prdV2AppSurfaceStrongActionPattern.test(right)
-      || prdV2AppSurfaceIndependentPositivePattern.test(right)
-      || prdV2AppSurfaceNegativePattern.test(right)
+      prdAppSurfaceStrongActionPattern.test(right)
+      || prdAppSurfaceIndependentPositivePattern.test(right)
+      || prdAppSurfaceNegativePattern.test(right)
     ) {
       if (current.trim()) assertions.push(current);
       current = right;
@@ -627,44 +403,44 @@ function appSurfaceEvidenceAssertions(segment: string): string[] {
 
 function hasAffirmativeAppSurfaceEvidence(segment: string): boolean {
   return appSurfaceEvidenceAssertions(segment).some((assertion) => (
-    prdV2AppSurfacePositivePattern.test(assertion)
-    && !prdV2AppSurfaceNegativePattern.test(assertion)
+    prdAppSurfacePositivePattern.test(assertion)
+    && !prdAppSurfaceNegativePattern.test(assertion)
   ));
 }
 
-const prdV2FunctionalChangePositivePattern = /(?:新增|增加|新建|新开发|开发(?!人员|者|团队|同学|工程师)|建设|搭建|构建|实现|修改|调整|改变|变更|变动|改造|升级).{0,24}(?:功能接口|功能逻辑|业务逻辑|逻辑|功能|接口|页面|能力|控件|流程|行为|规则|模块|入口|开关|设置|字段|按钮|校验|记录|反馈|重试|映射|状态(?:逻辑|规则|流程|展示|处理|记录|行为|流转|机)?)|(?:功能接口|功能逻辑|业务逻辑|逻辑|功能|接口|页面|能力|控件|流程|行为|规则|模块|入口|开关|设置|字段|按钮|校验|记录|反馈|重试|映射|状态(?:逻辑|规则|流程|展示|处理|记录|行为|流转|机)).{0,20}(?:新增|增加|新建|修改|调整|改变|变更|变动|改造|升级)|(?:应|需|需要|必须|本次|本需求|本项目|目标是|计划).{0,12}(?:支持|提供|允许|启用|开放).{0,24}(?:功能接口|功能逻辑|业务逻辑|逻辑|功能|接口|页面|能力|控件|流程|行为|规则|模块|入口|开关|设置|字段|按钮|校验|记录|反馈|重试|映射|状态(?:逻辑|规则|流程|展示|处理|记录|行为|流转|机))/u;
-const prdV2FunctionalChangeNegativePattern = /(?:不涉及|无需|没有|不存在|无).{0,20}(?:功能接口|功能逻辑|业务逻辑|逻辑|功能|接口|页面|能力|控件|流程|行为|规则|模块|入口|开关|设置|字段|按钮|校验|记录|反馈|重试|映射|状态(?:逻辑|规则|流程|展示|处理|记录|行为|流转|机)).{0,16}(?:新增|增加|新建|新开发|开发|建设|搭建|构建|实现|修改|调整|改变|变更|变动|改造|升级)|(?:不|未|无需|不再|尚未)(?:发生|涉及|包含|进行|需要)?(?:新增|增加|新建|新开发|开发|建设|搭建|构建|实现|修改|调整|改变|变更|变动|改造|升级).{0,24}(?:功能接口|功能逻辑|业务逻辑|逻辑|功能|接口|页面|能力|控件|流程|行为|规则|模块|入口|开关|设置|字段|按钮|校验|记录|反馈|重试|映射|状态(?:逻辑|规则|流程|展示|处理|记录|行为|流转|机))|(?:功能接口|功能逻辑|业务逻辑|逻辑|功能|接口|页面|能力|控件|流程|行为|规则|模块|入口|开关|设置|字段|按钮|校验|记录|反馈|重试|映射|状态(?:逻辑|规则|流程|展示|处理|记录|行为|流转|机)).{0,16}(?:不|未|无|无需)(?:发生|涉及|包含|进行)?(?:新增|增加|新建|新开发|开发|建设|搭建|构建|实现|修改|调整|改变|变更|变动|改造|升级)/u;
-const prdV2FunctionalChangeGlobalScopePattern = /(?:任何(?:功能|页面|接口|逻辑|能力)|功能接口|功能逻辑|业务逻辑|(?:功能|页面|接口|逻辑|能力).{0,16}(?:功能|页面|接口|逻辑|能力))/u;
-const prdV2FunctionalChangeBroadNoChangePattern = /(?:不涉及|没有|不存在|无|未发生|不会发生|不进行|无需进行).{0,48}(?:功能接口|功能逻辑|业务逻辑|功能|页面|接口|逻辑|能力).{0,24}(?:变化|变更|变动|改动|调整|改造)|(?:功能接口|功能逻辑|业务逻辑|功能|页面|接口|逻辑|能力).{0,32}(?:均|都|全部)?(?:没有|不存在|无|未发生|不会发生).{0,8}(?:变化|变更|变动|改动|调整|改造)|(?:功能接口|功能逻辑|业务逻辑|功能|页面|接口|逻辑|能力).{0,32}(?:均|都|全部)?(?:保持|维持)(?:现状|原状|不变)/u;
-const prdV2FunctionalChangeExhaustiveNoChangePattern = /(?:不|未|无需)(?=[^。！？；;\n]{0,56}(?:新增|新建|建设|开发|搭建|构建|实现))(?=[^。！？；;\n]{0,56}(?:修改|调整|改变|变更|变动|改造|升级))[^。！？；;\n]{0,56}(?:任何(?:功能|页面|接口|逻辑|能力)|功能接口|功能逻辑|业务逻辑)/u;
-const prdV2FunctionalChangeClauseDelimiterPattern = /(?:[；;]|[，,]?(?:但(?:是)?|而(?:是)?|同时|并且|且))/u;
-const prdV2FunctionalChangeIndependentActionDelimiterPattern = /[，,](?=(?:(?:本次|本需求|本项目|另(?:外)?|随后|将|会|需|需要|计划)\s*)*(?:新增|增加|新建|新开发|开发|建设|搭建|构建|实现|修改|调整|改变|变更|变动|改造|升级))/u;
-const prdV2FunctionalChangeCommaDelimiterPattern = /[，,]/u;
+const prdFunctionalChangePositivePattern = /(?:新增|增加|新建|新开发|开发(?!人员|者|团队|同学|工程师)|建设|搭建|构建|实现|修改|调整|改变|变更|变动|改造|升级).{0,24}(?:功能接口|功能逻辑|业务逻辑|逻辑|功能|接口|页面|能力|控件|流程|行为|规则|模块|入口|开关|设置|字段|按钮|校验|记录|反馈|重试|映射|状态(?:逻辑|规则|流程|展示|处理|记录|行为|流转|机)?)|(?:功能接口|功能逻辑|业务逻辑|逻辑|功能|接口|页面|能力|控件|流程|行为|规则|模块|入口|开关|设置|字段|按钮|校验|记录|反馈|重试|映射|状态(?:逻辑|规则|流程|展示|处理|记录|行为|流转|机)).{0,20}(?:新增|增加|新建|修改|调整|改变|变更|变动|改造|升级)|(?:应|需|需要|必须|本次|本需求|本项目|目标是|计划).{0,12}(?:支持|提供|允许|启用|开放).{0,24}(?:功能接口|功能逻辑|业务逻辑|逻辑|功能|接口|页面|能力|控件|流程|行为|规则|模块|入口|开关|设置|字段|按钮|校验|记录|反馈|重试|映射|状态(?:逻辑|规则|流程|展示|处理|记录|行为|流转|机))/u;
+const prdFunctionalChangeNegativePattern = /(?:不涉及|无需|没有|不存在|无).{0,20}(?:功能接口|功能逻辑|业务逻辑|逻辑|功能|接口|页面|能力|控件|流程|行为|规则|模块|入口|开关|设置|字段|按钮|校验|记录|反馈|重试|映射|状态(?:逻辑|规则|流程|展示|处理|记录|行为|流转|机)).{0,16}(?:新增|增加|新建|新开发|开发|建设|搭建|构建|实现|修改|调整|改变|变更|变动|改造|升级)|(?:不|未|无需|不再|尚未)(?:发生|涉及|包含|进行|需要)?(?:新增|增加|新建|新开发|开发|建设|搭建|构建|实现|修改|调整|改变|变更|变动|改造|升级).{0,24}(?:功能接口|功能逻辑|业务逻辑|逻辑|功能|接口|页面|能力|控件|流程|行为|规则|模块|入口|开关|设置|字段|按钮|校验|记录|反馈|重试|映射|状态(?:逻辑|规则|流程|展示|处理|记录|行为|流转|机))|(?:功能接口|功能逻辑|业务逻辑|逻辑|功能|接口|页面|能力|控件|流程|行为|规则|模块|入口|开关|设置|字段|按钮|校验|记录|反馈|重试|映射|状态(?:逻辑|规则|流程|展示|处理|记录|行为|流转|机)).{0,16}(?:不|未|无|无需)(?:发生|涉及|包含|进行)?(?:新增|增加|新建|新开发|开发|建设|搭建|构建|实现|修改|调整|改变|变更|变动|改造|升级)/u;
+const prdFunctionalChangeGlobalScopePattern = /(?:任何(?:功能|页面|接口|逻辑|能力)|功能接口|功能逻辑|业务逻辑|(?:功能|页面|接口|逻辑|能力).{0,16}(?:功能|页面|接口|逻辑|能力))/u;
+const prdFunctionalChangeBroadNoChangePattern = /(?:不涉及|没有|不存在|无|未发生|不会发生|不进行|无需进行).{0,48}(?:功能接口|功能逻辑|业务逻辑|功能|页面|接口|逻辑|能力).{0,24}(?:变化|变更|变动|改动|调整|改造)|(?:功能接口|功能逻辑|业务逻辑|功能|页面|接口|逻辑|能力).{0,32}(?:均|都|全部)?(?:没有|不存在|无|未发生|不会发生).{0,8}(?:变化|变更|变动|改动|调整|改造)|(?:功能接口|功能逻辑|业务逻辑|功能|页面|接口|逻辑|能力).{0,32}(?:均|都|全部)?(?:保持|维持)(?:现状|原状|不变)/u;
+const prdFunctionalChangeExhaustiveNoChangePattern = /(?:不|未|无需)(?=[^。！？；;\n]{0,56}(?:新增|新建|建设|开发|搭建|构建|实现))(?=[^。！？；;\n]{0,56}(?:修改|调整|改变|变更|变动|改造|升级))[^。！？；;\n]{0,56}(?:任何(?:功能|页面|接口|逻辑|能力)|功能接口|功能逻辑|业务逻辑)/u;
+const prdFunctionalChangeClauseDelimiterPattern = /(?:[；;]|[，,]?(?:但(?:是)?|而(?:是)?|同时|并且|且))/u;
+const prdFunctionalChangeIndependentActionDelimiterPattern = /[，,](?=(?:(?:本次|本需求|本项目|另(?:外)?|随后|将|会|需|需要|计划)\s*)*(?:新增|增加|新建|新开发|开发|建设|搭建|构建|实现|修改|调整|改变|变更|变动|改造|升级))/u;
+const prdFunctionalChangeCommaDelimiterPattern = /[，,]/u;
 
 function functionalChangeEvidenceAssertions(segment: string): string[] {
   return segment
-    .split(prdV2FunctionalChangeClauseDelimiterPattern)
-    .flatMap((clause) => clause.split(prdV2FunctionalChangeIndependentActionDelimiterPattern))
+    .split(prdFunctionalChangeClauseDelimiterPattern)
+    .flatMap((clause) => clause.split(prdFunctionalChangeIndependentActionDelimiterPattern))
     .flatMap((clause) => (
       hasExplicitNoFunctionalChangeAssertion(clause)
         ? [clause]
-        : clause.split(prdV2FunctionalChangeCommaDelimiterPattern)
+        : clause.split(prdFunctionalChangeCommaDelimiterPattern)
     ))
     .map((assertion) => assertion.trim())
     .filter(Boolean);
 }
 
 function hasExplicitNoFunctionalChangeAssertion(assertion: string): boolean {
-  return prdV2FunctionalChangeGlobalScopePattern.test(assertion) && (
-    prdV2FunctionalChangeBroadNoChangePattern.test(assertion)
-    || prdV2FunctionalChangeExhaustiveNoChangePattern.test(assertion)
+  return prdFunctionalChangeGlobalScopePattern.test(assertion) && (
+    prdFunctionalChangeBroadNoChangePattern.test(assertion)
+    || prdFunctionalChangeExhaustiveNoChangePattern.test(assertion)
   );
 }
 
 function hasAffirmativeFunctionalChangeEvidence(segment: string): boolean {
   return functionalChangeEvidenceAssertions(segment).some((assertion) => (
-    prdV2FunctionalChangePositivePattern.test(assertion)
-    && !prdV2FunctionalChangeNegativePattern.test(assertion)
+    prdFunctionalChangePositivePattern.test(assertion)
+    && !prdFunctionalChangeNegativePattern.test(assertion)
     && !hasExplicitNoFunctionalChangeAssertion(assertion)
   ));
 }
@@ -675,10 +451,10 @@ function hasExplicitNoFunctionalChangeEvidence(segments: readonly string[]): boo
   ));
 }
 
-const prdV2SafetyEvidenceRules: Record<number, PrdV2EvidenceRule> = {
+const prdSafetyEvidenceRules: Record<number, PrdEvidenceRule> = {
   1: {
-    positive: prdV2FunctionalChangePositivePattern,
-    negative: prdV2FunctionalChangeNegativePattern,
+    positive: prdFunctionalChangePositivePattern,
+    negative: prdFunctionalChangeNegativePattern,
     isAffirmative: hasAffirmativeFunctionalChangeEvidence,
   },
   2: {
@@ -721,8 +497,8 @@ const prdV2SafetyEvidenceRules: Record<number, PrdV2EvidenceRule> = {
     negative: /不涉及.{0,12}(?:隐私政策|隐私协议)|无需.{0,8}(?:隐私政策|隐私协议)/u,
   },
   12: {
-    positive: prdV2AppSurfacePositivePattern,
-    negative: prdV2AppSurfaceNegativePattern,
+    positive: prdAppSurfacePositivePattern,
+    negative: prdAppSurfaceNegativePattern,
     isAffirmative: hasAffirmativeAppSurfaceEvidence,
   },
   13: {
@@ -763,9 +539,9 @@ const prdV2SafetyEvidenceRules: Record<number, PrdV2EvidenceRule> = {
   },
 };
 
-const prdV2SafetyRemediationPattern = /(?:整改|改造|补齐|补充|完善|修复|接入|上线前需|上线前必须|发布前需|发布前必须|需(?:完成|增加|补充|接入|改造)|应(?:完成|增加|补充|接入|改造))/u;
+const prdSafetyRemediationPattern = /(?:整改|改造|补齐|补充|完善|修复|接入|上线前需|上线前必须|发布前需|发布前必须|需(?:完成|增加|补充|接入|改造)|应(?:完成|增加|补充|接入|改造))/u;
 
-const prdV2AcceptanceDimensions = [
+const prdAcceptanceDimensions = [
   {
     key: "visibility",
     label: "页面或入口可见性",
@@ -804,7 +580,7 @@ const prdV2AcceptanceDimensions = [
   },
 ] as const;
 
-const prdChannelEvidenceRules: Record<typeof prdChannelKinds[number], PrdV2EvidenceRule> = {
+const prdChannelEvidenceRules: Record<typeof prdChannelKinds[number], PrdEvidenceRule> = {
   inApp: {
     positive: /(?:端内渠道|端内入口|APP\s*端内|客户端内|应用内)/iu,
     negative: /(?:不涉及|不启用|未启用|不投放|未投放|排除).{0,8}(?:端内|应用内)|(?:端内|应用内).{0,8}(?:不涉及|不启用|未启用|不投放|未投放|排除)/u,
@@ -819,8 +595,23 @@ const prdChannelEvidenceRules: Record<typeof prdChannelKinds[number], PrdV2Evide
   },
 };
 
-const prdDocumentV2BaseSchema = z.object({
-  protocol: z.literal("workbench.prd.v2"),
+export const prdV3FunctionSectionSchema = prdSectionSchema.extend({
+  id: artifactIrIdSchema,
+  title: z.string().min(5).max(240).regex(/^2\.(?:[2-9]|[1-9]\d+)\s+\S/u, "business section title must use 2.2+ numbering"),
+  diagrams: z.array(prdTemplateDiagramSchema).max(2).default([]),
+}).strict();
+
+export function prdTableOfContentsEntriesForV3(functionSectionTitles: readonly string[]): string[] {
+  return [
+    "1 引言", "1.1项目背景", "1.2文档范围", "1.3使用场景（必填）",
+    "2 业务需求", "2.1页面链接",
+    ...functionSectionTitles,
+    "3. 业务降级方案（必填）", "4. 需求安全基线要求（必填）",
+  ];
+}
+
+const prdDocumentV3BaseSchema = z.object({
+  protocol: z.literal("workbench.prd.v3"),
   documentId: artifactIrIdSchema,
   title: z.string().min(1).max(240),
   revision: prdRevisionSchema,
@@ -831,18 +622,16 @@ const prdDocumentV2BaseSchema = z.object({
   versionHistory: z.array(prdVersionHistoryEntrySchema).min(1).max(100),
   tableOfContents: z.object({
     title: z.literal("目 录"),
-    entries: z.array(z.string().min(1).max(240))
-      .min(prdTableOfContentsEntries.length)
-      .max(prdTableOfContentsEntries.length + prdAdditionalBusinessSectionLimit),
+    entries: z.array(z.string().min(1).max(240)).min(9).max(58),
   }).strict(),
   assumptions: z.array(prdAssumptionSchema).max(500),
   citations: z.array(artifactCitationSchema).max(1_000),
   sections: z.object({
     introduction: z.object({
       title: z.literal("1 引言"),
-      background: prdV2SectionSchema.extend({ title: z.literal("1.1项目背景") }).strict(),
-      scope: prdV2SectionSchema.extend({ title: z.literal("1.2文档范围") }).strict(),
-      usageScenarios: prdV2SectionSchema.extend({
+      background: prdSectionSchema.extend({ title: z.literal("1.1项目背景") }).strict(),
+      scope: prdSectionSchema.extend({ title: z.literal("1.2文档范围") }).strict(),
+      usageScenarios: prdSectionSchema.extend({
         title: z.literal("1.3使用场景（必填）"),
         channelTable: z.object({
           title: z.literal("活动投放渠道"),
@@ -855,16 +644,8 @@ const prdDocumentV2BaseSchema = z.object({
     businessRequirements: z.object({
       title: z.literal("2 业务需求"),
       summary: prdInlineContentSchema,
-      pageLinks: prdV2SectionSchema.extend({ title: z.literal("2.1页面链接") }).strict(),
-      coreRules: prdV2SectionSchema.extend({ title: z.literal("2.2 核心业务规则/功能说明") }).strict(),
-      flowAndPages: prdV2SectionSchema.extend({
-        title: z.literal("2.3 核心流程/状态/页面要求"),
-        diagrams: z.array(prdDiagramSchema).min(2).max(2),
-      }).strict(),
-      acceptanceCriteria: prdV2SectionSchema.extend({ title: z.literal("2.4 验收标准") }).strict(),
-      additionalSections: z.array(prdAdditionalBusinessSectionSchema)
-        .max(prdAdditionalBusinessSectionLimit)
-        .default([]),
+      pageLinks: prdSectionSchema.extend({ title: z.literal("2.1页面链接") }).strict(),
+      functionSections: z.array(prdV3FunctionSectionSchema).min(1).max(50),
     }).strict(),
     degradation: z.object({
       title: z.literal("3 业务降级方案（必填）"),
@@ -881,82 +662,31 @@ const prdDocumentV2BaseSchema = z.object({
   }).strict(),
 }).strict();
 
-export const prdV3DiagramSchema = prdDiagramSchema.extend({
-  title: z.string().min(4).max(240).regex(/^图[1-9]\d*\s+\S/u, "diagram title must start with its figure number"),
-  nodes: z.array(prdDiagramNodeSchema).min(2).max(40),
-  edges: z.array(prdDiagramEdgeSchema).min(1).max(80),
-}).strict();
-
-export const prdTemplateDiagramSchema = prdV3DiagramSchema;
-
-export const prdV3FunctionSectionSchema = prdV2SectionSchema.extend({
-  id: artifactIrIdSchema,
-  title: z.string().min(5).max(240).regex(/^2\.(?:[2-9]|[1-9]\d+)\s+\S/u, "business section title must use 2.2+ numbering"),
-  diagrams: z.array(prdV3DiagramSchema).max(2).default([]),
-}).strict();
-
-export function prdTableOfContentsEntriesForV3(functionSectionTitles: readonly string[]): string[] {
-  return [
-    ...prdTableOfContentsEntries.slice(0, 6),
-    ...functionSectionTitles,
-    ...prdTableOfContentsEntries.slice(prdAdditionalSectionTocIndex),
-  ];
-}
-
-const prdDocumentV3BaseSchema = prdDocumentV2BaseSchema.extend({
-  protocol: z.literal("workbench.prd.v3"),
-  tableOfContents: z.object({
-    title: z.literal("目 录"),
-    entries: z.array(z.string().min(1).max(240)).min(9).max(58),
-  }).strict(),
-  sections: prdDocumentV2BaseSchema.shape.sections.extend({
-    businessRequirements: z.object({
-      title: z.literal("2 业务需求"),
-      summary: prdInlineContentSchema,
-      pageLinks: prdV2SectionSchema.extend({ title: z.literal("2.1页面链接") }).strict(),
-      functionSections: z.array(prdV3FunctionSectionSchema).min(1).max(50),
-    }).strict(),
-  }).strict(),
-}).strict();
-
-type PrdTemplateBase = z.infer<typeof prdDocumentV2BaseSchema> | z.infer<typeof prdDocumentV3BaseSchema>;
-export type PrdTemplateDiagram = z.infer<typeof prdV3DiagramSchema>;
+type PrdTemplateBase = z.infer<typeof prdDocumentV3BaseSchema>;
+export type PrdTemplateDiagram = z.infer<typeof prdTemplateDiagramSchema>;
 export type PrdTemplateSection = { title: string; blocks: PrdBlock[]; id?: string; diagrams?: PrdTemplateDiagram[] };
 
-/** Actual reading order, without rewriting a v3 document into a legacy layout. */
+/** Sections in document reading order. */
 export function prdBusinessSections(document: PrdTemplateBase): PrdTemplateSection[] {
   const business = document.sections.businessRequirements;
-  if ("functionSections" in business) return [business.pageLinks, ...business.functionSections];
-  return [business.pageLinks, business.coreRules, business.flowAndPages, business.acceptanceCriteria, ...business.additionalSections];
+  return [business.pageLinks, ...business.functionSections];
 }
 
 export function prdDocumentDiagrams(document: PrdTemplateBase): PrdTemplateDiagram[] {
   return prdBusinessSections(document).flatMap((section) => section.diagrams ?? []);
 }
 
-function businessSectionEntries(document: PrdTemplateBase): Array<readonly [string, z.infer<typeof prdV2SectionSchema>]> {
+function businessSectionEntries(document: PrdTemplateBase): Array<readonly [string, z.infer<typeof prdSectionSchema>]> {
   const business = document.sections.businessRequirements;
-  if ("functionSections" in business) return [
+  return [
     ["pageLinks", business.pageLinks],
     ...business.functionSections.map((section, index) => [`functionSections.${index}`, section] as const),
-  ];
-  return [
-    ["pageLinks", business.pageLinks], ["coreRules", business.coreRules],
-    ["flowAndPages", business.flowAndPages], ["acceptanceCriteria", business.acceptanceCriteria],
-    ...business.additionalSections.map((section, index) => [`additionalSections.${index}`, section] as const),
   ];
 }
 
 function refinePrdTemplateDocument(
   document: PrdTemplateBase,
   context: z.RefinementCtx,
-  {
-    allowLegacyAppSurfaceEvidence,
-    enforceRuntimeRowOneSemantics,
-  }: {
-    allowLegacyAppSurfaceEvidence: boolean;
-    enforceRuntimeRowOneSemantics: boolean;
-  },
 ): void {
   const expectedTitle = `${document.cover.workOrderName}需求说明书`;
   if (document.title !== expectedTitle || document.cover.title !== expectedTitle) {
@@ -964,18 +694,15 @@ function refinePrdTemplateDocument(
   }
 
   const business = document.sections.businessRequirements;
-  const isV3 = document.protocol === "workbench.prd.v3";
-  const numberedSections = "functionSections" in business ? business.functionSections : business.additionalSections;
+  const numberedSections = business.functionSections;
   for (const [index, section] of numberedSections.entries()) {
-    const expectedPrefix = `2.${index + (isV3 ? 2 : 5)} `;
+    const expectedPrefix = `2.${index + 2} `;
     if (!section.title.startsWith(expectedPrefix)) {
-      addIssue(context, ["sections", "businessRequirements", isV3 ? "functionSections" : "additionalSections", index, "title"],
+      addIssue(context, ["sections", "businessRequirements", "functionSections", index, "title"],
         `business section title must start with ${expectedPrefix}`);
     }
   }
-  const expectedTableOfContentsEntries = isV3
-    ? prdTableOfContentsEntriesForV3(numberedSections.map((section) => section.title))
-    : prdTableOfContentsEntriesFor(numberedSections.map((section) => section.title));
+  const expectedTableOfContentsEntries = prdTableOfContentsEntriesForV3(numberedSections.map((section) => section.title));
   if (document.tableOfContents.entries.length !== expectedTableOfContentsEntries.length) {
     addIssue(
       context,
@@ -1014,31 +741,20 @@ function refinePrdTemplateDocument(
   }
 
   const diagrams = prdDocumentDiagrams(document);
-  const diagramPaths: (string | number)[][] = "functionSections" in business
-    ? business.functionSections.flatMap((section, sectionIndex) => section.diagrams.map((_, diagramIndex) => ["sections", "businessRequirements", "functionSections", sectionIndex, "diagrams", diagramIndex]))
-    : diagrams.map((_, index) => ["sections", "businessRequirements", "flowAndPages", "diagrams", index]);
-
-  const expectedDiagrams = [
-    { kind: "productFlow", title: "图1 产品流程图" },
-    { kind: "productArchitecture", title: "图2 产品架构图" },
-  ] as const;
-  if ("functionSections" in business) {
-    for (const [sectionIndex, section] of business.functionSections.entries()) {
-      for (const kind of duplicateValues(section.diagrams.map((diagram) => diagram.kind))) {
-        addIssue(context, ["sections", "businessRequirements", "functionSections", sectionIndex, "diagrams"], `diagram kind must be unique within a function section: ${kind}`);
-      }
+  const diagramPaths = business.functionSections.flatMap((section, sectionIndex) => (
+    section.diagrams.map((_, diagramIndex) => ["sections", "businessRequirements", "functionSections", sectionIndex, "diagrams", diagramIndex])
+  ));
+  for (const [sectionIndex, section] of business.functionSections.entries()) {
+    for (const kind of duplicateValues(section.diagrams.map((diagram) => diagram.kind))) {
+      addIssue(context, ["sections", "businessRequirements", "functionSections", sectionIndex, "diagrams"], `diagram kind must be unique within a function section: ${kind}`);
     }
-    for (const [index, diagram] of diagrams.entries()) {
-      if (!diagram.title.startsWith(`图${index + 1} `)) {
-        addIssue(context, [...(diagramPaths[index] ?? []), "title"], `diagram title must start with 图${index + 1} in reading order`);
-      }
+  }
+  for (const [index, diagram] of diagrams.entries()) {
+    if (!diagram.title.startsWith(`图${index + 1} `)) {
+      addIssue(context, [...(diagramPaths[index] ?? []), "title"], `diagram title must start with 图${index + 1} in reading order`);
     }
   }
   for (const [diagramIndex, diagram] of diagrams.entries()) {
-    const expected = expectedDiagrams[diagramIndex];
-    if (!isV3 && (!expected || diagram.kind !== expected.kind || diagram.title !== expected.title)) {
-      addIssue(context, diagramPaths[diagramIndex] ?? [], "diagrams must contain product flow followed by product architecture");
-    }
     const nodeIds = new Set(diagram.nodes.map((node) => node.id));
     if (nodeIds.size !== diagram.nodes.length) {
       addIssue(context, [...(diagramPaths[diagramIndex] ?? []), "nodes"], "diagram node ids must be unique");
@@ -1064,14 +780,14 @@ function refinePrdTemplateDocument(
   }
   const safetyEvidenceSegments = requirementEvidenceSegments(document);
   for (const [index, row] of document.sections.safetyBaseline.rows.entries()) {
-    if (isV3 && row.applicability === "不涉及" && row.remarks !== null) {
+    if (row.applicability === "不涉及" && row.remarks !== null) {
       addIssue(context, ["sections", "safetyBaseline", "rows", index, "remarks"], "a v3 safety row marked 不涉及 must use null remarks");
     }
     if (row.applicability !== "不涉及" && !row.remarks) {
       addIssue(context, ["sections", "safetyBaseline", "rows", index, "remarks"], "a safety row marked 是 or 否 must include its requirement evidence or remediation note");
     }
-    const evidenceRule = prdV2SafetyEvidenceRules[row.sequence];
-    if (row.sequence === 1 && enforceRuntimeRowOneSemantics) {
+    const evidenceRule = prdSafetyEvidenceRules[row.sequence];
+    if (row.sequence === 1) {
       const hasFunctionalChange = hasAffirmativeEvidence(safetyEvidenceSegments, evidenceRule);
       if (row.applicability === "不涉及") {
         if (hasFunctionalChange) {
@@ -1093,25 +809,19 @@ function refinePrdTemplateDocument(
       }
       continue;
     }
-    if (row.sequence === 1 && row.applicability === "不涉及") {
-      // Persisted v2 documents remain readable; Runtime submission applies the strict row 1 rules above.
-      continue;
-    }
     if (row.applicability === "不涉及") {
       if (hasAffirmativeEvidence(safetyEvidenceSegments, evidenceRule)) {
         addIssue(context, ["sections", "safetyBaseline", "rows", index, "applicability"], "a safety row marked 不涉及 contradicts affirmative semantic evidence in the requirement body");
       }
       continue;
     }
-    const hasEvidence = allowLegacyAppSurfaceEvidence
-      ? hasPersistedAffirmativeEvidence(safetyEvidenceSegments, row.sequence, evidenceRule)
-      : hasAffirmativeEvidence(safetyEvidenceSegments, evidenceRule);
+    const hasEvidence = hasAffirmativeEvidence(safetyEvidenceSegments, evidenceRule);
     if (!hasEvidence) {
       addIssue(context, ["sections", "safetyBaseline", "rows", index, "applicability"], "a safety row marked 是 or 否 requires affirmative semantic evidence in the requirement body");
     }
     if (row.applicability === "否" && !safetyEvidenceSegments.some((segment) => (
       isAffirmativeEvidenceSegment(segment, evidenceRule)
-      && prdV2SafetyRemediationPattern.test(segment)
+      && prdSafetyRemediationPattern.test(segment)
     ))) {
       addIssue(context, ["sections", "safetyBaseline", "rows", index, "applicability"], "a safety row marked 否 requires a concrete remediation for the same safety topic in the requirement body");
     }
@@ -1128,7 +838,7 @@ function refinePrdTemplateDocument(
     }
   }
 
-  const sectionEntries: Array<readonly [string, z.infer<typeof prdV2SectionSchema>]> = [
+  const sectionEntries: Array<readonly [string, z.infer<typeof prdSectionSchema>]> = [
     ["background", document.sections.introduction.background],
     ["scope", document.sections.introduction.scope],
     ["usageScenarios", document.sections.introduction.usageScenarios],
@@ -1146,7 +856,7 @@ function refinePrdTemplateDocument(
     ...document.assumptions.map((assumption) => assumption.id),
     ...document.citations.map((citation) => citation.id),
   ];
-  if ("functionSections" in business) allIds.push(...business.functionSections.map((section) => section.id));
+  allIds.push(...business.functionSections.map((section) => section.id));
   for (const block of allBlocks) {
     allIds.push(block.id);
     if (block.type === "bulletList" || block.type === "orderedList") {
@@ -1167,83 +877,18 @@ function refinePrdTemplateDocument(
     addIssue(context, [], `IR id must be globally unique: ${duplicate}`);
   }
 
-  if ("functionSections" in business) {
-    refinePrdV3Acceptance(document, context);
-  } else {
-  const acceptanceTable = business.acceptanceCriteria.blocks.find((block): block is z.infer<typeof prdTableBlockSchema> => (
-    block.type === "table"
-    && block.columns.length === 3
-    && block.columns[0]?.label === "序号"
-    && block.columns[1]?.label === "验收项"
-    && block.columns[2]?.label === "验收标准"
-  ));
-  if (!acceptanceTable) {
-    addIssue(context, ["sections", "businessRequirements", "acceptanceCriteria", "blocks"], "acceptance criteria must contain a 序号/验收项/验收标准 table");
-  } else {
-    const [sequenceColumn, itemColumn, standardColumn] = acceptanceTable.columns;
-    const normalizedItems: string[] = [];
-    const normalizedStandards: string[] = [];
-    const itemTexts: string[] = [];
-    for (const [rowIndex, row] of acceptanceTable.rows.entries()) {
-      const cellText = (columnId: string | undefined) => inlinePlainText(
-        row.cells.find((cell) => cell.columnId === columnId)?.content ?? [],
-      ).replace(/\s+/gu, "").trim();
-      const sequence = cellText(sequenceColumn?.id);
-      const item = cellText(itemColumn?.id);
-      const standard = cellText(standardColumn?.id);
-      itemTexts.push(item);
-      normalizedItems.push(normalizeSemanticText(item));
-      normalizedStandards.push(normalizeSemanticText(standard));
-      if (sequence !== String(rowIndex + 1)) {
-        addIssue(context, ["sections", "businessRequirements", "acceptanceCriteria", "blocks", "rows", rowIndex], "acceptance row sequence must be continuous starting at 1");
-      }
-      if ([...item].length < 2 || [...standard].length < 10) {
-        addIssue(context, ["sections", "businessRequirements", "acceptanceCriteria", "blocks", "rows", rowIndex], "acceptance rows must name a concrete item and a substantive testable standard");
-      }
-      if (prdV2UntestableAcceptancePattern.test(standard)) {
-        addIssue(context, ["sections", "businessRequirements", "acceptanceCriteria", "blocks", "rows", rowIndex], "acceptance standards must state observable results instead of vague quality wording");
-      }
-    }
-    for (const duplicate of duplicateValues(normalizedItems.filter(Boolean))) {
-      addIssue(context, ["sections", "businessRequirements", "acceptanceCriteria", "blocks"], `acceptance items must be distinct: ${duplicate}`);
-    }
-    for (const duplicate of duplicateValues(normalizedStandards.filter(Boolean))) {
-      addIssue(context, ["sections", "businessRequirements", "acceptanceCriteria", "blocks"], `acceptance standards must be distinct: ${duplicate}`);
-    }
-    const acceptanceEvidenceSegments = acceptanceRelevanceEvidenceSegments(document);
-    const relevantDimensions = prdV2AcceptanceDimensions.filter((dimension) => (
-      hasAffirmativeEvidence(acceptanceEvidenceSegments, { positive: dimension.relevancePattern })
-    ));
-    if (acceptanceTable.rows.length < relevantDimensions.length) {
-      addIssue(context, ["sections", "businessRequirements", "acceptanceCriteria", "blocks"], `acceptance criteria must contain at least ${relevantDimensions.length} independently testable rows for the relevant requirement dimensions`);
-    }
-    const dimensionRows = relevantDimensions.map((dimension) => (
-      itemTexts.flatMap((item, rowIndex) => dimension.pattern.test(item) ? [rowIndex] : [])
-    ));
-    for (const [dimensionIndex, rows] of dimensionRows.entries()) {
-      if (rows.length === 0) {
-        addIssue(context, ["sections", "businessRequirements", "acceptanceCriteria", "blocks"], `acceptance criteria must cover ${relevantDimensions[dimensionIndex]?.label}`);
-      }
-    }
-    if (dimensionRows.every((rows) => rows.length > 0) && !hasDistinctAcceptanceCoverage(dimensionRows)) {
-      addIssue(context, ["sections", "businessRequirements", "acceptanceCriteria", "blocks"], "acceptance dimensions must be represented by distinct rows");
-    }
-  }
-  if (!business.coreRules.blocks.some((block) => block.type === "table" || block.type === "requirement")) {
-    addIssue(context, ["sections", "businessRequirements", "coreRules", "blocks"], "core rules must contain a rule table or typed requirement");
-  }
-  }
+  refinePrdV3Acceptance(document, context);
   if (!document.sections.introduction.scope.blocks.some((block) => block.type === "bulletList" || block.type === "orderedList")) {
     addIssue(context, ["sections", "introduction", "scope", "blocks"], "document scope must contain an explicit list");
   }
   for (const [blockIndex, block] of allBlocks.entries()) {
-    if (block.type === "goal" && prdV2VagueSuccessMetricPattern.test(block.successMetric.trim())) {
+    if (block.type === "goal" && prdVagueSuccessMetricPattern.test(block.successMetric.trim())) {
       addIssue(context, ["sections", "blocks", blockIndex, "successMetric"], "success metrics must be verifiable instead of promising a generic improvement");
     }
   }
 
   if (document.sections.degradation.applicable) {
-    const productFlow = isV3 ? diagrams.find((diagram) => diagram.kind === "productFlow") : diagrams[0];
+    const productFlow = diagrams.find((diagram) => diagram.kind === "productFlow");
     const outgoingCounts = new Map<string, number>();
     for (const edge of productFlow?.edges ?? []) {
       outgoingCounts.set(edge.from, (outgoingCounts.get(edge.from) ?? 0) + 1);
@@ -1258,13 +903,13 @@ function refinePrdTemplateDocument(
     const hasExceptionBranch = [...outgoingCounts.values()].some((count) => count >= 2)
       && /(?:失败|异常|错误|超时|不可用|降级)/u.test(flowText)
       && /(?:重试|恢复|回退|返回|保留|缓存|人工处理)/u.test(flowText);
-    if (!hasExceptionBranch && (!isV3 || productFlow)) {
+    if (!hasExceptionBranch && productFlow) {
       addIssue(context, diagramPaths[productFlow ? diagrams.indexOf(productFlow) : 0] ?? ["sections", "businessRequirements"], "an applicable degradation plan requires an explicit failure and recovery branch in the product flow");
     }
   }
-  for (const [blockIndex, block] of allBlocks.entries()) {
+  for (const block of allBlocks) {
     if (block.type === "table") {
-      const tablePath = isV3 ? blockPaths.get(block) ?? [] : ["sections", "blocks", blockIndex];
+      const tablePath = blockPaths.get(block) ?? [];
       if (isSemanticChannelTable(block)) {
         addIssue(context, tablePath, "use the single typed channelTable instead of another channel table");
       }
@@ -1299,7 +944,7 @@ function refinePrdTemplateDocument(
   const requirementIds = new Set(requirements.map((requirement) => requirement.id));
   const criterionIds = new Set(criteria.map((criterion) => criterion.id));
   const flowIds = new Set(flows.map((flow) => flow.id));
-  for (const [index, requirement] of requirements.entries()) {
+  for (const requirement of requirements) {
     for (const duplicate of duplicateValues([...requirement.goalIds, ...requirement.acceptanceCriterionIds])) {
       addIssue(context, blockPaths.get(requirement) ?? [], `duplicate requirement reference: ${duplicate}`);
     }
@@ -1317,7 +962,7 @@ function refinePrdTemplateDocument(
       }
     }
   }
-  for (const [index, criterion] of criteria.entries()) {
+  for (const criterion of criteria) {
     for (const requirementId of criterion.requirementIds) {
       const requirement = requirements.find((candidate) => candidate.id === requirementId);
       if (!requirement) {
@@ -1327,7 +972,7 @@ function refinePrdTemplateDocument(
       }
     }
   }
-  for (const [flowIndex, flow] of flows.entries()) {
+  for (const flow of flows) {
     for (const [stepIndex, step] of flow.steps.entries()) {
       for (const requirementId of step.requirementIds) {
         if (!requirementIds.has(requirementId)) {
@@ -1339,11 +984,8 @@ function refinePrdTemplateDocument(
   const sectionIds = new Set([
     "introduction", "background", "scope", "usageScenarios", "businessRequirements",
     "pageLinks", "degradation", "safetyBaseline",
-    ...("functionSections" in business ? [] : ["coreRules", "flowAndPages", "acceptanceCriteria"]),
+    ...business.functionSections.map((section) => section.id),
   ]);
-  if ("functionSections" in business) {
-    for (const section of business.functionSections) sectionIds.add(section.id);
-  }
   const referenceSets = {
     section: sectionIds,
     goal: goalIds,
@@ -1364,64 +1006,107 @@ function refinePrdTemplateDocument(
     }
   }
 
-  // V3 also permits references in the business summary and degradation prose;
-  // these inline fields live outside blocks but share the same entity graph.
-  if (isV3) {
-    const outerInlines = [
-      { content: business.summary, path: ["sections", "businessRequirements", "summary"] },
-      { content: document.sections.degradation.content, path: ["sections", "degradation", "content"] },
-    ];
-    for (const { content, path } of outerInlines) {
-      for (const [index, inline] of content.entries()) {
-        if (inline.type === "citation" && !citations.has(inline.citationId)) {
-          addIssue(context, [...path, index], `unknown citation: ${inline.citationId}`);
-        } else if (inline.type === "reference" && !referenceSets[inline.targetType].has(inline.targetId)) {
-          addIssue(context, [...path, index], `unknown ${inline.targetType} reference: ${inline.targetId}`);
-        }
+  // These inline fields share the block entity graph.
+  const outerInlines = [
+    { content: business.summary, path: ["sections", "businessRequirements", "summary"] },
+    { content: document.sections.degradation.content, path: ["sections", "degradation", "content"] },
+  ];
+  for (const { content, path } of outerInlines) {
+    for (const [index, inline] of content.entries()) {
+      if (inline.type === "citation" && !citations.has(inline.citationId)) {
+        addIssue(context, [...path, index], `unknown citation: ${inline.citationId}`);
+      } else if (inline.type === "reference" && !referenceSets[inline.targetType].has(inline.targetId)) {
+        addIssue(context, [...path, index], `unknown ${inline.targetType} reference: ${inline.targetId}`);
       }
     }
   }
 
-  for (const placeholder of prdV2ForbiddenPlaceholders) {
+
+  for (const placeholder of prdForbiddenPlaceholders) {
     if (stringValues(document).some((value) => value.includes(placeholder))) {
       addIssue(context, [], `PRD must not contain placeholder wording: ${placeholder}`);
     }
   }
-  for (const pattern of prdV2ForbiddenPlaceholderPatterns) {
+  for (const pattern of prdForbiddenPlaceholderPatterns) {
     if (stringValues(document).some((value) => pattern.test(value))) {
       addIssue(context, [], `PRD must not contain placeholder wording matching ${pattern.source}`);
     }
   }
-  for (const pattern of prdV2WeakStandalonePatterns) {
+  for (const pattern of prdWeakStandalonePatterns) {
     if (stringValues(document).some((value) => pattern.test(value.trim()))) {
       addIssue(context, [], `PRD must spell out inherited or changed behavior instead of using ${pattern.source}`);
     }
   }
-  for (const [blockIndex, block] of allBlocks.entries()) {
-    if (!isV3 && block.type === "heading" && prdV2StandaloneApiHeadingPattern.test(inlinePlainText(block.content).trim())) {
-      addIssue(context, ["sections", "blocks", blockIndex], "PRD must not contain a standalone interface or API chapter");
-    }
-  }
 }
 
-export const prdDocumentV2Schema = prdDocumentV2BaseSchema.superRefine((document, context) => {
-  refinePrdTemplateDocument(document, context, {
-    allowLegacyAppSurfaceEvidence: true,
-    enforceRuntimeRowOneSemantics: false,
-  });
-});
+type AcceptancePath = (string | number)[];
+type AcceptanceSource = {
+  path: AcceptancePath;
+  conditionPaths: AcceptancePath[];
+  resultPath: AcceptancePath;
+};
+type AcceptanceUnit = { item: string; standard: string; path: AcceptancePath; sources: AcceptanceSource[] };
 
-export const runtimePrdDocumentV2Schema = prdDocumentV2BaseSchema.superRefine((document, context) => {
-  refinePrdTemplateDocument(document, context, {
-    allowLegacyAppSurfaceEvidence: false,
-    enforceRuntimeRowOneSemantics: true,
+export type PrdAcceptanceCoverageDiagnostic = {
+  requiredRowCount: number;
+  currentRowCount: number;
+  distinctRowsPossible: boolean;
+  dimensions: { key: string; label: string; candidateRows: number[]; candidateRowCount: number }[];
+  conflict: { dimensionKeys: string[]; candidateRows: number[]; candidateRowCount: number } | null;
+  rows: { index: number; path: string; conditionPaths: string[]; resultPaths: string[]; sourceCount: number }[];
+  truncated: boolean;
+};
+
+// The diagnostic consumes the exact units and matching matrix used below. It
+// contains paths and contract-owned labels only, never authored business text.
+function acceptanceCoverageDiagnostic(
+  units: AcceptanceUnit[],
+  dimensions: readonly typeof prdAcceptanceDimensions[number][],
+  dimensionRows: number[][],
+): PrdAcceptanceCoverageDiagnostic {
+  const selected = new Set<number>();
+  // Include scarce matches first so a large unrelated section cannot hide the
+  // rows responsible for a collision. Counts always describe the full matrix.
+  for (const rows of [...dimensionRows].sort((a, b) => a.length - b.length)) {
+    for (const index of rows.slice(0, 2)) if (selected.size < 8) selected.add(index);
+  }
+  for (let index = 0; index < units.length && selected.size < 8; index++) selected.add(index);
+  const pointer = (path: AcceptancePath) => `/${path.join("/")}`;
+  const rows = [...selected].sort((a, b) => a - b).map((index) => {
+    const unit = units[index]!;
+    return {
+      index, path: pointer(unit.path), sourceCount: unit.sources.length,
+      conditionPaths: unit.sources.flatMap((source) => source.conditionPaths).slice(0, 4).map(pointer),
+      resultPaths: unit.sources.slice(0, 2).map((source) => pointer(source.resultPath)),
+    };
   });
-});
+  // Explain a deficient subset of the same matrix: N dimensions with fewer
+  // than N possible rows. At most six dimensions makes this bounded (63 sets).
+  let conflict: PrdAcceptanceCoverageDiagnostic["conflict"] = null;
+  for (let mask = 1; mask < 2 ** dimensions.length; mask++) {
+    const indexes = dimensions.flatMap((_, index) => mask & (1 << index) ? [index] : []);
+    const candidates = [...new Set(indexes.flatMap((index) => dimensionRows[index]!))];
+    if (candidates.length < indexes.length && (!conflict || indexes.length < conflict.dimensionKeys.length)) {
+      conflict = { dimensionKeys: indexes.map((index) => dimensions[index]!.key),
+        candidateRows: candidates.filter((index) => selected.has(index)), candidateRowCount: candidates.length };
+    }
+  }
+  return {
+    requiredRowCount: dimensions.length, currentRowCount: units.length,
+    distinctRowsPossible: hasDistinctAcceptanceCoverage(dimensionRows),
+    dimensions: dimensions.map((dimension, index) => ({
+      key: dimension.key, label: dimension.label,
+      candidateRows: dimensionRows[index]!.filter((row) => selected.has(row)),
+      candidateRowCount: dimensionRows[index]!.length,
+    })),
+    rows, conflict,
+    truncated: units.length > rows.length || units.some((unit) => unit.sources.length > 2
+      || unit.sources.reduce((count, source) => count + source.conditionPaths.length, 0) > 4),
+  };
+}
 
 function refinePrdV3Acceptance(document: PrdTemplateBase, context: z.RefinementCtx): void {
   const business = document.sections.businessRequirements;
-  if (!("functionSections" in business)) return;
-  type AcceptanceUnit = { item: string; standard: string; path: (string | number)[] };
   const tableUnits: AcceptanceUnit[] = [];
   const typedUnits: AcceptanceUnit[] = [];
   for (const [sectionIndex, section] of business.functionSections.entries()) {
@@ -1435,21 +1120,32 @@ function refinePrdV3Acceptance(document: PrdTemplateBase, context: z.RefinementC
           if (text(sequenceColumn?.id) !== String(rowIndex + 1)) {
             addIssue(context, path, "acceptance row sequence must be continuous starting at 1 within its table");
           }
-          tableUnits.push({ item: text(itemColumn?.id), standard: text(standardColumn?.id), path });
+          const cellPath = (columnId: string | undefined) => {
+            const index = row.cells.findIndex((cell) => cell.columnId === columnId);
+            return index < 0 ? path : [...path, "cells", index, "content"];
+          };
+          tableUnits.push({ item: text(itemColumn?.id), standard: text(standardColumn?.id), path,
+            sources: [{ path, conditionPaths: [cellPath(itemColumn?.id)], resultPath: cellPath(standardColumn?.id) }] });
         }
       } else if (block.type === "acceptanceCriterion") {
         const requirementNames = block.requirementIds.flatMap((id) => business.functionSections.flatMap((candidate) => candidate.blocks.filter((entity) => entity.type === "requirement" && entity.id === id).map((entity) => entity.type === "requirement" ? entity.title : "")));
-        typedUnits.push({ item: [inlinePlainText(block.given), inlinePlainText(block.when), ...requirementNames].join(" "), standard: inlinePlainText(block.then), path: blockPath });
+        const requirementTitlePaths = block.requirementIds.flatMap((id) => business.functionSections.flatMap((candidate, candidateIndex) => candidate.blocks.flatMap((entity, entityIndex) => entity.type === "requirement" && entity.id === id
+          ? [["sections", "businessRequirements", "functionSections", candidateIndex, "blocks", entityIndex, "title"]] : [])));
+        typedUnits.push({ item: [inlinePlainText(block.given), inlinePlainText(block.when), ...requirementNames].join(" "), standard: inlinePlainText(block.then), path: blockPath,
+          sources: [{ path: blockPath, conditionPaths: [[...blockPath, "given"], [...blockPath, "when"], ...requirementTitlePaths], resultPath: [...blockPath, "then"] }] });
       }
     }
   }
   // Identical observable results mirrored between a table and typed GWT get
   // one coverage slot. Independently authored typed criteria elsewhere still
   // participate; repeated standards within the same representation remain errors.
-  const units = tableUnits.map((unit) => ({ ...unit }));
+  const units = tableUnits.map((unit) => ({ ...unit, sources: [...unit.sources] }));
   for (const typed of typedUnits) {
     const mirror = tableUnits.findIndex((table) => normalizeSemanticText(table.standard) === normalizeSemanticText(typed.standard));
-    if (mirror >= 0) units[mirror]!.item += ` ${typed.item}`;
+    if (mirror >= 0) {
+      units[mirror]!.item += ` ${typed.item}`;
+      units[mirror]!.sources.push(...typed.sources);
+    }
     else units.push(typed);
   }
   if (!units.length) {
@@ -1460,7 +1156,7 @@ function refinePrdV3Acceptance(document: PrdTemplateBase, context: z.RefinementC
     if ([...unit.item].length < 2 || [...unit.standard].length < 10) {
       addIssue(context, unit.path, "acceptance criteria must name a concrete item and a substantive testable standard");
     }
-    if (prdV2UntestableAcceptancePattern.test(unit.standard)) {
+    if (prdUntestableAcceptancePattern.test(unit.standard)) {
       addIssue(context, unit.path, "acceptance standards must state observable results instead of vague quality wording");
     }
   }
@@ -1477,23 +1173,26 @@ function refinePrdV3Acceptance(document: PrdTemplateBase, context: z.RefinementC
     addIssue(context, ["sections", "businessRequirements", "functionSections"], `acceptance standards must be distinct: ${duplicate}`);
   }
   const evidence = acceptanceRelevanceEvidenceSegments(document);
-  const dimensions = prdV2AcceptanceDimensions.filter((dimension) => hasAffirmativeEvidence(evidence, { positive: dimension.relevancePattern }));
-  if (units.length < dimensions.length) {
-    addIssue(context, ["sections", "businessRequirements", "functionSections"], `acceptance criteria must contain at least ${dimensions.length} independently testable rows for the relevant requirement dimensions`);
-  }
+  const dimensions = prdAcceptanceDimensions.filter((dimension) => hasAffirmativeEvidence(evidence, { positive: dimension.relevancePattern }));
   const dimensionRows = dimensions.map((dimension) => units.flatMap((unit, index) => dimension.pattern.test(unit.item) ? [index] : []));
+  const addCoverageIssue = (message: string) => context.addIssue({
+    code: "custom", path: ["sections", "businessRequirements", "functionSections"], message,
+    params: { acceptanceCoverage: acceptanceCoverageDiagnostic(units, dimensions, dimensionRows) },
+  });
+  if (units.length < dimensions.length) {
+    addCoverageIssue(`acceptance criteria must contain at least ${dimensions.length} independently testable rows for the relevant requirement dimensions`);
+  }
   for (const [index, rows] of dimensionRows.entries()) {
-    if (!rows.length) addIssue(context, ["sections", "businessRequirements", "functionSections"], `acceptance criteria must cover ${dimensions[index]?.label}`);
+    if (!rows.length) addCoverageIssue(`acceptance criteria must cover ${dimensions[index]?.label}`);
   }
   if (dimensionRows.every((rows) => rows.length > 0) && !hasDistinctAcceptanceCoverage(dimensionRows)) {
-    addIssue(context, ["sections", "businessRequirements", "functionSections"], "acceptance dimensions must be represented by distinct rows");
+    addCoverageIssue("acceptance dimensions must be represented by distinct rows");
   }
 }
 
 export const prdDocumentV3Schema = prdDocumentV3BaseSchema.superRefine((document, context) => {
-  refinePrdTemplateDocument(document, context, { allowLegacyAppSurfaceEvidence: false, enforceRuntimeRowOneSemantics: true });
+  refinePrdTemplateDocument(document, context);
 });
-export const runtimePrdDocumentV3Schema = prdDocumentV3Schema;
 
 function inlinePlainText(inlines: readonly z.infer<typeof prdInlineSchema>[]) {
   return inlines.map((inline) => {
@@ -1572,13 +1271,11 @@ function isAcceptanceTable(block: z.infer<typeof prdBlockSchema>): block is z.in
 function prdTemplateBodyEvidenceSegments(document: PrdTemplateBase, includeAcceptanceCriteria: boolean): string[] {
   const business = document.sections.businessRequirements;
   const blockSections = [document.sections.introduction.background, document.sections.introduction.scope,
-    document.sections.introduction.usageScenarios, ...prdBusinessSections(document).filter((section) => (
-      includeAcceptanceCriteria || !("acceptanceCriteria" in business) || section !== business.acceptanceCriteria
-    ))];
+    document.sections.introduction.usageScenarios, ...prdBusinessSections(document)];
   return [
     ...splitEvidenceText(inlinePlainText(business.summary)),
     ...blockSections.flatMap((section) => section.blocks.filter((block) => (
-      includeAcceptanceCriteria || document.protocol !== "workbench.prd.v3" || (block.type !== "acceptanceCriterion" && !isAcceptanceTable(block))
+      includeAcceptanceCriteria || (block.type !== "acceptanceCriterion" && !isAcceptanceTable(block))
     )).flatMap(prdBlockEvidenceSegments)),
     ...prdDocumentDiagrams(document).flatMap((diagram) => [
       ...splitEvidenceText(diagram.description), ...diagram.nodes.flatMap((node) => splitEvidenceText(node.label)),
@@ -1588,27 +1285,11 @@ function prdTemplateBodyEvidenceSegments(document: PrdTemplateBase, includeAccep
   ];
 }
 
-function hasAffirmativeEvidence(segments: readonly string[], rule: PrdV2EvidenceRule): boolean {
+function hasAffirmativeEvidence(segments: readonly string[], rule: PrdEvidenceRule): boolean {
   return segments.some((segment) => isAffirmativeEvidenceSegment(segment, rule));
 }
 
-function hasPersistedAffirmativeEvidence(
-  segments: readonly string[],
-  sequence: number,
-  rule: PrdV2EvidenceRule,
-): boolean {
-  if (hasAffirmativeEvidence(segments, rule)) return true;
-  return sequence === 12 && segments.some(hasLegacyAffirmativeAppSurfaceEvidence);
-}
-
-function hasLegacyAffirmativeAppSurfaceEvidence(segment: string): boolean {
-  return (
-    prdV2LegacyAppSurfacePositivePattern.test(segment)
-    && !prdV2LegacyAppSurfaceNegativePattern.test(segment)
-  );
-}
-
-function isAffirmativeEvidenceSegment(segment: string, rule: PrdV2EvidenceRule): boolean {
+function isAffirmativeEvidenceSegment(segment: string, rule: PrdEvidenceRule): boolean {
   if (rule.isAffirmative) return rule.isAffirmative(segment);
   return (
     rule.positive.test(segment)
@@ -1648,22 +1329,9 @@ function isSemanticChannelTable(block: z.infer<typeof prdTableBlockSchema>): boo
   return hasChannelAxis && hasSelectionAxis;
 }
 
-export type PrdDocumentV1 = z.infer<typeof prdDocumentV1Schema>;
-export type PrdDocumentV2 = z.infer<typeof prdDocumentV2Schema>;
 export type PrdDocumentV3 = z.infer<typeof prdDocumentV3Schema>;
-export type PrdTemplateDocument = PrdDocumentV2 | PrdDocumentV3;
-export type PrdDocument = PrdDocumentV1 | PrdTemplateDocument;
-
-export const prdDocumentSchema: z.ZodType<PrdDocument, unknown> = z.union([
-  prdDocumentV1Schema,
-  prdDocumentV2Schema,
-  prdDocumentV3Schema,
-]);
-export const runtimePrdDocumentSchema: z.ZodType<PrdDocument, unknown> = z.union([
-  prdDocumentV1Schema,
-  runtimePrdDocumentV2Schema,
-  runtimePrdDocumentV3Schema,
-]);
+export type PrdTemplateDocument = PrdDocumentV3;
+export type PrdDocument = PrdDocumentV3;
+export const prdDocumentSchema = prdDocumentV3Schema;
 export type PrdBlock = z.infer<typeof prdBlockSchema>;
 export type PrdInline = z.infer<typeof prdInlineSchema>;
-export type PrdSectionKey = z.infer<typeof prdSectionKeySchema>;

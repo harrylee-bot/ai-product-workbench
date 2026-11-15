@@ -3,15 +3,16 @@ import { canonicalJson } from "@workbench/workbench-contracts";
 import { createSourcePrototypePreviewToken } from "@workbench/workbench-preview-token";
 import { describe, expect, it, vi } from "vitest";
 import { PreviewService } from "../src/preview.service.js";
+import { getPreview } from "./preview-request.fixture.js";
 
 const digest = (value: string) => createHash("sha256").update(value).digest("hex");
 const secret = Buffer.alloc(32, 13);
 const html = '<!doctype html><html><head><style>body{margin:0}</style></head><body><div>Source content</div><script>window.ready=true</script></body></html>';
-function fixture() {
+function fixture(sourceHtml = html) {
   const content = { protocol: "workbench.prototype-source.v1", documentId: "source-1", title: "Source", revision: 1,
     summary: "Source prototype", entryFile: "src/App.tsx", files: [{ path: "src/App.tsx", content: 'export default function App(){return <p>Source content</p>}' }],
     pages: [{ id: "page-home", name: "Home", route: "/" }], assets: [],
-    build: { renderer: "workbench.react-source.v1", reactVersion: "19.2.3", bundlerVersion: "0.28.1", sourceChecksum: "b".repeat(64), html, htmlSha256: digest(html) },
+    build: { renderer: "workbench.react-source.v1", reactVersion: "19.2.3", bundlerVersion: "0.28.1", sourceChecksum: "b".repeat(64), html: sourceHtml, htmlSha256: digest(sourceHtml) },
   };
   const checksum = digest(canonicalJson(content));
   const version = { projectId: "project-1", content, checksum };
@@ -31,13 +32,14 @@ describe("Frozen SourcePrototype isolated preview", () => {
   it("rechecks private membership and immutable content before serving, including conditional requests", async () => {
     const { service, db, makeToken } = fixture();
     const token = makeToken({ principalId: "viewer-1" });
-    const preview = await service.get(token);
+    const preview = await getPreview(service, token);
     expect(preview.contentSecurityPolicy).toContain("connect-src 'none'");
     expect(preview.contentSecurityPolicy).not.toContain("allow-same-origin");
     const chunks = []; for await (const chunk of preview.body) chunks.push(Buffer.from(chunk));
     const body = Buffer.concat(chunks).toString();
     expect(body).toContain("Source content");
     expect(body).toContain("workbench.preview");
+    expect(body.indexOf("data-workbench-preview-bridge")).toBeLessThan(body.indexOf("<script>window.ready=true"));
     await preview.dispose();
     db.projectMember.findFirst.mockResolvedValueOnce(null as never);
     await expect(service.resolve(token)).rejects.toThrow("PREVIEW_NOT_FOUND");
@@ -58,5 +60,12 @@ describe("Frozen SourcePrototype isolated preview", () => {
     const token = makeToken({ principalId: "viewer-1" });
     version.content.files[0]!.content = "changed";
     await expect(service.resolve(token)).rejects.toThrow("PREVIEW_NOT_FOUND");
+  });
+  it.each([
+    ['<html><body>missing head</body></html>', "PREVIEW_HTML_HEAD_MISSING"],
+    ['<html><head></head><body data-workbench-preview-bridge="v1"></body></html>', "PREVIEW_BRIDGE_MARKER_CONFLICT"],
+  ])("rejects source HTML that violates the bridge contract: %s", async (sourceHtml, error) => {
+    const { service, makeToken } = fixture(sourceHtml);
+    await expect(getPreview(service, makeToken({ principalId: "viewer-1" }))).rejects.toThrow(error);
   });
 });

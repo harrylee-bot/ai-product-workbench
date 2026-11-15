@@ -1,11 +1,7 @@
 import {
-  externalExportDeliverySchema,
   exportBoardNodeIdsSchema,
   exportJobSchema,
   exportOptionsSchema,
-  externalExportPayloadSnapshotSchema,
-  type ExternalExportDelivery,
-  type ExternalExportPayloadSnapshot,
   type ExportPackaging,
   type ExportFormat,
   type ExportJob,
@@ -93,77 +89,6 @@ export function mapExportJob(record: ExportJobRecord): ExportJob {
   });
 }
 
-export type ExternalExportDeliveryRecord = {
-  id: string;
-  exportJobId: string;
-  createdById: string;
-  requestHash: string;
-  target: "ai_studio" | "netlify" | "lovable" | "bolt";
-  authentication: "not_required" | "required" | "authenticated";
-  status: "pending_confirmation" | "queued" | "running" | "cancelling" | "succeeded" | "failed" | "cancelled";
-  revision: number;
-  attempt: number;
-  payload: unknown;
-  remoteReference: string | null;
-  failureCode: string | null;
-  failureDetail: string | null;
-  createdAt: Date;
-  confirmedAt: Date | null;
-  startedAt: Date | null;
-  transferAuthorizedAt: Date | null;
-  finishedAt: Date | null;
-  updatedAt: Date;
-};
-
-export function mapExternalExportDelivery(record: ExternalExportDeliveryRecord): ExternalExportDelivery {
-  const payload = externalExportPayloadSnapshotSchema.parse(record.payload);
-  return externalExportDeliverySchema.parse({
-    id: record.id,
-    exportJobId: record.exportJobId,
-    createdById: record.createdById,
-    target: record.target,
-    authentication: record.authentication,
-    status: record.status,
-    revision: record.revision,
-    attempt: record.attempt,
-    payload,
-    remoteReference: record.remoteReference,
-    failure: record.failureCode === null
-      ? null
-      : { code: record.failureCode, detail: record.failureDetail },
-    createdAt: record.createdAt.toISOString(),
-    confirmedAt: record.confirmedAt?.toISOString() ?? null,
-    startedAt: record.startedAt?.toISOString() ?? null,
-    transferAuthorizedAt: record.transferAuthorizedAt?.toISOString() ?? null,
-    finishedAt: record.finishedAt?.toISOString() ?? null,
-    updatedAt: record.updatedAt.toISOString(),
-  });
-}
-
-export function externalExportPayloadFromJob(job: {
-  id: string;
-  releaseId: string | null;
-  format: ExportFormat;
-  packaging: ExportPackaging;
-  selection: ExportJob["selection"];
-  outputBlob: { mediaType: string; byteSize: bigint; sha256: string };
-}): ExternalExportPayloadSnapshot {
-  if (!job.releaseId) throw new Error("EXPORT_EXTERNAL_RELEASE_MISSING");
-  return externalExportPayloadSnapshotSchema.parse({
-    exportJobId: job.id,
-    releaseId: job.releaseId,
-    format: job.format,
-    packaging: job.packaging,
-    selection: job.selection,
-    output: {
-      mediaType: job.outputBlob.mediaType,
-      byteSize: safeByteSize(job.outputBlob.byteSize),
-      sha256: job.outputBlob.sha256,
-      fileName: outputFileName(job.id, job.format, job.packaging),
-    },
-  });
-}
-
 export function mapExportSelection(record: Pick<ExportJobRecord,
   | "selectionKind"
   | "selectionArtifactId"
@@ -195,7 +120,7 @@ export function exportFailure(record: Pick<ExportJobRecord, "failureCode" | "fai
 export function outputFileName(
   exportId: string,
   format: ExportFormat,
-  packaging: ExportPackaging = format === "html" || format === "docx" || format === "pdf" ? "single_file" : "zip",
+  packaging: ExportPackaging,
 ) {
   const extension: Record<ExportFormat, string> = {
     html: "html",

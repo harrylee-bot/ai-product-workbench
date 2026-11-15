@@ -1,7 +1,6 @@
 "use client";
 
 import type {
-  ExternalExportDelivery,
   ExportCapabilities,
   ExportJob,
   ExportSelection,
@@ -11,13 +10,11 @@ import {
   BotIcon,
   CheckCircle2Icon,
   ClipboardIcon,
-  CloudUploadIcon,
   Code2Icon,
   DownloadIcon,
   FileTextIcon,
   Grid3X3Icon,
   RefreshCwIcon,
-  StarsIcon,
   XIcon,
 } from "lucide-react";
 import { useEffect, useState, type ComponentType, type SVGProps } from "react";
@@ -27,7 +24,6 @@ import {
   exportSelectionsEqual,
   exportTargetAvailability,
   exportTargetDescriptor,
-  exportTargetForExternalDelivery,
   exportTargetForFormat,
   type WorkbenchExportTarget,
 } from "@/lib/workbench/features";
@@ -38,7 +34,6 @@ import type { SourceExportSelection } from "@/lib/workbench/features/source-expo
 export function ExportDialog({
   activeExport,
   activeExportSelection,
-  activeExternalDelivery,
   busy,
   capabilities,
   capabilitiesError,
@@ -47,14 +42,10 @@ export function ExportDialog({
   error,
   hasSelection,
   onCancelExport,
-  onCancelExternalDelivery,
-  onConfirmExternalDelivery,
   onCopyCode,
   onDownload,
   onOpenChange,
-  onPrepareExternalDelivery,
   onRetryCapabilities,
-  onRetryExternalDelivery,
   onSelectAll,
   onStartExport,
   open,
@@ -63,7 +54,6 @@ export function ExportDialog({
 }: {
   activeExport: ExportJob | null;
   activeExportSelection: ExportSelection | null;
-  activeExternalDelivery: ExternalExportDelivery | null;
   busy: boolean;
   capabilities: ExportCapabilities | null;
   capabilitiesError: unknown;
@@ -72,14 +62,10 @@ export function ExportDialog({
   error: unknown;
   hasSelection: boolean;
   onCancelExport: () => Promise<unknown>;
-  onCancelExternalDelivery: (target: WorkbenchExportTarget) => Promise<unknown>;
-  onConfirmExternalDelivery: (target: WorkbenchExportTarget) => Promise<unknown>;
   onCopyCode: () => Promise<void>;
   onDownload: () => Promise<void>;
   onOpenChange: (open: boolean) => void;
-  onPrepareExternalDelivery: (target: WorkbenchExportTarget) => Promise<ExternalExportDelivery>;
   onRetryCapabilities: () => Promise<unknown>;
-  onRetryExternalDelivery: (target: WorkbenchExportTarget) => Promise<unknown>;
   onSelectAll: () => void;
   onStartExport: (target: WorkbenchExportTarget, selection: ExportSelection) => Promise<ExportJob>;
   open: boolean;
@@ -94,12 +80,8 @@ export function ExportDialog({
   }> = [
     { icon: FileTextIcon, label: "Download Word", meta: "下载 PRD 需求文档 .docx" },
     { icon: FileTextIcon, label: "Download PDF", meta: "下载 PRD 需求文档 .pdf" },
-    { icon: StarsIcon, label: "AI Studio", meta: "发布到 AI Studio" },
     { icon: Grid3X3Icon, label: "Figma", meta: "下载 Figma 导入包" },
     { icon: BotIcon, label: "MCP", meta: "下载 MCP 资源包" },
-    { icon: CloudUploadIcon, label: "Netlify", meta: "部署到 Netlify" },
-    { icon: CloudUploadIcon, label: "Lovable", meta: "发送到 Lovable" },
-    { icon: CloudUploadIcon, label: "Bolt", meta: "发送到 Bolt" },
     { icon: DownloadIcon, label: "Download .zip", meta: "下载离线 HTML 包" },
     { icon: ClipboardIcon, label: "Copy code", meta: "复制单文件 HTML" },
     { icon: Code2Icon, label: "React", meta: "下载 React 工程" },
@@ -121,20 +103,11 @@ export function ExportDialog({
     && activeExportSelection
     && (exportSelectionsEqual(activeExportSelection, selection)
       || (documentExport?.selection && exportSelectionsEqual(activeExportSelection, documentExport.selection)))
-    ? activeExternalDelivery?.exportJobId === activeExport.id
-      ? exportTargetForExternalDelivery(activeExternalDelivery.target)
-      : exportTargetForFormat(activeExport.format, activeExport.packaging)
+    ? exportTargetForFormat(activeExport.format, activeExport.packaging)
     : null;
-  const restoredFromExternalDelivery = Boolean(
-    restoredTarget
-    && activeExport
-    && activeExternalDelivery?.exportJobId === activeExport.id,
-  );
-
   useEffect(() => {
     if (!restoredTarget) return;
     setSelectedTarget((current) => {
-      if (restoredFromExternalDelivery) return restoredTarget;
       const currentDescriptor = exportTargetDescriptor(current);
       const restoredDescriptor = exportTargetDescriptor(restoredTarget);
       return currentDescriptor.format === restoredDescriptor.format
@@ -142,7 +115,7 @@ export function ExportDialog({
         ? current
         : restoredTarget;
     });
-  }, [restoredFromExternalDelivery, restoredTarget]);
+  }, [restoredTarget]);
 
   const descriptor = exportTargetDescriptor(selectedTarget);
   const isDocumentExport = descriptor.format === "docx" || descriptor.format === "pdf";
@@ -159,7 +132,7 @@ export function ExportDialog({
         : { available: false, reason: documentExport?.reason ?? "请选择一个已完成的 PRD 需求文档" };
     }
     if (sourceExport?.reason) return { available: false, reason: sourceExport.reason };
-    if (sourceExport?.source && ((format !== "html" && format !== "react") || targetDescriptor.externalTarget !== null)) {
+    if (sourceExport?.source && (format !== "html" && format !== "react")) {
       return { available: false, reason: "源码原型支持 HTML 离线包、复制 HTML 和 React 工程" };
     }
     return hasSelection ? capability : { available: false, reason: "请先选择画布上的产物" };
@@ -174,9 +147,6 @@ export function ExportDialog({
   const exportSucceeded = activeExportMatches && activeExport.status === "succeeded";
   const downloadReady = exportSucceeded && descriptor.delivery === "download";
   const downloadFailed = downloadReady && Boolean(error);
-  const externalDeliveryMatches = descriptor.externalTarget !== null
-    && activeExternalDelivery?.target === descriptor.externalTarget
-    && activeExternalDelivery.exportJobId === activeExport?.id;
   const selectionTitle = isDocumentExport && documentExport?.title
     ? documentExport.title
     : effectiveSelection.kind === "artifact"
@@ -190,30 +160,16 @@ export function ExportDialog({
   const exportButtonLabel = busy
     ? exportRunning
       ? `正在取消 ${selectedTarget}...`
-      : downloadReady ? "正在下载文件..." : "正在发布当前版本..."
-    : externalDeliveryMatches && activeExternalDelivery?.status === "pending_confirmation"
-      ? `确认发布至 ${selectedTarget}`
-      : externalDeliveryMatches && activeExternalDelivery?.status === "cancelling"
-        ? `正在取消 ${selectedTarget}...`
-        : externalDeliveryMatches && (activeExternalDelivery?.status === "queued" || activeExternalDelivery?.status === "running")
-          ? `取消发布 ${selectedTarget}`
-          : externalDeliveryMatches && activeExternalDelivery?.status === "failed"
-            ? `重试发布 ${selectedTarget}`
-            : externalDeliveryMatches && activeExternalDelivery?.status === "succeeded"
-              ? `已发布至 ${selectedTarget}`
-              : exportRunning
-                ? `取消导出 ${selectedTarget}`
-                : exportSucceeded
-                  ? descriptor.delivery === "clipboard"
-                    ? "复制代码"
-                    : descriptor.delivery === "external"
-                      ? `准备发布至 ${selectedTarget}`
-                      : downloadFailed ? "重试下载文件" : `下载 ${selectedTarget}`
-                  : error || (activeExportMatches && activeExport.status === "failed")
-                    ? `重试导出 ${selectedTarget}`
-                    : descriptor.delivery === "external"
-                      ? `生成并准备 ${selectedTarget}`
-                      : `导出 ${selectedTarget}`;
+      : downloadReady ? "正在下载文件..." : "正在生成导出文件..."
+    : exportRunning
+      ? `取消导出 ${selectedTarget}`
+      : exportSucceeded
+        ? descriptor.delivery === "clipboard"
+          ? "复制代码"
+          : downloadFailed ? "重试下载文件" : `下载 ${selectedTarget}`
+        : error || (activeExportMatches && activeExport.status === "failed")
+          ? `重试导出 ${selectedTarget}`
+          : `导出 ${selectedTarget}`;
 
   return (
     <AnimatePresence>
@@ -305,17 +261,6 @@ export function ExportDialog({
                     );
                   })}
                 </div>
-                {externalDeliveryMatches && activeExternalDelivery?.status === "pending_confirmation" && (
-                  <div className="mt-[10px] border-t border-white/[0.10] pt-[10px]" data-external-delivery-confirmation>
-                    <div className="text-[12px] font-semibold text-[#e8eaed]">即将传输</div>
-                    <div className="mt-[6px] space-y-[3px] text-[12px] leading-[15px] text-[#aeb3bb]">
-                      <div>{externalSelectionSummary(activeExternalDelivery.payload.selection)}</div>
-                      <div>{activeExternalDelivery.payload.format} / {activeExternalDelivery.payload.packaging}</div>
-                      <div>{activeExternalDelivery.payload.output.fileName}</div>
-                      <div>{formatBytes(activeExternalDelivery.payload.output.byteSize)} · {activeExternalDelivery.payload.output.sha256.slice(0, 12)}</div>
-                    </div>
-                  </div>
-                )}
               </div>
               <div className="border-t border-white/[0.12] p-[12px]">
                 {activeExportMatches && activeExport.failure?.code === "EXPORT_OUTPUT_BLOB_NOT_READABLE" && (
@@ -331,25 +276,14 @@ export function ExportDialog({
                 <button
                   aria-busy={busy}
                   className="h-[32px] w-full rounded-full bg-[#c9b3ff] text-[13px] font-semibold text-[#241832]"
-                  disabled={busy || ((!exportRunning && !exportSucceeded && !externalDeliveryMatches)
-                    && (!selectedAvailability.available || capabilitiesPending)) || (externalDeliveryMatches && (
-                    activeExternalDelivery?.status === "succeeded"
-                    || activeExternalDelivery?.status === "cancelling"
-                  ))}
+                  disabled={busy || ((!exportRunning && !exportSucceeded)
+                    && (!selectedAvailability.available || capabilitiesPending))}
                   onClick={() => {
                     let operation: Promise<unknown>;
-                    if (externalDeliveryMatches && activeExternalDelivery?.status === "pending_confirmation") {
-                      operation = onConfirmExternalDelivery(selectedTarget);
-                    } else if (externalDeliveryMatches && (activeExternalDelivery?.status === "queued" || activeExternalDelivery?.status === "running")) {
-                      operation = onCancelExternalDelivery(selectedTarget);
-                    } else if (externalDeliveryMatches && activeExternalDelivery?.status === "failed") {
-                      operation = onRetryExternalDelivery(selectedTarget);
-                    } else if (exportRunning) {
+                    if (exportRunning) {
                       operation = onCancelExport();
                     } else if (exportSucceeded && descriptor.delivery === "clipboard") {
                       operation = onCopyCode();
-                    } else if (exportSucceeded && descriptor.delivery === "external") {
-                      operation = onPrepareExternalDelivery(selectedTarget);
                     } else if (exportSucceeded) {
                       operation = onDownload();
                     } else {
@@ -403,17 +337,4 @@ export function ExportDialog({
       )}
     </AnimatePresence>
   );
-}
-
-function formatBytes(byteSize: number) {
-  if (byteSize < 1_024) return `${byteSize} B`;
-  if (byteSize < 1_024 * 1_024) return `${(byteSize / 1_024).toFixed(1)} KB`;
-  return `${(byteSize / (1_024 * 1_024)).toFixed(1)} MB`;
-}
-
-function externalSelectionSummary(selection: ExportSelection) {
-  if (selection.kind === "board_nodes") return `画布节点 ${selection.nodeIds.length} 个`;
-  if (selection.kind === "artifact") return selection.screenId ? "产物界面 1 个" : "产物版本 1 个";
-  if (selection.kind === "release") return "项目发布版本";
-  return "项目画布";
 }

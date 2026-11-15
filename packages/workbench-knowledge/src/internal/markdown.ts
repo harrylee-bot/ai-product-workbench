@@ -72,7 +72,7 @@ export function analyzeMarkdown(markdown: string): MarkdownAnalysis {
   };
 }
 
-export function serializeNode(node: RootContent | WikiLinkNode): string {
+function serializeNode(node: RootContent | WikiLinkNode): string {
   const root: Root = { type: "root", children: [node as RootContent] };
   return toMarkdown(root, serializeOptions).trimEnd();
 }
@@ -128,8 +128,4 @@ export function walkMarkdownTree(tree: Root, visitor: (node: Content | WikiLinkN
     }
   };
   for (const node of tree.children) visitNode(node as Content | WikiLinkNode);
-}
-
-export function isYamlNode(node: RootContent): node is YAML {
-  return node.type === "yaml";
 }

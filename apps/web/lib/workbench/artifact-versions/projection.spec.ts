@@ -1,10 +1,10 @@
 import {
   prdSafetyBaselineItems,
-  prdTableOfContentsEntriesFor,
+  prdTableOfContentsEntriesForV3,
   type ArtifactVersionDetail,
   type PrototypeDocument,
 } from "@workbench/workbench-contracts";
-import { prdDocumentV2Example } from "@workbench/workbench-contracts/test-fixtures";
+import { prdDocumentV3Example } from "@workbench/workbench-contracts/test-fixtures";
 import { describe, expect, it } from "vitest";
 
 import { prdDocument } from "../../../components/workbench/workbench-prd-test-fixture";
@@ -18,23 +18,22 @@ describe("ArtifactVersion comparison projection", () => {
     const projection = projectArtifactVersion(inlineVersion("prd", prdDocument()));
 
     expect(projection.note).toBeNull();
-    expect(projection.text).toContain("# Production PRD");
-    expect(projection.text).toContain("## 1. Executive summary");
+    expect(projection.text).toContain("# 示例工单需求说明书");
+    expect(projection.text).toContain("### 1.1项目背景");
     expect(projection.text).toContain("Initial summary sourceEvidenceGoal");
-    expect(projection.text).toContain("前置条件：Given");
-    expect(projection.text).toContain("触发操作：When");
-    expect(projection.text).toContain("预期结果：Then");
-    expect(projection.text).toContain("缓解措施：Mitigate");
+    expect(projection.text).toContain("前置条件：用户已登录、具备任务权限并进入任务页面");
+    expect(projection.text).toContain("触发操作：用户填写合法信息并提交任务");
+    expect(projection.text).toContain("预期结果：系统只创建一次任务");
   });
 
-  it("projects the complete v2 template with both diagrams and every canonical safety item", () => {
-    const projection = projectArtifactVersion(inlineVersion("prd", prdDocumentV2Example));
+  it("projects the complete current template with both diagrams and every canonical safety item", () => {
+    const projection = projectArtifactVersion(inlineVersion("prd", prdDocumentV3Example));
 
     expect(projection.text).toContain("# 示例工单需求说明书");
     expect(projection.text).toContain("## 版 本 历 史");
     expect(projection.text).toContain("## 目 录");
     expect(projection.text).toContain("### 1.1项目背景");
-    expect(projection.text).toContain("### 2.4 验收标准");
+    expect(projection.text).toContain("### 2.4 任务处理验收标准");
     expect(projection.text).toContain("#### 图1 产品流程图");
     expect(projection.text).toContain("#### 图2 产品架构图");
     expect(projection.text).toContain("| 序号 | 活动投放的可选渠道 | 是否投放 |");
@@ -44,16 +43,17 @@ describe("ArtifactVersion comparison projection", () => {
   });
 
   it("projects additional 2.5+ business sections between acceptance and degradation", () => {
-    const document = structuredClone(prdDocumentV2Example);
-    document.sections.businessRequirements.additionalSections = [{
+    const document = structuredClone(prdDocumentV3Example);
+    document.sections.businessRequirements.functionSections.push({
+      id: "section-config", diagrams: [],
       title: "2.5 配置规则",
       blocks: [{
         id: "additional-config-rule",
         type: "paragraph",
         content: [{ type: "text", text: "补充业务配置规则及对应结果。", marks: [] }],
       }],
-    }];
-    document.tableOfContents.entries = prdTableOfContentsEntriesFor(["2.5 配置规则"]);
+    });
+    document.tableOfContents.entries = prdTableOfContentsEntriesForV3(document.sections.businessRequirements.functionSections.map((section) => section.title));
 
     const projection = projectArtifactVersion(inlineVersion("prd", document));
 
@@ -116,7 +116,7 @@ function inlineVersion(
     createdAt: "2026-07-14T00:00:00.000Z",
     contentMode: "inline",
     kind,
-    schemaVersion: 1,
+    schemaVersion: kind === "prd" ? 3 : 1,
     content,
   } as ArtifactVersionDetail;
 }

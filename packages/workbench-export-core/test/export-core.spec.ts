@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { unzipSync } from "fflate";
 import { boardNodeProtocol, type PrototypeDocument } from "@workbench/workbench-contracts";
-import { prdDocumentV2Example } from "@workbench/workbench-contracts/test-fixtures";
+import { prdDocumentV3Example } from "@workbench/workbench-contracts/test-fixtures";
 import {
   buildExport,
   renderExportHtml,
@@ -56,9 +56,9 @@ describe("Workbench export core", () => {
     const request = exportRequest("html");
     const artifact = request.source.artifacts[0]!;
     artifact.kind = "prd";
-    artifact.schemaVersion = 2;
-    artifact.title = prdDocumentV2Example.title;
-    artifact.content = structuredClone(prdDocumentV2Example);
+    artifact.schemaVersion = 3;
+    artifact.title = prdDocumentV3Example.title;
+    artifact.content = structuredClone(prdDocumentV3Example);
     const rendered = renderExportHtml(request);
     expect(rendered.bodyMarkup).toContain("wb-prd__cover");
     expect(rendered.bodyMarkup).toContain("版本历史");

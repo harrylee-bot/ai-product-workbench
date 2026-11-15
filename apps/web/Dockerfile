@@ -38,25 +38,24 @@ ENV WORKBENCH_TYPES_PREVALIDATED=$WORKBENCH_TYPES_PREVALIDATED
 ENV NEXT_TELEMETRY_DISABLED=1 \
     NODE_OPTIONS=--max-old-space-size=2048 \
     WORKBENCH_NEXT_BUILD_CPUS=1
-COPY apps/web apps/web
 COPY packages/workbench-contracts packages/workbench-contracts
 COPY packages/workbench-telemetry packages/workbench-telemetry
 RUN npm --workspace @workbench/workbench-contracts run validate:openapi \
   && npm --workspace @workbench/workbench-contracts run build \
-  && npm --workspace @workbench/workbench-telemetry run build \
-  && npm --workspace @workbench/web run generate:workbench-api
+  && npm --workspace @workbench/workbench-telemetry run build
+COPY apps/web apps/web
+RUN npm --workspace @workbench/web run generate:workbench-api
 WORKDIR /app/apps/web
-# Type checking runs in the exact-source CI job on the native ARM64 runner.
-# Production image assembly can therefore reuse that verified result. This
-# avoids starting Next's native route/type worker under an AMD64 emulator,
-# while the following production build still compiles the application bundle.
+# Direct releases validate types inside this native build stage. External CI
+# may opt in to reuse its validation of the exact source tree.
 RUN if [ "$WORKBENCH_TYPES_PREVALIDATED" = "1" ]; then \
       test -f package.json; \
     else \
       npx next typegen && npx tsc -p tsconfig.build.json --noEmit; \
     fi
 ENV WORKBENCH_TYPES_PREVALIDATED=1
-RUN npm run build
+RUN --mount=type=cache,id=workbench-next-webpack,target=/app/apps/web/.next/cache,sharing=locked \
+  npm run build
 
 FROM --platform=$TARGETPLATFORM ${NODE_IMAGE} AS prod-deps
 WORKDIR /app

@@ -6,10 +6,7 @@ import type { ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { workbenchQueryKeys } from "../../../query/keys";
-import {
-  useWorkbenchIdentity,
-  useWorkbenchIdentityReader,
-} from "./index";
+import { useWorkbenchIdentity } from "./index";
 
 const mocks = vi.hoisted(() => ({
   getIdentity: vi.fn(),
@@ -42,11 +39,5 @@ describe("Identity application", () => {
     queryClient.clear();
   });
 
-  it("passes the feature-owned adapter directly to lazy Share remix reads", () => {
-    const rendered = renderHook(() => useWorkbenchIdentityReader());
 
-    expect(rendered.result.current).toBe(mocks);
-    expect(mocks.getIdentity).not.toHaveBeenCalled();
-    rendered.unmount();
-  });
 });

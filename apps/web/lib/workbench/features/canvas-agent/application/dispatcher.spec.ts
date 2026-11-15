@@ -204,7 +204,7 @@ describe("ScopedCanvasAgentClientCommandDispatcher", () => {
     ));
     const dispatcher = createDispatcher({ boardRevision: 4, waitForBoardRevision });
     const pending = dispatcher.dispatch(envelope(command("selection.change", { boardRevision: 5 })));
-    dispatcher.replaceScope({ ...scope(), projectSessionGeneration: 2 });
+    dispatcher.dispose();
     rejectWait(new DOMException("aborted", "AbortError"));
 
     const outcome = await pending;

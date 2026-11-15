@@ -141,7 +141,7 @@ export function projectPrototypeRuntimeNode(
   return projection;
 }
 
-export function resolvePrototypeRuntimeBinding(
+function resolvePrototypeRuntimeBinding(
   document: PrototypeRuntimeDocument,
   runtime: PrototypeRuntimeState,
   binding: PrototypeBinding,

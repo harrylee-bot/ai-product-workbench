@@ -12,6 +12,8 @@ export * from "./archive.js";
 export * from "./errors.js";
 export * from "./figma-export.js";
 export * from "./html-renderer.js";
+export { prototypeDocumentReactOutput } from "./react-export.js";
+export * from "./prototype-pages.js";
 export * from "./prd-docx-renderer.js";
 export * from "./types.js";
 export * from "./source-prototype.js";

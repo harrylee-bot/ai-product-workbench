@@ -19,9 +19,6 @@ let phase = "cancel";
 let cancelCalls = 0;
 let detailPolls = 0;
 let contentDownloads = 0;
-let deliveryPrepares = 0;
-let deliveryConfirms = 0;
-let deliveryPolls = 0;
 
 const project = {
   id: "project-export-recovery",
@@ -175,30 +172,22 @@ try {
       return json(route, {
         items: [phase === "cancel"
           ? queuedExport()
-          : phase === "download"
-            ? runningExport()
-            : succeededExternalExport()],
+          : runningExport()],
         nextCursor: null,
       });
     }
     if (method === "GET" && requestPath === "/api/v1/exports/capabilities") {
-      const available = { available: true, authentication: "not_required", reasonCode: null };
+      const available = { available: true, reasonCode: null };
       return json(route, {
         formats: {
           html: available,
           react: available,
-          figma: { available: false, authentication: "not_required", reasonCode: "EXPORT_FIGMA_UNAVAILABLE" },
+          figma: { available: false, reasonCode: "EXPORT_FIGMA_UNAVAILABLE" },
           mcp: available,
           docx: available,
           pdf: available,
         },
         packaging: { single_file: available, zip: available },
-        external: {
-          ai_studio: { available: false, authentication: "not_required", reasonCode: "EXPORT_EXTERNAL_AI_STUDIO_UNAVAILABLE" },
-          netlify: { available: true, authentication: "authenticated", reasonCode: null },
-          lovable: { available: false, authentication: "required", reasonCode: "EXPORT_EXTERNAL_AUTHENTICATION_REQUIRED" },
-          bolt: { available: false, authentication: "required", reasonCode: "EXPORT_EXTERNAL_AUTHENTICATION_REQUIRED" },
-        },
       });
     }
     if (method === "GET" && requestPath === "/api/v1/exports/export-cancel") {
@@ -226,35 +215,6 @@ try {
         body: "PK\u0003\u0004workbench-export",
       });
     }
-    if (method === "GET" && requestPath === "/api/v1/exports/export-external") {
-      return json(route, succeededExternalExport(), { etag: '"2"' });
-    }
-    if (
-      method === "GET"
-      && /^\/api\/v1\/exports\/export-(?:cancel|download|external)\/deliveries$/u.test(requestPath)
-    ) {
-      return json(route, { items: [] });
-    }
-    if (method === "POST" && requestPath === "/api/v1/exports/export-external/deliveries") {
-      assert(request.headers()["idempotency-key"], "External delivery preparation requires Idempotency-Key");
-      assert(request.postDataJSON().target === "netlify", "External delivery must bind the selected Netlify target");
-      deliveryPrepares += 1;
-      return json(route, pendingExternalDelivery(), {
-        etag: '"0"',
-        location: "/api/v1/export-deliveries/delivery-netlify",
-      }, 201);
-    }
-    if (method === "POST" && requestPath === "/api/v1/export-deliveries/delivery-netlify/confirm") {
-      assert(request.headers()["if-match"] === '"0"', "External confirmation must use the prepared delivery revision");
-      deliveryConfirms += 1;
-      return json(route, queuedExternalDelivery(), { etag: '"1"' }, 202);
-    }
-    if (method === "GET" && requestPath === "/api/v1/export-deliveries/delivery-netlify") {
-      deliveryPolls += 1;
-      const delivery = deliveryPolls >= 2 ? succeededExternalDelivery() : runningExternalDelivery();
-      return json(route, delivery, { etag: `"${delivery.revision}"` });
-    }
-
     unknownRequests.push(`${method} ${requestPath}`);
     return json(route, {
       type: "about:blank",
@@ -296,25 +256,16 @@ try {
     download.suggestedFilename().endsWith(".zip"),
     `Recovered Export download must use a ZIP filename: ${download.suggestedFilename()}`,
   );
+  assert(await download.failure() === null, "Recovered Export download must finish successfully");
 
-  phase = "external";
-  await page.reload({ waitUntil: "networkidle" });
-  await page.locator("[data-workbench-project]").waitFor();
-  await page.locator("button[data-global-panel-trigger]").filter({ hasText: "导出" }).click();
-  const externalPanel = page.locator("[data-workbench-export-panel]");
-  await externalPanel.getByRole("button", { name: /Netlify/ }).click();
-  await externalPanel.getByRole("button", { name: "准备发布至 Netlify" }).click();
-  await externalPanel.getByText("workbench-export-export-external.zip").waitFor();
-  assert(deliveryPrepares === 1, `External delivery must be prepared exactly once; prepares=${deliveryPrepares}`);
-  assert(deliveryConfirms === 0, "Preparing an external delivery must not publish before explicit confirmation");
-  await externalPanel.getByRole("button", { name: "确认发布至 Netlify" }).click();
-  await waitForValue(() => deliveryConfirms === 1, page, "external delivery confirmation");
-  await externalPanel.getByRole("button", { name: "已发布至 Netlify" }).waitFor({ timeout: 8_000 });
+  for (const target of ["Netlify", "Lovable", "Bolt", "AI Studio"]) {
+    assert(await exportPanel.getByText(target, { exact: true }).count() === 0, `Retired ${target} action must be absent`);
+  }
   await page.screenshot({ path: screenshot, animations: "disabled", caret: "hide", fullPage: true });
 
   await page.setViewportSize({ width: 390, height: 844 });
   await page.waitForTimeout(250);
-  await assertWithinViewport(page, externalPanel, "mobile Export panel");
+  await assertWithinViewport(page, exportPanel, "mobile Export panel");
   await page.screenshot({
     path: mobileScreenshot,
     animations: "disabled",
@@ -324,7 +275,6 @@ try {
 
   assert(detailPolls >= 2, `Active Export must be polled to terminal state; polls=${detailPolls}`);
   assert(contentDownloads === 1, `Successful Export must download exactly once; downloads=${contentDownloads}`);
-  assert(deliveryPolls >= 2, `Confirmed external delivery must poll to terminal state; polls=${deliveryPolls}`);
   assert(unknownRequests.length === 0, `Unhandled API requests: ${unknownRequests.join(", ")}`);
   assert(consoleErrors.length === 0, `Browser console errors: ${consoleErrors.join(" | ")}`);
 
@@ -333,9 +283,6 @@ try {
     cancelCalls,
     detailPolls,
     contentDownloads,
-    deliveryPrepares,
-    deliveryConfirms,
-    deliveryPolls,
     suggestedFilename: download.suggestedFilename(),
     screenshot: path.relative(fileURLToPath(new URL("../../", import.meta.url)), screenshot),
     mobileScreenshot: path.relative(fileURLToPath(new URL("../../", import.meta.url)), mobileScreenshot),
@@ -381,93 +328,6 @@ function succeededExport() {
       fileName: "workbench-export-export-download.zip",
     },
   });
-}
-
-function succeededExternalExport() {
-  return exportJob({
-    id: "export-external",
-    status: "succeeded",
-    revision: 2,
-    startedAt: timestamp,
-    finishedAt: timestamp,
-    output: {
-      blobId: "blob-export-external",
-      mediaType: "application/zip",
-      byteSize: 2_048,
-      sha256,
-      fileName: "workbench-export-export-external.zip",
-    },
-  });
-}
-
-function pendingExternalDelivery() {
-  return externalDelivery({ status: "pending_confirmation", revision: 0 });
-}
-
-function queuedExternalDelivery() {
-  return externalDelivery({
-    status: "queued",
-    revision: 1,
-    confirmedAt: timestamp,
-  });
-}
-
-function runningExternalDelivery() {
-  return externalDelivery({
-    status: "running",
-    revision: 2,
-    attempt: 1,
-    confirmedAt: timestamp,
-    startedAt: timestamp,
-  });
-}
-
-function succeededExternalDelivery() {
-  return externalDelivery({
-    status: "succeeded",
-    revision: 3,
-    attempt: 1,
-    remoteReference: "netlify-site-export-external",
-    confirmedAt: timestamp,
-    startedAt: timestamp,
-    transferAuthorizedAt: timestamp,
-    finishedAt: timestamp,
-  });
-}
-
-function externalDelivery(overrides) {
-  return {
-    id: "delivery-netlify",
-    exportJobId: "export-external",
-    createdById: "principal-1",
-    target: "netlify",
-    authentication: "authenticated",
-    status: "pending_confirmation",
-    revision: 0,
-    attempt: 0,
-    payload: {
-      exportJobId: "export-external",
-      releaseId: "release-1",
-      format: "html",
-      packaging: "zip",
-      selection: { kind: "board" },
-      output: {
-        mediaType: "application/zip",
-        byteSize: 2_048,
-        sha256,
-        fileName: "workbench-export-export-external.zip",
-      },
-    },
-    remoteReference: null,
-    failure: null,
-    createdAt: timestamp,
-    confirmedAt: null,
-    startedAt: null,
-    transferAuthorizedAt: null,
-    finishedAt: null,
-    updatedAt: timestamp,
-    ...overrides,
-  };
 }
 
 function exportJob(overrides) {

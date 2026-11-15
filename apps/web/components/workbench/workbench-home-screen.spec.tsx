@@ -30,6 +30,12 @@ vi.mock("@/lib/workbench/features/identity/api-adapter", () => ({
   useWorkbenchIdentityApi: () => transportMocks,
 }));
 
+vi.mock("./workbench-import-sources-dialog", () => ({
+  WorkbenchImportSourcesDialog: ({ open }: { open: boolean }) => (
+    open ? <div data-testid="mock-import-sources-dialog" /> : null
+  ),
+}));
+
 const homeScreenFile = path.join(process.cwd(), "components/workbench/workbench-home-screen.tsx");
 
 afterEach(cleanup);
@@ -122,7 +128,7 @@ describe("Workbench home inspiration templates", () => {
     })));
   });
 
-  it("submits web even when a legacy app template is selected", async () => {
+  it("submits web for every home template", async () => {
     const onSubmitPrompt = vi.fn(async () => "project-template");
     render(<HomeScreenHarness onSubmitPrompt={onSubmitPrompt} />);
 
@@ -293,8 +299,8 @@ function HomeScreenHarness({
         onLogout={async () => undefined}
         onOpenProject={() => undefined}
         onRetryDesignSystems={() => undefined}
-        onRetryModels={() => undefined}
         onRetryProjects={() => undefined}
+        onCreateExternalSource={async () => null}
         onSubmitPrompt={onSubmitPrompt}
         projectPageLoading={false}
         projectSearch=""

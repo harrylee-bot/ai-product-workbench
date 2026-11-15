@@ -7,13 +7,6 @@ import {
   workbenchPreviewRpcChannelForCapability,
   workbenchPreviewRpcVersion,
 } from "@workbench/workbench-contracts";
-import {
-  defaultTreeAdapter,
-  html as htmlNamespace,
-  parse,
-  serialize,
-  type DefaultTreeAdapterTypes,
-} from "parse5";
 import { Parser } from "htmlparser2";
 
 const bridgeAttribute = "data-workbench-preview-bridge";
@@ -99,34 +92,6 @@ export class WorkbenchPreviewHtmlInspector {
   }
 }
 
-export function injectWorkbenchPreviewBridge(
-  html: string,
-  webOrigin: string,
-  capabilityId: string,
-) {
-  const document = parse(html);
-  if (findElement(document, (element) => hasAttribute(element, bridgeAttribute))) {
-    throw new Error("PREVIEW_BRIDGE_MARKER_CONFLICT");
-  }
-  const head = findElement(document, (element) => element.tagName === "head");
-  if (!head) throw new Error("PREVIEW_HTML_HEAD_MISSING");
-
-  const bridge = createWorkbenchPreviewBridgeInjection(webOrigin, capabilityId);
-  const script = defaultTreeAdapter.createElement("script", htmlNamespace.NS.HTML, [
-    { name: bridgeAttribute, value: `v${workbenchPreviewRpcVersion}` },
-  ]);
-  defaultTreeAdapter.insertText(script, bridge.source);
-  defaultTreeAdapter.appendChild(head, script);
-
-  const transformedHtml = serialize(document);
-  const bytes = new TextEncoder().encode(transformedHtml);
-  return {
-    bytes,
-    etag: `"${createHash("sha256").update(bytes).digest("hex")}"`,
-    html: transformedHtml,
-  };
-}
-
 export function createWorkbenchPreviewBridgeInjection(
   webOrigin: string,
   capabilityId: string,
@@ -166,21 +131,4 @@ function assertOrigin(value: string) {
 
 function assertSafeInlineScript(source: string, label: string) {
   if (/<\/script/i.test(source)) throw new Error(`${label} contains a closing script tag`);
-}
-
-function hasAttribute(element: DefaultTreeAdapterTypes.Element, name: string) {
-  return element.attrs.some((attribute) => attribute.name === name);
-}
-
-function findElement(
-  node: DefaultTreeAdapterTypes.Node,
-  predicate: (element: DefaultTreeAdapterTypes.Element) => boolean,
-): DefaultTreeAdapterTypes.Element | null {
-  if ("tagName" in node && predicate(node)) return node;
-  if (!("childNodes" in node)) return null;
-  for (const child of node.childNodes) {
-    const found = findElement(child, predicate);
-    if (found) return found;
-  }
-  return null;
 }

@@ -17,7 +17,7 @@ ROOT = Path(__file__).resolve().parents[3]
 
 class PrdV3RuntimeTests(unittest.TestCase):
     def setUp(self):
-        self.draft = json.loads((ROOT / "integrations/deerflow/test-fixtures/prd-runtime-result-v3.example.json").read_text())["artifacts"][0]
+        self.draft = json.loads((ROOT / "integrations/deerflow/test-fixtures/prd-runtime-result.example.json").read_text())["artifacts"][0]
         self.runtime = SimpleNamespace(context={"workbench": {"runId": "run_v3", "runtimeAttemptId": "attempt_v3", "requestedArtifactKinds": ["prd"]}}, state={"messages": [{"type": "human", "content": "Generate the requested requirement."}]}, tool_call_id="initial")
 
     def publish(self, call_id, **args):
@@ -28,12 +28,17 @@ class PrdV3RuntimeTests(unittest.TestCase):
         self.runtime.state["messages"].append({"type": "tool", "name": call["name"], "tool_call_id": call_id, "status": "success", "content": content, "artifact": artifact})
         return json.loads(content), artifact
 
-    def test_complete_v3_and_legacy_v2_remain_valid(self):
-        self.assertTrue(validate_runtime_artifact_draft(self.draft)["ok"])
-        legacy = json.loads((ROOT / "integrations/deerflow/test-fixtures/prd-runtime-result.example.json").read_text())["artifacts"][0]
-        self.assertTrue(validate_runtime_artifact_draft(legacy)["ok"])
-        self.draft["schemaVersion"] = 2
-        self.assertFalse(validate_runtime_artifact_draft(self.draft)["ok"])
+    def test_current_protocol_accepts_create_and_revise_and_rejects_retired_versions(self):
+        for operation in ({"kind": "create"}, {"kind": "revise", "target": {
+            "artifactId": "artifact-prd", "artifactVersionId": "version-prd", "screenIds": [],
+        }}):
+            draft = copy.deepcopy(self.draft)
+            draft["operation"] = operation
+            self.assertTrue(validate_runtime_artifact_draft(draft)["ok"])
+            for version in (1, 2):
+                draft["schemaVersion"] = version
+                draft["content"]["protocol"] = f"workbench.prd.v{version}"
+                self.assertFalse(validate_runtime_artifact_draft(draft)["ok"])
 
     def test_repairs_misnested_function_sections_without_rewriting_any_authored_content(self):
         invalid = copy.deepcopy(self.draft)

@@ -15,8 +15,8 @@ describe("Preview RPC contract", () => {
       protocol: "workbench.preview",
       version: 2,
     }).success).toBe(false);
-    expect(workbenchPreviewRpcChannelForCapability("wbpv1.payload.signature"))
-      .toBe("workbench.preview.v1:wbpv1.payload.signature");
+    expect(workbenchPreviewRpcChannelForCapability("wbpv2.payload.signature"))
+      .toBe("workbench.preview.v1:wbpv2.payload.signature");
     expect(() => workbenchPreviewRpcChannelForCapability("path/token"))
       .toThrow();
     expect(workbenchPreviewHandshakeSchema.safeParse({

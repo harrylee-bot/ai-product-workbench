@@ -4,25 +4,10 @@ import type {
   Run,
   SubmitApprovalRequest,
 } from "@workbench/workbench-contracts";
-import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { workbenchQueryKeys } from "../../../query/keys";
-import type { CursorPageOptions } from "../../../transport/contracts";
 import { useWorkbenchRunsApi } from "../api-adapter";
-
-export function useWorkbenchRuns(
-  projectId: string,
-  threadId: string,
-  options: CursorPageOptions = {},
-) {
-  const service = useWorkbenchRunsApi();
-  return useQuery({
-    queryKey: workbenchQueryKeys.runList(projectId, threadId, options),
-    queryFn: () => service.listRuns(threadId, options),
-    enabled: Boolean(projectId && threadId),
-    placeholderData: keepPreviousData,
-  });
-}
 
 export type WorkbenchRunQueryOptions = {
   enabled?: boolean;
@@ -90,15 +75,6 @@ export function useWorkbenchRunApprovals(runId: string) {
     queryKey: workbenchQueryKeys.approvals(runId),
     queryFn: () => service.listRunApprovals(runId),
     enabled: Boolean(runId),
-  });
-}
-
-export function useWorkbenchRunApproval(runId: string, approvalId: string) {
-  const service = useWorkbenchRunsApi();
-  return useQuery({
-    queryKey: workbenchQueryKeys.approval(runId, approvalId),
-    queryFn: () => service.getRunApproval(runId, approvalId),
-    enabled: Boolean(runId && approvalId),
   });
 }
 

@@ -1,18 +1,14 @@
-import type { ExternalExportDelivery } from "@workbench/workbench-contracts";
 import { describe, expect, it, vi } from "vitest";
 
 import { createBoardStore } from "./board";
 import {
   exportTargetAvailability,
   copyExportHtmlToClipboard,
-  exportFormatForTarget,
-  exportTargetForExternalDelivery,
+  exportTargetDescriptor,
   exportTargetForFormat,
   flushWorkbenchBoard,
-  selectLatestRestorableExternalDelivery,
   validateIsolatedPreviewCapability,
   waitForProjectPreview,
-  waitForPreviewExport,
 } from "./workbench-publication-controller";
 import {
   canonicalizeExportSelection,
@@ -22,25 +18,15 @@ import {
 
 describe("Workbench publication controller", () => {
   it("maps every visible export target to the closed contract enum", () => {
-    expect(exportFormatForTarget("Figma")).toBe("figma");
-    expect(exportFormatForTarget("Download .zip")).toBe("html");
-    expect(exportFormatForTarget("Copy code")).toBe("html");
-    expect(exportFormatForTarget("React")).toBe("react");
-    expect(exportFormatForTarget("MCP")).toBe("mcp");
-    expect(exportFormatForTarget("Download Word")).toBe("docx");
-    expect(exportFormatForTarget("Download PDF")).toBe("pdf");
+    expect(exportTargetDescriptor("Figma").format).toBe("figma");
+    expect(exportTargetDescriptor("Download .zip").format).toBe("html");
+    expect(exportTargetDescriptor("Copy code").format).toBe("html");
+    expect(exportTargetDescriptor("React").format).toBe("react");
+    expect(exportTargetDescriptor("MCP").format).toBe("mcp");
+    expect(exportTargetDescriptor("Download Word").format).toBe("docx");
+    expect(exportTargetDescriptor("Download PDF").format).toBe("pdf");
     expect(exportTargetForFormat("docx", "single_file")).toBe("Download Word");
     expect(exportTargetForFormat("pdf", "single_file")).toBe("Download PDF");
-    expect(exportTargetForExternalDelivery("ai_studio")).toBe("AI Studio");
-    expect(exportTargetForExternalDelivery("netlify")).toBe("Netlify");
-  });
-
-  it("restores only the newest non-cancelled external delivery", () => {
-    const pending = externalDelivery({ id: "delivery-pending", status: "pending_confirmation" });
-    const cancelled = externalDelivery({ id: "delivery-cancelled", status: "cancelled" });
-    expect(selectLatestRestorableExternalDelivery([pending, cancelled])).toBe(pending);
-    expect(selectLatestRestorableExternalDelivery([cancelled, pending])).toBeNull();
-    expect(selectLatestRestorableExternalDelivery([])).toBeNull();
   });
 
   it("uses canonical set semantics for Board-node Export identity and cache keys", () => {
@@ -86,24 +72,17 @@ describe("Workbench publication controller", () => {
       available: false,
       reason: "正在检查导出能力",
     });
-    const available = { available: true as const, authentication: "not_required" as const, reasonCode: null };
-    const authRequired = { available: false as const, authentication: "required" as const, reasonCode: "EXPORT_EXTERNAL_AUTHENTICATION_REQUIRED" as const };
+    const available = { available: true as const, reasonCode: null };
     expect(exportTargetAvailability({
       formats: {
         html: available,
         react: available,
-        figma: { available: false, authentication: "not_required", reasonCode: "EXPORT_FIGMA_UNAVAILABLE" },
+        figma: { available: false, reasonCode: "EXPORT_FIGMA_UNAVAILABLE" },
         mcp: available,
         docx: available,
         pdf: available,
       },
       packaging: { single_file: available, zip: available },
-      external: {
-        ai_studio: { available: false, authentication: "not_required", reasonCode: "EXPORT_EXTERNAL_AI_STUDIO_UNAVAILABLE" },
-        netlify: authRequired,
-        lovable: authRequired,
-        bolt: authRequired,
-      },
     }, "Figma")).toEqual({
       available: false,
       reason: "当前部署尚未完成 Figma 导出验收",
@@ -178,50 +157,6 @@ describe("Workbench publication controller", () => {
       .rejects.toThrow("changed remotely");
   });
 
-  it("waits for an HTML Export terminal state before minting a Preview", async () => {
-    const queued = exportJob({ status: "queued" });
-    const running = exportJob({
-      status: "running",
-      revision: 1,
-      startedAt: "2026-07-13T12:00:01.000Z",
-    });
-    const succeeded = exportJob({
-      status: "succeeded",
-      revision: 2,
-      startedAt: "2026-07-13T12:00:01.000Z",
-      finishedAt: "2026-07-13T12:00:02.000Z",
-      output: {
-        mode: "blob",
-        blobId: "blob-1",
-        mediaType: "text/html; charset=utf-8",
-        byteSize: 100,
-        sha256: "a".repeat(64),
-      },
-    });
-    const getExportJob = vi.fn()
-      .mockResolvedValueOnce({ value: running, etag: '"1"' })
-      .mockResolvedValueOnce({ value: succeeded, etag: '"2"' });
-
-    await expect(waitForPreviewExport({ getExportJob }, queued, {
-      intervalMs: 0,
-      timeoutMs: 1_000,
-    })).resolves.toEqual(succeeded);
-    expect(getExportJob).toHaveBeenCalledTimes(2);
-  });
-
-  it("fails closed for terminal Export failures and cancellation", async () => {
-    await expect(waitForPreviewExport({ getExportJob: vi.fn() }, exportJob({
-      status: "failed",
-      finishedAt: "2026-07-13T12:00:02.000Z",
-      failure: { code: "EXPORT_RENDER_FAILED", detail: "Renderer rejected the document" },
-    }), { intervalMs: 0 })).rejects.toThrow("Renderer rejected the document");
-
-    await expect(waitForPreviewExport({ getExportJob: vi.fn() }, exportJob({
-      status: "cancelled",
-      finishedAt: "2026-07-13T12:00:02.000Z",
-    }), { intervalMs: 0 })).rejects.toThrow("cancelled");
-  });
-
   it("polls a read-authorized Project Preview without using ExportJob APIs", async () => {
     const initial = projectPreview({ status: "queued" });
     const succeeded = projectPreview({ status: "succeeded", revision: 2 });
@@ -262,27 +197,6 @@ describe("Workbench publication controller", () => {
   });
 });
 
-function exportJob(overrides: Record<string, unknown>) {
-  return {
-    id: "export-1",
-    releaseId: "release-1",
-    createdById: "principal-1",
-    format: "html" as const,
-    packaging: "single_file" as const,
-    selection: { kind: "artifact" as const, artifactId: "artifact-1", artifactVersionId: "version-1" },
-    status: "queued" as const,
-    revision: 0,
-    options: {},
-    output: null,
-    failure: null,
-    createdAt: "2026-07-13T12:00:00.000Z",
-    startedAt: null,
-    finishedAt: null,
-    updatedAt: "2026-07-13T12:00:00.000Z",
-    ...overrides,
-  };
-}
-
 function projectPreview(overrides: Record<string, unknown>) {
   return {
     id: "preview-1",
@@ -296,43 +210,6 @@ function projectPreview(overrides: Record<string, unknown>) {
     createdAt: "2026-07-13T12:00:00.000Z",
     expiresAt: "2099-07-13T12:00:00.000Z",
     updatedAt: "2026-07-13T12:00:00.000Z",
-    ...overrides,
-  };
-}
-
-function externalDelivery(overrides: Partial<ExternalExportDelivery>): ExternalExportDelivery {
-  const timestamp = "2026-07-18T00:00:00.000Z";
-  const status = overrides.status ?? "pending_confirmation";
-  return {
-    id: "delivery-1",
-    exportJobId: "export-1",
-    createdById: "principal-1",
-    target: "netlify" as const,
-    authentication: "authenticated" as const,
-    status,
-    revision: status === "cancelled" ? 1 : 0,
-    attempt: 0,
-    payload: {
-      exportJobId: "export-1",
-      releaseId: "release-1",
-      format: "html" as const,
-      packaging: "zip" as const,
-      selection: { kind: "board" as const },
-      output: {
-        mediaType: "application/zip",
-        byteSize: 100,
-        sha256: "a".repeat(64),
-        fileName: "project.zip",
-      },
-    },
-    remoteReference: null,
-    failure: null,
-    createdAt: timestamp,
-    confirmedAt: null,
-    startedAt: null,
-    transferAuthorizedAt: null,
-    finishedAt: status === "cancelled" ? timestamp : null,
-    updatedAt: timestamp,
     ...overrides,
   };
 }

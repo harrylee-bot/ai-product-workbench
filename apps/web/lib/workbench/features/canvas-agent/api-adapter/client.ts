@@ -4,7 +4,6 @@ import {
   canvasClientStateSyncResponseSchema,
   type CanvasClientStateSyncRequest,
   type CanvasClientStateSyncResponse,
-  type CanvasClientCommand,
   type CanvasClientCommandAck,
   type CanvasClientCommandAckRequest,
   type CanvasClientCommandList,
@@ -143,5 +142,3 @@ export function createWorkbenchCanvasAgentCommandApi(
 async function throwForCanvasAgentResponse(response: Response): Promise<void> {
   if (!response.ok) throw await workbenchApiErrorFromResponse(response);
 }
-
-export type { CanvasClientCommand };

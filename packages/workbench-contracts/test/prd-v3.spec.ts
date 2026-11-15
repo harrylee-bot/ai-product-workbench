@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { prdDocumentV2Example, prdDocumentV3Example } from "../src/prd-example.js";
-import { artifactVersionInlinePrdV3DetailSchema, createPrdV3ArtifactVersionRequestSchema } from "../src/artifacts.js";
+import { prdDocumentV3Example } from "../src/prd-example.js";
+import { artifactVersionInlinePrdDetailSchema, createPrdArtifactVersionRequestSchema } from "../src/artifacts.js";
 import { prdBusinessSections, prdDocumentDiagrams, prdDocumentSchema, prdDocumentV3Schema, prdTableOfContentsEntriesForV3, type PrdDocumentV3 } from "../src/prd.js";
 import { runtimeArtifactDraftSchema } from "../src/runtime.js";
 import { sourceCitations } from "./knowledge-citation.fixture.js";
@@ -15,8 +15,8 @@ function syncToc(document: PrdDocumentV3) {
 }
 
 describe("workbench.prd.v3 functional sections", () => {
-  it("keeps v2 readable and exposes actual section and diagram order", () => {
-    expect(prdDocumentSchema.parse(prdDocumentV2Example).protocol).toBe("workbench.prd.v2");
+  it("exposes current section and diagram order", () => {
+    expect(prdDocumentSchema.parse(candidate()).protocol).toBe("workbench.prd.v3");
     const document = prdDocumentV3Schema.parse(candidate());
     expect(prdBusinessSections(document).map((section) => section.title)).toEqual([
       "2.1页面链接", "2.2 任务提交与业务校验", "2.3 任务状态与失败恢复", "2.4 任务处理验收标准",
@@ -223,12 +223,12 @@ describe("workbench.prd.v3 functional sections", () => {
 
   it("accepts v3 through version creation and Runtime while rejecting mismatched schema versions", () => {
     const document = { ...candidate(), citations: sourceCitations };
-    expect(createPrdV3ArtifactVersionRequestSchema.parse({ kind: "prd", baseArtifactVersionId: "version-previous", document }).document.protocol).toBe("workbench.prd.v3");
+    expect(createPrdArtifactVersionRequestSchema.parse({ kind: "prd", baseArtifactVersionId: "version-previous", document }).document.protocol).toBe("workbench.prd.v3");
     const draft = { kind: "prd", schemaVersion: 3, title: document.title, content: document, citations: sourceCitations, operation: { kind: "create" } };
     expect(runtimeArtifactDraftSchema.safeParse(draft).success).toBe(true);
     expect(runtimeArtifactDraftSchema.safeParse({ ...draft, schemaVersion: 2 }).success).toBe(false);
     const detail = { artifactId: "artifact-prd", artifactVersionId: "version-prd", version: 1, status: "ready", checksum: "a".repeat(64), citations: sourceCitations, createdByRunId: null, knowledgeReleaseId: null, createdAt: "2026-10-29T00:00:00.000Z", contentMode: "inline", kind: "prd", schemaVersion: 3, content: document };
-    expect(artifactVersionInlinePrdV3DetailSchema.safeParse(detail).success).toBe(true);
-    expect(artifactVersionInlinePrdV3DetailSchema.safeParse({ ...detail, schemaVersion: 2 }).success).toBe(false);
+    expect(artifactVersionInlinePrdDetailSchema.safeParse(detail).success).toBe(true);
+    expect(artifactVersionInlinePrdDetailSchema.safeParse({ ...detail, schemaVersion: 2 }).success).toBe(false);
   });
 });

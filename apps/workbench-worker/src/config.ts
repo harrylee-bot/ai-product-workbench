@@ -62,11 +62,9 @@ export function loadWorkerConfig() {
     1_000,
     120_000,
   );
-  const runtimeProviderStateMode = enumValue(
-    "WORKBENCH_RUNTIME_PROVIDER_STATE_MODE",
-    ["legacy-read", "shadow-verify", "projection-required"] as const,
-    "projection-required",
-  );
+  if ((optional("WORKBENCH_RUNTIME_PROVIDER_STATE_MODE") ?? "projection-required") !== "projection-required") {
+    throw new Error("WORKBENCH_RUNTIME_PROVIDER_STATE_MODE must be projection-required");
+  }
   const runtimeExecutionMaximumWallClockMs = boundedInteger(
     "WORKBENCH_RUNTIME_EXECUTION_MAX_WALL_CLOCK_MS",
     30 * 60_000,
@@ -133,7 +131,6 @@ export function loadWorkerConfig() {
     runtimeExecutionHeartbeatMs,
     runtimeExecutionMaximumWallClockMs,
     runtimeExecutionDeadlineCancelMs,
-    runtimeProviderStateMode,
     runtimeExecutionReconcileIntervalMs: boundedInteger(
       "WORKBENCH_RUNTIME_EXECUTION_RECONCILE_INTERVAL_MS",
       5_000,
@@ -254,18 +251,6 @@ function boundedInteger(name: string, fallback: number, minimum: number, maximum
     throw new Error(`${name} must be an integer between ${minimum} and ${maximum}`);
   }
   return parsed;
-}
-
-function enumValue<const T extends readonly string[]>(
-  name: string,
-  values: T,
-  fallback: T[number],
-): T[number] {
-  const value = optional(name) ?? fallback;
-  if (!values.includes(value)) {
-    throw new Error(`${name} must be one of: ${values.join(", ")}`);
-  }
-  return value;
 }
 
 function trimTrailingSlash(value: string) {

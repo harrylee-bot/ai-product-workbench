@@ -4,7 +4,6 @@ import { describe, expect, it } from "vitest";
 import {
   PROTOTYPE_NODE_ID_ATTRIBUTE,
   applyPrototypeTransformPatchBatch,
-  applyPrototypeTransformPatch,
   centeredPrototypeRendererTransform,
   commandBatchFromTransformSnapshots,
   commandFromTransformSnapshot,
@@ -118,7 +117,7 @@ describe("prototype editor kernel model", () => {
     });
     if (!patch.ok) throw new Error("expected move patch");
 
-    const updated = applyPrototypeTransformPatch(original, patch.value);
+    const updated = applyPrototypeTransformPatchBatch(original, { type: "prototype.nodes.transform.patch.batch", screenId: patch.value.screenId, patches: [patch.value] });
     expect(prototypeDocumentSchema.safeParse(updated).success).toBe(true);
     expect(updated.revision).toBe(2);
     expect(updated.nodes[1].layout.x).toEqual({ kind: "literal", value: 40.123 });
@@ -140,7 +139,7 @@ describe("prototype editor kernel model", () => {
     if (!command.ok) throw new Error("expected resize command");
     const patch = patchFromTransformCommand(document, command.value);
     if (!patch.ok) throw new Error("expected resize patch");
-    const updated = applyPrototypeTransformPatch(document, patch.value);
+    const updated = applyPrototypeTransformPatchBatch(document, { type: "prototype.nodes.transform.patch.batch", screenId: patch.value.screenId, patches: [patch.value] });
 
     expect(updated.nodes[1].layout).toMatchObject({
       x: { kind: "literal", value: 12.5 },
@@ -347,7 +346,7 @@ describe("prototype editor kernel model", () => {
       },
     });
     if (!patch.ok) throw new Error("expected rotate patch");
-    const updated = applyPrototypeTransformPatch(document, patch.value);
+    const updated = applyPrototypeTransformPatchBatch(document, { type: "prototype.nodes.transform.patch.batch", screenId: patch.value.screenId, patches: [patch.value] });
     expect(updated.nodes[1].style.rotation).toBe(90);
     expect(updated.nodes[1].style.transformOrigin).toEqual({ x: 0.5, y: 0.5 });
     expect(prototypeDocumentSchema.safeParse(updated).success).toBe(true);

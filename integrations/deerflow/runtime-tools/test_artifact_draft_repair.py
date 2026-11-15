@@ -6,7 +6,7 @@ import unittest
 from pathlib import Path
 from types import SimpleNamespace
 
-from test_artifact_draft_tool import workbench_artifact_draft_publish
+from test_artifact_draft_tool import anonymous_acceptance_collision, workbench_artifact_draft_publish
 from deerflow_workbench_tools.artifact_draft_repair import (
     ArtifactDraftRepairPathError,
     _apply_repair,
@@ -70,6 +70,39 @@ class ArtifactDraftRepairTests(unittest.TestCase):
         self.assertTrue(ack["ok"],ack["issues"])
         self.assertEqual(artifact["draft"],self.draft)
 
+    def test_observed_then_only_repair_loop_gets_precise_condition_path_and_can_finish(self):
+        draft = anonymous_acceptance_collision()
+        before = copy.deepcopy(draft)
+        ack, _ = self.publish("collision", draft=draft)
+        initial_hint = next(h for h in ack["repairHints"] if "acceptanceCoverage" in h)
+        matrix = initial_hint["acceptanceCoverage"]
+        # Reproduce two causally reconstructed, checksum-changing repairs to
+        # then, as observed in the real failure. Neither fixes condition coverage.
+        for index in range(2):
+            previous_checksum = ack["candidateChecksum"]
+            ack, rejected = self.publish(f"then-{index}", repair=self.repair(ack, [{
+                "op": "replace", "path": matrix["rows"][2]["resultPaths"][0] + "/0/text",
+                "value": f"第{index + 1}次操作后保留已录入内容并给出可核对的回执。",
+            }]))
+            self.assertFalse(ack["ok"])
+            self.assertNotEqual(ack["candidateChecksum"], previous_checksum)
+            hint = next(h for h in ack["repairHints"] if "acceptanceCoverage" in h)
+            self.assertEqual(hint["candidateChecksum"], ack["candidateChecksum"])
+            self.assertEqual(hint["acceptanceCoverage"], matrix)
+            self.assertNotIn("draft", rejected)
+        # This fixture already specifies the mandatory-input rule. Express its
+        # independent precondition at the exact current row path from the hint.
+        condition_path = next(path for path in matrix["rows"][0]["conditionPaths"] if path.endswith("/given"))
+        ack, accepted = self.publish("independent-condition", repair=self.repair(ack, [{
+            "op": "replace", "path": condition_path + "/0/text", "value": "必填项尚未输入",
+        }]))
+        self.assertTrue(ack["ok"], ack["issues"])
+        self.assertNotIn("repairHints", ack)
+        self.assertEqual(draft, before)
+        self.assertEqual(accepted["draft"]["content"]["sections"]["introduction"], before["content"]["sections"]["introduction"])
+        self.assertEqual(accepted["draft"]["content"]["sections"]["businessRequirements"]["functionSections"][0]["blocks"][1], before["content"]["sections"]["businessRequirements"]["functionSections"][0]["blocks"][1])
+        self.assertEqual(latest_accepted_artifact_draft(self.runtime.state, run_id="run_1", runtime_attempt_id="attempt_1", artifact_index=0), accepted["draft"])
+
     def test_patch_still_runs_full_semantic_validation(self):
         ack,_=self.reject()
         result,artifact=self.publish("repair1",repair=self.repair(ack,[{"op":"add","path":"/content/sections/safetyBaseline","value":{}}]))
@@ -111,7 +144,7 @@ class ArtifactDraftRepairTests(unittest.TestCase):
         candidate = copy.deepcopy(self.draft)
         candidate["title"] = "PRIVATE_CANDIDATE_TEXT"
         original = copy.deepcopy(candidate)
-        path = "/content/sections/businessRequirements/acceptanceCriteria/blocks/0/rows/0/cells/2/content/0/text"
+        path = "/content/sections/businessRequirements/functionSections/2/blocks/0/rows/0/cells/2/content/0/text"
         repair = {"baseCandidateChecksum": "a" * 64, "operations": [
             {"op": "replace", "path": "/title", "value": "PRIVATE_REPLACEMENT_TEXT"},
             {"op": "replace", "path": path, "value": "PRIVATE_NEW_CRITERION"},
@@ -123,7 +156,7 @@ class ArtifactDraftRepairTests(unittest.TestCase):
         self.assertEqual(str(error), "WORKBENCH_ARTIFACT_DRAFT_REPAIR_PATH_MISSING")
         self.assertEqual(error.feedback["operationIndex"], 1)
         self.assertEqual(error.feedback["path"]["pointer"], path)
-        self.assertEqual(error.feedback["path"]["existingPath"], "/content/sections/businessRequirements/acceptanceCriteria/blocks/0")
+        self.assertEqual(error.feedback["path"]["existingPath"], "/content/sections/businessRequirements/functionSections/2/blocks/0")
         self.assertEqual(error.feedback["path"]["type"], "object")
         self.assertIn("requirementIds", error.feedback["path"]["keys"])
         self.assertNotIn("rows", error.feedback["path"]["keys"])
@@ -132,11 +165,11 @@ class ArtifactDraftRepairTests(unittest.TestCase):
         self.assertNotIn("PRIVATE_", feedback)
 
     def test_out_of_range_repair_reports_array_length_and_unrelated_errors_have_no_details(self):
-        path = "/content/sections/businessRequirements/acceptanceCriteria/blocks/99"
+        path = "/content/sections/businessRequirements/functionSections/2/blocks/99"
         repair = {"baseCandidateChecksum": "b" * 64, "operations": [{"op": "add", "path": path, "value": {}}]}
         with self.assertRaises(ArtifactDraftRepairPathError) as caught:
             _apply_repair(self.draft, repair, "b" * 64)
-        self.assertEqual(caught.exception.feedback["path"]["length"], len(self.draft["content"]["sections"]["businessRequirements"]["acceptanceCriteria"]["blocks"]))
+        self.assertEqual(caught.exception.feedback["path"]["length"], len(self.draft["content"]["sections"]["businessRequirements"]["functionSections"][2]["blocks"]))
         self.assertEqual(repair_error_feedback(ValueError("PRIVATE_ERROR_TEXT")), "")
 
     def test_restores_canonical_directory_entries(self):
@@ -233,7 +266,7 @@ class ArtifactDraftRepairTests(unittest.TestCase):
         self.assertIsNone(latest_accepted_artifact_draft(self.runtime.state,run_id='run_1',runtime_attempt_id='attempt_1',artifact_index=0))
 
     def test_pointer_rules_bounds_and_transactional_operations(self):
-        base={"kind":"prd","schemaVersion":2,"operation":{"kind":"create"},"title":"title","citations":[],"content":{"a/b":{"~key":["first","second","third"]},"empty":{},"existing":{"x":1}}}
+        base={"kind":"prd","schemaVersion":3,"operation":{"kind":"create"},"title":"title","citations":[],"content":{"a/b":{"~key":["first","second","third"]},"empty":{},"existing":{"x":1}}}
         checksum="a"*64
         patch=lambda ops:{"baseCandidateChecksum":checksum,"operations":ops}
         result=_apply_repair(base,patch([{"op":"move","from":"/content/a~1b/~0key/0","path":"/content/a~1b/~0key/2"},{"op":"add","path":"/content/empty/new","value":False},{"op":"replace","path":"/content/existing/x","value":2},{"op":"remove","path":"/content/empty/new"}]),checksum)

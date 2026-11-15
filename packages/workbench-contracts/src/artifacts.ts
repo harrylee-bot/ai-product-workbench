@@ -5,16 +5,10 @@ import { isoDateTimeSchema, jsonValueSchema, opaqueIdSchema } from "./common.js"
 import type { JsonValue } from "./common.js";
 import {
   designSystemDocumentSchema,
-  publicDesignSystemDocumentSchema,
   type DesignSystemDocument,
-  type PublicDesignSystemDocument,
 } from "./design-systems.js";
 import {
-  prdDocumentV1Schema,
-  prdDocumentV2Schema,
   prdDocumentV3Schema,
-  type PrdDocumentV1,
-  type PrdDocumentV2,
   type PrdDocumentV3,
 } from "./prd.js";
 import {
@@ -106,33 +100,15 @@ type ArtifactVersionDetailMetadata = ArtifactVersionReference & {
 
 type ArtifactVersionInlineDetailBase = ArtifactVersionDetailMetadata & { contentMode: "inline" };
 
-export type ArtifactVersionInlineLegacyDetail = ArtifactVersionInlineDetailBase & (
-  | { kind: "prd"; schemaVersion: 1; content: PrdDocumentV1 }
+export type ArtifactVersionInlineDetail = ArtifactVersionInlineDetailBase & (
+  | { kind: "prd"; schemaVersion: 3; content: PrdDocumentV3 }
   | { kind: "prototype"; schemaVersion: 1; content: PrototypeDocument }
   | { kind: "design_system"; schemaVersion: 1; content: DesignSystemDocument }
   | { kind: "image" | "code" | "document" | "data"; schemaVersion: number; content: JsonValue }
+  | { kind: "prototype"; schemaVersion: 2; content: SourcePrototypeDocument }
 );
 
-export type ArtifactVersionInlineDetail = ArtifactVersionInlineLegacyDetail
-  | ArtifactVersionInlineDetailBase & { kind: "prd"; schemaVersion: 2; content: PrdDocumentV2 }
-  | ArtifactVersionInlineDetailBase & { kind: "prd"; schemaVersion: 3; content: PrdDocumentV3 }
-  | ArtifactVersionInlineDetailBase & { kind: "prototype"; schemaVersion: 2; content: SourcePrototypeDocument };
-
 export const artifactVersionInlinePrdDetailSchema = z.object({
-  ...inlineDetailShape,
-  kind: z.literal("prd"),
-  schemaVersion: z.literal(1),
-  content: prdDocumentV1Schema,
-}).strict();
-
-export const artifactVersionInlinePrdV2DetailSchema = z.object({
-  ...inlineDetailShape,
-  kind: z.literal("prd"),
-  schemaVersion: z.literal(2),
-  content: prdDocumentV2Schema,
-}).strict();
-
-export const artifactVersionInlinePrdV3DetailSchema = z.object({
   ...inlineDetailShape,
   kind: z.literal("prd"),
   schemaVersion: z.literal(3),
@@ -188,21 +164,15 @@ export const artifactVersionInlineDataDetailSchema = z.object({
   content: jsonValueSchema,
 }).strict();
 
-export const artifactVersionInlineLegacyDetailSchema: z.ZodType<ArtifactVersionInlineLegacyDetail> = z.discriminatedUnion("kind", [
+export const artifactVersionInlineDetailSchema: z.ZodType<ArtifactVersionInlineDetail, unknown> = z.union([
   artifactVersionInlinePrdDetailSchema,
   artifactVersionInlinePrototypeDetailSchema,
+  artifactVersionInlineSourcePrototypeDetailSchema,
   artifactVersionInlineDesignSystemDetailSchema,
   artifactVersionInlineImageDetailSchema,
   artifactVersionInlineCodeDetailSchema,
   artifactVersionInlineDocumentDetailSchema,
   artifactVersionInlineDataDetailSchema,
-]);
-
-export const artifactVersionInlineDetailSchema: z.ZodType<ArtifactVersionInlineDetail, unknown> = z.union([
-  artifactVersionInlineLegacyDetailSchema,
-  artifactVersionInlinePrdV2DetailSchema,
-  artifactVersionInlinePrdV3DetailSchema,
-  artifactVersionInlineSourcePrototypeDetailSchema,
 ]);
 
 export const artifactContentBlobSchema = z.object({
@@ -237,7 +207,7 @@ export const artifactVersionBlobDetailSchema: z.ZodType<ArtifactVersionBlobDetai
 }).strict().superRefine((version, context) => {
   if (
     (version.kind === "prototype" && version.schemaVersion !== 1)
-    || (version.kind === "prd" && version.schemaVersion !== 1 && version.schemaVersion !== 2 && version.schemaVersion !== 3)
+    || (version.kind === "prd" && version.schemaVersion !== 3)
   ) {
     context.addIssue({
       code: z.ZodIssueCode.custom,
@@ -276,38 +246,10 @@ type PublicArtifactVersionDetailMetadata = ArtifactVersionReference & {
 
 type PublicArtifactVersionInlineDetailBase = PublicArtifactVersionDetailMetadata & { contentMode: "inline" };
 
-export type PublicArtifactVersionInlineLegacyDetail = PublicArtifactVersionInlineDetailBase & (
-  | { kind: "prd"; schemaVersion: 1; content: PrdDocumentV1 }
+export type PublicArtifactVersionInlineDetail = PublicArtifactVersionInlineDetailBase & (
   | { kind: "prototype"; schemaVersion: 1; content: PublicPrototypeDocument }
-  | { kind: "design_system"; schemaVersion: 1; content: PublicDesignSystemDocument }
-  | { kind: "image" | "code" | "document" | "data"; schemaVersion: number; content: JsonValue }
+  | { kind: "prototype"; schemaVersion: 2; content: PublicSourcePrototypeDocument }
 );
-
-export type PublicArtifactVersionInlineDetail = PublicArtifactVersionInlineLegacyDetail
-  | PublicArtifactVersionInlineDetailBase & { kind: "prd"; schemaVersion: 2; content: PrdDocumentV2 }
-  | PublicArtifactVersionInlineDetailBase & { kind: "prd"; schemaVersion: 3; content: PrdDocumentV3 }
-  | PublicArtifactVersionInlineDetailBase & { kind: "prototype"; schemaVersion: 2; content: PublicSourcePrototypeDocument };
-
-export const publicArtifactVersionInlinePrdDetailSchema = z.object({
-  ...publicInlineDetailShape,
-  kind: z.literal("prd"),
-  schemaVersion: z.literal(1),
-  content: prdDocumentV1Schema,
-}).strict();
-
-export const publicArtifactVersionInlinePrdV2DetailSchema = z.object({
-  ...publicInlineDetailShape,
-  kind: z.literal("prd"),
-  schemaVersion: z.literal(2),
-  content: prdDocumentV2Schema,
-}).strict();
-
-export const publicArtifactVersionInlinePrdV3DetailSchema = z.object({
-  ...publicInlineDetailShape,
-  kind: z.literal("prd"),
-  schemaVersion: z.literal(3),
-  content: prdDocumentV3Schema,
-}).strict();
 
 export const publicArtifactVersionInlinePrototypeDetailSchema = z.object({
   ...publicInlineDetailShape,
@@ -323,55 +265,9 @@ export const publicArtifactVersionInlineSourcePrototypeDetailSchema = z.object({
   content: publicSourcePrototypeDocumentSchema,
 }).strict();
 
-export const publicArtifactVersionInlineDesignSystemDetailSchema = z.object({
-  ...publicInlineDetailShape,
-  kind: z.literal("design_system"),
-  schemaVersion: z.literal(1),
-  content: publicDesignSystemDocumentSchema,
-}).strict();
-
-export const publicArtifactVersionInlineImageDetailSchema = z.object({
-  ...publicInlineDetailShape,
-  kind: z.literal("image"),
-  schemaVersion: z.number().int().positive(),
-  content: jsonValueSchema,
-}).strict();
-
-export const publicArtifactVersionInlineCodeDetailSchema = z.object({
-  ...publicInlineDetailShape,
-  kind: z.literal("code"),
-  schemaVersion: z.number().int().positive(),
-  content: jsonValueSchema,
-}).strict();
-
-export const publicArtifactVersionInlineDocumentDetailSchema = z.object({
-  ...publicInlineDetailShape,
-  kind: z.literal("document"),
-  schemaVersion: z.number().int().positive(),
-  content: jsonValueSchema,
-}).strict();
-
-export const publicArtifactVersionInlineDataDetailSchema = z.object({
-  ...publicInlineDetailShape,
-  kind: z.literal("data"),
-  schemaVersion: z.number().int().positive(),
-  content: jsonValueSchema,
-}).strict();
-
-export const publicArtifactVersionInlineLegacyDetailSchema: z.ZodType<PublicArtifactVersionInlineLegacyDetail> = z.discriminatedUnion("kind", [
-  publicArtifactVersionInlinePrdDetailSchema,
-  publicArtifactVersionInlinePrototypeDetailSchema,
-  publicArtifactVersionInlineDesignSystemDetailSchema,
-  publicArtifactVersionInlineImageDetailSchema,
-  publicArtifactVersionInlineCodeDetailSchema,
-  publicArtifactVersionInlineDocumentDetailSchema,
-  publicArtifactVersionInlineDataDetailSchema,
-]);
 
 export const publicArtifactVersionInlineDetailSchema: z.ZodType<PublicArtifactVersionInlineDetail, unknown> = z.union([
-  publicArtifactVersionInlineLegacyDetailSchema,
-  publicArtifactVersionInlinePrdV2DetailSchema,
-  publicArtifactVersionInlinePrdV3DetailSchema,
+  publicArtifactVersionInlinePrototypeDetailSchema,
   publicArtifactVersionInlineSourcePrototypeDetailSchema,
 ]);
 
@@ -379,30 +275,19 @@ export const publicArtifactContentBlobSchema = artifactContentBlobSchema.omit({ 
 export type PublicArtifactContentBlob = z.infer<typeof publicArtifactContentBlobSchema>;
 
 export type PublicArtifactVersionBlobDetail = PublicArtifactVersionDetailMetadata & {
-  kind: Exclude<z.infer<typeof artifactKindSchema>, "design_system">;
-  schemaVersion: number;
+  kind: "prototype";
+  schemaVersion: 1;
   contentMode: "blob";
   blob: PublicArtifactContentBlob;
 };
 
 export const publicArtifactVersionBlobDetailSchema: z.ZodType<PublicArtifactVersionBlobDetail> = z.object({
   ...publicArtifactVersionDetailBaseShape,
-  kind: artifactKindSchema.exclude(["design_system"]),
-  schemaVersion: z.number().int().positive(),
+  kind: z.literal("prototype"),
+  schemaVersion: z.literal(1),
   contentMode: z.literal("blob"),
   blob: publicArtifactContentBlobSchema,
-}).strict().superRefine((version, context) => {
-  if (
-    (version.kind === "prototype" && version.schemaVersion !== 1)
-    || (version.kind === "prd" && version.schemaVersion !== 1 && version.schemaVersion !== 2 && version.schemaVersion !== 3)
-  ) {
-    context.addIssue({
-      code: z.ZodIssueCode.custom,
-      path: ["schemaVersion"],
-      message: `${version.kind} schemaVersion is unsupported`,
-    });
-  }
-});
+}).strict();
 
 export type PublicArtifactVersionDetail = PublicArtifactVersionInlineDetail | PublicArtifactVersionBlobDetail;
 
@@ -417,7 +302,7 @@ export const artifactVersionListItemSchema = artifactVersionSchema.extend({
   if (
     (version.kind === "prototype" && version.schemaVersion !== 1 && !(version.schemaVersion === 2 && version.contentMode === "inline"))
     || (version.kind === "design_system" && version.schemaVersion !== 1)
-    || (version.kind === "prd" && version.schemaVersion !== 1 && version.schemaVersion !== 2 && version.schemaVersion !== 3)
+    || (version.kind === "prd" && version.schemaVersion !== 3)
   ) {
     context.addIssue({
       code: z.ZodIssueCode.custom,
@@ -497,29 +382,11 @@ export const artifactVersionFavoriteListSchema = z.object({
 }).strict();
 
 export type CreateArtifactVersionRequest =
-  | { kind: "prd"; baseArtifactVersionId: string; document: PrdDocumentV1 }
-  | { kind: "prd"; baseArtifactVersionId: string; document: PrdDocumentV2 }
   | { kind: "prd"; baseArtifactVersionId: string; document: PrdDocumentV3 }
   | { kind: "prototype"; baseArtifactVersionId: string; document: PrototypeDocument }
   | { kind: "prototype"; baseArtifactVersionId: string; document: SourcePrototypeInput };
 
-type CreateArtifactVersionLegacyRequest =
-  | { kind: "prd"; baseArtifactVersionId: string; document: PrdDocumentV1 }
-  | { kind: "prototype"; baseArtifactVersionId: string; document: PrototypeDocument };
-
 export const createPrdArtifactVersionRequestSchema = z.object({
-  baseArtifactVersionId: opaqueIdSchema,
-  kind: z.literal("prd"),
-  document: prdDocumentV1Schema,
-}).strict();
-
-export const createPrdV2ArtifactVersionRequestSchema = z.object({
-  baseArtifactVersionId: opaqueIdSchema,
-  kind: z.literal("prd"),
-  document: prdDocumentV2Schema,
-}).strict();
-
-export const createPrdV3ArtifactVersionRequestSchema = z.object({
   baseArtifactVersionId: opaqueIdSchema,
   kind: z.literal("prd"),
   document: prdDocumentV3Schema,
@@ -537,15 +404,9 @@ export const createSourcePrototypeArtifactVersionRequestSchema = z.object({
   document: sourcePrototypeInputSchema,
 }).strict();
 
-export const createArtifactVersionRequestLegacySchema: z.ZodType<CreateArtifactVersionLegacyRequest> = z.discriminatedUnion("kind", [
+export const createArtifactVersionRequestSchema: z.ZodType<CreateArtifactVersionRequest, unknown> = z.union([
   createPrdArtifactVersionRequestSchema,
   createPrototypeArtifactVersionRequestSchema,
-]);
-
-export const createArtifactVersionRequestSchema: z.ZodType<CreateArtifactVersionRequest, unknown> = z.union([
-  createArtifactVersionRequestLegacySchema,
-  createPrdV2ArtifactVersionRequestSchema,
-  createPrdV3ArtifactVersionRequestSchema,
   createSourcePrototypeArtifactVersionRequestSchema,
 ]);
 

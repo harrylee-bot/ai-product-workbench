@@ -11,10 +11,7 @@ import {
 import { useMemo } from "react";
 
 import type { WorkbenchApiClient } from "../../../api/client";
-import {
-  useOptionalWorkbenchTransport,
-  useWorkbenchTransport,
-} from "../../../transport/context";
+import { useWorkbenchTransport } from "../../../transport/context";
 import {
   createIdempotencyKey,
   normalizeEtag,
@@ -78,12 +75,4 @@ export class WorkbenchImportSourcesApi {
 export function useWorkbenchImportSourcesApi(): WorkbenchImportSourcesApi {
   const { api } = useWorkbenchTransport();
   return useMemo(() => new WorkbenchImportSourcesApi(api), [api]);
-}
-
-export function useOptionalWorkbenchImportSourcesApi(): WorkbenchImportSourcesApi | null {
-  const transport = useOptionalWorkbenchTransport();
-  return useMemo(
-    () => (transport ? new WorkbenchImportSourcesApi(transport.api) : null),
-    [transport],
-  );
 }

@@ -3,7 +3,7 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
 import { artifactVersionDetailSchema, exportCapabilitiesSchema, projectReleaseSchema, publicArtifactVersionDetailSchema, publicShareSchema } from "@workbench/workbench-contracts";
-import { prdDocumentV2Example } from "@workbench/workbench-contracts/test-fixtures";
+import { prdDocumentV3Example } from "@workbench/workbench-contracts/test-fixtures";
 
 // Layout regression against the real local Web bundle with controlled read-only APIs.
 const origin = new URL(process.env.WORKBENCH_E2E_WEB_ORIGIN ?? "http://localhost:3000").origin;
@@ -13,7 +13,7 @@ const timestamp = "2026-10-29T00:00:00.000Z";
 const checksum = "a".repeat(64);
 const project = { id: "project-typography", workspaceId: "workspace-1", title: "跨部门业务需求与产品原型协同管理平台的字体及多屏适配验收项目", summary: null, status: "active", revision: 1, createdAt: timestamp, updatedAt: timestamp };
 const thread = { id: "thread-typography", projectId: project.id, title: "需求", status: "active", revision: 1, createdAt: timestamp, updatedAt: timestamp };
-const version = { artifactId: "artifact-prd", artifactVersionId: "prd-v1", version: 1, kind: "prd", schemaVersion: 2, status: "ready", checksum, createdByRunId: null, createdAt: timestamp };
+const version = { artifactId: "artifact-prd", artifactVersionId: "prd-v1", version: 1, kind: "prd", schemaVersion: 3, status: "ready", checksum, createdByRunId: null, createdAt: timestamp };
 const artifact = { id: "artifact-prd", projectId: project.id, kind: "prd", title: "示例工单需求说明书", revision: 1, currentVersion: version, createdAt: timestamp, updatedAt: timestamp };
 const board = {
   id: "board-typography", projectId: project.id, revision: 1,
@@ -24,8 +24,8 @@ const board = {
     data: { protocol: "workbench.board-node.v1", nodeType: "artifact", title: artifact.title, artifactKind: "prd" } }],
   edges: [],
 };
-const detail = artifactVersionDetailSchema.parse({ ...version, citations: [], knowledgeReleaseId: null, contentMode: "inline", content: prdDocumentV2Example });
-const pin = { position: 0, artifactId: artifact.id, artifactVersionId: version.artifactVersionId, title: artifact.title, kind: "prd", version: 1, schemaVersion: 2, checksum, assets: [] };
+const detail = artifactVersionDetailSchema.parse({ ...version, citations: [], knowledgeReleaseId: null, contentMode: "inline", content: prdDocumentV3Example });
+const pin = { position: 0, artifactId: artifact.id, artifactVersionId: version.artifactVersionId, title: artifact.title, kind: "prd", version: 1, schemaVersion: 3, checksum, assets: [] };
 const release = projectReleaseSchema.parse({
   id: "release-typography", projectId: project.id, version: 1, status: "ready", createdById: "principal-1",
   boardId: board.id, boardRevision: 1, boardSnapshot: board, boardChecksum: checksum, artifactPins: [pin],
@@ -35,16 +35,15 @@ const release = projectReleaseSchema.parse({
 const publicRelease = structuredClone(release);
 delete publicRelease.createdById;
 for (const item of [...publicRelease.artifactPins, ...publicRelease.manifest.artifacts]) delete item.assets;
-const publicShare = publicShareSchema.parse({ shareId: "share-typography", scope: "remix", expiresAt: null, release: publicRelease });
+const publicShare = publicShareSchema.parse({ shareId: "share-typography", scope: "view", expiresAt: null, release: publicRelease });
 const publicDetail = { ...detail };
 delete publicDetail.createdByRunId;
 delete publicDetail.knowledgeReleaseId;
 publicArtifactVersionDetailSchema.parse(publicDetail);
-const available = { available: true, authentication: "not_required", reasonCode: null };
+const available = { available: true, reasonCode: null };
 const capabilities = exportCapabilitiesSchema.parse({
   formats: Object.fromEntries(["html", "react", "figma", "mcp", "docx", "pdf"].map(f => [f, available])),
   packaging: { single_file: available, zip: available },
-  external: Object.fromEntries(["ai_studio", "netlify", "lovable", "bolt"].map(f => [f, { available: false, authentication: "required", reasonCode: "EXPORT_EXTERNAL_AUTHENTICATION_REQUIRED" }])),
 });
 const unknownRequests = [];
 const pageErrors = [];

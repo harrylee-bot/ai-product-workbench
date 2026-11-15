@@ -25,16 +25,11 @@ describeWithPostgres("PrismaImportSourceStore PostgreSQL boundaries", () => {
           .resolves.toEqual({ kind: "busy" });
 
         await new Promise((resolve) => setTimeout(resolve, 5));
-        await expect(store.expireStaleAttempts(new Date(Date.now() + 1_000), 3, 50)).resolves.toEqual({
-          expired: 1,
-          retryable: 1,
-          exhausted: 0,
-        });
+        await store.expireStaleAttempts(new Date(Date.now() + 1_000), 3, 50);
 
         const candidates = await store.reconciliationCandidates(new Date(0), 3, 50);
         expect(candidates).toEqual([{
           sourceId: fixture.sourceId,
-          projectId: fixture.projectId,
           requestHash: fixture.requestHash,
           nextAttempt: 2,
         }]);

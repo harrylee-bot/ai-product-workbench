@@ -3,7 +3,7 @@ import { canonicalJson, runSourceBlobLimit, type CreateImportSourceRequest, type
 
 export const maximumImportSourceManifestBlobs = runSourceBlobLimit;
 
-export type FrozenImportBlob = {
+type FrozenImportBlob = {
   path: string;
   mediaType: string;
   bytes: Buffer;
@@ -11,14 +11,12 @@ export type FrozenImportBlob = {
 };
 
 export type FrozenImport = {
-  label: string;
   descriptor: ImportSourceDescriptor;
   checksum: string;
   blobs: FrozenImportBlob[];
 };
 
 export function freezeImport(input: {
-  label: string;
   descriptor: ImportSourceDescriptor;
   blobs: Array<{ path: string; mediaType: string; bytes: Buffer }>;
 }): FrozenImport {
@@ -31,7 +29,7 @@ export function freezeImport(input: {
     descriptor: input.descriptor,
     blobs: blobs.map(({ path, mediaType, bytes, sha256 }) => ({ path, mediaType, byteSize: bytes.byteLength, sha256 })),
   })).digest("hex");
-  return { label: input.label, descriptor: input.descriptor, checksum, blobs };
+  return { descriptor: input.descriptor, checksum, blobs };
 }
 
 export interface ImportProvider {

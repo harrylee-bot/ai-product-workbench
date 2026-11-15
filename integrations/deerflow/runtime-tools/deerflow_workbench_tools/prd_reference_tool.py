@@ -46,7 +46,7 @@ PRD_REFERENCE_FILES: Final[Mapping[PrdReferencePath, PrdReferenceSpec]] = Mappin
         physical_path=Path(
             "/app/skills/public/workbench/references/prd-runtime-result.schema.json",
         ),
-        sha256="76c1ae2338854cb68133fc242f7efde534278878bbd89e297a4f8ee010479065",
+        sha256="25d95c16c5577408807a70cf8371cbafb857f648f649555f8e2abe46b4a2593f",
     ),
 })
 

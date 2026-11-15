@@ -19,7 +19,7 @@ import {
   RefreshCwIcon,
   XIcon,
 } from "lucide-react";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, type ReactNode } from "react";
 import { toast } from "sonner";
 
 import {
@@ -72,7 +72,7 @@ type WorkbenchRunSubmitHandler = (
   submission: WorkbenchRunSubmission,
 ) => Promise<string | null>;
 
-export type WorkbenchProjectComposerContext = {
+type WorkbenchProjectComposerContext = {
   artifactTargets: RunArtifactTarget[];
   id: string;
   kind: "agent-edit" | "generate-followup" | "generate-prototype" | "generate-variants";
@@ -81,6 +81,8 @@ export type WorkbenchProjectComposerContext = {
 
 export type WorkbenchProjectComposerProps = {
   busy: boolean;
+  generationContextLocked?: boolean;
+  intentControl?: ReactNode;
   canRefresh: boolean;
   context?: WorkbenchProjectComposerContext | null;
   disabled: boolean;
@@ -95,7 +97,6 @@ export type WorkbenchProjectComposerProps = {
   onRefresh: () => Promise<unknown>;
   onClearContext?: () => void;
   onRetryDesignPresets: () => void;
-  onRetryModels: () => void;
   onTargetSurfaceChange: (surface: RunTargetSurface) => void;
   onToggleModel: () => void;
   onSubmitPrompt: WorkbenchRunSubmitHandler;
@@ -113,6 +114,8 @@ export type WorkbenchProjectComposerProps = {
 
 export function ProjectComposer({
   busy,
+  generationContextLocked = false,
+  intentControl,
   canRefresh,
   context = null,
   disabled,
@@ -127,7 +130,6 @@ export function ProjectComposer({
   onRefresh,
   onClearContext,
   onRetryDesignPresets,
-  onRetryModels: _onRetryModels,
   onTargetSurfaceChange,
   onToggleModel,
   onSubmitPrompt,
@@ -335,6 +337,7 @@ export function ProjectComposer({
         data-busy={isBusy ? "true" : undefined}
         data-typing={displayedPrompt.trim().length > 0 ? "true" : undefined}
       >
+        {intentControl}
         {(context || hasDocumentChip || selectedFiles[0] || selectedSourceIds.length > 0) && (
           <div className="mb-[14px] flex max-w-full flex-wrap gap-[8px]">
             {context && (
@@ -427,7 +430,7 @@ export function ProjectComposer({
         >
           <button
             className="workbench-composer-tool grid size-[32px] place-items-center rounded-full hover:bg-white/[0.06]"
-            disabled={disabled}
+            disabled={disabled || generationContextLocked}
             onClick={() => void attachments.openAttachment("file")}
             type="button"
           >
@@ -448,7 +451,7 @@ export function ProjectComposer({
             /
           </button>
           <WorkbenchTargetSurfaceControl
-            disabled={disabled}
+            disabled={disabled || generationContextLocked}
             onChange={onTargetSurfaceChange}
             surface={targetSurface}
           />
@@ -461,7 +464,7 @@ export function ProjectComposer({
               "workbench-composer-tool grid size-[32px] place-items-center rounded-full hover:bg-white/[0.06]",
               composerPanel === "attachments" && "bg-white/[0.08] text-[#f1f3f4]",
             )}
-            disabled={disabled}
+            disabled={disabled || generationContextLocked}
             onClick={() => toggleComposerPanel("attachments")}
             type="button"
           >
@@ -475,7 +478,7 @@ export function ProjectComposer({
               "workbench-composer-tool grid size-[32px] place-items-center rounded-full hover:bg-white/[0.06]",
               composerPanel === "style" && "bg-white/[0.08] text-[#f1f3f4]",
             )}
-            disabled={disabled}
+            disabled={disabled || generationContextLocked}
             onClick={() => toggleComposerPanel("style")}
             type="button"
           >
@@ -486,7 +489,7 @@ export function ProjectComposer({
             aria-haspopup="menu"
             aria-label="选择生成类型"
             className="workbench-composer-model flex h-[34px] shrink-0 items-center gap-[7px] rounded-full bg-[#2b2c30]/95 px-[14px] text-[13px] font-semibold text-[#f1f3f4] max-sm:px-[10px]"
-            disabled={disabled || modelCatalog.status !== "ready"}
+            disabled={disabled || generationContextLocked || modelCatalog.status !== "ready"}
             onClick={() => {
               setComposerPanel(null);
               onToggleModel();
@@ -494,12 +497,19 @@ export function ProjectComposer({
             type="button"
           >
             <FileTextIcon className="size-[15px]" />
-            {targetedGenerate ? "生成原型" : artifactOutputLabel(outputKind)}
+            {generationContextLocked ? "沿用版本上下文" : targetedGenerate ? "生成原型" : artifactOutputLabel(outputKind)}
           </button>
           <AnimatePresence>
-            {modelCatalog.status === "ready" && modelMenuOpen && (
+            {!generationContextLocked && modelCatalog.status === "ready" && modelMenuOpen && (
               <ComposerArtifactOutputMenu
                 kind={outputKind}
+                models={[...new Set(modelChoices.filter((choice) => choice.workflow === selectedModel?.workflow).map((choice) => choice.modelId))]}
+                selectedModelId={selectedModel?.modelId}
+                onSelectModel={(modelId) => {
+                  const choice = modelChoices.find((item) => item.workflow === selectedModel?.workflow && item.modelId === modelId);
+                  if (choice) onSelectModel(choice.key);
+                  (onCloseModel ?? onToggleModel)();
+                }}
                 onSelect={(kind) => {
                   const generateChoice = modelChoices.find((choice) => (
                     choice.workflow === "generate" && choice.modelId === selectedModel?.modelId
@@ -516,7 +526,7 @@ export function ProjectComposer({
           <button
             aria-label="重试上一次生成"
             className="workbench-composer-tool workbench-composer-refresh grid size-[32px] place-items-center rounded-full hover:bg-white/[0.06]"
-            disabled={disabled || isBusy || !canRefresh}
+            disabled={disabled || generationContextLocked || isBusy || !canRefresh}
             onClick={() => void onRefresh().catch(() => undefined)}
             title={canRefresh ? "重试上一次生成" : "当前没有可重试的生成"}
             type="button"
@@ -547,7 +557,7 @@ export function ProjectComposer({
             }}
           />
         )}
-            {composerPanel === "attachments" && (
+            {!generationContextLocked && composerPanel === "attachments" && (
           <ComposerAttachmentMenu
             onImportSourcePrototype={onSourcePrototypeCreated ? () => { setComposerPanel(null); setSourcePrototypeOpen(true); } : undefined}
             onSelect={(kind) => {
@@ -562,7 +572,7 @@ export function ProjectComposer({
             }}
           />
         )}
-        {composerPanel === "style" && (
+        {!generationContextLocked && composerPanel === "style" && (
           <ProjectDesignSystemMenu
             onCreateCustom={() => {
               setComposerPanel(null);
@@ -584,9 +594,9 @@ export function ProjectComposer({
         busy={busy}
         onOpenChange={setCustomDesignOpen}
         onSubmit={(request) => setSelectedStyle(designStyleSelectionFromCustom(request))}
-        open={customDesignOpen}
+        open={customDesignOpen && !generationContextLocked}
       />
-      {sourcePrototypeOpen && <WorkbenchSourcePrototypeDialog onCreated={onSourcePrototypeCreated}
+      {sourcePrototypeOpen && !generationContextLocked && <WorkbenchSourcePrototypeDialog onCreated={onSourcePrototypeCreated}
         onOpenChange={setSourcePrototypeOpen} open projectId={projectId} />}
       <WorkbenchImportSourcesDialog
         disabled={disabled}
@@ -598,7 +608,7 @@ export function ProjectComposer({
           });
         }}
         onSelectedSourceIdsChange={setSelectedSourceIds}
-        open={importSourcesOpen}
+        open={importSourcesOpen && !generationContextLocked}
         projectId={projectId}
         selectedSourceIds={selectedSourceIds}
       />

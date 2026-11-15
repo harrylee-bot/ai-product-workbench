@@ -32,8 +32,11 @@ def workbench_prototype_patch_publish(
 ) -> tuple[str, dict[str, Any]]:
     """Validate and publish one atomic 产品工作台 Prototype Screen patch.
 
-    Call this only after publishing the first complete Prototype checkpoint. The
-    Worker derives every trusted scope identifier and applies the batch atomically.
+    Call this only after this run's four real Prototype stages (design-system,
+    mapping-components, creating-flows, generating-ui) and a complete checkpoint
+    for the same artifact_index and screen_id have all succeeded. Wait for each
+    stage and the checkpoint ACK; earlier runs and sibling calls do not count.
+    The Worker derives every trusted scope identifier and applies the batch atomically.
 
     Args:
         artifact_index: Stable zero-based index used by the final Runtime result.

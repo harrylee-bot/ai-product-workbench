@@ -97,20 +97,20 @@ const WorkbenchPrdEditContext = createContext<WorkbenchPrdEditContextValue>({
   onDocumentCommit: async () => undefined,
 });
 
-export type ArtboardData = {
+type ArtboardData = {
   mode: ProjectMode;
   phase: Phase;
   title: string;
 };
 
-export type BoardTileData = {
+type BoardTileData = {
   accent: string;
   kind: "screen" | "image" | "doc" | "palette" | "wire";
   subtitle: string;
   title: string;
 };
 
-export type GeneratedScreenData = {
+type GeneratedScreenData = {
   artifact?: WorkbenchArtifactReference;
   index: number;
   phase: Phase;
@@ -118,7 +118,7 @@ export type GeneratedScreenData = {
   title: string;
 };
 
-export type DocumentCanvasData = {
+type DocumentCanvasData = {
   artifact?: WorkbenchArtifactReference;
   phase: Phase;
   previousArtifact?: WorkbenchArtifactReference;
@@ -126,7 +126,7 @@ export type DocumentCanvasData = {
   title: string;
 };
 
-export type GeneratedStyleBoardData = {
+type GeneratedStyleBoardData = {
   title: string;
 };
 
@@ -143,11 +143,11 @@ export type OverviewArtifactData = {
   title: string;
 };
 
-export type ArtboardNode = Node<ArtboardData, "workbenchArtboard">;
-export type BoardTileNode = Node<BoardTileData, "workbenchTile">;
+type ArtboardNode = Node<ArtboardData, "workbenchArtboard">;
+type BoardTileNode = Node<BoardTileData, "workbenchTile">;
 export type GeneratedScreenNode = Node<GeneratedScreenData, "generatedScreen">;
 export type DocumentCanvasNode = Node<DocumentCanvasData, "documentCanvas">;
-export type GeneratedStyleBoardNode = Node<GeneratedStyleBoardData, "generatedStyleBoard">;
+type GeneratedStyleBoardNode = Node<GeneratedStyleBoardData, "generatedStyleBoard">;
 export type OverviewArtifactNode = Node<OverviewArtifactData, "overviewArtifact">;
 export type BoardFrameNode = Node<BoardFrameData, "frame">;
 export type BoardDrawingNode = Node<BoardDrawingData, "drawing">;

@@ -9,6 +9,7 @@ const deployScript = resolve("deploy/server-deploy.sh");
 const queueParticipants = [
   "workbench-api",
   "workbench-worker",
+  "workbench-temporal-worker",
   "workbench-file-worker",
   "workbench-import-worker",
   "workbench-export-worker",
@@ -93,7 +94,7 @@ test("partial deployment rejects queue policy recreate authorization", () => {
 
 for (const [deployTarget, services] of [
   ["api", "workbench-api"],
-  ["web", "workbench-web knowledge"],
+  ["web", "workbench-web"],
   ["runtime-worker", "workbench-worker"],
   ["file-worker", "workbench-file-worker"],
   ["import-worker", "workbench-import-worker"],
@@ -113,9 +114,11 @@ for (const [deployTarget, services] of [
 
 function runDeployment({
   deployTarget = "all",
+  selectedServices = "",
   envFileAuthorization = "0",
   failBuild = false,
   failMigration = false,
+  temporalStatus = "healthy",
   manageDeerflowRuntime = false,
   deerflowImagePresent = true,
   failDeerflowPull = false,
@@ -184,10 +187,12 @@ function runDeployment({
     WORKBENCH_DEPLOY_HEALTH_TIMEOUT_SECONDS: "5",
     WORKBENCH_RUNTIME_QUEUE_STOP_TIMEOUT_SECONDS: "5",
     DEPLOY_TARGET: deployTarget,
+    WORKBENCH_DEPLOY_SERVICES: selectedServices,
     TEST_COMMAND_LOG: commandLogPath,
     TEST_STATE_DIR: stateDir,
     TEST_FAIL_BUILD: failBuild ? "1" : "0",
     TEST_FAIL_MIGRATION: failMigration ? "1" : "0",
+    TEST_TEMPORAL_STATUS: temporalStatus,
     TEST_DEERFLOW_IMAGE_PRESENT: deerflowImagePresent ? "1" : "0",
     TEST_FAIL_DEERFLOW_PULL: failDeerflowPull ? "1" : "0",
   };
@@ -227,7 +232,7 @@ function fakeDockerSource() {
     "    : > \"$TEST_STATE_DIR/deerflow-image\"",
     "  fi",
     "  if [ \"$1 $2\" = 'image inspect' ] && [ \"$3\" = '--format' ]; then printf 'registry.example.test/workbench-runtime@sha256:%064d\\n' 1; fi",
-    "  if [ \"$1 $2\" = 'inspect --format' ]; then printf 'healthy\\n'; fi",
+    "  if [ \"$1 $2\" = 'inspect --format' ]; then case \"$4\" in workbench-temporal-worker-id) printf '%s\\n' \"$TEST_TEMPORAL_STATUS\";; *) printf 'healthy\\n';; esac; fi",
     "  exit 0",
     "fi",
     "last=",
@@ -261,7 +266,7 @@ function fakeDockerSource() {
     "    if [ \"$last\" = -q ]; then printf 'existing-id\\n'; exit 0; fi",
     "    if [ \"$last\" = postgres ]; then printf 'postgres-id\\n'; exit 0; fi",
     "    case \"$last\" in",
-    "      workbench-api|workbench-worker|workbench-file-worker|workbench-import-worker|workbench-export-worker)",
+    "      workbench-api|workbench-worker|workbench-temporal-worker|workbench-file-worker|workbench-import-worker|workbench-export-worker)",
     "        if [ -f \"$TEST_STATE_DIR/stopped\" ] && [ ! -f \"$TEST_STATE_DIR/started\" ]; then exit 0; fi",
     "        ;;",
     "    esac",
@@ -278,3 +283,54 @@ function writeExecutable(path, source) {
   writeFileSync(path, source, { mode: 0o755 });
   chmodSync(path, 0o755);
 }
+
+for (const selectedServices of ["workbench-web", "workbench-api workbench-import-worker", "workbench-preview", "workbench-temporal-worker"]) {
+  test(`selected release updates only ${selectedServices} without migrating or stopping the queue`, () => {
+    const result = runDeployment({ deployTarget: "selected", selectedServices });
+    assert.equal(result.status, 0, result.stderr);
+    assert.match(result.commandLog, new RegExp(`direct-build ${selectedServices}\\n`));
+    assert.match(result.commandLog, new RegExp(`up -d --no-build --no-deps ${selectedServices}\\n`));
+    assert.doesNotMatch(result.commandLog, / stop | run --rm|direct-build all|deerflow-config-merge/);
+    if (selectedServices === "workbench-web") assert.doesNotMatch(result.commandLog, /knowledge/);
+    for (const line of result.lines.filter(line => line.includes(" up "))) assert.match(line, /--no-deps/);
+    for (const service of selectedServices.split(" ")) assert.match(result.stdout, new RegExp(`Service ready: ${service} \\(healthy\\)`));
+  });
+}
+
+test("selected release rejects unknown services before building", () => {
+  const result = runDeployment({ deployTarget: "selected", selectedServices: "postgres" });
+  assert.equal(result.status, 64);
+  assert.doesNotMatch(result.commandLog, /direct-build| up | stop /);
+});
+
+for (const deployTarget of ["all", "selected"]) {
+  test(`${deployTarget} does not report deployment success when the Temporal executor fails health`, () => {
+    const result = runDeployment({ deployTarget, selectedServices: "workbench-temporal-worker", temporalStatus: "unhealthy" });
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /Service failed before readiness: workbench-temporal-worker \(unhealthy\)/);
+    assert.doesNotMatch(result.stdout, /产品工作台部署完成/);
+  });
+}
+
+test("a running Temporal executor without health readiness cannot complete a selected release", () => {
+  const result = runDeployment({ deployTarget: "selected", selectedServices: "workbench-temporal-worker", temporalStatus: "running" });
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /Service readiness timed out: workbench-temporal-worker/);
+  assert.doesNotMatch(result.stdout, /产品工作台部署完成/);
+});
+
+test("migration-only deployment stops the Temporal executor before schema changes", () => {
+  const result = runDeployment({ deployTarget: "migrate" });
+  assert.equal(result.status, 0, result.stderr);
+  const stopIndex = result.lines.findIndex(line => line.includes(" stop --timeout "));
+  const migrateIndex = result.lines.findIndex(line => line.includes(" run --rm --no-deps migrate"));
+  assert(result.lines[stopIndex].includes("workbench-temporal-worker"));
+  assert(migrateIndex > stopIndex);
+  assert.doesNotMatch(result.commandLog.slice(result.commandLog.indexOf(result.lines[migrateIndex])), / up /);
+});
+
+test("selected build failure never updates the running containers", () => {
+  const result = runDeployment({ deployTarget: "selected", selectedServices: "workbench-web", failBuild: true });
+  assert.equal(result.status, 43);
+  assert.doesNotMatch(result.commandLog, / up | stop | run --rm/);
+});

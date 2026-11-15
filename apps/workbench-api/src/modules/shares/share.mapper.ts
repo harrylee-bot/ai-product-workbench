@@ -1,10 +1,8 @@
 import { createHash } from "node:crypto";
 import {
   canonicalJson,
-  designSystemDocumentSchema,
   prototypeDocumentSchema,
   publicArtifactVersionDetailSchema,
-  publicDesignSystemDocumentSchema,
   publicPrototypeDocumentSchema,
   sourcePrototypeDocumentSchema,
   projectPublicSourcePrototypeDocument,
@@ -70,7 +68,8 @@ export function mapPublicArtifactVersion(
   pin: ProjectReleaseArtifactPin,
 ): PublicArtifactVersionDetail {
   if (
-    record.id !== pin.artifactVersionId
+    pin.kind !== "prototype"
+    || record.id !== pin.artifactVersionId
     || record.artifactId !== pin.artifactId
     || record.version !== pin.version
     || record.schemaVersion !== pin.schemaVersion
@@ -94,13 +93,9 @@ export function mapPublicArtifactVersion(
   let detail: PublicArtifactVersionDetail;
   if (record.contentBlob === null) {
     if (record.content === null) throw new Error("PUBLIC_SHARE_ARTIFACT_CONTENT_MISSING");
-    const content = pin.kind === "prototype"
-      ? record.schemaVersion === 2
-        ? projectPublicSourcePrototypeDocument(sourcePrototypeDocumentSchema.parse(record.content))
-        : publicPrototypeDocumentSchema.parse(sanitizePublicJson(prototypeDocumentSchema.parse(record.content)))
-      : pin.kind === "design_system"
-        ? publicDesignSystemDocumentSchema.parse(sanitizePublicJson(designSystemDocumentSchema.parse(record.content)))
-        : sanitizePublicJson(record.content);
+    const content = record.schemaVersion === 2
+      ? projectPublicSourcePrototypeDocument(sourcePrototypeDocumentSchema.parse(record.content))
+      : publicPrototypeDocumentSchema.parse(sanitizePublicJson(prototypeDocumentSchema.parse(record.content)));
     detail = publicArtifactVersionDetailSchema.parse({
       ...common,
       contentMode: "inline",

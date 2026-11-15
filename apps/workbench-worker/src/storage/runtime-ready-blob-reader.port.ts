@@ -1,7 +1,7 @@
 import type { VerifiedReadyObjectBody } from "@workbench/workbench-content-security";
 import type { RuntimeContentLocator } from "../runtime/runtime.port.js";
 
-export type RuntimeReadyBlobBody = {
+type RuntimeReadyBlobBody = {
   body: VerifiedReadyObjectBody;
   byteSize: number;
   mediaType: string | null;

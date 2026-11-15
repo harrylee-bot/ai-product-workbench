@@ -787,17 +787,8 @@ function sha256Digest(value: string): Promise<string> {
   return sha256Loader.then((digest) => digest(value));
 }
 
-export function prototypePatchProjectionKey(artifactVersionId: string, screenId: string): string {
+function prototypePatchProjectionKey(artifactVersionId: string, screenId: string): string {
   return `${artifactVersionId}\u0000${screenId}`;
-}
-
-export function findPrototypePatchProjection(
-  snapshot: PrototypePatchProjectorSnapshot,
-  artifactVersionId: string,
-  screenId: string | undefined,
-): PrototypePatchProjectionView | null {
-  if (!screenId) return null;
-  return snapshot.projections.get(prototypePatchProjectionKey(artifactVersionId, screenId)) ?? null;
 }
 
 function nextPatchCandidate(screens: ReadonlyMap<string, StoredProjection>): {

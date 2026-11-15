@@ -18,39 +18,18 @@ from pathlib import Path
 import posixpath
 import re
 import stat
-from typing import Annotated, Any
-
-try:
-    from typing import override
-except ImportError:  # pragma: no cover - DeerFlow's pinned Python is 3.12.
-    def override(function):
-        return function
+from typing import Annotated, Any, override
 
 from langchain.agents import AgentState
 from langchain.agents.middleware import AgentMiddleware
-try:
-    from langchain.agents.middleware.types import (
-        ExtendedModelResponse,
-        ModelCallResult,
-        ModelRequest,
-        ModelResponse,
-        PrivateStateAttr,
-        hook_config,
-    )
-except ImportError:  # pragma: no cover - compatibility for the focused contract stub.
-    from langchain.agents.middleware.types import ModelCallResult, ModelRequest, ModelResponse
-    PrivateStateAttr = object()
-
-    class ExtendedModelResponse:
-        def __init__(self, *, model_response: Any, command: Any):
-            self.model_response = model_response
-            self.command = command
-
-    def hook_config(**_kwargs: Any):
-        def decorate(function: Callable[..., Any]) -> Callable[..., Any]:
-            return function
-
-        return decorate
+from langchain.agents.middleware.types import (
+    ExtendedModelResponse,
+    ModelCallResult,
+    ModelRequest,
+    ModelResponse,
+    PrivateStateAttr,
+    hook_config,
+)
 from langchain_core.messages import AIMessage, SystemMessage, ToolMessage
 from langgraph.prebuilt.tool_node import ToolCallRequest
 from langgraph.types import Command
@@ -70,7 +49,6 @@ ARTIFACT_PROGRESS_TOOL_NAMES = (
     "workbench_generation_stage_update",
     "workbench_artifact_draft_publish",
 )
-PROTOTYPE_PATCH_TOOL_NAME = "workbench_prototype_patch_publish"
 PROTOTYPE_ONLY_TOOL_NAMES = (
     "workbench_prototype_patch_publish",
 )
@@ -79,7 +57,6 @@ READ_FILE_TOOL_NAME = "read_file"
 GENERATION_STAGE_TOOL_NAME = "workbench_generation_stage_update"
 ARTIFACT_DRAFT_TOOL_NAME = "workbench_artifact_draft_publish"
 RUNTIME_RESULT_TOOL_NAME = "workbench_runtime_result_submit"
-SUBAGENT_TOOL_NAME = "task"
 CLARIFICATION_TOOL_NAME = "ask_clarification"
 PRD_STAGE_SEQUENCE = (
     "collecting-prd-context",
@@ -108,7 +85,7 @@ PRD_REFERENCE_FILES = (
     ),
     (
         "/mnt/skills/public/workbench/references/prd-runtime-result.schema.json",
-        "76c1ae2338854cb68133fc242f7efde534278878bbd89e297a4f8ee010479065",
+        "25d95c16c5577408807a70cf8371cbafb857f648f649555f8e2abe46b4a2593f",
     ),
 )
 PROTOTYPE_REFERENCE_FILES = (
@@ -118,7 +95,7 @@ PROTOTYPE_REFERENCE_FILES = (
     ),
     (
         "/mnt/skills/public/workbench/references/runtime-result-contract.md",
-        "f9f5ba50ef5b3a1dfa824553c0f2a7897c28a1e5530805de341c4e1415ed8638",
+        "99271dfe4f6c3e632505c0c03407687b3d5f4a70fa89b3b9dd36570a1d57dc44",
     ),
 )
 _PROTOTYPE_REFERENCE_DIRECTORY = Path("/app/skills/public/workbench/references")
@@ -189,9 +166,8 @@ _ARTIFACT_PROGRESS_BLOCK_CODE = "WORKBENCH_ARTIFACT_PROGRESS_NOT_REQUESTED"
 _PROTOTYPE_BLOCK_CODE = "WORKBENCH_PROTOTYPE_TOOL_NOT_REQUESTED"
 _KNOWLEDGE_BLOCK_CODE = "WORKBENCH_KNOWLEDGE_TOOL_NOT_AUTHORIZED"
 _PRD_REFERENCE_BLOCK_CODE = "WORKBENCH_PRD_REFERENCE_TOOL_NOT_AUTHORIZED"
-_REFERENCE_BLOCK_CODE = _PRD_REFERENCE_BLOCK_CODE
-_PROTOTYPE_SUBAGENT_BLOCK_CODE = "WORKBENCH_PROTOTYPE_SUBAGENT_NOT_AVAILABLE"
 _PRD_CLARIFICATION_BLOCK_CODE = "WORKBENCH_PRD_CLARIFICATION_NOT_SUPPORTED"
+_WORKBENCH_CLARIFICATION_BLOCK_CODE = "WORKBENCH_CLARIFICATION_NOT_SUPPORTED"
 _PRD_REFERENCE_ROOT = "/mnt/skills/public/"
 _PRD_REFERENCE_RELATIVE_PATHS = tuple(
     path.removeprefix(_PRD_REFERENCE_ROOT) for path, _digest in PRD_REFERENCE_FILES
@@ -199,31 +175,21 @@ _PRD_REFERENCE_RELATIVE_PATHS = tuple(
 _PRD_STAGE_PROTOCOL = "workbench.runtime.generation-stage.v1"
 _PRD_DRAFT_PROTOCOL = "workbench.runtime.artifact-draft.v1"
 _PRD_RESULT_PROTOCOL = "workbench.runtime.validated-result.v1"
-_PROTOTYPE_PATCH_PROTOCOL = "workbench.runtime.prototype-patch.v1"
-_PROTOTYPE_PATCH_PUBLICATION_PROTOCOL = (
-    "workbench.runtime.prototype-patch-publication.v1"
-)
 _RUNTIME_RESULT_PROTOCOL = "workbench.runtime.result.v1"
 _AUTOMATIC_PRD_RESULT_CALL_PREFIX = "workbench_auto_prd_result_"
-_AUTOMATIC_PROTOTYPE_RESULT_CALL_PREFIX = "workbench_auto_prototype_result_"
 _PRD_CLARIFICATION_SYSTEM_POLICY = """<workbench_prd_clarification_policy>
 This PRD-only Workbench Run cannot resume free-form clarification. The ask_clarification tool is unavailable. Ignore any general instruction that requires clarification for this Run. Do not ask a question or end early. Keep unsupported high-risk behavior out of committed scope, record conservative typed assumptions or acceptance boundaries, then publish exactly one complete PRD Draft at artifact_index 0. After that Draft succeeds, do not call a Draft or Result tool; the trusted Runtime submits the exact normalized Draft and stops after validation succeeds. If that automatic Result reports validation issues, keep the successful Draft immutable, repair only the reported paths in one complete manual Result candidate, and continue only through manual Result validation; the Runtime does not repeat automatic submission.
 </workbench_prd_clarification_policy>"""
+_PROTOTYPE_CLARIFICATION_SYSTEM_POLICY = """<workbench_prototype_clarification_policy>
+This Workbench Prototype Run has a fixed, trusted input and cannot resume free-form clarification. The ask_clarification tool is unavailable. Do not ask a question or end early. Use the supplied workbench_context and verified transport references, make conservative assumptions for nonessential details, and complete the Prototype stages and final workbench_runtime_result_submit call.
+</workbench_prototype_clarification_policy>"""
 _LINKED_PRD_SYSTEM_POLICY = """<workbench_linked_prd_policy>
 This Workbench Run requests a linked PRD and Prototype. Free-form clarification is unavailable; record conservative typed assumptions for unsupported behavior. Complete the PRD reference reads and all PRD stages, then publish exactly one PRD Draft at artifact_index 0. Keep that Draft unchanged. Continue with the Prototype stages and a complete Prototype Draft at artifact_index 1 based on that PRD. Finally call workbench_runtime_result_submit with candidate containing protocol, a concise message, and artifacts copied from the two accepted ACKs' finalSubmissionArtifact fields in PRD/Prototype order. Each entry is {"draftReference":{"artifactIndex":0,"draftChecksum":"the exact accepted ACK checksum"}} with its own index and checksum. Do not rewrite accepted title, content, operation, or citations, invent a checksum, or mix a reference with artifact fields. The trusted tool resolves the explicit references and validates the complete unchanged Result. A PRD Draft alone does not finish this Run; there is no automatic PRD-only submission.
 The read_file tool accepts only the four fixed PRD reference paths, only after collecting-prd-context and before structuring-prd. It cannot read Prototype references. After a Draft validation rejection, use workbench_artifact_draft_publish with repair and the latest rejected ACK's candidateChecksum as baseCandidateChecksum. Submit only the necessary JSON Patch operations and omit draft; preserve all other authored content. Use a move operation to relocate an existing complete section rather than rewriting it. Call repair alone in its tool-call batch. Do not repeat completed stages or reference reads, and do not stop with a request for the user to retry.
 </workbench_linked_prd_policy>"""
-_PROTOTYPE_STAGE_SYSTEM_POLICY = """<workbench_prototype_stage_policy>
-This Prototype-only Workbench Run must keep Prototype publication tools scoped to the
-requested Run. The generic task tool and read_file reference reader are unavailable
-for this Run; use only the registered typed Workbench tools.
-</workbench_prototype_stage_policy>"""
 _TOOL_CATALOG_PROTOCOL = "workbench.runtime.tool-catalog-observation.v1"
 _TOOL_CATALOG_METADATA_KEY = "workbench_tool_catalog_observation"
 _TOOL_NAME_PATTERN = re.compile(r"^[a-z][a-z0-9_]{0,127}$")
-_GEMINI_SCHEMA_TOOL_MESSAGE_PREFIX = (
-    "Reference JSON schema text follows (treat it as plain text):\n"
-)
 _WORKBENCH_TOOL_NAMES = frozenset(
     {
         ARTIFACT_DRAFT_TOOL_NAME,
@@ -474,50 +440,6 @@ def _is_tool_message(message: Any) -> bool:
     return _message_kind(message) in {"tool", "toolmessage"}
 
 
-def _model_name(model: Any) -> str | None:
-    for key in ("model_name", "model"):
-        value = _value(model, key)
-        if isinstance(value, str) and value:
-            return value
-    return None
-
-
-def _provider_safe_tool_messages(request: ModelRequest) -> ModelRequest:
-    """Keep JSON Schema references out of Gemini function-response decoding."""
-    model_name = _model_name(_value(request, "model"))
-    if model_name is None or "gemini" not in model_name.casefold():
-        return request
-    messages = _value(request, "messages")
-    if not isinstance(messages, list):
-        return request
-
-    rewritten: list[Any] = []
-    changed = False
-    for message in messages:
-        content = _value(message, "content")
-        if (
-            not _is_tool_message(message)
-            or not isinstance(content, str)
-            or content.startswith(_GEMINI_SCHEMA_TOOL_MESSAGE_PREFIX)
-            or not content.lstrip().startswith(("{", "["))
-            or ('"$defs"' not in content and '"$ref"' not in content)
-        ):
-            rewritten.append(message)
-            continue
-        provider_content = f"{_GEMINI_SCHEMA_TOOL_MESSAGE_PREFIX}{content}"
-        if isinstance(message, Mapping):
-            rewritten.append({**message, "content": provider_content})
-            changed = True
-            continue
-        copier = getattr(message, "model_copy", None)
-        if callable(copier):
-            rewritten.append(copier(update={"content": provider_content}))
-            changed = True
-            continue
-        rewritten.append(message)
-    return request.override(messages=rewritten) if changed else request
-
-
 def _tool_args(value: Any) -> dict[str, Any]:
     if isinstance(value, Mapping):
         return dict(value)
@@ -735,15 +657,6 @@ def _reference_index(path: Any) -> int | None:
         if path == candidate:
             return index
     return None
-
-
-def _prototype_reference(path: Any) -> tuple[str, str] | None:
-    if not isinstance(path, str):
-        return None
-    return next(
-        (reference for reference in PROTOTYPE_REFERENCE_FILES if path == reference[0]),
-        None,
-    )
 
 
 def _reference_like_path(path: Any) -> bool:
@@ -1013,20 +926,6 @@ def _successful_prd_draft(
     return drafts[0][0], drafts[0][1], invalid
 
 
-def _prototype_call_is_bound(
-    artifact: Any,
-    call_id: str,
-    run_id: str | None,
-    runtime_attempt_id: str | None,
-) -> bool:
-    return _workbench_call_is_bound(
-        artifact,
-        call_id,
-        run_id,
-        runtime_attempt_id,
-    )
-
-
 def _successful_prototype_draft_from_call(
     call: Mapping[str, Any],
     run_id: str | None,
@@ -1037,7 +936,7 @@ def _successful_prototype_draft_from_call(
     artifact = _value(call["response"], "artifact")
     draft = artifact.get("draft") if isinstance(artifact, Mapping) else None
     artifact_index = artifact.get("artifactIndex") if isinstance(artifact, Mapping) else None
-    if not _prototype_call_is_bound(artifact, call["id"], run_id, runtime_attempt_id):
+    if not _workbench_call_is_bound(artifact, call["id"], run_id, runtime_attempt_id):
         return None
     if (
         isinstance(artifact, Mapping)
@@ -1050,32 +949,6 @@ def _successful_prototype_draft_from_call(
         and 0 <= artifact_index < 20
     ):
         return dict(draft), artifact_index
-    return None
-
-
-def _successful_prototype_patch_from_call(
-    call: Mapping[str, Any],
-    run_id: str | None,
-    runtime_attempt_id: str | None,
-) -> int | None:
-    if call["name"] != PROTOTYPE_PATCH_TOOL_NAME or not _tool_succeeded(call["response"]):
-        return None
-    artifact = _value(call["response"], "artifact")
-    patch = artifact.get("patch") if isinstance(artifact, Mapping) else None
-    artifact_index = patch.get("artifactIndex") if isinstance(patch, Mapping) else None
-    if not _prototype_call_is_bound(artifact, call["id"], run_id, runtime_attempt_id):
-        return None
-    if (
-        isinstance(artifact, Mapping)
-        and artifact.get("protocol") == _PROTOTYPE_PATCH_PUBLICATION_PROTOCOL
-        and artifact.get("ok") is True
-        and isinstance(patch, Mapping)
-        and patch.get("protocol") == _PROTOTYPE_PATCH_PROTOCOL
-        and isinstance(artifact_index, int)
-        and not isinstance(artifact_index, bool)
-        and 0 <= artifact_index < 20
-    ):
-        return artifact_index
     return None
 
 
@@ -1112,61 +985,6 @@ def _successful_prototype_draft(
     if len(drafts) != 1:
         return None, None, invalid or len(drafts) > 1
     return drafts[0][0], drafts[0][1], invalid
-
-
-def _latest_successful_prototype_draft(
-    state: Any,
-    run_id: str | None = None,
-    runtime_attempt_id: str | None = None,
-) -> tuple[dict[str, Any] | None, int | None, bool]:
-    """Return the newest bound Prototype checkpoint without rejecting revise history."""
-    drafts, invalid = _successful_prototype_drafts(
-        state,
-        run_id,
-        runtime_attempt_id,
-    )
-    if not drafts:
-        return None, None, invalid
-    if any(
-        isinstance(draft.get("operation"), Mapping)
-        and draft["operation"].get("kind") == "create"
-        for draft, _artifact_index in drafts
-    ) and len(drafts) > 1:
-        return None, None, True
-    draft, artifact_index = drafts[-1]
-    return draft, artifact_index, invalid
-
-
-def _prototype_patch_checkpoint_required(
-    state: Any,
-    run_id: str | None = None,
-    runtime_attempt_id: str | None = None,
-) -> tuple[frozenset[int], bool]:
-    """Return artifact indexes whose newest publication is an uncheckpointed Patch."""
-    completed, invalid = _completed_tool_calls(state)
-    latest_publication: dict[int, str] = {}
-    for call in completed:
-        draft = _successful_prototype_draft_from_call(
-            call,
-            run_id,
-            runtime_attempt_id,
-        )
-        if draft is not None:
-            _draft, artifact_index = draft
-            latest_publication[artifact_index] = "draft"
-            continue
-        patch_artifact_index = _successful_prototype_patch_from_call(
-            call,
-            run_id,
-            runtime_attempt_id,
-        )
-        if patch_artifact_index is not None:
-            latest_publication[patch_artifact_index] = "patch"
-    return frozenset(
-        artifact_index
-        for artifact_index, publication in latest_publication.items()
-        if publication == "patch"
-    ), invalid
 
 
 def _successful_runtime_results(
@@ -1309,83 +1127,6 @@ def _automatic_prd_result_message(
     )
 
 
-def _automatic_prototype_result_message(
-    state: Any,
-    run_id: str | None,
-    runtime_attempt_id: str | None,
-) -> AIMessage | None:
-    """Turn the validated Prototype draft into the final result without another LLM call."""
-    if run_id is None or runtime_attempt_id is None:
-        return None
-    draft, artifact_index, draft_invalid = _successful_prototype_draft(
-        state,
-        run_id,
-        runtime_attempt_id,
-    )
-    stage_count, stage_invalid = _prototype_stage_progress(
-        state,
-        run_id,
-        runtime_attempt_id,
-    )
-    result_count, result_invalid = _successful_runtime_results(
-        state,
-        run_id,
-        runtime_attempt_id,
-    )
-    completed, completed_invalid = _completed_tool_calls(state)
-    operation = draft.get("operation") if isinstance(draft, Mapping) else None
-    if (
-        draft is None
-        or artifact_index != 0
-        or not isinstance(operation, Mapping)
-        or operation.get("kind") != "create"
-        or draft_invalid
-        or stage_invalid
-        or stage_count != len(PROTOTYPE_STAGE_SEQUENCE)
-        or result_invalid
-        or completed_invalid
-        or result_count > 0
-    ):
-        return None
-    if _has_pending_tool_call(state, name=RUNTIME_RESULT_TOOL_NAME):
-        return None
-
-    candidate = {
-        "protocol": _RUNTIME_RESULT_PROTOCOL,
-        "message": "\u539f\u578b\u5df2\u751f\u6210\u5e76\u53ef\u9884\u89c8\u3002",
-        "artifacts": [draft],
-    }
-    call_identity = {
-        "runId": run_id,
-        "runtimeAttemptId": runtime_attempt_id,
-        "candidate": candidate,
-    }
-    digest = hashlib.sha256(
-        json.dumps(call_identity, ensure_ascii=False, separators=(",", ":"), sort_keys=True).encode(
-            "utf-8"
-        )
-    ).hexdigest()[:24]
-    call_id = f"{_AUTOMATIC_PROTOTYPE_RESULT_CALL_PREFIX}{digest}"
-    if any(
-        call["name"] == RUNTIME_RESULT_TOOL_NAME and call["id"] == call_id
-        for call in completed
-    ) or _tool_call_was_declared(
-        state,
-        name=RUNTIME_RESULT_TOOL_NAME,
-        call_id=call_id,
-    ):
-        return None
-    return AIMessage(
-        content="",
-        tool_calls=[{
-            "id": call_id,
-            "name": RUNTIME_RESULT_TOOL_NAME,
-            "args": {"candidate": candidate},
-            "type": "tool_call",
-        }],
-    )
-
-
 def _current_batch_calls(request: ToolCallRequest) -> list[dict[str, Any]]:
     call_id = request.tool_call.get("id")
     messages = _state_messages(request.state)
@@ -1500,12 +1241,10 @@ class WorkbenchToolScopeMiddleware(AgentMiddleware[AgentState]):
             kind in {"prd", "prototype"} for kind in normalized_kinds
         )
         self._prototype_enabled = normalized_kinds is not None and "prototype" in normalized_kinds
-        # The reference reader is available only when a PRD is requested. Retain the
-        # existing Prototype visibility matrix without importing the separate
-        # reference implementation's Prototype stage gate.
-        self._prototype_reference_enabled = False
-        self._prototype_stage_gate_enabled = False
         self._prd_gate_enabled = normalized_kinds is not None and "prd" in normalized_kinds
+        self._clarification_disabled = normalized_kinds is not None and any(
+            kind in {"prd", "prototype"} for kind in normalized_kinds
+        )
         self._prd_auto_enabled = normalized_kinds == ["prd"]
         self._linked_draft_recovery_enabled = (
             normalized_kinds is not None and set(normalized_kinds) == {"prd", "prototype"}
@@ -1779,12 +1518,7 @@ class WorkbenchToolScopeMiddleware(AgentMiddleware[AgentState]):
         visible = []
         for tool in request.tools:
             name = _tool_name(tool)
-            if name == CLARIFICATION_TOOL_NAME and self._prd_gate_enabled:
-                continue
-            # Prototype-only Runs keep the lead on the typed Artifact path. The
-            # generic task tool cannot read the pinned Workbench references and
-            # otherwise enables unbounded protocol-lookup delegation loops.
-            if name == SUBAGENT_TOOL_NAME and self._prototype_stage_gate_enabled:
+            if name == CLARIFICATION_TOOL_NAME and self._clarification_disabled:
                 continue
             if name in _CANVAS_TOOL_NAME_SET and name not in self._declared_canvas:
                 continue
@@ -1800,12 +1534,15 @@ class WorkbenchToolScopeMiddleware(AgentMiddleware[AgentState]):
         overrides: dict[str, Any] = {}
         if len(visible) != len(request.tools):
             overrides["tools"] = visible
-        if self._prd_gate_enabled:
-            policy = (
-                _PRD_CLARIFICATION_SYSTEM_POLICY
-                if self._prd_auto_enabled
-                else _LINKED_PRD_SYSTEM_POLICY
-            )
+        if self._clarification_disabled:
+            if self._prd_gate_enabled:
+                policy = (
+                    _PRD_CLARIFICATION_SYSTEM_POLICY
+                    if self._prd_auto_enabled
+                    else _LINKED_PRD_SYSTEM_POLICY
+                )
+            else:
+                policy = _PROTOTYPE_CLARIFICATION_SYSTEM_POLICY
             system_message = request.system_message
             system_text = system_message.text if system_message is not None else ""
             if policy not in system_text:
@@ -1813,15 +1550,6 @@ class WorkbenchToolScopeMiddleware(AgentMiddleware[AgentState]):
                     f"{system_text.rstrip()}\n\n{policy}"
                     if system_text.strip()
                     else policy
-                ))
-        if self._prototype_stage_gate_enabled:
-            system_message = overrides.get("system_message", request.system_message)
-            system_text = system_message.text if system_message is not None else ""
-            if _PROTOTYPE_STAGE_SYSTEM_POLICY not in system_text:
-                overrides["system_message"] = SystemMessage(content=(
-                    f"{system_text.rstrip()}\n\n{_PROTOTYPE_STAGE_SYSTEM_POLICY}"
-                    if system_text.strip()
-                    else _PROTOTYPE_STAGE_SYSTEM_POLICY
                 ))
         repair_policy = self._linked_repair_policy(request)
         if repair_policy is not None:
@@ -1841,7 +1569,7 @@ class WorkbenchToolScopeMiddleware(AgentMiddleware[AgentState]):
             if result_policy not in system_text:
                 overrides["system_message"] = SystemMessage(content=f"{system_text.rstrip()}\n\n{result_policy}".strip())
         scoped_request = request if not overrides else request.override(**overrides)
-        return _provider_safe_tool_messages(scoped_request)
+        return scoped_request
 
     def _catalog_observation(self, request: ModelRequest) -> dict[str, Any] | None:
         if not self._knowledge_catalog_bound:
@@ -1852,10 +1580,12 @@ class WorkbenchToolScopeMiddleware(AgentMiddleware[AgentState]):
         name = request.tool_call.get("name")
         if not isinstance(name, str):
             return None
-        if name == CLARIFICATION_TOOL_NAME and self._prd_gate_enabled:
-            block_code = _PRD_CLARIFICATION_BLOCK_CODE
-        elif name == SUBAGENT_TOOL_NAME and self._prototype_stage_gate_enabled:
-            block_code = _PROTOTYPE_SUBAGENT_BLOCK_CODE
+        if name == CLARIFICATION_TOOL_NAME and self._clarification_disabled:
+            block_code = (
+                _PRD_CLARIFICATION_BLOCK_CODE
+                if self._prd_gate_enabled
+                else _WORKBENCH_CLARIFICATION_BLOCK_CODE
+            )
         elif name in _CANVAS_TOOL_NAME_SET and name not in self._declared_canvas:
             block_code = _CANVAS_BLOCK_CODE
         elif name in _ARTIFACT_PROGRESS_TOOL_NAME_SET and not self._artifact_progress_enabled:
@@ -2269,6 +1999,71 @@ class WorkbenchToolScopeMiddleware(AgentMiddleware[AgentState]):
                 )
         return None
 
+    def _prototype_preflight(self, request: ToolCallRequest) -> ToolMessage | None:
+        if not self._prototype_enabled:
+            return None
+        name = request.tool_call.get("name")
+        args = _tool_args(request.tool_call.get("args"))
+        stage = args.get("stage")
+        if name == GENERATION_STAGE_TOOL_NAME:
+            if stage not in PROTOTYPE_STAGE_SEQUENCE:
+                return None
+        elif name == ARTIFACT_DRAFT_TOOL_NAME:
+            draft = _artifact_draft_from_declaration(
+                request.state, request.tool_call, self._run_id, self._runtime_attempt_id,
+            )
+            if isinstance(draft, Mapping) and draft.get("kind") != "prototype":
+                return None
+        elif name not in {RUNTIME_RESULT_TOOL_NAME, *PROTOTYPE_ONLY_TOOL_NAMES}:
+            return None
+        stage_count, invalid = _prototype_stage_progress(
+            request.state, self._run_id, self._runtime_attempt_id,
+            allow_prd_stages=self._prd_gate_enabled,
+        )
+        if invalid:
+            return _error_tool_message(
+                request, "WORKBENCH_PROTOTYPE_STAGE_HISTORY_INVALID",
+                "The current run has conflicting successful Prototype stages; do not publish from this history.",
+            )
+        next_stage = PROTOTYPE_STAGE_SEQUENCE[stage_count] if stage_count < len(PROTOTYPE_STAGE_SEQUENCE) else None
+        if name == GENERATION_STAGE_TOOL_NAME:
+            stage_calls = [call for call in _current_batch_calls(request)
+                           if call["name"] == GENERATION_STAGE_TOOL_NAME
+                           and call["args"].get("stage") in PROTOTYPE_STAGE_SEQUENCE]
+            position = next((index for index, call in enumerate(stage_calls)
+                             if call["id"] == request.tool_call.get("id")), None)
+            if position is None or position != 0:
+                return _error_tool_message(
+                    request, "WORKBENCH_PROTOTYPE_STAGE_BATCH_INVALID",
+                    "Record only one real Prototype stage per model tool-call batch; wait for its successful ACK before the next stage.",
+                )
+            if stage != next_stage:
+                instruction = (f"Begin the next phase with workbench_generation_stage_update(stage='{next_stage}')."
+                               if next_stage else "All Prototype phases already succeeded; do not repeat stages when repairing a draft.")
+                return _error_tool_message(request, "WORKBENCH_PROTOTYPE_STAGE_ORDER_INVALID", instruction)
+            return None
+        if next_stage is not None:
+            return _error_tool_message(
+                request, "WORKBENCH_PROTOTYPE_STAGES_REQUIRED",
+                "New and edited Prototypes require this run's four real phases in order: design-system, mapping-components, creating-flows, generating-ui. "
+                f"Begin the next phase with workbench_generation_stage_update(stage='{next_stage}'); wait for all four successful ACKs before publishing a draft, patch, or result. "
+                "Earlier runs and unacknowledged calls in this batch do not count.",
+            )
+        if name in _PROTOTYPE_ONLY_TOOL_NAME_SET:
+            drafts, invalid = _successful_prototype_drafts(request.state, self._run_id, self._runtime_attempt_id)
+            checkpoint = next((draft for draft, index in reversed(drafts)
+                               if index == args.get("artifact_index")), None)
+            content = checkpoint.get("content") if isinstance(checkpoint, Mapping) else None
+            screens = content.get("screens") if isinstance(content, Mapping) else None
+            if invalid or not isinstance(screens, list) or not any(
+                isinstance(screen, Mapping) and screen.get("id") == args.get("screen_id") for screen in screens
+            ):
+                return _error_tool_message(
+                    request, "WORKBENCH_PROTOTYPE_PATCH_CHECKPOINT_REQUIRED",
+                    "First publish a complete Prototype checkpoint for this artifact_index and screen_id in the current run and attempt; wait for its successful ACK before patching. Earlier runs and sibling calls do not count.",
+                )
+        return None
+
     def _prd_postflight(
         self,
         request: ToolCallRequest,
@@ -2313,277 +2108,6 @@ class WorkbenchToolScopeMiddleware(AgentMiddleware[AgentState]):
             },
         })
 
-    def _prototype_reference_preflight(
-        self,
-        request: ToolCallRequest,
-    ) -> ToolMessage | None:
-        if not self._prototype_reference_enabled:
-            return None
-        args = _tool_args(request.tool_call.get("args"))
-        path = args.get("path")
-        reference = _prototype_reference(path)
-        if reference is None:
-            return _error_tool_message(
-                request,
-                "WORKBENCH_PROTOTYPE_REFERENCE_PATH_INVALID",
-                f"Use one exact Prototype Runtime reference path: '{PROTOTYPE_REFERENCE_FILES[0][0]}' or '{PROTOTYPE_REFERENCE_FILES[1][0]}'.",
-            )
-        if not _full_reference_read(args):
-            return _error_tool_message(
-                request,
-                "WORKBENCH_PROTOTYPE_REFERENCE_RANGE_FORBIDDEN",
-                f"Retry read_file for '{path}' while omitting both start_line and end_line.",
-            )
-        return None
-
-    def _prototype_reference_postflight(
-        self,
-        request: ToolCallRequest,
-        result: ToolMessage | Command,
-    ) -> ToolMessage | Command:
-        if (
-            not self._prototype_reference_enabled
-            or request.tool_call.get("name") != READ_FILE_TOOL_NAME
-        ):
-            return result
-        path = _tool_args(request.tool_call.get("args")).get("path")
-        reference = _prototype_reference(path)
-        if reference is None:
-            return result
-        if not isinstance(result, ToolMessage) or not _tool_succeeded(result):
-            return _error_tool_message(
-                request,
-                "WORKBENCH_PROTOTYPE_REFERENCE_READ_FAILED",
-                f"Retry read_file for the exact path '{path}' with no range.",
-            )
-        content = _tool_content(result)
-        actual_digest = (
-            hashlib.sha256(content.encode("utf-8")).hexdigest()
-            if content is not None
-            else None
-        )
-        if actual_digest != reference[1]:
-            return _error_tool_message(
-                request,
-                "WORKBENCH_PROTOTYPE_REFERENCE_CONTENT_MISMATCH",
-                f"The installed file '{path}' does not match the pinned Prototype reference; do not publish until the Runtime image is corrected.",
-            )
-        return result
-
-    def _prototype_stage_preflight(
-        self,
-        request: ToolCallRequest,
-    ) -> ToolMessage | None:
-        if (
-            not self._prototype_stage_gate_enabled
-            or request.tool_call.get("name") != GENERATION_STAGE_TOOL_NAME
-        ):
-            return None
-        stage_count, stage_invalid = _prototype_stage_progress(
-            request.state,
-            self._run_id,
-            self._runtime_attempt_id,
-        )
-        expected_stage = (
-            PROTOTYPE_STAGE_SEQUENCE[stage_count]
-            if stage_count < len(PROTOTYPE_STAGE_SEQUENCE)
-            else None
-        )
-        if stage_invalid:
-            return _error_tool_message(
-                request,
-                "WORKBENCH_PROTOTYPE_STAGE_HISTORY_INVALID",
-                "The current turn contains a successful cross-family, duplicate, regressed, malformed, or out-of-order Prototype stage; do not publish from this turn.",
-            )
-        args = _tool_args(request.tool_call.get("args"))
-        stage = args.get("stage")
-        instruction = (
-            f"Call workbench_generation_stage_update next with stage='{expected_stage}'."
-            if expected_stage is not None
-            else "All four Prototype stages already succeeded; continue artifact publication without another generation stage update."
-        )
-        if stage not in PROTOTYPE_STAGE_SEQUENCE:
-            return _error_tool_message(
-                request,
-                "WORKBENCH_PROTOTYPE_STAGE_FAMILY_INVALID",
-                instruction,
-            )
-        batch_stages = [
-            call
-            for call in _current_batch_calls(request)
-            if call["name"] == GENERATION_STAGE_TOOL_NAME
-        ]
-        current_position = next(
-            (index for index, call in enumerate(batch_stages) if call["id"] == request.tool_call.get("id")),
-            None,
-        )
-        if current_position is None:
-            return _error_tool_message(
-                request,
-                "WORKBENCH_PROTOTYPE_STAGE_DECLARATION_MISSING",
-                f"Retry workbench_generation_stage_update with stage='{stage}' in a new model tool-call batch.",
-            )
-        if len(batch_stages) != 1:
-            return _error_tool_message(
-                request,
-                "WORKBENCH_PROTOTYPE_STAGE_BATCH_INVALID",
-                f"Record only one real Prototype stage per model tool-call batch. {instruction}",
-            )
-        if stage != expected_stage:
-            return _error_tool_message(
-                request,
-                "WORKBENCH_PROTOTYPE_STAGE_ORDER_INVALID",
-                instruction,
-            )
-        return None
-
-    def _prototype_publication_preflight(
-        self,
-        request: ToolCallRequest,
-    ) -> ToolMessage | None:
-        if not self._prototype_stage_gate_enabled:
-            return None
-        name = request.tool_call.get("name")
-        if name == PROTOTYPE_PATCH_TOOL_NAME:
-            draft, _artifact_index, draft_invalid = _latest_successful_prototype_draft(
-                request.state,
-                self._run_id,
-                self._runtime_attempt_id,
-            )
-            checkpoint_required, patch_history_invalid = _prototype_patch_checkpoint_required(
-                request.state,
-                self._run_id,
-                self._runtime_attempt_id,
-            )
-            draft_operation = draft.get("operation") if isinstance(draft, Mapping) else None
-            if draft_invalid or patch_history_invalid:
-                return _error_tool_message(
-                    request,
-                    "WORKBENCH_PROTOTYPE_PUBLICATION_HISTORY_INVALID",
-                    "The current turn contains malformed or duplicate successful Prototype publication calls; do not publish a patch from this turn.",
-                )
-            if (
-                isinstance(draft_operation, Mapping)
-                and draft_operation.get("kind") == "create"
-            ):
-                return _error_tool_message(
-                    request,
-                    "WORKBENCH_PROTOTYPE_TERMINAL_DRAFT_IMMUTABLE",
-                    "The successful terminal create Draft is immutable; repair an automatic Result rejection only through the manual complete Result path.",
-                )
-            if checkpoint_required:
-                return _error_tool_message(
-                    request,
-                    "WORKBENCH_PROTOTYPE_PATCH_CHECKPOINT_REQUIRED",
-                    "Publish a complete revised Prototype Draft checkpoint before another Patch or final Result.",
-                )
-            if any(
-                call["name"] in {ARTIFACT_DRAFT_TOOL_NAME, RUNTIME_RESULT_TOOL_NAME}
-                for call in _current_batch_calls(request)
-            ):
-                return _error_tool_message(
-                    request,
-                    "WORKBENCH_PROTOTYPE_PUBLICATION_BATCH_INVALID",
-                    "Call only one Prototype publication tool in each model tool-call batch.",
-                )
-            return None
-        if name not in {ARTIFACT_DRAFT_TOOL_NAME, RUNTIME_RESULT_TOOL_NAME}:
-            return None
-
-        stage_count, stage_invalid = _prototype_stage_progress(
-            request.state,
-            self._run_id,
-            self._runtime_attempt_id,
-        )
-        draft, _artifact_index, draft_invalid = _latest_successful_prototype_draft(
-            request.state,
-            self._run_id,
-            self._runtime_attempt_id,
-        )
-        checkpoint_required, patch_history_invalid = _prototype_patch_checkpoint_required(
-            request.state,
-            self._run_id,
-            self._runtime_attempt_id,
-        )
-        result_count, result_invalid = _successful_runtime_results(
-            request.state,
-            self._run_id,
-            self._runtime_attempt_id,
-        )
-        if stage_invalid or draft_invalid or patch_history_invalid or result_invalid:
-            return _error_tool_message(
-                request,
-                "WORKBENCH_PROTOTYPE_PUBLICATION_HISTORY_INVALID",
-                "The current turn contains malformed, duplicate, or out-of-order successful Prototype stages or publication calls; do not publish again from this turn.",
-            )
-        if stage_count < len(PROTOTYPE_STAGE_SEQUENCE):
-            next_stage = PROTOTYPE_STAGE_SEQUENCE[stage_count]
-            return _error_tool_message(
-                request,
-                "WORKBENCH_PROTOTYPE_STAGE_REQUIRED",
-                f"Call workbench_generation_stage_update next with stage='{next_stage}' before publishing the Prototype.",
-            )
-        if result_count > 0:
-            return _error_tool_message(
-                request,
-                "WORKBENCH_PROTOTYPE_RESULT_ALREADY_SUBMITTED",
-                "A validated Runtime result already exists for this turn; return the concise completion message without another tool call.",
-            )
-        if draft is not None and name == ARTIFACT_DRAFT_TOOL_NAME:
-            draft_operation = draft.get("operation") if isinstance(draft, Mapping) else None
-            if isinstance(draft_operation, Mapping) and draft_operation.get("kind") == "create":
-                return _error_tool_message(
-                    request,
-                    "WORKBENCH_PROTOTYPE_DRAFT_ALREADY_PUBLISHED",
-                    "A validated terminal create Draft already exists; the Runtime will submit that exact draft as the final result.",
-                )
-            if not checkpoint_required:
-                return _error_tool_message(
-                    request,
-                    "WORKBENCH_PROTOTYPE_DRAFT_ALREADY_PUBLISHED",
-                    "A validated revise Draft already exists; publish a Patch or submit the explicit Result before another Draft.",
-                )
-        if checkpoint_required and name == ARTIFACT_DRAFT_TOOL_NAME:
-            artifact_index = _tool_args(request.tool_call.get("args")).get("artifact_index")
-            if isinstance(artifact_index, int) and not isinstance(artifact_index, bool) and (
-                artifact_index not in checkpoint_required
-            ):
-                return _error_tool_message(
-                    request,
-                    "WORKBENCH_PROTOTYPE_PATCH_CHECKPOINT_REQUIRED",
-                    "Publish a complete revised Prototype Draft checkpoint for each patched artifact before another Patch or final Result.",
-                )
-        if checkpoint_required and name == RUNTIME_RESULT_TOOL_NAME:
-            return _error_tool_message(
-                request,
-                "WORKBENCH_PROTOTYPE_PATCH_CHECKPOINT_REQUIRED",
-                "Publish a complete revised Prototype Draft checkpoint before another Patch or final Result.",
-            )
-        if draft is None and name == RUNTIME_RESULT_TOOL_NAME:
-            return _error_tool_message(
-                request,
-                "WORKBENCH_PROTOTYPE_DRAFT_REQUIRED",
-                "Publish the complete validated Prototype candidate with workbench_artifact_draft_publish before final submission.",
-            )
-
-        batch_publications = [
-            call
-            for call in _current_batch_calls(request)
-            if call["name"]
-            in {
-                ARTIFACT_DRAFT_TOOL_NAME,
-                PROTOTYPE_PATCH_TOOL_NAME,
-                RUNTIME_RESULT_TOOL_NAME,
-            }
-        ]
-        if len(batch_publications) != 1:
-            return _error_tool_message(
-                request,
-                "WORKBENCH_PROTOTYPE_PUBLICATION_BATCH_INVALID",
-                "Call exactly one Prototype publication tool in each model tool-call batch.",
-            )
-        return None
-
     @override
     def wrap_model_call(
         self,
@@ -2615,20 +2139,6 @@ class WorkbenchToolScopeMiddleware(AgentMiddleware[AgentState]):
                 automatic_prd_result,
                 self._catalog_observation(scoped_request),
             )
-        automatic_result = (
-            _automatic_prototype_result_message(
-                scoped_request.state,
-                self._run_id,
-                self._runtime_attempt_id,
-            )
-            if self._prototype_stage_gate_enabled
-            else None
-        )
-        if automatic_result is not None:
-            return _stamp_catalog_observation(
-                automatic_result,
-                self._catalog_observation(scoped_request),
-            )
         return _stamp_catalog_observation(
             handler(scoped_request),
             self._catalog_observation(scoped_request),
@@ -2655,18 +2165,10 @@ class WorkbenchToolScopeMiddleware(AgentMiddleware[AgentState]):
         blocked = self._prd_preflight(request)
         if blocked is not None:
             return blocked
-        blocked = self._prototype_stage_preflight(request)
+        blocked = self._prototype_preflight(request)
         if blocked is not None:
             return blocked
-        blocked = self._prototype_publication_preflight(request)
-        if blocked is not None:
-            return blocked
-        if request.tool_call.get("name") == READ_FILE_TOOL_NAME:
-            blocked = self._prototype_reference_preflight(request)
-            if blocked is not None:
-                return blocked
-        result = self._prd_postflight(request, handler(request))
-        return self._prototype_reference_postflight(request, result)
+        return self._prd_postflight(request, handler(request))
 
     @override
     async def awrap_model_call(
@@ -2699,20 +2201,6 @@ class WorkbenchToolScopeMiddleware(AgentMiddleware[AgentState]):
                 automatic_prd_result,
                 self._catalog_observation(scoped_request),
             )
-        automatic_result = (
-            _automatic_prototype_result_message(
-                scoped_request.state,
-                self._run_id,
-                self._runtime_attempt_id,
-            )
-            if self._prototype_stage_gate_enabled
-            else None
-        )
-        if automatic_result is not None:
-            return _stamp_catalog_observation(
-                automatic_result,
-                self._catalog_observation(scoped_request),
-            )
         return _stamp_catalog_observation(
             await handler(scoped_request),
             self._catalog_observation(scoped_request),
@@ -2743,15 +2231,7 @@ class WorkbenchToolScopeMiddleware(AgentMiddleware[AgentState]):
         blocked = self._prd_preflight(request)
         if blocked is not None:
             return blocked
-        blocked = self._prototype_stage_preflight(request)
+        blocked = self._prototype_preflight(request)
         if blocked is not None:
             return blocked
-        blocked = self._prototype_publication_preflight(request)
-        if blocked is not None:
-            return blocked
-        if request.tool_call.get("name") == READ_FILE_TOOL_NAME:
-            blocked = self._prototype_reference_preflight(request)
-            if blocked is not None:
-                return blocked
-        result = self._prd_postflight(request, await handler(request))
-        return self._prototype_reference_postflight(request, result)
+        return self._prd_postflight(request, await handler(request))

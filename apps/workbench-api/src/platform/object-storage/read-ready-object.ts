@@ -1,10 +1,6 @@
 import {
-  ReadyObjectIntegrityError,
-  readyObjectIntegrityFailureCodes,
   stageReadyObject,
   type ReadyObjectIntegrityFailure,
-  type ReadyObjectIntegrityFailureCode,
-  type ReadyObjectIntegrityRecorder,
   type ReadyObjectManifest,
   type ReadyObjectStagingOptions,
 } from "@workbench/workbench-content-security";
@@ -12,14 +8,8 @@ import { entityTagMatches, parseByteRange } from "../../common/byte-content.js";
 import type { ReadyBlobStoragePort } from "./object-storage.port.js";
 import { objectStorageUnavailableProblem } from "./object-storage.problems.js";
 
-export {
-  ReadyObjectIntegrityError,
-  readyObjectIntegrityFailureCodes,
-};
 export type {
   ReadyObjectIntegrityFailure,
-  ReadyObjectIntegrityFailureCode,
-  ReadyObjectIntegrityRecorder,
 };
 
 export type ReadyObjectPointer = ReadyObjectManifest;

@@ -34,7 +34,7 @@ const generated = `${JSON.stringify({
   ...rewriteRefs(schemas.RuntimeResult),
   $defs: definitions,
 }, null, 2)}\n`;
-const prdNames = dependencyClosure("RuntimeArtifactDraftPrdV3", schemas);
+const prdNames = dependencyClosure("RuntimeArtifactDraftPrd", schemas);
 const prdDefinitions = Object.fromEntries(
   [...prdNames]
     .sort()
@@ -57,7 +57,7 @@ const prdGenerated = `${serializePrdSchema({
     },
     artifacts: {
       type: "array",
-      items: { $ref: "#/$defs/RuntimeArtifactDraftPrdV3" },
+      items: { $ref: "#/$defs/RuntimeArtifactDraftPrd" },
       minItems: 1,
       maxItems: 1,
     },
@@ -168,7 +168,7 @@ function prdAuthoringGuide(allSchemas) {
       ],
     }],
   };
-  const document = allSchemas.PrdDocumentV3;
+  const document = allSchemas.PrdDocument;
   const sectionSchemas = document.properties.sections.properties;
   const introEnum = sectionSchemas.safetyBaseline.properties.intro.enum;
   if (!Array.isArray(introEnum) || introEnum.length !== 1) throw new Error("Expected one fixed safety intro literal");

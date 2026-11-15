@@ -268,7 +268,8 @@ describe("workbench project chrome", () => {
   });
 
   it("uses the 产品工作台 brand and preserves viewer command permissions", () => {
-    const onPreview = vi.fn();
+    const onOpenPrototypeV2 = vi.fn();
+    const onOpenMedia = vi.fn();
     render(
       <ProjectTopBar
         capabilities={workbenchProjectCapabilities("viewer")}
@@ -278,7 +279,8 @@ describe("workbench project chrome", () => {
         onDuplicate={vi.fn()}
         onExport={vi.fn()}
         onMembers={vi.fn()}
-        onPreview={onPreview}
+        onOpenPrototypeV2={onOpenPrototypeV2}
+        onOpenMedia={onOpenMedia}
         onRename={vi.fn()}
         onShare={vi.fn()}
         onToggleMenu={vi.fn()}
@@ -289,7 +291,7 @@ describe("workbench project chrome", () => {
     );
 
     expect(screen.getByText("产品工作台项目")).not.toBeNull();
-    expect((screen.getByRole("button", { name: "预览项目" }) as HTMLButtonElement).disabled)
+    expect((screen.getByRole("button", { name: "打开交互原型 V2" }) as HTMLButtonElement).disabled)
       .toBe(false);
     expect((screen.getByRole("button", { name: "导出" }) as HTMLButtonElement).disabled)
       .toBe(true);
@@ -300,9 +302,17 @@ describe("workbench project chrome", () => {
     expect((screen.getByRole("menuitem", { name: "复制项目" }) as HTMLButtonElement).disabled)
       .toBe(false);
 
-    fireEvent.click(screen.getByRole("button", { name: "预览项目" }));
-    expect(onPreview).toHaveBeenCalledOnce();
-    expect(onPreview).toHaveBeenCalledWith();
+    fireEvent.click(screen.getByRole("button", { name: "打开交互原型 V2" }));
+    expect(onOpenPrototypeV2).toHaveBeenCalledOnce();
+    expect(onOpenPrototypeV2).toHaveBeenCalledWith();
+
+    const prototypeEntry = screen.getByRole("menuitem", { name: "交互原型预览（V2）" });
+    expect(prototypeEntry.getAttribute("data-workbench-prototype-entry")).toBe("v2");
+    fireEvent.click(prototypeEntry);
+    expect(onOpenPrototypeV2).toHaveBeenCalledTimes(2);
+
+    fireEvent.click(screen.getByRole("menuitem", { name: "文件与素材" }));
+    expect(onOpenMedia).toHaveBeenCalledOnce();
   });
 
   it("keeps the generated-project suggestion branded as 产品工作台", () => {
@@ -318,6 +328,31 @@ describe("workbench project chrome", () => {
     );
 
     expect(screen.getByText("贴士：让产品工作台优化设计中的特定部分")).not.toBeNull();
+  });
+
+  it("keeps the V2 workbench entry available before a ready artifact exists", () => {
+    const onOpenPrototypeV2 = vi.fn();
+    render(
+      <ProjectTopBar
+        capabilities={workbenchProjectCapabilities("viewer")}
+        exportOpen={false}
+        onArchive={vi.fn()}
+        onBack={vi.fn()}
+        onDuplicate={vi.fn()}
+        onExport={vi.fn()}
+        onMembers={vi.fn()}
+        onOpenPrototypeV2={onOpenPrototypeV2}
+        onRename={vi.fn()}
+        onShare={vi.fn()}
+        onToggleMenu={vi.fn()}
+        projectMenuOpen
+        projectTitle="未生成原型"
+        shareOpen={false}
+      />,
+    );
+
+    expect((screen.getByRole("button", { name: "打开交互原型 V2" }) as HTMLButtonElement).disabled).toBe(false);
+    expect((screen.getByRole("menuitem", { name: "交互原型预览（V2）" }) as HTMLButtonElement).disabled).toBe(false);
   });
 
   it("unmounts selected-node actions for the full lifetime of an active Run", () => {

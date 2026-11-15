@@ -18,11 +18,10 @@ import {
 } from "@workbench/workbench-export-core";
 import type { ExportWorkerConfig } from "../config.js";
 import type { ExportStoragePort } from "../storage/storage.port.js";
-import type { ExportCommand, PrismaExportStore } from "./export.store.js";
+import type { ExportCommand } from "./export.store.js";
 
 export class ExportSourceLoader {
   constructor(
-    private readonly store: PrismaExportStore,
     private readonly storage: ExportStoragePort,
     private readonly config: Pick<ExportWorkerConfig, "maximumInputBytes">,
   ) {}

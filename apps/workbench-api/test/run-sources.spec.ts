@@ -10,7 +10,7 @@ import { createHash } from "node:crypto";
 import {
   canonicalJson,
 } from "@workbench/workbench-contracts";
-import { prdDocumentV2Example } from "@workbench/workbench-contracts/test-fixtures";
+import { prdDocumentV3Example } from "@workbench/workbench-contracts/test-fixtures";
 
 const now = new Date("2026-07-12T00:00:00.000Z");
 const designSystemContent = {
@@ -779,7 +779,7 @@ describe("Run immutable Import Source snapshots", () => {
     )).rejects.toMatchObject({ status: 409 });
   });
 
-  it("locks ready PRD v1/v2 targets and freezes their request order and idempotency", async () => {
+  it("locks ready PRD targets and freezes their request order and idempotency", async () => {
     const targetedRequest = {
       ...request,
       workflow: "edit" as const,
@@ -790,8 +790,8 @@ describe("Run immutable Import Source snapshots", () => {
     };
     const ready = createHarness({
       targetVersions: [
-        { id: "version_target_1", artifactId: "artifact_target_1", kind: "prd", schemaVersion: 2, content: prdDocumentV2Example, contentBlobId: null },
-        { id: "version_target_2", artifactId: "artifact_target_2", kind: "prd", schemaVersion: 1, content: null, contentBlobId: null },
+        { id: "version_target_1", artifactId: "artifact_target_1", kind: "prd", schemaVersion: 3, content: prdDocumentV3Example, contentBlobId: null },
+        { id: "version_target_2", artifactId: "artifact_target_2", kind: "prd", schemaVersion: 3, content: prdDocumentV3Example, contentBlobId: null },
       ],
     });
 
@@ -823,8 +823,8 @@ describe("Run immutable Import Source snapshots", () => {
 
     const retry = createHarness({
       targetVersions: [
-        { id: "version_target_1", artifactId: "artifact_target_1", kind: "prd", schemaVersion: 2, content: prdDocumentV2Example, contentBlobId: null },
-        { id: "version_target_2", artifactId: "artifact_target_2", kind: "prd", schemaVersion: 1, content: null, contentBlobId: null },
+        { id: "version_target_1", artifactId: "artifact_target_1", kind: "prd", schemaVersion: 3, content: prdDocumentV3Example, contentBlobId: null },
+        { id: "version_target_2", artifactId: "artifact_target_2", kind: "prd", schemaVersion: 3, content: prdDocumentV3Example, contentBlobId: null },
       ],
     });
     retry.access.findRun = vi.fn().mockResolvedValue(persistedRun({

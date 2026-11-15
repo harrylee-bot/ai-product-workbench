@@ -29,7 +29,7 @@ type SourceModule = {
 const require = createRequire(import.meta.url);
 const webRoot = fileURLToPath(new URL("../../../", import.meta.url));
 const featuresRoot = path.join(webRoot, "lib/workbench/features");
-const optionalFeatureLayers = ["ui"] as const;
+const optionalFeatureLayers = ["domain", "ui"] as const;
 const boundaryConfig = require(path.join(
   webRoot,
   "workbench-feature-boundaries.cjs",
@@ -72,7 +72,6 @@ describe("layered Workbench feature boundaries", () => {
       const publicEntry = usesDirectoryEntry ? featureIndex : facadeFile;
       const expectedPublicEntries = [
         path.join(featureRoot, "application/index.ts"),
-        path.join(featureRoot, "domain/index.ts"),
         ...optionalFeatureLayers
           .map((layer) => path.join(featureRoot, layer, "index.ts"))
           .filter((file) => graph.has(file)),
@@ -117,6 +116,7 @@ describe("layered Workbench feature boundaries", () => {
       }
 
       for (const layer of boundaryConfig.workbenchFeatureLayers) {
+        if (layer === "domain" && !implementationFiles.some((file) => isInside(file, path.join(featureRoot, layer)))) continue;
         expect(
           graph.has(path.join(featureRoot, layer, "index.ts")),
           `${feature}/${layer} must expose an index.ts`,

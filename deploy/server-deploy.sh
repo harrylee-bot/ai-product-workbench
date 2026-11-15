@@ -24,6 +24,7 @@ RUNTIME_QUEUE_STOP_TIMEOUT_SECONDS="${WORKBENCH_RUNTIME_QUEUE_STOP_TIMEOUT_SECON
 RUNTIME_QUEUE_PARTICIPANTS=(
   workbench-api
   workbench-worker
+  workbench-temporal-worker
   workbench-file-worker
   workbench-import-worker
   workbench-export-worker
@@ -66,6 +67,12 @@ wait_for_service() {
       status="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$container_id" 2>/dev/null || true)"
       case "$status" in
         healthy | running)
+          # The executor must finish its native-runtime/Chromium readiness probe.
+          # A process without a working health check cannot complete a rollout.
+          if [ "$service" = workbench-temporal-worker ] && [ "$status" != healthy ]; then
+            sleep 2
+            continue
+          fi
           echo "Service ready: $service ($status)"
           return 0
           ;;
@@ -283,6 +290,9 @@ prepare_direct_images() {
   direct_build_images "$@"
   # Locally built images have a stable RepoDigest but no registry tag digest.
   # Bind the runtime worker to that immutable digest before Compose starts it.
+  if [ "$#" -gt 0 ] && [[ " $* " != *" workbench-worker "* ]]; then
+    return 0
+  fi
   local worker_ref worker_digest temp_env
   worker_ref="$(env_value WORKBENCH_RUNTIME_WORKER_IMAGE_REF)"
   worker_digest="$(docker image inspect --format '{{index .RepoDigests 0}}' "$worker_ref" 2>/dev/null || true)"
@@ -309,7 +319,7 @@ compose_up_force_recreate() {
   # Nginx resolves Docker service names when it starts. Recreate the public
   # gateway after an upstream rollout so it cannot retain a removed container
   # IP in its resolved upstream.
-  "${COMPOSE[@]}" up -d --no-build --force-recreate "$@"
+  "${COMPOSE[@]}" up -d --no-build --no-deps --force-recreate "$@"
 }
 
 stop_runtime_queue_participants() {
@@ -353,9 +363,35 @@ if [ "$SKIP_PREFLIGHT" = "0" ]; then
 fi
 
 case "$DEPLOY_TARGET" in
+  selected)
+    [ "$clean_host" = 0 ] || { echo "Selected release requires an existing stack" >&2; exit 64; }
+    read -r -a selected_services <<< "${WORKBENCH_DEPLOY_SERVICES:-}"
+    [ "${#selected_services[@]}" -gt 0 ] || { echo "Selected release requires services" >&2; exit 64; }
+    for service in "${selected_services[@]}"; do
+      case "$service" in
+        workbench-api|workbench-web|workbench-worker|workbench-temporal-worker|workbench-file-worker|workbench-import-worker|workbench-export-worker|workbench-preview|knowledge) ;;
+        *) echo "Unsupported selected service: $service" >&2; exit 64 ;;
+      esac
+    done
+    prepare_direct_images "${selected_services[@]}"
+    deployment_mutated=1
+    compose_up --no-deps "${selected_services[@]}"
+    wait_for_services "${selected_services[@]}"
+    if [[ " ${selected_services[*]} " == *" workbench-preview "* ]]; then
+      compose_up_force_recreate preview-gateway
+      wait_for_services preview-gateway
+    fi
+    if [[ " ${selected_services[*]} " =~ [[:space:]](workbench-api|workbench-web|knowledge)[[:space:]] ]]; then
+      compose_up_force_recreate gateway
+      wait_for_services gateway
+    fi
+    ;;
   all)
     prepare_direct_images
     ensure_deerflow_image
+    if [ "$(env_value WORKBENCH_TEMPORAL_MANAGED)" = "1" ]; then
+      WORKBENCH_ENV_FILE="$ENV_FILE" "$SCRIPT_DIR/workbench-temporal-deploy.sh"
+    fi
     deployment_mutated=1
     prepare_runtime_queue_cutover
     if [ "$MANAGE_DEERFLOW_RUNTIME" = "1" ]; then
@@ -367,6 +403,7 @@ case "$DEPLOY_TARGET" in
       workbench-api \
       workbench-web \
       workbench-worker \
+      workbench-temporal-worker \
       workbench-file-worker \
       workbench-import-worker \
       workbench-export-worker \
@@ -386,10 +423,10 @@ case "$DEPLOY_TARGET" in
     wait_for_services gateway
     ;;
   web)
-    prepare_direct_images workbench-web knowledge
+    prepare_direct_images workbench-web
     deployment_mutated=1
-    compose_up workbench-web knowledge
-    wait_for_services workbench-web knowledge
+    compose_up --no-deps workbench-web
+    wait_for_services workbench-web
     compose_up_force_recreate gateway
     wait_for_services gateway
     ;;
@@ -460,7 +497,7 @@ case "$DEPLOY_TARGET" in
     prepare_runtime_queue_cutover
     ;;
   *)
-    echo "DEPLOY_TARGET must be one of: all, api, web, runtime-worker, deerflow-runtime, file-worker, import-worker, export-worker, preview, knowledge, migrate, stop" >&2
+    echo "DEPLOY_TARGET must be one of: all, selected, api, web, runtime-worker, deerflow-runtime, file-worker, import-worker, export-worker, preview, knowledge, migrate, stop" >&2
     exit 64
     ;;
 esac

@@ -8,7 +8,7 @@ import {
 } from "@workbench/workbench-contracts";
 import { Prisma, PrismaClient } from "@workbench/workbench-db";
 import { prototypeScreenProjectionChecksum } from "../src/runs/prototype-patch-applier.js";
-import { PrototypePatchService } from "../src/runs/prototype-patch.service.js";
+import { TransactionalPrototypePatchService as PrototypePatchService } from "./prototype-patch.fixture.js";
 import { RunEventStore } from "../src/runs/run-event.store.js";
 import { RunProcessor } from "../src/runs/run-processor.js";
 
@@ -438,7 +438,7 @@ describeWithPostgres("Prototype Patch PostgreSQL transactions", () => {
     const db = new PrismaClient({ datasourceUrl: databaseUrl! });
     const applicationFixture = await seedFixture(db);
     const readyFixture = await seedFixture(db);
-    const events = new RunEventStore(db);
+    const events = new RunEventStore();
     const patch = patchReplacingText(applicationFixture.document, 0, 1, "Forged receipt");
     const applied = applyPrototypePatch(applicationFixture.document, patch).document;
     const requestSha256 = "c".repeat(64);
@@ -568,7 +568,7 @@ describeWithPostgres("Prototype Patch PostgreSQL transactions", () => {
 
       const document = applyPrototypePatch(fixture.document, patch).document;
       const projectionChecksum = screenChecksum(document, "screen-home", 1);
-      const events = new RunEventStore(db);
+      const events = new RunEventStore();
       await db.$transaction(async (tx) => {
         await events.appendOnce(
           tx,

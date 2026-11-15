@@ -62,20 +62,6 @@ export class WorkbenchReleasesApi {
       "create project release",
     );
   }
-
-  async getProjectRelease(
-    releaseId: string,
-  ): Promise<ImmutableVersioned<ProjectRelease>> {
-    const result = await this.api.GET("/releases/{releaseId}", {
-      params: { path: { releaseId } },
-    });
-    return immutableVersioned(
-      projectReleaseSchema,
-      result.data,
-      result.response,
-      "get project release",
-    );
-  }
 }
 
 export function useWorkbenchReleasesApi(): WorkbenchReleasesApi {

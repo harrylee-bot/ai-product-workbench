@@ -1003,7 +1003,7 @@ describeWithPostgres("RuntimeAttempt PostgreSQL provider cancellation operations
 });
 
 describeWithPostgres("RuntimeAttempt PostgreSQL external event crash replay", () => {
-  it("reproduces the legacy 7,686-event provider-state replay path", async () => {
+  it("refuses a missing projection even when 7,686 historical events could be replayed", async () => {
     const queries: string[] = [];
     const db = new PrismaClient({
       datasourceUrl: databaseUrl!,
@@ -1015,24 +1015,15 @@ describeWithPostgres("RuntimeAttempt PostgreSQL external event crash replay", ()
     const incidentEventCount = 7_686;
 
     try {
-      const expected = await seedRepresentativeProcessedEvents(db, fixture, incidentEventCount);
-
-      const legacyService = new RuntimeAttemptService(db, 120_000, "legacy-read");
-      queries.length = 0;
-      const state = await legacyService.providerTextState(claim);
-
-      expect(state).toMatchObject({
-        protocol: "workbench.runtime-provider-text-state.v2",
-        rawAssistantText: expected.visibleText,
-        visibleAssistantText: expected.visibleText,
-        durableVisibleAssistantText: expected.visibleText,
-        committedFinalization: {
-          externalEventId: expected.finalizationExternalEventId,
-          payloadSha256: expected.finalizationPayloadSha256,
-        },
+      await seedRepresentativeProcessedEvents(db, fixture, incidentEventCount);
+      await db.runtimeProviderState.delete({
+        where: { runtimeAttemptId: fixture.runtimeAttemptId! },
       });
-      expect("processedExternalEventIds" in state).toBe(false);
-      expect(queries.some((query) => query.toLowerCase().includes("runtime_external_events"))).toBe(true);
+      const service = new RuntimeAttemptService(db, 120_000);
+      queries.length = 0;
+
+      await expect(service.providerTextState(claim)).rejects.toThrow("RUNTIME_PROVIDER_STATE_MISSING");
+      expect(queries.some((query) => query.toLowerCase().includes("runtime_external_events"))).toBe(false);
     } finally {
       await cleanupFixture(db, fixture);
       await db.$disconnect();
@@ -1059,7 +1050,7 @@ describeWithPostgres("RuntimeAttempt PostgreSQL external event crash replay", ()
         });
         queries.length = 0;
         const backfillStartedAt = performance.now();
-        const backfill = await operator.processBatch({
+        const backfill = await processBackfillBatch(operator, {
           candidateSha: "e7deb65d8b6e03f8a9e73787afeaaca7a70750e6",
           mode: "apply",
           batchSize: 10,
@@ -1131,7 +1122,7 @@ describeWithPostgres("RuntimeAttempt PostgreSQL external event crash replay", ()
     const fixture = await seedAttemptFixture(db, true);
     const { service, claim } = await activateExternalRun(db, fixture, 45_000);
     const input = externalEvent(fixture, "event-slow-atomic-commit");
-    const events = new RunEventStore(db);
+    const events = new RunEventStore();
 
     try {
       await expect(service.processExternalEvent(claim, input, async (tx) => {
@@ -1153,7 +1144,7 @@ describeWithPostgres("RuntimeAttempt PostgreSQL external event crash replay", ()
     const { service, claim } = await activateExternalRun(db, fixture, 45_000);
     const input = externalEvent(fixture, "event-slow-heartbeat-contention");
     const eventLocked = deferred<void>();
-    const events = new RunEventStore(db);
+    const events = new RunEventStore();
 
     try {
       const event = service.processExternalEvent(claim, input, async (tx) => {
@@ -1201,7 +1192,7 @@ describeWithPostgres("RuntimeAttempt PostgreSQL external event crash replay", ()
     const fixture = await seedAttemptFixture(db, true);
     const { service, claim } = await activateExternalRun(db, fixture);
     const input = externalEvent(fixture, "event-after-append");
-    const events = new RunEventStore(db);
+    const events = new RunEventStore();
 
     try {
       await expect(service.processExternalEvent(claim, input, async (tx) => {
@@ -1260,7 +1251,7 @@ describeWithPostgres("RuntimeAttempt PostgreSQL external event crash replay", ()
       expect(committed).toEqual(expectedDurableEventState(fixture, [first]));
 
       const replayEffects = vi.fn(async (tx: Prisma.TransactionClient) => {
-        await appendActivityEffect(new RunEventStore(db), tx, fixture, first.externalEventId);
+        await appendActivityEffect(new RunEventStore(), tx, fixture, first.externalEventId);
       });
       await expect(service.processExternalEvent(claim, first, replayEffects))
         .resolves.toEqual({ created: false, sequence: 1 });
@@ -1410,10 +1401,10 @@ describeWithPostgres("RuntimeAttempt PostgreSQL fault and concurrency fences", (
     );
     const input = externalEvent(fixture, "event-concurrent-same-identity");
     const firstEffects = vi.fn(async (tx: Prisma.TransactionClient) => {
-      await appendActivityEffect(new RunEventStore(firstDb), tx, fixture, input.externalEventId);
+      await appendActivityEffect(new RunEventStore(), tx, fixture, input.externalEventId);
     });
     const secondEffects = vi.fn(async (tx: Prisma.TransactionClient) => {
-      await appendActivityEffect(new RunEventStore(secondDb), tx, fixture, input.externalEventId);
+      await appendActivityEffect(new RunEventStore(), tx, fixture, input.externalEventId);
     });
     const firstOutcome = firstService.processExternalEvent(claim, input, firstEffects);
     let secondOutcome: Promise<{ created: boolean; sequence: number }> | undefined;
@@ -1871,7 +1862,7 @@ describeWithPostgres("RuntimeProviderState PostgreSQL backfill", () => {
         where: { runtimeAttemptId: fixture.runtimeAttemptId! },
       });
 
-      const dryRun = await operator.processBatch({
+      const dryRun = await processBackfillBatch(operator, {
         candidateSha,
         mode: "dry-run",
         batchSize: 10,
@@ -1889,7 +1880,7 @@ describeWithPostgres("RuntimeProviderState PostgreSQL backfill", () => {
         rolloutBlocked: true,
       });
 
-      const applied = await operator.processBatch({
+      const applied = await processBackfillBatch(operator, {
         candidateSha,
         mode: "apply",
         batchSize: 10,
@@ -1908,7 +1899,7 @@ describeWithPostgres("RuntimeProviderState PostgreSQL backfill", () => {
         rolloutBlocked: false,
       });
 
-      const verified = await operator.processBatch({
+      const verified = await processBackfillBatch(operator, {
         candidateSha,
         mode: "verify-only",
         batchSize: 10,
@@ -1919,7 +1910,7 @@ describeWithPostgres("RuntimeProviderState PostgreSQL backfill", () => {
         where: { runtimeAttemptId: fixture.runtimeAttemptId! },
         data: { stateSha256: "f".repeat(64) },
       });
-      await expect(operator.processBatch({
+      await expect(processBackfillBatch(operator, {
         candidateSha,
         mode: "verify-only",
         batchSize: 10,
@@ -1969,7 +1960,7 @@ describeWithPostgres("RuntimeProviderState PostgreSQL backfill", () => {
         },
       });
 
-      const applied = await operator.processBatch({
+      const applied = await processBackfillBatch(operator, {
         candidateSha: "e7deb65d8b6e03f8a9e73787afeaaca7a70750e6",
         mode: "apply",
         batchSize: 10,
@@ -2031,7 +2022,7 @@ describeWithPostgres("RuntimeProviderState PostgreSQL backfill", () => {
         where: { runtimeAttemptId: fixture.runtimeAttemptId! },
       });
 
-      await expect(operator.processBatch({
+      await expect(processBackfillBatch(operator, {
         candidateSha: "e7deb65d8b6e03f8a9e73787afeaaca7a70750e6",
         mode: "apply",
         batchSize: 10,
@@ -2083,7 +2074,7 @@ describeWithPostgres("RuntimeProviderState PostgreSQL backfill", () => {
       );
       guardDisabled = false;
 
-      await expect(operator.processBatch({
+      await expect(processBackfillBatch(operator, {
         candidateSha: "e7deb65d8b6e03f8a9e73787afeaaca7a70750e6",
         mode: "apply",
         batchSize: 10,
@@ -2515,7 +2506,7 @@ async function processWithActivityEffect(
   fixture: AttemptFixture,
   input: ReturnType<typeof externalEvent>,
 ) {
-  const events = new RunEventStore(db);
+  const events = new RunEventStore();
   return service.processExternalEvent(claim, input, async (tx) => {
     await appendActivityEffect(events, tx, fixture, input.externalEventId);
   });
@@ -2998,4 +2989,12 @@ function promiseStateAfter<T>(promise: Promise<T>, durationMs: number) {
       setTimeout(() => resolve("pending"), durationMs);
     }),
   ]);
+}
+
+async function processBackfillBatch(
+  operator: RuntimeProviderStateBackfill,
+  input: Parameters<RuntimeProviderStateBackfill["processPage"]>[0],
+) {
+  const page = await operator.processPage(input);
+  return { ...page, coverage: await operator.coverage() };
 }

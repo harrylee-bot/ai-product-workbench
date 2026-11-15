@@ -4,7 +4,7 @@ import type {
   VerifiedReadyObjectBody,
 } from "@workbench/workbench-content-security";
 
-export type StoredObject = {
+type StoredObject = {
   body: Readable;
   byteSize: number;
   mediaType: string | null;

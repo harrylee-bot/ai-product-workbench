@@ -3,10 +3,10 @@ import { createHash } from "node:crypto";
 import http from "node:http";
 import test from "node:test";
 import { canonicalJson } from "@workbench/workbench-contracts";
-import { prdDocumentV2Example } from "@workbench/workbench-contracts/test-fixtures";
+import { prdDocumentV3Example } from "@workbench/workbench-contracts/test-fixtures";
 import {
   assertPrdSmokeBusinessSemantics,
-  assertPrdV2Structure,
+  assertPrdStructure,
   executePrdHttpSmoke,
 } from "./workbench-prd-http-smoke.mjs";
 
@@ -22,7 +22,7 @@ const prdGenerationStages = [
   "validating-prd",
 ];
 
-test("runs the isolated PRD v2 HTTP flow through Better Auth email sign-in", async (t) => {
+test("runs the isolated PRD v3 HTTP flow through Better Auth email sign-in", async (t) => {
   const fake = await startFakeWorkbench();
   t.after(fake.close);
 
@@ -262,12 +262,25 @@ test("rejects matching event and version checksums that do not hash the PRD cont
   assertNoSecretOrPrdBody(result, [existingCookie]);
 });
 
+for (const diagramCount of [0, 1, 2]) {
+  test(`accepts a current PRD with ${diagramCount} functional diagrams`, () => {
+    const document = orderNotificationPrdFixture();
+    const sections = document.sections.businessRequirements.functionSections;
+    const diagrams = sections.flatMap((section) => section.diagrams).slice(0, diagramCount);
+    for (const section of sections) section.diagrams = [];
+    sections[1].diagrams = diagrams;
+
+    assert.equal(assertPrdStructure(document).diagramCount, diagramCount);
+    assert.equal(assertPrdSmokeBusinessSemantics(document).theme, "order-status-notification");
+  });
+}
+
 test("rejects forbidden requirement-document placeholder wording", () => {
-  const document = structuredClone(prdDocumentV2Example);
+  const document = structuredClone(prdDocumentV3Example);
   document.sections.introduction.background.blocks[0].content[0].text = "待确认";
 
   assert.throws(
-    () => assertPrdV2Structure(document),
+    () => assertPrdStructure(document),
     (error) => error?.code === "PRD_PLACEHOLDER_FORBIDDEN",
   );
 });
@@ -277,7 +290,7 @@ test("requires the production smoke PRD revision to remain a draft", () => {
   document.revision.status = "approved";
 
   assert.throws(
-    () => assertPrdV2Structure(document),
+    () => assertPrdStructure(document),
     (error) => error?.code === "PRD_REVISION_INVALID",
   );
 });
@@ -357,7 +370,7 @@ test("rejects unrelated task-domain content in the production smoke PRD", () => 
   }
 
   const diagramGroupDrift = orderNotificationPrdFixture();
-  diagramGroupDrift.sections.businessRequirements.flowAndPages.diagrams[0].nodes[0].group = "任务能力";
+  diagramGroupDrift.sections.businessRequirements.functionSections[1].diagrams[0].nodes[0].group = "任务能力";
   assert.throws(
     () => assertPrdSmokeBusinessSemantics(diagramGroupDrift),
     (error) => error?.code === "PRD_SMOKE_UNRELATED_CONTENT",
@@ -386,11 +399,11 @@ test("allows task wording that remains grounded in notification delivery", () =>
   const document = orderNotificationPrdFixture();
   document.sections.degradation.content[0].text +=
     " 通知发送任务由队列调度，发送任务处理失败后记录原因，重试任务状态可查询。";
-  document.sections.businessRequirements.acceptanceCriteria.blocks.push({
+  document.sections.businessRequirements.functionSections[2].blocks.push({
     id: "notification-task-state-consistency",
     type: "acceptanceCriterion",
     requirementIds: [
-      document.sections.businessRequirements.acceptanceCriteria.blocks[0].requirementIds[0],
+      document.sections.businessRequirements.functionSections[2].blocks[0].requirementIds[0],
     ],
     given: [{ type: "text", text: "同一通知任务存在结果记录和重试判断", marks: [] }],
     when: [{ type: "text", text: "系统查询或更新任务状态", marks: [] }],
@@ -499,7 +512,7 @@ test("rejects Runtime metadata and unrequested order facts in the production smo
     "订单状态分类为已完成状态、已取消状态。",
   ]) {
     const document = orderNotificationPrdFixture();
-    document.sections.businessRequirements.coreRules.blocks[2].content[0].text += ` ${phrase}`;
+    document.sections.businessRequirements.functionSections[0].blocks[2].content[0].text += ` ${phrase}`;
     assert.throws(
       () => assertPrdSmokeBusinessSemantics(document),
       (error) => error?.code === "PRD_SMOKE_SOURCE_BOUNDARY_INVALID",
@@ -523,7 +536,7 @@ test("rejects Runtime metadata and unrequested order facts in the production smo
   );
 
   const splitInlineMetadata = orderNotificationPrdFixture();
-  splitInlineMetadata.sections.businessRequirements.coreRules.blocks.push({
+  splitInlineMetadata.sections.businessRequirements.functionSections[0].blocks.push({
     id: "split-inline-runtime-metadata",
     type: "paragraph",
     content: [
@@ -537,7 +550,7 @@ test("rejects Runtime metadata and unrequested order facts in the production smo
   );
 
   const tableDefault = orderNotificationPrdFixture();
-  tableDefault.sections.businessRequirements.coreRules.blocks.push({
+  tableDefault.sections.businessRequirements.functionSections[0].blocks.push({
     id: "invented-default-table",
     type: "table",
     columns: [
@@ -558,7 +571,7 @@ test("rejects Runtime metadata and unrequested order facts in the production smo
   );
 
   const tableCategory = orderNotificationPrdFixture();
-  tableCategory.sections.businessRequirements.coreRules.blocks.push({
+  tableCategory.sections.businessRequirements.functionSections[0].blocks.push({
     id: "invented-category-table",
     type: "table",
     columns: [
@@ -600,7 +613,7 @@ test("allows explicit no-new-default and existing-setting constraints", () => {
     "不能新增默认状态并明确验收时不得出现由本需求新增的默认启用。",
   ]) {
     const document = orderNotificationPrdFixture();
-    document.sections.businessRequirements.coreRules.blocks[2].content[0].text += ` ${phrase}`;
+    document.sections.businessRequirements.functionSections[0].blocks[2].content[0].text += ` ${phrase}`;
     assert.doesNotThrow(() => assertPrdSmokeBusinessSemantics(document), phrase);
   }
 });
@@ -612,7 +625,7 @@ test("does not treat cross-clause completion wording as an order-status enumerat
     "系统按照既有订单状态分类和消费者当前设置完成通知判断、结果记录与异常处理。",
   ]) {
     const document = orderNotificationPrdFixture();
-    document.sections.businessRequirements.coreRules.blocks[2].content[0].text += ` ${phrase}`;
+    document.sections.businessRequirements.functionSections[0].blocks[2].content[0].text += ` ${phrase}`;
     assert.doesNotThrow(() => assertPrdSmokeBusinessSemantics(document), phrase);
   }
 });
@@ -623,14 +636,14 @@ test("allows completion and cancellation wording outside order-category semantic
     "消费者已取消本次通知重试。",
   ]) {
     const document = orderNotificationPrdFixture();
-    document.sections.businessRequirements.coreRules.blocks[2].content[0].text += ` ${phrase}`;
+    document.sections.businessRequirements.functionSections[0].blocks[2].content[0].text += ` ${phrase}`;
     assert.doesNotThrow(() => assertPrdSmokeBusinessSemantics(document), phrase);
   }
 });
 
 test("allows an explicit existing-default constraint beside unrelated boolean cells", () => {
   const document = orderNotificationPrdFixture();
-  document.sections.businessRequirements.coreRules.blocks.push({
+  document.sections.businessRequirements.functionSections[0].blocks.push({
     id: "existing-default-constraint-table",
     type: "table",
     columns: [
@@ -664,8 +677,8 @@ test("requires every explicit no-invention constraint from the smoke prompt", ()
     ["不新增或枚举分类", "支持状态分类配置"],
   ]) {
     const document = orderNotificationPrdFixture();
-    document.sections.businessRequirements.coreRules.blocks[2].content[0].text =
-      document.sections.businessRequirements.coreRules.blocks[2].content[0].text.replace(source, replacement);
+    document.sections.businessRequirements.functionSections[0].blocks[2].content[0].text =
+      document.sections.businessRequirements.functionSections[0].blocks[2].content[0].text.replace(source, replacement);
     assert.throws(
       () => assertPrdSmokeBusinessSemantics(document),
       (error) => error?.code === "PRD_SMOKE_TOPIC_INVALID",
@@ -729,15 +742,15 @@ test("requires the order-notification topic in each critical PRD section", () =>
       );
     },
     (document) => {
-      document.sections.businessRequirements.coreRules = replaceStringFragments(
-        replaceStringFragments(document.sections.businessRequirements.coreRules, "订单", "业务"),
+      document.sections.businessRequirements.functionSections[0] = replaceStringFragments(
+        replaceStringFragments(document.sections.businessRequirements.functionSections[0], "订单", "业务"),
         "通知",
         "消息",
       );
     },
     (document) => {
-      document.sections.businessRequirements.acceptanceCriteria = replaceStringFragments(
-        replaceStringFragments(document.sections.businessRequirements.acceptanceCriteria, "订单", "业务"),
+      document.sections.businessRequirements.functionSections[2] = replaceStringFragments(
+        replaceStringFragments(document.sections.businessRequirements.functionSections[2], "订单", "业务"),
         "通知",
         "消息",
       );
@@ -752,11 +765,11 @@ test("requires the order-notification topic in each critical PRD section", () =>
   }
 });
 
-test("requires both diagrams and degradation to describe order-notification recovery", () => {
+test("requires included diagrams and degradation to describe order-notification recovery", () => {
   const diagramDrift = orderNotificationPrdFixture();
-  diagramDrift.sections.businessRequirements.flowAndPages.diagrams[1] = replaceStringFragments(
+  diagramDrift.sections.businessRequirements.functionSections[1].diagrams[1] = replaceStringFragments(
     replaceStringFragments(
-      replaceStringFragments(diagramDrift.sections.businessRequirements.flowAndPages.diagrams[1], "订单", "业务"),
+      replaceStringFragments(diagramDrift.sections.businessRequirements.functionSections[1].diagrams[1], "订单", "业务"),
       "通知",
       "消息",
     ),
@@ -992,7 +1005,7 @@ function prdArtifactFixture() {
       artifactVersionId: "version-smoke",
       createdByRunId: "run-smoke",
       kind: "prd",
-      schemaVersion: 2,
+      schemaVersion: 3,
       status: "ready",
     },
   };
@@ -1025,14 +1038,14 @@ function prdVersionFixture(document = orderNotificationPrdFixture(), checksum = 
     createdByRunId: "run-smoke",
     kind: "prd",
     knowledgeReleaseId: null,
-    schemaVersion: 2,
+    schemaVersion: 3,
     status: "ready",
     version: 1,
   };
 }
 
 function orderNotificationPrdFixture() {
-  let document = structuredClone(prdDocumentV2Example);
+  let document = structuredClone(prdDocumentV3Example);
   for (const [source, replacement] of [
     ["产品工作台", "电商订单中心"],
     ["当前项目", "电商订单中心"],
@@ -1071,7 +1084,7 @@ function orderNotificationPrdFixture() {
   ];
   document.sections.businessRequirements.summary[0].text =
     "总体目标：已登录消费者可配置订单状态通知开关，查看发送结果记录，并在发送失败时重试或获得明确权限反馈。";
-  document.sections.businessRequirements.coreRules.blocks[2].content[0].text =
+  document.sections.businessRequirements.functionSections[0].blocks[2].content[0].text =
     "本需求修改现有订单通知功能逻辑；通知开关不设新的默认状态，沿用消费者现有设置；订单状态分类沿用订单中心既有分类，不新增或枚举分类；通知设置数据与发送状态均执行完整性和一致性校验。";
   document.sections.safetyBaseline.rows[1] = {
     sequence: 2,

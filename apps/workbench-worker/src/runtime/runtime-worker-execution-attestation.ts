@@ -12,13 +12,12 @@ import path from "node:path";
 import { canonicalJson } from "@workbench/workbench-contracts";
 
 export const runtimeWorkerExecutionProtocol = "workbench.runtime-worker-execution.v2" as const;
-export const runtimeWorkerExecutionScopeId = "production-runtime.worker-execution" as const;
+const runtimeWorkerExecutionScopeId = "production-runtime.worker-execution" as const;
 
 const identifierPattern = /^[A-Za-z0-9][A-Za-z0-9._:/-]{1,127}$/u;
 const jobIdPattern = /^[A-Za-z0-9_-]{1,128}$/u;
 const commitPattern = /^[0-9a-f]{40}$/u;
 const digestPattern = /^sha256:[0-9a-f]{64}$/u;
-const keyIdPattern = /^sha256:[0-9a-f]{64}$/u;
 const maximumPrivateKeyBytes = 64 * 1024;
 const signingEnvironmentVariables = [
   "WORKBENCH_RUNTIME_WORKER_EXECUTION_PRIVATE_KEY_PATH",
@@ -29,7 +28,7 @@ const signingEnvironmentVariables = [
   "WORKBENCH_RUNTIME_WORKER_IMAGE_REF",
 ] as const;
 
-export type RuntimeWorkerExecutionStatement = Readonly<{
+type RuntimeWorkerExecutionStatement = Readonly<{
   candidateCommit: string;
   containerHostname: string;
   environmentId: string;
@@ -42,7 +41,7 @@ export type RuntimeWorkerExecutionStatement = Readonly<{
   signerId: string;
 }>;
 
-export type RuntimeWorkerExecutionReceipt = Readonly<{
+type RuntimeWorkerExecutionReceipt = Readonly<{
   protocol: typeof runtimeWorkerExecutionProtocol;
   statement: RuntimeWorkerExecutionStatement;
   signature: Readonly<{
@@ -64,7 +63,7 @@ export type RuntimeWorkerExecutionSigner = Readonly<{
   ) => Readonly<T & { workerExecution: RuntimeWorkerExecutionReceipt }>;
 }>;
 
-export type RuntimeWorkerExecutionAttestationInput = Readonly<{
+type RuntimeWorkerExecutionAttestationInput = Readonly<{
   jobId: string;
   runtimeAttemptId: string | null;
   containerHostname?: string;

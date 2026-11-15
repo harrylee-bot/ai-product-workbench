@@ -30,12 +30,10 @@ type WorkbenchAuthContextValue = {
   login: (input: { account: string; password: string }) => Promise<WorkbenchUser>;
   register: (input: {
     username: string;
-    email?: string;
+    email: string;
     password: string;
-    displayName?: string;
   }) => Promise<WorkbenchUser>;
   logout: () => Promise<void>;
-  refresh: () => Promise<void>;
 };
 
 const WorkbenchAuthContext = createContext<WorkbenchAuthContextValue | null>(null);
@@ -67,13 +65,11 @@ export function WorkbenchAuthProvider({ children }: { children: ReactNode }) {
 
   const register = useCallback(async (input: {
     username: string;
-    email?: string;
+    email: string;
     password: string;
-    displayName?: string;
   }) => {
-    if (!input.email) throw new Error("Email is required");
     const username = input.username.trim();
-    const displayUsername = input.displayName?.trim() || username;
+    const displayUsername = username;
     const result = await workbenchAuthClient.signUp.email({
       email: input.email,
       password: input.password,
@@ -94,10 +90,6 @@ export function WorkbenchAuthProvider({ children }: { children: ReactNode }) {
     await session.refetch();
   }, [session]);
 
-  const refresh = useCallback(async () => {
-    await session.refetch();
-  }, [session]);
-
   const value = useMemo<WorkbenchAuthContextValue>(() => ({
     user,
     loading: session.isPending,
@@ -105,8 +97,7 @@ export function WorkbenchAuthProvider({ children }: { children: ReactNode }) {
     login,
     register,
     logout,
-    refresh,
-  }), [login, loginWithOidc, logout, refresh, register, session.isPending, user]);
+  }), [login, loginWithOidc, logout, register, session.isPending, user]);
 
   return (
     <WorkbenchAuthContext.Provider value={value}>

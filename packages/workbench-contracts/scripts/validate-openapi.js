@@ -63,11 +63,11 @@ function requiresPositiveInteger(schema) {
 
 if (contract.openapi !== "3.1.0") throw new Error("The Workbench contract must use OpenAPI 3.1.0");
 if (!contract.paths || Object.keys(contract.paths).length === 0) throw new Error("The Workbench contract has no paths");
-assert(Object.keys(contract.paths).length === 98, "Workbench v1 must expose exactly 98 resource paths including source prototype previews");
+assert(Object.keys(contract.paths).length === 115, "Workbench v1 must expose exactly 115 resource paths including source and visual prototype previews");
 const operationCount = Object.values(contract.paths).reduce((count, pathItem) => (
   count + ["get", "post", "put", "patch", "delete"].filter((method) => pathItem?.[method]).length
 ), 0);
-assert(operationCount === 120, "Workbench v1 must expose exactly 120 generated operations including source prototype previews");
+assert(operationCount === 140, "Workbench v1 must expose exactly 140 generated operations including source and visual prototype previews");
 for (const [path, methods] of [
   ["/artifacts/{artifactId}/versions/{artifactVersionId}/finalization", ["get", "post"]],
   ["/artifacts/{artifactId}/versions/{artifactVersionId}/finalization/retry", ["post"]],
@@ -259,7 +259,7 @@ if (!contract.components?.schemas?.ApprovalOption || !contract.components?.schem
 
 const schemas = contract.components.schemas;
 for (const requiredSchema of [
-  "ArtifactCitation", "PrdDocument", "PrdSections", "PrdBlock", "PrdInline",
+  "ArtifactCitation", "PrdDocument", "PrdBlock", "PrdInline",
   "PrototypeDocument", "PrototypeNode", "PrototypeLayout", "PrototypeStyle",
   "PrototypeToken", "PrototypeAsset", "PrototypeState", "PrototypeAction",
   "PrototypeBinding", "PrototypeMotion", "PrototypePatchOperation", "PrototypePatchBatch",
@@ -342,15 +342,10 @@ assertCommandHeaders("/file-upload-sessions/{uploadSessionId}/parts/{partNumber}
 assertCommandHeaders("/file-upload-sessions/{uploadSessionId}/complete", "post", { idempotency: true, ifMatch: true });
 assertCommandHeaders("/projects/{projectId}/releases", "post", { idempotency: true, ifMatch: true });
 assertCommandHeaders("/projects/{projectId}/shares/rotate", "post", { idempotency: true, ifMatch: false });
-assertCommandHeaders("/public/shares/{shareToken}/remixes", "post", { idempotency: true, ifMatch: false });
 assertCommandHeaders("/projects/{projectId}/exports", "post", { idempotency: true, ifMatch: false });
 assertCommandHeaders("/projects/{projectId}/previews", "post", { idempotency: true, ifMatch: false });
 assertCommandHeaders("/shares/{shareId}/revoke", "post", { idempotency: false, ifMatch: true });
 assertCommandHeaders("/exports/{exportId}/cancel", "post", { idempotency: false, ifMatch: true });
-assertCommandHeaders("/exports/{exportId}/deliveries", "post", { idempotency: true, ifMatch: false });
-assertCommandHeaders("/export-deliveries/{deliveryId}/confirm", "post", { idempotency: false, ifMatch: true });
-assertCommandHeaders("/export-deliveries/{deliveryId}/retry", "post", { idempotency: false, ifMatch: true });
-assertCommandHeaders("/export-deliveries/{deliveryId}/cancel", "post", { idempotency: false, ifMatch: true });
 
 assert(contract.paths["/projects"].get.responses["200"].content["application/json"].schema.$ref === "#/components/schemas/ProjectList", "Cross-Workspace Project listing must use the role-aware ProjectList");
 assert(!contract.paths["/workspaces/{workspaceId}/projects"].get, "Workspace-scoped Project listing must not remain as a compatibility endpoint");
@@ -372,12 +367,8 @@ for (const apiPath of [
   "/public/shares/{shareToken}/artifacts/{artifactId}/versions/{artifactVersionId}",
   "/public/shares/{shareToken}/artifacts/{artifactId}/versions/{artifactVersionId}/content",
   "/public/shares/{shareToken}/artifacts/{artifactId}/versions/{artifactVersionId}/assets/{assetId}/content",
-  "/public/shares/{shareToken}/remixes",
   "/exports/capabilities", "/projects/{projectId}/exports", "/exports/{exportId}", "/exports/{exportId}/cancel",
   "/exports/{exportId}/preview-token", "/exports/{exportId}/content",
-  "/exports/{exportId}/deliveries", "/export-deliveries/{deliveryId}",
-  "/export-deliveries/{deliveryId}/confirm", "/export-deliveries/{deliveryId}/retry",
-  "/export-deliveries/{deliveryId}/cancel",
   "/projects/{projectId}/previews", "/previews/{previewId}", "/previews/{previewId}/token",
 ]) {
   assert(contract.paths[apiPath], `${apiPath} is required`);
@@ -391,17 +382,11 @@ for (const [apiPath, method] of [
 ]) {
   assert(JSON.stringify(contract.paths[apiPath][method].security) === "[]", `${apiPath} must use only its active Share token capability`);
 }
-assert(contract.paths["/public/shares/{shareToken}/remixes"].post.security === undefined, "Remix must inherit OIDC bearer authentication");
+assert(!contract.paths["/public/shares/{shareToken}/remixes"], "Read-only Prototype shares must not expose a Project remix command");
 assert(contract.paths["/exports/capabilities"].get.security === undefined, "Export capabilities must inherit OIDC bearer authentication");
 assert(contract.paths["/exports/capabilities"].get.responses["200"].content["application/json"].schema.$ref === "#/components/schemas/ExportCapabilities", "Export capability catalog must use ExportCapabilities");
 assert(!contract.paths["/exports/{exportId}/preview-token"].post.requestBody, "Preview capability TTL and origin must not be client-controlled");
 assert(contract.paths["/exports/{exportId}/content"].get.responses["200"].headers["Content-Disposition"], "Export download must provide a safe attachment disposition");
-assert(contract.paths["/exports/{exportId}/deliveries"].post.requestBody.content["application/json"].schema.$ref === "#/components/schemas/CreateExternalExportDeliveryRequest", "External Export delivery creation must accept only its target command");
-assert(contract.paths["/exports/{exportId}/deliveries"].post.responses["201"].content["application/json"].schema.$ref === "#/components/schemas/ExternalExportDelivery", "External Export delivery creation must return its audit snapshot");
-assert(contract.paths["/exports/{exportId}/deliveries"].get.responses["200"].content["application/json"].schema.$ref === "#/components/schemas/ExternalExportDeliveryList", "External Export delivery listing must return the bounded audit list");
-for (const action of ["confirm", "retry", "cancel"]) {
-  assert(!contract.paths[`/export-deliveries/{deliveryId}/${action}`].post.requestBody, `${action} External Export delivery must not accept client payload or credentials`);
-}
 const publicAssetContent = contract.paths["/public/shares/{shareToken}/artifacts/{artifactId}/versions/{artifactVersionId}/assets/{assetId}/content"].get;
 const publicArtifactContent = contract.paths["/public/shares/{shareToken}/artifacts/{artifactId}/versions/{artifactVersionId}/content"].get;
 assert(publicArtifactContent.responses["200"].headers.ETag.$ref === "#/components/headers/ContentDigestETag", "Public shared Artifact content ETag must identify immutable bytes");
@@ -416,10 +401,8 @@ for (const requiredSchema of [
   "ShareGrant", "RotateShareGrantResponse", "PublicShare", "PublicArtifactVersionDetail",
   "PublicArtifactVersionInlineDetail", "PublicArtifactVersionBlobDetail", "PublicArtifactContentBlob",
   "PublicPrototypeDocument", "PublicPrototypeAsset", "PublicPrototypeImageAsset", "PublicPrototypeFontAsset",
-  "CreateProjectRemixResponse",
-  "ExportJob", "ExportSelection", "ExportFormat", "ExportPackaging", "ExportCapabilities", "ExportCapability", "FigmaExportCapability",
-  "ExportCapabilityUnavailableReason", "ExportPreviewTokenResponse", "ExternalExportTarget", "ExternalExportAuthentication",
-  "CreateExternalExportDeliveryRequest", "ExternalExportPayloadSnapshot", "ExternalExportDelivery", "ExternalExportDeliveryList",
+  "ExportJob", "ExportSelection", "ExportFormat", "ExportPackaging", "ExportCapabilities", "ExportCapability",
+  "ExportCapabilityUnavailableReason", "ExportPreviewTokenResponse",
   "CreateProjectPreviewRequest", "ProjectPreview", "PreviewTokenResponse",
 ]) {
   assert(schemas[requiredSchema], `${requiredSchema} is required`);
@@ -431,8 +414,10 @@ for (const forbiddenField of ["token", "tokenHash", "storageKey", "createdById"]
 }
 assert(!schemas.ShareGrant.properties.tokenHash && !schemas.ShareGrant.properties.token, "ShareGrant must not expose bearer-token material");
 assert(JSON.stringify(refNames(schemas.PublicArtifactVersionDetail)) === JSON.stringify([
-  "PublicArtifactVersionInlineDetail", "PublicArtifactVersionInlinePrdV2Detail", "PublicArtifactVersionInlinePrdV3Detail", "PublicArtifactVersionInlineSourcePrototypeDetail", "PublicArtifactVersionBlobDetail",
-]), "PublicArtifactVersionDetail must preserve the legacy inline branch and versioned PRD and source prototype branches");
+  "PublicArtifactVersionInlinePrototypeDetail",
+  "PublicArtifactVersionInlineSourcePrototypeDetail",
+  "PublicArtifactVersionBlobDetail",
+]), "PublicArtifactVersionDetail must expose only current shared Prototype projections and the blob branch");
 for (const forbiddenField of ["createdByRunId", "knowledgeReleaseId", "contentBlobId", "storageKey", "tokenHash"]) {
   assert(!schemas.PublicArtifactVersionBlobDetail.properties[forbiddenField], `PublicArtifactVersionBlobDetail must not expose ${forbiddenField}`);
 }
@@ -461,28 +446,18 @@ for (const field of ["format", "packaging"]) {
   assert(schemas.ExportJob.required.includes(field), `ExportJob must freeze ${field}`);
   assert(schemas.CreateExportJobRequest.required.includes(field), `CreateExportJobRequest must explicitly choose ${field}`);
 }
+assert(!schemas.ExportCapabilities.properties.external, "Retired external publishing must not be advertised");
+assert(!Object.keys(contract.paths).some((path) => path.includes("export-deliveries") || /^\/exports\/[^/]+\/deliveries$/.test(path)), "Retired external publishing routes must be absent");
 const formatCapabilities = resolveSchema(schemas.ExportCapabilities.properties.formats);
 const packagingCapabilities = resolveSchema(schemas.ExportCapabilities.properties.packaging);
-const externalCapabilities = resolveSchema(schemas.ExportCapabilities.properties.external);
 assert(JSON.stringify(Object.keys(formatCapabilities.properties)) === JSON.stringify(["html", "react", "figma", "mcp", "docx", "pdf"]), "Export format capabilities must remain explicit");
 assert(JSON.stringify(Object.keys(packagingCapabilities.properties)) === JSON.stringify(["single_file", "zip"]), "Export packaging capabilities must remain explicit");
-assert(JSON.stringify(Object.keys(externalCapabilities.properties)) === JSON.stringify(["ai_studio", "netlify", "lovable", "bolt"]), "External Export target capabilities must remain explicit");
 for (const capability of [
   ...Object.values(formatCapabilities.properties),
   ...Object.values(packagingCapabilities.properties),
-  ...Object.values(externalCapabilities.properties),
 ]) {
-  assert(capability.$ref === "#/components/schemas/AvailableExportCapability", "Every Export capability entry must use the audited capability state contract");
+  assert(capability.$ref === "#/components/schemas/ExportCapability", "Every Export capability entry must use the audited capability state contract");
 }
-assert(JSON.stringify(Object.keys(schemas.CreateExternalExportDeliveryRequest.properties)) === JSON.stringify(["target"]), "External delivery creation must accept only a named target");
-assert(!schemas.ExternalExportPayloadSnapshot.properties.output.properties.url
-  && !schemas.ExternalExportPayloadSnapshot.properties.output.properties.token
-  && !schemas.ExternalExportPayloadSnapshot.properties.output.properties.storageKey,
-"External delivery payload snapshots must not expose URLs, credentials, or internal storage keys");
-for (const forbiddenField of ["token", "oauthToken", "accessToken", "storageKey"]) {
-  assert(!schemas.ExternalExportDelivery.properties[forbiddenField], `ExternalExportDelivery must not expose ${forbiddenField}`);
-}
-
 for (const apiPath of expectedFilePaths) {
   for (const method of ["get", "post", "delete"]) {
     const operation = contract.paths[apiPath]?.[method];
@@ -592,12 +567,10 @@ assert(artifactVersionPreference.get.responses["200"].headers.ETag.$ref === "#/c
 assert(artifactVersionPreference.put.responses["200"].headers.ETag.$ref === "#/components/headers/ETag", "ArtifactVersion preference writes must expose the updated revision ETag");
 assert(artifactVersionPreference.put.requestBody.content["application/json"].schema.$ref === "#/components/schemas/UpdateArtifactVersionPreferenceRequest", "ArtifactVersion preference writes must use the private preference request contract");
 
-const expectedPrdSections = [
-  "executiveSummary", "problem", "goals", "targetUsers", "scope", "requirements",
-  "userFlows", "acceptanceCriteria", "risksAndDependencies",
-];
-assert(JSON.stringify(schemas.PrdSections.required) === JSON.stringify(expectedPrdSections), "PrdSections must expose the fixed ordered v1 section keys");
-assert(schemas.PrdSections.additionalProperties === false, "PrdSections must reject unknown section keys");
+assert(JSON.stringify(schemas.PrdDocument.properties.sections.required) === JSON.stringify([
+  "introduction", "businessRequirements", "degradation", "safetyBaseline",
+]), "PRD must expose the four current sections");
+assert(schemas.PrdDocument.properties.sections.additionalProperties === false, "PRD must reject unknown sections");
 
 const expectedPrdBlocks = [
   "PrdParagraphBlock", "PrdHeadingBlock", "PrdBulletListBlock", "PrdOrderedListBlock",
@@ -608,35 +581,24 @@ assert(JSON.stringify(refNames(schemas.PrdBlock)) === JSON.stringify(expectedPrd
 assert(JSON.stringify(refNames(schemas.PrdInline)) === JSON.stringify([
   "PrdTextInline", "PrdLinkInline", "PrdCitationInline", "PrdReferenceInline",
 ]), "PrdInline whitelist changed without a protocol version bump");
-assert(JSON.stringify(refNames(schemas.PrdDocument)) === JSON.stringify([
-  "PrdDocumentV1", "PrdDocumentV2", "PrdDocumentV3",
-]), "PrdDocument must expose the supported v1/v2/v3 protocol union");
-assert(literalValue(schemas.PrdDocumentV1.properties.protocol) === "workbench.prd.v1", "PrdDocumentV1 protocol must be workbench.prd.v1");
-assert(literalValue(schemas.PrdDocumentV2.properties.protocol) === "workbench.prd.v2", "PrdDocumentV2 protocol must be workbench.prd.v2");
-assert(JSON.stringify(schemas.PrdDocumentV2.required) === JSON.stringify([
+assert(literalValue(schemas.PrdDocument.properties.protocol) === "workbench.prd.v3", "PRD must use the current protocol");
+for (const obsolete of ["PrdDocumentV1", "PrdDocumentV2", "RuntimeArtifactDraftPrdV1Revision", "RuntimeArtifactDraftPrdV2"]) {
+  assert(!schemas[obsolete], `Retired PRD branch must not be published: ${obsolete}`);
+}
+assert(JSON.stringify(schemas.PrdDocument.required) === JSON.stringify([
   "protocol", "documentId", "title", "revision", "cover", "versionHistory",
   "tableOfContents", "assumptions", "citations", "sections",
-]), "PrdDocumentV2 must retain the complete requirement-document structure");
-assert(literalValue(schemas.PrdDocumentV2.properties.tableOfContents.properties.title) === "目 录", "PrdDocumentV2 must retain the fixed table-of-contents title");
-assert(schemas.PrdDocumentV2.properties.tableOfContents.properties.entries.minItems === 11
-  && schemas.PrdDocumentV2.properties.tableOfContents.properties.entries.maxItems === 61,
-"PrdDocumentV2 must retain 11 fixed table-of-contents entries and allow up to 50 additional business sections");
-const additionalPrdSections = schemas.PrdDocumentV2.properties.sections.properties.businessRequirements.properties.additionalSections;
-assert(additionalPrdSections.items.$ref === "#/components/schemas/PrdAdditionalBusinessSection"
-  && additionalPrdSections.maxItems === 50
-  && JSON.stringify(additionalPrdSections.default) === "[]",
-"PrdDocumentV2 additional business sections must default to an empty, bounded typed array");
-assert(!schemas.PrdDocumentV2.properties.sections.properties.businessRequirements.required.includes("additionalSections"),
-  "PrdDocumentV2 must accept legacy v2 input without additional business sections");
-assert(schemas.PrdDocumentV2.properties.sections.properties.introduction.properties.usageScenarios.properties.channelTable.properties.rows.minItems === 3
-  && schemas.PrdDocumentV2.properties.sections.properties.introduction.properties.usageScenarios.properties.channelTable.properties.rows.maxItems === 3,
-"PrdDocumentV2 must retain exactly three canonical channel rows");
-assert(schemas.PrdDocumentV2.properties.sections.properties.businessRequirements.properties.flowAndPages.properties.diagrams.minItems === 2
-  && schemas.PrdDocumentV2.properties.sections.properties.businessRequirements.properties.flowAndPages.properties.diagrams.maxItems === 2,
-"PrdDocumentV2 must retain the product-flow and product-architecture diagrams");
-assert(schemas.PrdDocumentV2.properties.sections.properties.safetyBaseline.properties.rows.minItems === 21
-  && schemas.PrdDocumentV2.properties.sections.properties.safetyBaseline.properties.rows.maxItems === 21,
-"PrdDocumentV2 must retain the complete 21-row safety baseline");
+]), "PRD must retain the complete requirement-document structure");
+assert(literalValue(schemas.PrdDocument.properties.tableOfContents.properties.title) === "目 录", "PRD must retain its fixed directory title");
+assert(schemas.PrdDocument.properties.tableOfContents.properties.entries.minItems === 9
+  && schemas.PrdDocument.properties.tableOfContents.properties.entries.maxItems === 58,
+"PRD directory must include fixed entries and 1–50 function sections");
+assert(schemas.PrdDocument.properties.sections.properties.introduction.properties.usageScenarios.properties.channelTable.properties.rows.minItems === 3
+  && schemas.PrdDocument.properties.sections.properties.introduction.properties.usageScenarios.properties.channelTable.properties.rows.maxItems === 3,
+"PRD must retain exactly three canonical channel rows");
+assert(schemas.PrdDocument.properties.sections.properties.safetyBaseline.properties.rows.minItems === 21
+  && schemas.PrdDocument.properties.sections.properties.safetyBaseline.properties.rows.maxItems === 21,
+"PRD must retain the complete 21-row safety baseline");
 assert(JSON.stringify(schemas.PrdSafetyBaselineRow.properties.applicability.enum) === JSON.stringify([
   "是", "否", "不涉及",
 ]), "PRD safety applicability must remain a closed three-value contract");
@@ -647,7 +609,7 @@ assert(JSON.stringify(v3Business.required) === JSON.stringify(["title", "summary
 assert(v3Business.properties.functionSections.minItems === 1 && v3Business.properties.functionSections.maxItems === 50, "PRD v3 function sections must be nonempty and bounded");
 assert(schemas.PrdV3FunctionSection.properties.diagrams.maxItems === 2 && JSON.stringify(schemas.PrdV3FunctionSection.properties.diagrams.default) === "[]", "PRD v3 diagrams must be independently optional and bounded per section");
 assert(schemas.PrdTemplateDiagram.properties.nodes.minItems === 2 && schemas.PrdTemplateDiagram.properties.edges.minItems === 1, "PRD v3 must permit requirement-sized diagrams");
-assert(literalValue(schemas.ArtifactVersionInlinePrdV3Detail.properties.schemaVersion) === 3, "PRD v3 inline artifact versions must bind schemaVersion 3");
+assert(literalValue(schemas.ArtifactVersionInlinePrdDetail.properties.schemaVersion) === 3, "PRD v3 inline artifact versions must bind schemaVersion 3");
 
 const expectedPrototypeNodes = [
   "PrototypeFrameNode", "PrototypeFormNode", "PrototypeTextNode", "PrototypeIconNode",
@@ -665,12 +627,18 @@ for (const field of ["screens", "nodes", "tokens", "assets", "states", "actions"
 }
 
 assert(JSON.stringify(refNames(schemas.ArtifactVersionDetail)) === JSON.stringify([
-  "ArtifactVersionInlineDetail", "ArtifactVersionInlinePrdV2Detail", "ArtifactVersionInlinePrdV3Detail", "ArtifactVersionInlineSourcePrototypeDetail", "ArtifactVersionBlobDetail",
-]), "ArtifactVersionDetail must preserve the legacy inline branch and versioned PRD and source prototype branches");
+  "ArtifactVersionInlinePrdDetail",
+  "ArtifactVersionInlinePrototypeDetail",
+  "ArtifactVersionInlineSourcePrototypeDetail",
+  "ArtifactVersionInlineDesignSystemDetail",
+  "ArtifactVersionInlineImageDetail",
+  "ArtifactVersionInlineCodeDetail",
+  "ArtifactVersionInlineDocumentDetail",
+  "ArtifactVersionInlineDataDetail",
+  "ArtifactVersionBlobDetail",
+]), "ArtifactVersionDetail must expose each current inline kind and the blob branch");
 for (const [schemaName, kind] of [
   ["ArtifactVersionInlinePrdDetail", "prd"],
-  ["ArtifactVersionInlinePrdV2Detail", "prd"],
-  ["ArtifactVersionInlinePrdV3Detail", "prd"],
   ["ArtifactVersionInlinePrototypeDetail", "prototype"],
   ["ArtifactVersionInlineSourcePrototypeDetail", "prototype"],
   ["ArtifactVersionInlineDesignSystemDetail", "design_system"],
@@ -681,10 +649,8 @@ for (const [schemaName, kind] of [
 ]) {
   assert(literalValue(schemas[schemaName].properties.kind) === kind, `${schemaName} must retain kind ${kind}`);
 }
-assert(literalValue(schemas.ArtifactVersionInlinePrdDetail.properties?.schemaVersion) === 1, "Inline PRD v1 schemaVersion must be 1");
-assert(literalValue(schemas.ArtifactVersionInlinePrdV2Detail.properties?.schemaVersion) === 2, "Inline PRD v2 schemaVersion must be 2");
-assert(schemas.ArtifactVersionInlinePrdDetail.properties?.content?.$ref === "#/components/schemas/PrdDocumentV1", "Inline PRD v1 must retain the legacy response shape");
-assert(schemas.ArtifactVersionInlinePrdV2Detail.properties?.content?.$ref === "#/components/schemas/PrdDocumentV2", "Inline PRD v2 must use the fixed requirement-document contract");
+assert(literalValue(schemas.ArtifactVersionInlinePrdDetail.properties?.schemaVersion) === 3, "Inline PRD schemaVersion must be 3");
+assert(schemas.ArtifactVersionInlinePrdDetail.properties?.content?.$ref === "#/components/schemas/PrdDocument", "Inline PRD must reference the current complete contract");
 assert(literalValue(schemas.ArtifactVersionInlinePrototypeDetail.properties?.schemaVersion) === 1, "Inline Prototype schemaVersion must be 1");
 assert(literalValue(schemas.ArtifactVersionInlineSourcePrototypeDetail.properties?.schemaVersion) === 2, "Inline source prototype schemaVersion must be 2");
 assert(literalValue(schemas.PublicArtifactVersionInlineSourcePrototypeDetail.properties?.schemaVersion) === 2, "Public inline source prototype schemaVersion must be 2");
@@ -694,7 +660,7 @@ assert(!schemas.PublicSourcePrototypeDocument.properties.files, "Public source p
 assert(literalValue(schemas.ArtifactVersionInlineDesignSystemDetail.properties?.schemaVersion) === 1, "Inline Design System schemaVersion must be 1");
 assert(schemas.Artifact.required.includes("revision"), "Artifact must expose its mutable revision");
 for (const schemaName of [
-  "ArtifactVersionBlobDetail", "ArtifactVersionInlinePrdDetail", "ArtifactVersionInlinePrdV2Detail", "ArtifactVersionInlinePrdV3Detail",
+  "ArtifactVersionBlobDetail", "ArtifactVersionInlinePrdDetail",
   "ArtifactVersionInlinePrototypeDetail",
   "ArtifactVersionInlineDesignSystemDetail",
   "ArtifactVersionInlineImageDetail", "ArtifactVersionInlineCodeDetail",
@@ -717,20 +683,10 @@ for (const [schemaName, kind] of [
 ]) {
   assert(literalValue(schemas[schemaName].properties.kind) === kind, `${schemaName} must retain kind ${kind}`);
 }
-assert(JSON.stringify(refNames(schemas.RuntimeArtifactDraftPrd)) === JSON.stringify([
-  "RuntimeArtifactDraftPrdV1Revision", "RuntimeArtifactDraftPrdV2", "RuntimeArtifactDraftPrdV3",
-]), "Runtime PRD drafts must expose version-paired v1 revision and v2 branches");
-for (const [schemaName, version, contentSchema] of [
-  ["RuntimeArtifactDraftPrdV1Revision", 1, "PrdDocumentV1"],
-  ["RuntimeArtifactDraftPrdV2", 2, "PrdDocumentV2"],
-  ["RuntimeArtifactDraftPrdV3", 3, "PrdDocumentV3"],
-]) {
-  assert(literalValue(schemas[schemaName].properties.kind) === "prd", `${schemaName} must retain kind prd`);
-  assert(literalValue(schemas[schemaName].properties.schemaVersion) === version, `${schemaName} must bind schemaVersion ${version}`);
-  assert(schemas[schemaName].properties.content.$ref === `#/components/schemas/${contentSchema}`, `${schemaName} must bind ${contentSchema}`);
-}
-assert(literalValue(schemas.RuntimeArtifactDraftPrdV1Revision.properties.operation.properties.kind) === "revise", "Runtime PRD v1 must remain revision-only");
-assert(JSON.stringify(schemas.RuntimeArtifactDraftPrdV2.properties.operation.oneOf.map((option) => literalValue(option.properties.kind))) === JSON.stringify(["create", "revise"]), "Runtime PRD v2 must allow create and revise operations");
+assert(literalValue(schemas.RuntimeArtifactDraftPrd.properties.kind) === "prd", "Runtime PRD kind must remain prd");
+assert(literalValue(schemas.RuntimeArtifactDraftPrd.properties.schemaVersion) === 3, "Runtime PRD must require schemaVersion 3");
+assert(schemas.RuntimeArtifactDraftPrd.properties.content.$ref === "#/components/schemas/PrdDocument", "Runtime PRD must use the persisted document contract");
+assert(JSON.stringify(schemas.RuntimeArtifactDraftPrd.properties.operation.oneOf.map((option) => literalValue(option.properties.kind))) === JSON.stringify(["create", "revise"]), "Current PRD must allow create and revise operations");
 assert(literalValue(schemas.RuntimeArtifactDraftPrototype.properties.schemaVersion) === 1, "Runtime Prototype draft schemaVersion must be 1");
 for (const schemaName of ["RuntimeArtifactDraftImage", "RuntimeArtifactDraftCode", "RuntimeArtifactDraftDocument", "RuntimeArtifactDraftData"]) {
   assert(schemas[schemaName].properties.content.$ref === "#/components/schemas/JsonValue", `${schemaName} must use JsonValue`);

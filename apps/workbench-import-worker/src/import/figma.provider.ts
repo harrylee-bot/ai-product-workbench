@@ -38,7 +38,6 @@ export class FigmaImportProvider implements ImportProvider {
     const file = await get(`/v1/files/${encodeURIComponent(request.fileKey)}?version=${encodeURIComponent(pinnedVersion)}`);
     parseJson(file.body, "Figma file response");
     return freezeImport({
-      label: request.label ?? `Figma ${request.fileKey}@${pinnedVersion}`,
       descriptor: { kind: "figma_snapshot", fileKey: request.fileKey, versionId: pinnedVersion },
       blobs: [{ path: "figma.json", mediaType: "application/json", bytes: file.body }],
     });

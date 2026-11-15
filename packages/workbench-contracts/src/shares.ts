@@ -52,7 +52,7 @@ export const shareGrantSchema = z.object({
 export const rotateShareGrantRequestSchema = z.object({
   releaseId: opaqueIdSchema,
   artifactVersionId: opaqueIdSchema.optional(),
-  scope: shareScopeSchema.default("view"),
+  scope: z.literal("view").default("view"),
   expiresAt: isoDateTimeSchema.nullable().default(null),
 }).strict();
 
@@ -75,7 +75,7 @@ export const revokeProjectShareGrantsResponseSchema = z.object({
 
 export const publicShareSchema = z.object({
   shareId: opaqueIdSchema,
-  scope: shareScopeSchema,
+  scope: z.literal("view"),
   expiresAt: isoDateTimeSchema.nullable(),
   release: publicProjectReleaseSchema,
 }).strict();

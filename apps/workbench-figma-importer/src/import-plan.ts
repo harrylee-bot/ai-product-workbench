@@ -5,7 +5,6 @@ import {
 } from "@workbench/workbench-contracts/figma-export";
 import {
   type PrototypeAsset,
-  type PrototypeDocument,
   type PrototypeNode,
   type PrototypeScreen,
   type PrototypeStyle,
@@ -14,7 +13,7 @@ import {
 
 import { figmaImportAssetKey, type FigmaImportAssetBytes } from "./types";
 
-export type ResolvedPrototypeLayout = Omit<PrototypeLayout, "x" | "y" | "width" | "height" | "gap" | "padding"> & {
+type ResolvedPrototypeLayout = Omit<PrototypeLayout, "x" | "y" | "width" | "height" | "gap" | "padding"> & {
   x: number;
   y: number;
   width: number;
@@ -25,7 +24,7 @@ export type ResolvedPrototypeLayout = Omit<PrototypeLayout, "x" | "y" | "width" 
 
 type PrototypeLayout = PrototypeNode["layout"];
 
-export type ResolvedPrototypeStyle = Omit<PrototypeStyle, "fill" | "stroke" | "radii" | "typography"> & {
+type ResolvedPrototypeStyle = Omit<PrototypeStyle, "fill" | "stroke" | "radii" | "typography"> & {
   fill: string | null;
   stroke: {
     color: string;
@@ -72,7 +71,7 @@ export type FigmaImportPlan = {
   prototypes: FigmaImportPlanPrototype[];
 };
 
-export class FigmaImportPlanError extends Error {
+class FigmaImportPlanError extends Error {
   constructor(message: string) {
     super(message);
     this.name = "FigmaImportPlanError";
@@ -259,8 +258,4 @@ function generatedLabel(node: PrototypeNode): string | null {
   if (node.kind === "button") return node.label;
   if (node.kind === "input") return node.label;
   return null;
-}
-
-export function prototypeDocumentForPlan(plan: FigmaImportPlanPrototype): PrototypeDocument {
-  return plan.source.document;
 }

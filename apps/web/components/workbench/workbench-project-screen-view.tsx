@@ -1,5 +1,7 @@
 "use client";
 
+import { toast } from "sonner";
+
 import {
   Background,
   BackgroundVariant,
@@ -85,6 +87,7 @@ import {
 } from "./workbench-project-chrome";
 import { ProjectComposer, type WorkbenchProjectComposerProps } from "./workbench-project-composer";
 import { WorkbenchProjectMembersDialog } from "./workbench-project-members-dialog";
+import { WorkbenchPrototypeV2Panel, writePrototypeSelection, type PrototypePlanSubmit } from "./workbench-prototype-v2-panel";
 import { ProjectPreviewOverlay } from "./workbench-project-preview-overlay";
 const WorkbenchGenerationPreview = dynamic(
   () => import("./workbench-generation-preview").then((module) => module.WorkbenchGenerationPreview),
@@ -219,7 +222,9 @@ export type ProjectScreenViewContract = {
     onExport: () => void;
     onMembers: () => void;
     onMembersOpenChange: (open: boolean) => void;
-    onOpenPreview: () => void;
+    onOpenPrototypeV2: () => void;
+    onClosePrototypeV2?: () => void;
+    onOpenMedia?: () => void;
     onRenameProject: ComponentProps<typeof RenameProjectDialog>["onRename"];
     onRequestArchive: () => void;
     onRequestRename: () => void;
@@ -229,6 +234,7 @@ export type ProjectScreenViewContract = {
     previewCreate: ComponentProps<typeof ProjectPreviewOverlay>["createPreview"];
     previewInitialReference: WorkbenchArtifactReference | undefined;
     previewOpen: boolean;
+    prototypeV2Open?: boolean;
     projectActionBusy: boolean;
     projectMembersOpen: boolean;
     projectMenuOpen: boolean;
@@ -237,6 +243,7 @@ export type ProjectScreenViewContract = {
     shareOpen: boolean;
   };
   composer: {
+    onCreatePrototypePlan: PrototypePlanSubmit;
     onSelectSuggestion: (text: string) => void;
     projectComposer: ProjectComposerViewModel;
     suggestionDisabled: boolean;
@@ -291,10 +298,22 @@ export function ProjectScreenView({
   controller: ProjectScreenViewContract;
 }) {
   const routeAnimation = useWorkbenchRouteEnterAnimation("project");
+  const projectComposerProps: WorkbenchProjectComposerProps = { ...composer.projectComposer, setPrompt: composer.projectComposer.onPromptChange };
+  const submitProjectPrompt: WorkbenchProjectComposerProps["onSubmitPrompt"] = async (submission) => {
+    if (!(submission.requestedArtifactKinds ?? []).includes("prototype")) return projectComposerProps.onSubmitPrompt(submission);
+    let plan;
+    try { plan = await composer.onCreatePrototypePlan(submission); }
+    catch (error) { toast.error(error instanceof Error ? error.message : "创建原型计划失败"); return null; }
+    if (!plan) return null;
+    writePrototypeSelection({ planId: plan.id, revisionId: "", pageId: "" });
+    chrome.onOpenPrototypeV2();
+    window.dispatchEvent(new Event("workbench:prototype-open"));
+    return plan.id;
+  };
   return (
     <motion.section
       animate={routeAnimation}
-      className={root.projectStageClass}
+      className={cn(root.projectStageClass, chrome.prototypeV2Open && "[&>:not([data-workbench-prototype-v2-panel])]:invisible")}
       data-generation-stage={runPanels.generationStage ?? undefined}
       data-project-phase={root.phase}
       data-project-mode={root.projectMode}
@@ -328,7 +347,8 @@ export function ProjectScreenView({
         onDuplicate={chrome.onDuplicateProject}
         onMembers={chrome.onMembers}
         onExport={chrome.onExport}
-        onPreview={chrome.onOpenPreview}
+        onOpenPrototypeV2={chrome.onOpenPrototypeV2}
+        onOpenMedia={chrome.onOpenMedia}
         onRename={chrome.onRequestRename}
         onShare={chrome.onShare}
         onToggleMenu={chrome.onToggleProjectMenu}
@@ -336,6 +356,16 @@ export function ProjectScreenView({
         projectMenuOpen={chrome.projectMenuOpen}
         shareOpen={chrome.shareOpen}
       />
+      {chrome.prototypeV2Open && (
+        <WorkbenchPrototypeV2Panel
+          key={root.projectId}
+          canEdit={root.capabilities.canEdit}
+          composer={projectComposerProps}
+          onCreatePlan={composer.onCreatePrototypePlan}
+          onClose={chrome.onClosePrototypeV2 ?? (() => undefined)}
+          projectId={root.projectId}
+        />
+      )}
       <LeftInspector
         actionBusy={runPanels.actionBusy}
         activities={runPanels.activities}
@@ -352,7 +382,6 @@ export function ProjectScreenView({
         runPhaseLabel={runPanels.runPhaseLabel}
         runStatus={runPanels.runStatus}
         selectedTask={runPanels.selectedTask}
-        zoomLabel={canvas.zoomLabel}
       />
       <ProjectTranscriptPanel
         canCancel={runPanels.canCancel}
@@ -593,37 +622,7 @@ export function ProjectScreenView({
         zoomKeyActive={canvas.zoomKeyActive}
         zoomLabel={canvas.zoomLabel}
       />
-      <ProjectComposer
-        busy={composer.projectComposer.busy}
-        canRefresh={composer.projectComposer.canRefresh}
-        context={composer.projectComposer.context}
-        designPresetItems={composer.projectComposer.designPresetItems}
-        designPresetStatus={composer.projectComposer.designPresetStatus}
-        disabled={composer.projectComposer.disabled}
-        model={composer.projectComposer.model}
-        modelCatalog={composer.projectComposer.modelCatalog}
-        modelChoices={composer.projectComposer.modelChoices}
-        modelMenuOpen={composer.projectComposer.modelMenuOpen}
-        editArtifactTargets={composer.projectComposer.editArtifactTargets}
-        focusRequest={composer.projectComposer.focusRequest}
-        onClearContext={composer.projectComposer.onClearContext}
-        onCloseModel={composer.projectComposer.onCloseModel}
-        onSelectModel={composer.projectComposer.onSelectModel}
-        onToggleModel={composer.projectComposer.onToggleModel}
-        onRefresh={composer.projectComposer.onRefresh}
-        onRetryDesignPresets={composer.projectComposer.onRetryDesignPresets}
-        onRetryModels={composer.projectComposer.onRetryModels}
-        onSubmitPrompt={composer.projectComposer.onSubmitPrompt}
-        onSourcePrototypeCreated={composer.projectComposer.onSourcePrototypeCreated}
-        onTargetSurfaceChange={composer.projectComposer.onTargetSurfaceChange}
-        projectMode={composer.projectComposer.projectMode}
-        projectDesignSystemChoices={composer.projectComposer.projectDesignSystemChoices}
-        projectId={composer.projectComposer.projectId}
-        prompt={composer.projectComposer.prompt}
-        runStatus={composer.projectComposer.runStatus}
-        setPrompt={composer.projectComposer.onPromptChange}
-        targetSurface={composer.projectComposer.targetSurface}
-      />
+      {!chrome.prototypeV2Open && <ProjectComposer {...projectComposerProps} onSubmitPrompt={submitProjectPrompt} />}
       <UtilityPill
         canRedo={canvas.boardCanRedo}
         canUndo={canvas.boardCanUndo}

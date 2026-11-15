@@ -31,6 +31,16 @@ function controlledWorker() {
 }
 
 describe("sha256Blob worker", () => {
+  it("fails explicitly when Worker is unavailable", async () => {
+    vi.stubGlobal("Worker", undefined);
+    try {
+      await expect(sha256Blob(new Blob(["workbench"])))
+        .rejects.toThrow("UPLOAD_DIGEST_WORKER_UNAVAILABLE");
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it("reports valid progress, resolves the digest, and terminates the worker", async () => {
     const blob = new Blob(["workbench"]);
     const progress = vi.fn();

@@ -19,12 +19,12 @@ vi.mock("@/lib/workbench/features/import-sources", async () => {
   const actual = await vi.importActual<typeof import("@/lib/workbench/features/import-sources")>("@/lib/workbench/features/import-sources");
   return {
     ...actual,
-    useOptionalWorkbenchImportSourcesApi: () => mocks,
+    useWorkbenchImportSourcesApi: () => mocks,
   };
 });
 
 vi.mock("@/lib/workbench/features/import-sources/api-adapter", () => ({
-  useOptionalWorkbenchImportSourcesApi: () => mocks,
+  useWorkbenchImportSourcesApi: () => mocks,
 }));
 
 const timestamp = "2026-07-18T00:00:00.000Z";

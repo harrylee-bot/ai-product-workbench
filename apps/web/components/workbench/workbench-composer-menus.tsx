@@ -15,11 +15,9 @@ import type { ComponentType } from "react";
 
 import { cn } from "@/lib/utils";
 import type { WorkbenchComposerAttachmentKind } from "@/lib/workbench/files/composer-attachments";
-import type { WorkbenchModelChoice } from "@/lib/workbench/features";
 
 import { popoverTransition } from "./workbench-motion";
 
-type ModelName = string;
 
 export type WorkbenchArtifactOutputKind = "both" | "prd" | "prototype";
 
@@ -35,10 +33,16 @@ export function ComposerArtifactOutputMenu({
   kind,
   onSelect,
   placement = "project",
+  models = [],
+  selectedModelId,
+  onSelectModel,
 }: {
   kind: WorkbenchArtifactOutputKind | null;
   onSelect: (kind: WorkbenchArtifactOutputKind) => void;
   placement?: "home" | "project";
+  models?: readonly string[];
+  selectedModelId?: string;
+  onSelectModel?: (modelId: string) => void;
 }) {
   const options = [
     { icon: SparklesIcon, kind: "both" as const, label: "需求文档＋原型", description: "生成关联的文档与可交互原型" },
@@ -81,6 +85,12 @@ export function ComposerArtifactOutputMenu({
           </button>
         );
       })}
+      {models.length > 0 && onSelectModel && <div className="mt-2 border-t border-white/[0.08] pt-2">
+        <p className="px-2 pb-1 text-xs text-[#9aa0a6]">生成模型</p>
+        {models.map((modelId) => <button key={modelId} type="button" role="menuitemradio" aria-checked={modelId === selectedModelId} onClick={() => onSelectModel(modelId)} className="flex min-h-10 w-full items-center justify-between gap-2 rounded-lg px-2 py-2 text-left text-xs hover:bg-white/[0.06]">
+          <span className="min-w-0 break-all">{modelId}</span>{modelId === selectedModelId && <CheckCircle2Icon className="size-4 shrink-0" />}
+        </button>)}
+      </div>}
     </motion.div>
   );
 }
@@ -180,47 +190,6 @@ export function ComposerAttachmentMenu({
       })}
       {onImportSourcePrototype && <button className="flex h-[38px] w-full items-center gap-[10px] rounded-[9px] px-[10px] text-left text-[13px] font-semibold text-[#f1f3f4] hover:bg-white/[0.06]"
         onClick={onImportSourcePrototype} role="menuitem" type="button"><Code2Icon className="size-[15px] shrink-0 text-[#d8dce2]" />导入源码原型</button>}
-    </motion.div>
-  );
-}
-
-export function ModelChoiceMenu({
-  className,
-  model,
-  modelChoices,
-  onSelectModel,
-}: {
-  className: string;
-  model: ModelName;
-  modelChoices: WorkbenchModelChoice[];
-  onSelectModel: (model: ModelName) => void;
-}) {
-  return (
-    <motion.div
-      animate={{ opacity: 1, y: 0 }}
-      className={cn("z-[70] overflow-hidden rounded-[10px] border border-white/[0.08] bg-[#18191b]/92 p-[8px] text-[#e8eaed] shadow-[0_24px_90px_-42px_rgba(0,0,0,0.95)] backdrop-blur-2xl", className)}
-      exit={{ opacity: 0, y: 3 }}
-      initial={{ opacity: 0, y: 5 }}
-      transition={popoverTransition}
-    >
-      {modelChoices.map((option) => (
-        <button
-          className={cn(
-            "flex min-h-[68px] w-full items-center gap-[12px] rounded-[8px] px-[12px] py-[10px] text-left hover:bg-white/[0.06]",
-            model === option.key && "bg-white/[0.10]",
-          )}
-          key={option.key}
-          onClick={() => onSelectModel(option.key)}
-          type="button"
-        >
-          <SparklesIcon className="size-[18px] shrink-0 text-[#f1f3f4]" />
-          <span className="min-w-0 flex-1">
-            <span className="block text-[14px] font-semibold leading-[18px]">{option.label}</span>
-            <span className="mt-[4px] block whitespace-normal text-[13px] leading-[17px] text-[#c4c7ce]">{option.description}</span>
-          </span>
-          {model === option.key && <CheckCircle2Icon className="size-[16px] shrink-0 text-[#e8eaed]" />}
-        </button>
-      ))}
     </motion.div>
   );
 }

@@ -1,8 +1,14 @@
 import { PrismaClient } from "@workbench/workbench-db";
+import { assertChromiumAvailable } from "./browser/chromium-health.js";
+import { loadExportWorkerConfig } from "./config.js";
 
 async function main() {
-  if (!process.env.WORKBENCH_DATABASE_URL) throw new Error("Missing WORKBENCH_DATABASE_URL");
-  const db = new PrismaClient();
+  const config = loadExportWorkerConfig();
+  await assertChromiumAvailable({
+    executablePath: config.chromiumExecutablePath,
+    timeoutMs: config.browserTimeoutMs,
+  });
+  const db = new PrismaClient({ datasourceUrl: config.databaseUrl });
   try {
     await db.$queryRaw`SELECT 1`;
   } finally {

@@ -5,11 +5,9 @@ import {
   rotateShareGrantRequestSchema,
   rotateShareGrantResponseSchema,
   shareGrantListSchema,
-  shareGrantSchema,
   type RevokeProjectShareGrantsResponse,
   type RotateShareGrantRequest,
   type RotateShareGrantResponse,
-  type ShareGrant,
   type ShareGrantList,
 } from "@workbench/workbench-contracts";
 import { useMemo } from "react";
@@ -18,7 +16,6 @@ import type { WorkbenchApiClient } from "../../../api/client";
 import { useWorkbenchTransport } from "../../../transport/context";
 import {
   createIdempotencyKey,
-  normalizeEtag,
   normalizeIdempotencyKey,
   parseContract,
   versioned,
@@ -69,31 +66,6 @@ export class WorkbenchSharesApi {
       revokeProjectShareGrantsResponseSchema,
       result.data,
       "revoke Project share grants",
-    );
-  }
-
-  async getShareGrant(shareId: string): Promise<Versioned<ShareGrant>> {
-    const result = await this.api.GET("/shares/{shareId}", {
-      params: { path: { shareId } },
-    });
-    return versioned(shareGrantSchema, result.data, result.response, "get share grant");
-  }
-
-  async revokeShareGrant(
-    shareId: string,
-    ifMatch: string,
-  ): Promise<Versioned<ShareGrant>> {
-    const result = await this.api.POST("/shares/{shareId}/revoke", {
-      params: {
-        path: { shareId },
-        header: { "If-Match": normalizeEtag(ifMatch) },
-      },
-    });
-    return versioned(
-      shareGrantSchema,
-      result.data,
-      result.response,
-      "revoke share grant",
     );
   }
 }

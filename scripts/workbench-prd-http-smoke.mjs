@@ -10,7 +10,7 @@ import {
   canonicalJson,
   prdChannelKinds,
   prdSafetyBaselineItems,
-  prdTableOfContentsEntriesFor,
+  prdTableOfContentsEntriesForV3,
   runEventSchema,
 } from "@workbench/workbench-contracts";
 
@@ -306,10 +306,10 @@ export async function executePrdHttpSmoke({
     if (
       artifact?.currentVersion?.status !== "ready"
       || artifact?.currentVersion?.kind !== "prd"
-      || artifact?.currentVersion?.schemaVersion !== 2
+      || artifact?.currentVersion?.schemaVersion !== 3
       || artifact?.currentVersion?.createdByRunId !== runId
     ) {
-      throw smokeError("PRD_ARTIFACT_NOT_READY_V2", "Current PRD ArtifactVersion is not the ready v2 output of the smoke Run");
+      throw smokeError("PRD_ARTIFACT_NOT_READY", "Current PRD ArtifactVersion is not the ready current output of the smoke Run");
     }
     evidence.artifactId = artifactId;
     evidence.artifactVersionId = artifactVersionId;
@@ -394,10 +394,10 @@ export async function executePrdHttpSmoke({
     if (
       version.contentMode !== "inline"
       || version.kind !== "prd"
-      || version.schemaVersion !== 2
-      || version.content.protocol !== "workbench.prd.v2"
+      || version.schemaVersion !== 3
+      || version.content.protocol !== "workbench.prd.v3"
     ) {
-      throw smokeError("PRD_V2_PROTOCOL_REQUIRED", "Ready ArtifactVersion is not inline workbench.prd.v2 with schemaVersion 2");
+      throw smokeError("PRD_PROTOCOL_REQUIRED", "Ready ArtifactVersion is not inline workbench.prd.v3 with schemaVersion 3");
     }
     if (
       version.artifactId !== artifactId
@@ -421,8 +421,8 @@ export async function executePrdHttpSmoke({
         "Ready PRD ArtifactVersion checksum does not match its canonical content",
       );
     }
-    const structure = assertPrdV2Structure(version.content);
-    pass(evidence, now, "prd-v2-contract-verified", structure);
+    const structure = assertPrdStructure(version.content);
+    pass(evidence, now, "prd-contract-verified", structure);
     const semantics = assertPrdSmokeBusinessSemantics(version.content);
     pass(evidence, now, "prd-business-semantics-verified", semantics);
 
@@ -612,23 +612,24 @@ function assertOnlyPrdRequested(run) {
   }
 }
 
-export function assertPrdV2Structure(document) {
-  if (!document || document.protocol !== "workbench.prd.v2") {
-    throw smokeError("PRD_V2_PROTOCOL_REQUIRED", "Document protocol is not workbench.prd.v2");
+export function assertPrdStructure(document) {
+  if (!document || document.protocol !== "workbench.prd.v3") {
+    throw smokeError("PRD_PROTOCOL_REQUIRED", "Document protocol is not workbench.prd.v3");
   }
   if (document.revision?.status !== "draft") {
     throw smokeError("PRD_REVISION_INVALID", "Production smoke PRD revision must remain a draft");
   }
-  const additionalSections = document.sections?.businessRequirements?.additionalSections;
-  const expectedTableOfContents = prdTableOfContentsEntriesFor(
-    Array.isArray(additionalSections) ? additionalSections.map((section) => section?.title) : [],
+  const functionSections = document.sections?.businessRequirements?.functionSections;
+  const expectedTableOfContents = prdTableOfContentsEntriesForV3(
+    Array.isArray(functionSections) ? functionSections.map((section) => section?.title) : [],
   );
   if (
-    !Array.isArray(additionalSections)
+    !Array.isArray(functionSections)
+    || functionSections.length === 0
     || document.tableOfContents?.entries?.length !== expectedTableOfContents.length
     || JSON.stringify(document.tableOfContents.entries) !== JSON.stringify(expectedTableOfContents)
   ) {
-    throw smokeError("PRD_TABLE_OF_CONTENTS_INVALID", "PRD v2 table of contents does not match its fixed and optional business sections");
+    throw smokeError("PRD_TABLE_OF_CONTENTS_INVALID", "PRD v3 table of contents does not match its fixed and functional sections");
   }
   const channels = document.sections?.introduction?.usageScenarios?.channelTable?.rows;
   if (
@@ -636,18 +637,15 @@ export function assertPrdV2Structure(document) {
     || channels.length !== 3
     || channels.some((row, index) => row.sequence !== index + 1 || row.channel !== prdChannelKinds[index])
   ) {
-    throw smokeError("PRD_CHANNEL_TABLE_INVALID", "PRD v2 does not contain the three canonical channels in order");
+    throw smokeError("PRD_CHANNEL_TABLE_INVALID", "PRD v3 does not contain the three canonical channels in order");
   }
-  const diagrams = document.sections?.businessRequirements?.flowAndPages?.diagrams;
-  if (
-    !Array.isArray(diagrams)
-    || diagrams.length !== 2
-    || diagrams[0]?.kind !== "productFlow"
-    || diagrams[0]?.title !== "图1 产品流程图"
-    || diagrams[1]?.kind !== "productArchitecture"
-    || diagrams[1]?.title !== "图2 产品架构图"
-  ) {
-    throw smokeError("PRD_DIAGRAMS_INVALID", "PRD v2 does not contain product flow and product architecture diagrams");
+  const diagrams = functionSections.flatMap((section) => section.diagrams ?? []);
+  if (functionSections.some((section) => !Array.isArray(section.diagrams))
+    || diagrams.some((diagram, index) => !["productFlow", "productArchitecture"].includes(diagram.kind)
+      || !diagram.title?.startsWith(`图${index + 1} `)
+      || !Array.isArray(diagram.nodes) || diagram.nodes.length < 2
+      || !Array.isArray(diagram.edges) || diagram.edges.length < 1)) {
+    throw smokeError("PRD_DIAGRAMS_INVALID", "PRD function diagrams must have current kinds, numbering and nonempty graphs");
   }
   const degradation = document.sections?.degradation;
   const degradationText = inlinePlainText(degradation?.content).trim();
@@ -661,7 +659,7 @@ export function assertPrdV2Structure(document) {
     }
   }
   if (typeof degradation?.applicable !== "boolean") {
-    throw smokeError("PRD_DEGRADATION_INVALID", "PRD v2 degradation applicability is missing");
+    throw smokeError("PRD_DEGRADATION_INVALID", "PRD v3 degradation applicability is missing");
   }
   const safetyRows = document.sections?.safetyBaseline?.rows;
   if (
@@ -669,10 +667,10 @@ export function assertPrdV2Structure(document) {
     || safetyRows.length !== 21
     || safetyRows.some((row, index) => row.sequence !== prdSafetyBaselineItems[index]?.sequence)
   ) {
-    throw smokeError("PRD_SAFETY_BASELINE_INVALID", "PRD v2 does not contain all 21 canonical safety rows in order");
+    throw smokeError("PRD_SAFETY_BASELINE_INVALID", "PRD v3 does not contain all 21 canonical safety rows in order");
   }
   if (stringValues(document).some((value) => forbiddenPlaceholders.some((placeholder) => value.includes(placeholder)))) {
-    throw smokeError("PRD_PLACEHOLDER_FORBIDDEN", "PRD v2 contains forbidden placeholder wording");
+    throw smokeError("PRD_PLACEHOLDER_FORBIDDEN", "PRD v3 contains forbidden placeholder wording");
   }
   return {
     channelCount: channels.length,
@@ -681,7 +679,7 @@ export function assertPrdV2Structure(document) {
     protocol: document.protocol,
     revisionStatus: document.revision.status,
     safetyRowCount: safetyRows.length,
-    schemaVersion: 2,
+    schemaVersion: 3,
     tableOfContentsCount: document.tableOfContents.entries.length,
   };
 }
@@ -794,8 +792,7 @@ export function assertPrdSmokeBusinessSemantics(document) {
 
   for (const [label, section] of [
     ["background", introduction?.background],
-    ["core rules", businessRequirements?.coreRules],
-    ["acceptance criteria", businessRequirements?.acceptanceCriteria],
+    ...(businessRequirements?.functionSections ?? []).map((section) => [section.title, section]),
   ]) {
     const sectionText = visibleTextSegments(section).join("\n");
     if (!smokeSectionThemePattern.test(sectionText)) {
@@ -806,7 +803,7 @@ export function assertPrdSmokeBusinessSemantics(document) {
     }
   }
 
-  const diagrams = businessRequirements?.flowAndPages?.diagrams;
+  const diagrams = businessRequirements?.functionSections?.flatMap((section) => section.diagrams ?? []);
   if (
     !Array.isArray(diagrams)
     || diagrams.some((diagram) => !smokeDiagramThemePattern.test(visibleTextSegments(diagram).join("\n")))
@@ -843,11 +840,11 @@ function smokePrompt() {
   return [
     "这是隔离的生产验收 smoke，无需追问。",
     "请仅生成一份完整中文需求说明书，不生成原型、图片、代码或其他产物。",
-    "必须返回结构化 PRD Artifact：kind 必须为 prd，schemaVersion 必须为 2，content.protocol 必须为 workbench.prd.v2；不要返回 document Artifact 或普通字符串摘要。",
+    "必须返回结构化 PRD Artifact：kind 必须为 prd，schemaVersion 必须为 3，content.protocol 必须为 workbench.prd.v3；不要返回 document Artifact 或普通字符串摘要。",
     "主题：电商订单状态通知设置。目标用户是已登录消费者；支持端内通知开关、订单状态分类、发送结果记录、失败重试与权限反馈；本次不投放 WAP/H5 和小程序。",
     "通知开关不设新的默认状态，沿用消费者现有设置；订单状态分类沿用订单中心既有分类，本需求不新增或枚举分类。",
     "通知开关、订单状态分类映射和发送结果状态必须执行完整性和一致性校验。",
-    "请在唯一的端内/WAP-H5/小程序渠道表中将端内渠道 enabled 写为 true，另外两行 enabled 写为 false；2.4 验收表必须逐项覆盖权限反馈、订单状态分类、发送结果记录、失败重试以及完整性和一致性校验，并在正文中保留这些原词。",
+    "请在唯一的端内/WAP-H5/小程序渠道表中将端内渠道 enabled 写为 true，另外两行 enabled 写为 false；功能章节中的验收标准必须逐项覆盖权限反馈、订单状态分类、发送结果记录、失败重试以及完整性和一致性校验，并在正文中保留这些原词。",
     "请基于这些明确前提完成可直接评审和验收的需求说明书。",
   ].join("\n");
 }

@@ -7,7 +7,7 @@ import { Dialog, DialogContent, DialogDescription, DialogTitle } from "../ui/dia
 import { useCreateWorkbenchArtifact } from "../../lib/workbench/features/artifacts";
 import { useWorkbenchProjectSession } from "../../lib/workbench/project-session";
 
-export function sourcePrototypeSample(documentId = "source-prototype-sample"): SourcePrototypeInput {
+function sourcePrototypeSample(documentId = "source-prototype-sample"): SourcePrototypeInput {
   return {
     protocol: "workbench.prototype-source-input.v1", documentId,
     title: "采购申请", revision: 1,

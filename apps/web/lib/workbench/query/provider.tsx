@@ -61,7 +61,7 @@ export function WorkbenchQueryProvider({
 
 const uninitializedCacheNamespace = Symbol("uninitialized-cache-namespace");
 
-export function WorkbenchPrivateQueryCacheBoundary({
+function WorkbenchPrivateQueryCacheBoundary({
   cacheNamespace,
 }: {
   cacheNamespace: string | null;

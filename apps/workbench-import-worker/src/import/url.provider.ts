@@ -26,7 +26,6 @@ export class UrlImportProvider implements ImportProvider {
     const mediaType = response.mediaType ?? "text/html";
     if (!supportedMediaTypes.some((pattern) => pattern.test(mediaType))) throw new TerminalImportError("IMPORT_MEDIA_TYPE_UNSUPPORTED", "Website sources must be text or JSON documents");
     return freezeImport({
-      label: request.label ?? new URL(request.sourceUrl).hostname,
       descriptor: { kind: "url_snapshot", sourceUrl: request.sourceUrl, resolvedUrl: response.url },
       blobs: [{ path: "index.html", mediaType, bytes: response.body }],
     });

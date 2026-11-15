@@ -9,7 +9,8 @@ import {
 } from "../../../packages/workbench-contracts/src/runtime.js";
 import {
   prdSafetyBaselineIntro,
-  prdTableOfContentsEntries,
+  prdTableOfContentsEntriesForV3,
+  type PrdAcceptanceCoverageDiagnostic,
 } from "../../../packages/workbench-contracts/src/prd.js";
 
 const MAX_INPUT_BYTES = 2_000_000;
@@ -21,6 +22,7 @@ type ValidationIssue = {
   message: string;
   expectedType?: string;
   expectedValue?: string;
+  acceptanceCoverage?: PrdAcceptanceCoverageDiagnostic;
 };
 
 async function main() {
@@ -76,12 +78,39 @@ async function main() {
       artifactChecksums,
     });
   }
+  const issues = actionableIssues(parsed.error.issues.map((issue) => normalizeZodIssue(issue)), candidate);
+  let repairHintBytes = 0;
+  const repairHints = issues.flatMap((issue) => {
+    const [root, index, content] = issue.path;
+    const coverage = issue.acceptanceCoverage;
+    if (!coverage || root !== "artifacts" || typeof index !== "number" || content !== "content") return [];
+    return [{
+      artifactIndex: index,
+      candidateChecksum: artifactChecksums[index]!,
+      path: issue.path.slice(2),
+      acceptanceCoverage: {
+        ...coverage,
+        rows: coverage.rows.map((row) => ({
+          ...row, path: `/content${row.path}`,
+          conditionPaths: row.conditionPaths.map((path) => `/content${path}`),
+          resultPaths: row.resultPaths.map((path) => `/content${path}`),
+        })),
+      },
+    }];
+  }).filter((hint, index, all) => all.findIndex((other) => other.artifactIndex === hint.artifactIndex) === index)
+    .filter((hint) => {
+      repairHintBytes += Buffer.byteLength(JSON.stringify(hint), "utf8");
+      return repairHintBytes <= 24_000;
+    });
   return writeResult({
     protocol: "workbench.runtime.validation.v1",
     ok: false,
     candidateChecksum,
     artifactChecksums,
-    issues: actionableIssues(parsed.error.issues.map((issue) => normalizeZodIssue(issue)), candidate),
+    // Coverage metadata belongs in repair guidance, never in controlled
+    // artifact issues (whose strict protocol remains unchanged).
+    issues: issues.map(({ acceptanceCoverage: _coverage, ...issue }) => issue),
+    ...(repairHints.length ? { repairHints } : {}),
   });
 }
 
@@ -182,6 +211,11 @@ function validationIssue(rawIssue: Record<string, unknown>, candidate: unknown):
   }
   const fixedValue = prdFixedValue(issue, candidate);
   if (fixedValue !== undefined) issue.expectedValue = fixedValue;
+  if (rawIssue.code === "custom" && isRecord(rawIssue.params) && isRecord(rawIssue.params.acceptanceCoverage)) {
+    // This parameter is produced by the SSOT refinement, never by candidate
+    // fields. The normalized union traversal preserves it at the exact path.
+    issue.acceptanceCoverage = rawIssue.params.acceptanceCoverage as PrdAcceptanceCoverageDiagnostic;
+  }
   return issue;
 }
 
@@ -189,7 +223,7 @@ function prdFixedValue(issue: ValidationIssue, candidate: unknown): string | und
   const [root, index, ...path] = issue.path;
   if (root !== "artifacts" || typeof index !== "number" || !Number.isInteger(index)) return undefined;
   const draft = candidateArtifacts(candidate)[index];
-  if (!isRecord(draft) || draft.kind !== "prd" || ![2, 3].includes(Number(draft.schemaVersion)) || !isRecord(draft.content)) return undefined;
+  if (!isRecord(draft) || draft.kind !== "prd" || draft.schemaVersion !== 3 || !isRecord(draft.content)) return undefined;
   if (issue.code === "invalid_literal" && JSON.stringify(path) === '["content","sections","safetyBaseline","intro"]') {
     return prdSafetyBaselineIntro;
   }
@@ -198,16 +232,14 @@ function prdFixedValue(issue: ValidationIssue, candidate: unknown): string | und
   const entryIndex = path[3] as number;
   const sections = draft.content.sections;
   const business = isRecord(sections) ? sections.businessRequirements : undefined;
-  const isV3 = draft.schemaVersion === 3;
-  const additional = isRecord(business) ? (isV3 ? business.functionSections : business.additionalSections) : undefined;
-  if (additional !== undefined && !Array.isArray(additional)) return undefined;
-  const additionalCount = Array.isArray(additional) ? additional.length : 0;
-  // Additional headings are authored content, never fixed replacement values.
-  const fixedPrefixLength = isV3 ? 6 : prdTableOfContentsEntries.length - 2;
-  const canonicalIndex = entryIndex < fixedPrefixLength ? entryIndex : entryIndex - additionalCount + (isV3 ? 3 : 0);
-  if (entryIndex >= fixedPrefixLength && entryIndex < fixedPrefixLength + additionalCount) return undefined;
-  if (canonicalIndex < 0 || canonicalIndex >= prdTableOfContentsEntries.length) return undefined;
-  return prdTableOfContentsEntries[canonicalIndex];
+  const functionSections = isRecord(business) ? business.functionSections : undefined;
+  if (!Array.isArray(functionSections)) return undefined;
+  // Function headings are authored content, never fixed replacement values.
+  const fixedPrefixLength = 6;
+  if (entryIndex >= fixedPrefixLength && entryIndex < fixedPrefixLength + functionSections.length) return undefined;
+  const fixedEntries = prdTableOfContentsEntriesForV3([]);
+  const canonicalIndex = entryIndex < fixedPrefixLength ? entryIndex : entryIndex - functionSections.length;
+  return fixedEntries[canonicalIndex];
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -232,6 +264,7 @@ function writeResult(result: {
   issues: ValidationIssue[];
   candidateChecksum: string | null;
   artifactChecksums: string[];
+  repairHints?: unknown[];
 }) {
   process.stdout.write(`${JSON.stringify(result)}\n`);
 }

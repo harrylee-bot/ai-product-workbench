@@ -1,15 +1,13 @@
 import {
-  prdDocumentV2Schema,
   prdDocumentV3Schema,
   prdTableOfContentsEntriesForV3,
   prdSafetyBaselineItems,
-  prdTableOfContentsEntries,
 } from "./prd.js";
 
 const text = (value: string) => [{ type: "text" as const, text: value, marks: [] }];
 
-export const prdDocumentV2Example = prdDocumentV2Schema.parse({
-  protocol: "workbench.prd.v2",
+export const prdDocumentV3Example = prdDocumentV3Schema.parse({
+  protocol: "workbench.prd.v3",
   documentId: "prd-example",
   title: "示例工单需求说明书",
   revision: {
@@ -33,7 +31,7 @@ export const prdDocumentV2Example = prdDocumentV2Schema.parse({
   }],
   tableOfContents: {
     title: "目 录",
-    entries: [...prdTableOfContentsEntries],
+    entries: prdTableOfContentsEntriesForV3(["2.2 任务提交与业务校验", "2.3 任务状态与失败恢复", "2.4 任务处理验收标准"]),
   },
   assumptions: [{
     id: "assumption-permission",
@@ -99,8 +97,10 @@ export const prdDocumentV2Example = prdDocumentV2Schema.parse({
           ],
         }],
       },
-      coreRules: {
-        title: "2.2 核心业务规则/功能说明",
+      functionSections: [{
+        id: "section-task-submit",
+        title: "2.2 任务提交与业务校验",
+        diagrams: [],
         blocks: [
           {
             id: "goal-main",
@@ -142,9 +142,9 @@ export const prdDocumentV2Example = prdDocumentV2Schema.parse({
             }],
           },
         ],
-      },
-      flowAndPages: {
-        title: "2.3 核心流程/状态/页面要求",
+      }, {
+        id: "section-task-state",
+        title: "2.3 任务状态与失败恢复",
         blocks: [
           {
             id: "flow-main",
@@ -212,9 +212,10 @@ export const prdDocumentV2Example = prdDocumentV2Schema.parse({
             ],
           },
         ],
-      },
-      acceptanceCriteria: {
-        title: "2.4 验收标准",
+      }, {
+        id: "section-task-acceptance",
+        title: "2.4 任务处理验收标准",
+        diagrams: [],
         blocks: [
           {
             id: "criterion-main",
@@ -292,8 +293,7 @@ export const prdDocumentV2Example = prdDocumentV2Schema.parse({
             ],
           },
         ],
-      },
-      additionalSections: [],
+      }],
     },
     degradation: {
       title: "3 业务降级方案（必填）",
@@ -312,26 +312,6 @@ export const prdDocumentV2Example = prdDocumentV2Schema.parse({
               ? "提交信息与任务状态需要完整性和一致性校验。"
               : null,
       })),
-    },
-  },
-});
-
-
-// Versioned test fixture only; never an authoring source or a protocol adapter.
-const v3FunctionSections = [
-  { id: "section-task-submit", title: "2.2 任务提交与业务校验", blocks: structuredClone(prdDocumentV2Example.sections.businessRequirements.coreRules.blocks), diagrams: [] },
-  { id: "section-task-state", title: "2.3 任务状态与失败恢复", blocks: structuredClone(prdDocumentV2Example.sections.businessRequirements.flowAndPages.blocks), diagrams: structuredClone(prdDocumentV2Example.sections.businessRequirements.flowAndPages.diagrams) },
-  { id: "section-task-acceptance", title: "2.4 任务处理验收标准", blocks: structuredClone(prdDocumentV2Example.sections.businessRequirements.acceptanceCriteria.blocks), diagrams: [] },
-];
-export const prdDocumentV3Example = prdDocumentV3Schema.parse({
-  ...structuredClone(prdDocumentV2Example),
-  protocol: "workbench.prd.v3",
-  tableOfContents: { title: "目 录", entries: prdTableOfContentsEntriesForV3(v3FunctionSections.map((section) => section.title)) },
-  sections: {
-    ...structuredClone(prdDocumentV2Example.sections),
-    businessRequirements: {
-      title: "2 业务需求", summary: structuredClone(prdDocumentV2Example.sections.businessRequirements.summary),
-      pageLinks: structuredClone(prdDocumentV2Example.sections.businessRequirements.pageLinks), functionSections: v3FunctionSections,
     },
   },
 });

@@ -76,6 +76,8 @@ describe("Product Workbench telemetry", () => {
     await lifecycle.forceFlush();
 
     const exported = metricExporter.getMetrics();
+    expect(exported[0]?.resource.attributes["service.version"]).toBe("1.0.0");
+    expect(exported[0]?.scopeMetrics[0]?.scope.version).toBe("1.0.0");
     const metricData = exported.flatMap((resource) => resource.scopeMetrics)
       .flatMap((scope) => scope.metrics);
     expect(metricData.map((metric) => metric.descriptor.name)).toEqual(expect.arrayContaining([

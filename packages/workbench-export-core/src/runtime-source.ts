@@ -171,8 +171,11 @@ export const browserRuntimeSource = String.raw`(() => {
         button.setAttribute("aria-selected", String(button.dataset.wbScreenTarget === screenId));
       }
       activeScreenId = screenId;
-      if (next.initialStateId) await applyState(next.initialStateId);
-      else clearState(screenId);
+      host.dispatchEvent(new CustomEvent("workbench:prototype-page", { bubbles: true, detail: { pageId: screenId } }));
+      if (!activeStates.has(screenId)) {
+        if (next.initialStateId) await applyState(next.initialStateId);
+        else clearState(screenId);
+      } else applyBindings(screenId);
       await runMotions("enter", { screenId });
     };
 
@@ -339,6 +342,9 @@ export const browserRuntimeSource = String.raw`(() => {
         });
       }
     }
+    document.addEventListener("workbench:prototype-select-page", (event) => {
+      if (event.detail && event.detail.pageId !== activeScreenId && screens.has(event.detail.pageId)) void showScreen(event.detail.pageId);
+    });
     void showScreen(model.initialScreenId);
 
     function hasStateValueBinding(nodeId) {

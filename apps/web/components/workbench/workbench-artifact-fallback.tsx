@@ -3,22 +3,6 @@ import { cn } from "@/lib/utils";
 export type WorkbenchArtifactFallbackPhase = "generating" | "refining" | "complete";
 export type WorkbenchArtifactFallbackVariant = "document" | "prototype";
 
-export function workbenchPendingArtifactTitle(
-  prompt: string,
-  variant: WorkbenchArtifactFallbackVariant,
-  index = 0,
-) {
-  const normalizedPrompt = prompt.replace(/\s+/g, " ").trim();
-  const codePoints = Array.from(normalizedPrompt);
-  const subject = codePoints.length > 36
-    ? `${codePoints.slice(0, 36).join("")}...`
-    : normalizedPrompt || "当前请求";
-
-  return variant === "document"
-    ? `${subject} · 需求文档`
-    : `${subject} · 界面 ${index + 1}`;
-}
-
 export function WorkbenchDocumentLoading({
   mode = "blocking",
   phase = "generating",

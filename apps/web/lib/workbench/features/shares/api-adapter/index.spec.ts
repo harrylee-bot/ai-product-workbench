@@ -18,9 +18,8 @@ const share = {
 };
 
 describe("Workbench Shares API adapter", () => {
-  it("validates one-time token responses and uses revision ETags for revocation", async () => {
+  it("validates one-time token responses and project revocation", async () => {
     const token = `wbs_${"A".repeat(43)}`;
-    const revoked = { ...share, status: "revoked", revision: 2, revokedAt: timestamp };
     const adapter = createAdapter(async (request) => {
       const url = new URL(request.url);
       if (url.pathname.endsWith("/projects/project-1/shares") && request.method === "GET") {
@@ -36,10 +35,6 @@ describe("Workbench Shares API adapter", () => {
       if (url.pathname.endsWith("/projects/project-1/shares/revoke-all")) {
         return Response.json({ projectId: "project-1", activeGrantCount: 0 });
       }
-      if (url.pathname.endsWith("/revoke")) {
-        expect(request.headers.get("if-match")).toBe('"1"');
-        return Response.json(revoked, { headers: { ETag: '"2"' } });
-      }
       return Response.json(share, { headers: { ETag: '"1"' } });
     });
 
@@ -53,12 +48,8 @@ describe("Workbench Shares API adapter", () => {
       value: { share, token, revokedGrantCount: 1 },
       etag: '"1"',
     });
-    await expect(adapter.getShareGrant("share-1"))
-      .resolves.toEqual({ value: share, etag: '"1"' });
     await expect(adapter.revokeProjectShareGrants("project-1"))
       .resolves.toEqual({ projectId: "project-1", activeGrantCount: 0 });
-    await expect(adapter.revokeShareGrant("share-1", ' "1" '))
-      .resolves.toEqual({ value: revoked, etag: '"2"' });
   });
 });
 

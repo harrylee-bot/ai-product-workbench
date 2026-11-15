@@ -477,7 +477,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Invitation accepted atomically into its Workspace and Project */
+        /** Invitation accepted atomically into its Project without granting Workspace membership */
         post: operations["acceptProjectInvitation"];
         delete?: never;
         options?: never;
@@ -711,6 +711,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/artifacts/{artifactId}/versions/{artifactVersionId}/preview-token": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Short-lived isolated preview for an authorized frozen source prototype */
+        post: operations["createSourcePrototypePreviewToken"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/public/shares/{shareToken}/artifacts/{artifactId}/versions/{artifactVersionId}/preview-token": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Short-lived share-bound isolated preview, rechecked for revocation on every access */
+        post: operations["createPublicSourcePrototypePreviewToken"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/public/shares/{shareToken}/artifacts/{artifactId}/versions/{artifactVersionId}": {
         parameters: {
             query?: never;
@@ -756,23 +790,6 @@ export interface paths {
         get: operations["getPublicSharedArtifactVersionAssetContent"];
         put?: never;
         post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/public/shares/{shareToken}/remixes": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** New isolated Project remixed from the immutable shared release */
-        post: operations["createProjectRemix"];
         delete?: never;
         options?: never;
         head?: never;
@@ -927,92 +944,6 @@ export interface paths {
         get: operations["getExportContent"];
         put?: never;
         post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/exports/{exportId}/deliveries": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** External delivery audit records for one immutable Export output */
-        get: operations["listExternalExportDeliveries"];
-        put?: never;
-        /** External delivery prepared and awaiting explicit user confirmation */
-        post: operations["createExternalExportDelivery"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/export-deliveries/{deliveryId}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** External delivery audit snapshot */
-        get: operations["getExternalExportDelivery"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/export-deliveries/{deliveryId}/confirm": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Explicitly confirmed external delivery queued */
-        post: operations["confirmExternalExportDelivery"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/export-deliveries/{deliveryId}/retry": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Failed external delivery explicitly retried */
-        post: operations["retryExternalExportDelivery"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/export-deliveries/{deliveryId}/cancel": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** External delivery cancellation accepted or already terminal */
-        post: operations["cancelExternalExportDelivery"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1658,6 +1589,401 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/projects/{projectId}/prototype-v2/plans": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Read persisted prototype history */
+        get: operations["listPrototypePlans"];
+        put?: never;
+        /** Create an idempotent visual prototype plan */
+        post: operations["createPrototypePlan"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/projects/{projectId}/prototype-v2/revisions/{revisionId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Read persisted prototype history */
+        get: operations["getPrototypeRevision"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/projects/{projectId}/prototype-v2/revisions/{revisionId}/feedback": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Read persisted prototype history */
+        get: operations["listPrototypeFeedback"];
+        put?: never;
+        /** Create an anchored prototype feedback item */
+        post: operations["createPrototypeFeedback"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/projects/{projectId}/prototype-v2/shares": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Read persisted prototype history */
+        get: operations["listPrototypeShares"];
+        put?: never;
+        /** Create an expiring anonymous prototype share */
+        post: operations["createPrototypeShare"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/projects/{projectId}/prototype-v2/exports": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Read persisted prototype history */
+        get: operations["listPrototypeExports"];
+        put?: never;
+        /** Queue a real HTML or React prototype export */
+        post: operations["createPrototypeExport"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/projects/{projectId}/prototype-v2/revisions/{revisionId}/diff": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Compare semantic page changes against the pinned source revision */
+        get: operations["getPrototypeRevisionDiff"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/projects/{projectId}/prototype-v2/plans/{planId}/retry": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Retry terminal generation with the same pinned runtime context */
+        post: operations["retryPrototypePlan"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/projects/{projectId}/prototype-v2/revisions/{revisionId}/revise": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Generate a new immutable version from anchored feedback */
+        post: operations["revisePrototype"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/projects/{projectId}/prototype-v2/plans/{planId}/approve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Approve a plan and enqueue the Temporal generation workflow */
+        post: operations["approvePrototypePlan"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/projects/{projectId}/prototype-v2/plans/{planId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get a visual prototype plan and current workflow status */
+        get: operations["getPrototypePlan"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/projects/{projectId}/prototype-v2/plans/{planId}/revisions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List visual prototype revision summaries without page content or preview HTML */
+        get: operations["listPrototypeRevisions"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/projects/{projectId}/prototype-v2/plans/{planId}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Cancel a running visual prototype workflow */
+        post: operations["cancelPrototypePlan"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/projects/{projectId}/prototype-v2/revisions/{revisionId}/confirm": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Confirm a ready visual prototype revision with CAS */
+        post: operations["confirmPrototypeRevision"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/projects/{projectId}/prototype-v2/revisions/{revisionId}/reject": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Reject a ready visual prototype revision with CAS */
+        post: operations["rejectPrototypeRevision"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/projects/{projectId}/prototype-v2/revisions/{revisionId}/preview-token": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Create a short-lived preview capability bound to a project, revision and document checksum */
+        post: operations["createPrototypePreviewToken"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/projects/{projectId}/prototype-v2/feedback/{feedbackId}/resolve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Resolve a feedback item with CAS */
+        post: operations["resolvePrototypeFeedback"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/public/prototype-v2/shares/{token}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Resolve an active anonymous visual prototype share */
+        get: operations["getPublicPrototypeShare"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/public/prototype-v2/previews/{token}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Serve a short-lived isolated prototype preview document */
+        get: operations["getPrototypePreviewDocument"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/projects/{projectId}/prototype-v2/shares/{shareId}/revoke": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Revoke a prototype share with CAS */
+        post: operations["revokePrototypeShare"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/projects/{projectId}/prototype-v2/exports/{exportId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get a prototype export and immutable artifact identity */
+        get: operations["getPrototypeExport"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/projects/{projectId}/prototype-v2/exports/{exportId}/download": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Stream the immutable completed prototype export artifact */
+        get: operations["downloadPrototypeExport"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/projects/{projectId}/prototype-v2/exports/{exportId}/retry": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Retry a failed prototype export */
+        post: operations["retryPrototypeExport"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/projects/{projectId}/prototype-v2/exports/{exportId}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Cancel a queued or building prototype export with CAS */
+        post: operations["cancelPrototypeExport"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -1849,10 +2175,100 @@ export interface components {
                 fileName: string | null;
             };
         };
+        CreatedSourcePrototypeArtifact: {
+            id: string;
+            projectId: string;
+            /** @enum {string} */
+            kind: "prototype";
+            title: string;
+            revision: number;
+            currentVersion: {
+                artifactId: string;
+                artifactVersionId: string;
+                version: number;
+                /** @enum {string} */
+                kind: "prototype";
+                /** @enum {number} */
+                schemaVersion: 2;
+                /** @enum {string} */
+                status: "ready";
+                checksum: string;
+                createdByRunId: string | null;
+                /** Format: date-time */
+                createdAt: string;
+            };
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            updatedAt: string;
+        };
+        SourcePrototypeBuild: {
+            /** @enum {string} */
+            renderer: "workbench.react-source.v1";
+            /** @enum {string} */
+            reactVersion: "19.2.3";
+            /** @enum {string} */
+            bundlerVersion: "0.28.1";
+            sourceChecksum: string;
+            /** @description Compiled source prototype HTML remains within the bounded UTF-8 preview size. */
+            html: string;
+            htmlSha256: string;
+        };
+        /** @description Source prototype paths are bounded relative paths with an allowed source extension and no traversal segments. */
+        SourcePrototypePath: string;
+        SourcePrototypeFile: {
+            path: components["schemas"]["SourcePrototypePath"];
+            /** @description Source prototype files remain within the per-file UTF-8 byte limit. */
+            content: string;
+        };
+        SourcePrototypePage: {
+            id: string;
+            name: string;
+            route: string;
+        };
+        /** @description Persisted source prototype documents retain the same bounded project integrity as their input. */
+        SourcePrototypeDocument: {
+            /** @enum {string} */
+            protocol: "workbench.prototype-source.v1";
+            documentId: string;
+            title: string;
+            revision: number;
+            summary: string;
+            entryFile: components["schemas"]["SourcePrototypePath"];
+            files: components["schemas"]["SourcePrototypeFile"][];
+            pages: components["schemas"]["SourcePrototypePage"][];
+            /** @default [] */
+            assets: string[];
+            build: components["schemas"]["SourcePrototypeBuild"];
+        };
+        CreatedSourcePrototypeArtifactVersionDetail: {
+            artifactId: string;
+            artifactVersionId: string;
+            version: number;
+            /** @enum {string} */
+            status: "ready";
+            checksum: string;
+            citations: components["schemas"]["ArtifactCitation"][];
+            createdByRunId: string | null;
+            knowledgeReleaseId: string | null;
+            sourcePrdVersionId?: string | null;
+            /** Format: date-time */
+            createdAt: string;
+            /** @enum {string} */
+            contentMode: "inline";
+            /** @enum {string} */
+            kind: "prototype";
+            /** @enum {number} */
+            schemaVersion: 2;
+            content: components["schemas"]["SourcePrototypeDocument"];
+        };
         /** @description The created image Artifact current pointer and returned ready blob-backed ArtifactVersion are the same immutable version; enforced by the runtime Zod contract. */
         ArtifactCreation: {
             artifact: components["schemas"]["CreatedImageArtifact"];
             artifactVersion: components["schemas"]["CreatedImageArtifactVersionDetail"];
+        } | {
+            artifact: components["schemas"]["CreatedSourcePrototypeArtifact"];
+            artifactVersion: components["schemas"]["CreatedSourcePrototypeArtifactVersionDetail"];
         };
         PrototypePatchChecksum: string;
         PrototypePatchRevision: number;
@@ -1934,7 +2350,7 @@ export interface components {
             items: components["schemas"]["Artifact"][];
             nextCursor: string | null;
         };
-        /** @description PRD and prototype blob details require schemaVersion 1; enforced by the runtime Zod contract. */
+        /** @description PRD blob details require schemaVersion 3 and prototype blob details require schemaVersion 1; enforced by the runtime Zod contract. */
         ArtifactVersionBlobDetail: {
             artifactId: string;
             artifactVersionId: string;
@@ -1976,10 +2392,7 @@ export interface components {
             createdAt: string;
             /** @enum {string} */
             contentMode: "inline";
-            /**
-             * @description discriminator enum property added by openapi-typescript
-             * @enum {string}
-             */
+            /** @enum {string} */
             kind: "code";
             schemaVersion: number;
             content: components["schemas"]["JsonValue"];
@@ -1998,10 +2411,7 @@ export interface components {
             createdAt: string;
             /** @enum {string} */
             contentMode: "inline";
-            /**
-             * @description discriminator enum property added by openapi-typescript
-             * @enum {string}
-             */
+            /** @enum {string} */
             kind: "data";
             schemaVersion: number;
             content: components["schemas"]["JsonValue"];
@@ -2126,10 +2536,7 @@ export interface components {
             createdAt: string;
             /** @enum {string} */
             contentMode: "inline";
-            /**
-             * @description discriminator enum property added by openapi-typescript
-             * @enum {string}
-             */
+            /** @enum {string} */
             kind: "design_system";
             /** @enum {number} */
             schemaVersion: 1;
@@ -2149,10 +2556,7 @@ export interface components {
             createdAt: string;
             /** @enum {string} */
             contentMode: "inline";
-            /**
-             * @description discriminator enum property added by openapi-typescript
-             * @enum {string}
-             */
+            /** @enum {string} */
             kind: "document";
             schemaVersion: number;
             content: components["schemas"]["JsonValue"];
@@ -2171,10 +2575,7 @@ export interface components {
             createdAt: string;
             /** @enum {string} */
             contentMode: "inline";
-            /**
-             * @description discriminator enum property added by openapi-typescript
-             * @enum {string}
-             */
+            /** @enum {string} */
             kind: "image";
             schemaVersion: number;
             content: components["schemas"]["JsonValue"];
@@ -2189,15 +2590,6 @@ export interface components {
             owner: string | null;
             introducedInRevision: number;
             citationIds: string[];
-        };
-        PrdRevision: {
-            number: number;
-            /** @enum {string} */
-            status: "draft" | "inReview" | "approved";
-            summary: string;
-            /** Format: date-time */
-            changedAt: string;
-            changedById: string | null;
         };
         PrdCitationInline: {
             /**
@@ -2402,31 +2794,132 @@ export interface components {
             rows: components["schemas"]["PrdTableRow"][];
         };
         PrdBlock: components["schemas"]["PrdParagraphBlock"] | components["schemas"]["PrdHeadingBlock"] | components["schemas"]["PrdBulletListBlock"] | components["schemas"]["PrdOrderedListBlock"] | components["schemas"]["PrdTableBlock"] | components["schemas"]["PrdCalloutBlock"] | components["schemas"]["PrdGoalBlock"] | components["schemas"]["PrdPersonaBlock"] | components["schemas"]["PrdRequirementBlock"] | components["schemas"]["PrdAcceptanceCriterionBlock"] | components["schemas"]["PrdFlowBlock"] | components["schemas"]["PrdRiskBlock"];
-        PrdSection: {
+        PrdChannelRow: {
+            sequence: number;
+            /** @enum {string} */
+            channel: "inApp" | "wapH5" | "miniProgram";
+            enabled: boolean;
+        };
+        PrdRevision: {
+            number: number;
+            /** @enum {string} */
+            status: "draft" | "inReview" | "approved";
+            summary: string;
+            /** Format: date-time */
+            changedAt: string;
+            changedById: string | null;
+        };
+        PrdSafetyBaselineRow: {
+            sequence: number;
+            /** @enum {string} */
+            applicability: "是" | "否" | "不涉及";
+            remarks: string | null;
+        };
+        PrdDiagramEdge: {
+            id: string;
+            from: string;
+            to: string;
+            label: string | null;
+        };
+        PrdDiagramNode: {
+            id: string;
+            label: string;
+            group: string | null;
+        };
+        PrdTemplateDiagram: {
+            id: string;
+            /** @enum {string} */
+            kind: "productFlow" | "productArchitecture";
+            title: string;
+            description: string;
+            nodes: components["schemas"]["PrdDiagramNode"][];
+            edges: components["schemas"]["PrdDiagramEdge"][];
+        };
+        PrdV3FunctionSection: {
             title: string;
             blocks: components["schemas"]["PrdBlock"][];
+            id: string;
+            /** @default [] */
+            diagrams: components["schemas"]["PrdTemplateDiagram"][];
         };
-        PrdSections: {
-            executiveSummary: components["schemas"]["PrdSection"];
-            problem: components["schemas"]["PrdSection"];
-            goals: components["schemas"]["PrdSection"];
-            targetUsers: components["schemas"]["PrdSection"];
-            scope: components["schemas"]["PrdSection"];
-            requirements: components["schemas"]["PrdSection"];
-            userFlows: components["schemas"]["PrdSection"];
-            acceptanceCriteria: components["schemas"]["PrdSection"];
-            risksAndDependencies: components["schemas"]["PrdSection"];
-        };
-        /** @description Legacy PRD section whitelists and all IR references form a valid semantic graph; enforced by the runtime Zod contract. */
-        PrdDocumentV1: {
+        PrdVersionHistoryEntry: {
             /** @enum {string} */
-            protocol: "workbench.prd.v1";
+            status: "讨论稿" | "评审中" | "已定稿";
+            author: string;
+            participants: string[];
+            startDate: string;
+            endDate: string;
+            notes: string;
+        };
+        /** @description PRD v3 uses contiguous function-specific sections, optional typed diagrams, embedded or later acceptance, and the same complete safety, table, citation and semantic-reference validation. */
+        PrdDocument: {
+            /** @enum {string} */
+            protocol: "workbench.prd.v3";
             documentId: string;
             title: string;
             revision: components["schemas"]["PrdRevision"];
+            cover: {
+                workOrderName: string;
+                title: string;
+            };
+            versionHistory: components["schemas"]["PrdVersionHistoryEntry"][];
+            tableOfContents: {
+                /** @enum {string} */
+                title: "目 录";
+                entries: string[];
+            };
             assumptions: components["schemas"]["PrdAssumption"][];
             citations: components["schemas"]["ArtifactCitation"][];
-            sections: components["schemas"]["PrdSections"];
+            sections: {
+                introduction: {
+                    /** @enum {string} */
+                    title: "1 引言";
+                    background: {
+                        /** @enum {string} */
+                        title: "1.1项目背景";
+                        blocks: components["schemas"]["PrdBlock"][];
+                    };
+                    scope: {
+                        /** @enum {string} */
+                        title: "1.2文档范围";
+                        blocks: components["schemas"]["PrdBlock"][];
+                    };
+                    usageScenarios: {
+                        /** @enum {string} */
+                        title: "1.3使用场景（必填）";
+                        blocks: components["schemas"]["PrdBlock"][];
+                        channelTable: {
+                            /** @enum {string} */
+                            title: "活动投放渠道";
+                            rows: components["schemas"]["PrdChannelRow"][];
+                        };
+                    };
+                };
+                businessRequirements: {
+                    /** @enum {string} */
+                    title: "2 业务需求";
+                    summary: components["schemas"]["PrdInlineContent"];
+                    pageLinks: {
+                        /** @enum {string} */
+                        title: "2.1页面链接";
+                        blocks: components["schemas"]["PrdBlock"][];
+                    };
+                    functionSections: components["schemas"]["PrdV3FunctionSection"][];
+                };
+                degradation: {
+                    /** @enum {string} */
+                    title: "3 业务降级方案（必填）";
+                    applicable: boolean;
+                    content: components["schemas"]["PrdInlineContent"];
+                };
+                safetyBaseline: {
+                    /** @enum {string} */
+                    title: "4 需求安全基线要求（必填）";
+                    /** @enum {string} */
+                    intro: "该部分内容为必填项，请按照如下表格中的内容先进行自查，并按照如下要求完善需求文档：\n1、如选择“是”，代表本项自查内容已符合安全要求，需要提供截图违依据\n2、如选择“否”，代表本项自查内容暂时不符合安全要求，请在需求文档中增加本部分内容安全改造需求，并发送网信安需求评审邮件，附上本需求文档用于安全评审；\n3、如选择“不涉及”，代表本项目各项需求安全基线均不涉及，则无需召开网信安需求评审会。\n建议：该表格请业务人员和开发人员共同参与自查并填写。";
+                    rows: components["schemas"]["PrdSafetyBaselineRow"][];
+                };
+            };
         };
         ArtifactVersionInlinePrdDetail: {
             artifactId: string;
@@ -2442,14 +2935,11 @@ export interface components {
             createdAt: string;
             /** @enum {string} */
             contentMode: "inline";
-            /**
-             * @description discriminator enum property added by openapi-typescript
-             * @enum {string}
-             */
+            /** @enum {string} */
             kind: "prd";
             /** @enum {number} */
-            schemaVersion: 1;
-            content: components["schemas"]["PrdDocumentV1"];
+            schemaVersion: 3;
+            content: components["schemas"]["PrdDocument"];
         };
         PrototypeNavigateAction: {
             id: string;
@@ -2783,7 +3273,37 @@ export interface components {
             operand: components["schemas"]["PrototypeExpressionDepth7"];
         };
         /** @description Prototype expressions use only the declared operators, at most eight levels and 64 total nodes, and one to sixteen operands per and/or. A bounded pre-parse walk enforces tree limits before structural parsing; variable references and operand/result types are checked by the Prototype document contract. */
-        PrototypeExpression: components["schemas"]["PrototypeExpressionDepth8"];
+        PrototypeExpression: components["schemas"]["PrototypeExpressionDepth8"] & ({
+            /** @enum {string} */
+            kind: "literal";
+            value: components["schemas"]["PrototypeRuntimeValue"];
+        } | {
+            /** @enum {string} */
+            kind: "variable";
+            path: string;
+        } | {
+            /** @enum {string} */
+            kind: "contains";
+            left: components["schemas"]["PrototypeExpressionDepth7"];
+            right: components["schemas"]["PrototypeExpressionDepth7"];
+        } | {
+            /** @enum {string} */
+            kind: "equals";
+            left: components["schemas"]["PrototypeExpressionDepth7"];
+            right: components["schemas"]["PrototypeExpressionDepth7"];
+        } | {
+            /** @enum {string} */
+            kind: "and";
+            operands: components["schemas"]["PrototypeExpressionDepth7"][];
+        } | {
+            /** @enum {string} */
+            kind: "or";
+            operands: components["schemas"]["PrototypeExpressionDepth7"][];
+        } | {
+            /** @enum {string} */
+            kind: "not";
+            operand: components["schemas"]["PrototypeExpressionDepth7"];
+        });
         PrototypeBindingSource: {
             /** @enum {string} */
             kind: "variable";
@@ -2908,6 +3428,12 @@ export interface components {
             value: string;
         } | components["schemas"]["PrototypeTokenReference"];
         PrototypeTypography: {
+            /** @description Optional text color, independent of a control's background fill. Accepts a hex literal or color token; omitted values preserve legacy text fill and control contrast defaults. */
+            color?: {
+                /** @enum {string} */
+                kind: "literal";
+                value: string;
+            } | components["schemas"]["PrototypeTokenReference"];
             fontFamily: components["schemas"]["PrototypeStringValue"];
             fontSize: components["schemas"]["PrototypePositiveValue"];
             fontWeight: {
@@ -2948,6 +3474,12 @@ export interface components {
             radii: components["schemas"]["PrototypeRadii"];
             shadowTokenIds: string[];
             typography: {
+                /** @description Optional text color, independent of a control's background fill. Accepts a hex literal or color token; omitted values preserve legacy text fill and control contrast defaults. */
+                color?: {
+                    /** @enum {string} */
+                    kind: "literal";
+                    value: string;
+                } | components["schemas"]["PrototypeTokenReference"];
                 fontFamily: components["schemas"]["PrototypeStringValue"];
                 fontSize: components["schemas"]["PrototypePositiveValue"];
                 fontWeight: {
@@ -3293,150 +3825,13 @@ export interface components {
             createdAt: string;
             /** @enum {string} */
             contentMode: "inline";
-            /**
-             * @description discriminator enum property added by openapi-typescript
-             * @enum {string}
-             */
+            /** @enum {string} */
             kind: "prototype";
             /** @enum {number} */
             schemaVersion: 1;
             content: components["schemas"]["PrototypeDocument"];
         };
-        ArtifactVersionInlineDetail: components["schemas"]["ArtifactVersionInlinePrdDetail"] | components["schemas"]["ArtifactVersionInlinePrototypeDetail"] | components["schemas"]["ArtifactVersionInlineDesignSystemDetail"] | components["schemas"]["ArtifactVersionInlineImageDetail"] | components["schemas"]["ArtifactVersionInlineCodeDetail"] | components["schemas"]["ArtifactVersionInlineDocumentDetail"] | components["schemas"]["ArtifactVersionInlineDataDetail"];
-        PrdAdditionalBusinessSection: {
-            title: string;
-            blocks: components["schemas"]["PrdBlock"][];
-        };
-        PrdChannelRow: {
-            sequence: number;
-            /** @enum {string} */
-            channel: "inApp" | "wapH5" | "miniProgram";
-            enabled: boolean;
-        };
-        PrdDiagramEdge: {
-            id: string;
-            from: string;
-            to: string;
-            label: string | null;
-        };
-        PrdDiagramNode: {
-            id: string;
-            label: string;
-            group: string | null;
-        };
-        PrdDiagram: {
-            id: string;
-            /** @enum {string} */
-            kind: "productFlow" | "productArchitecture";
-            /** @enum {string} */
-            title: "图1 产品流程图" | "图2 产品架构图";
-            description: string;
-            nodes: components["schemas"]["PrdDiagramNode"][];
-            edges: components["schemas"]["PrdDiagramEdge"][];
-        };
-        PrdSafetyBaselineRow: {
-            sequence: number;
-            /** @enum {string} */
-            applicability: "是" | "否" | "不涉及";
-            remarks: string | null;
-        };
-        PrdVersionHistoryEntry: {
-            /** @enum {string} */
-            status: "讨论稿" | "评审中" | "已定稿";
-            author: string;
-            participants: string[];
-            startDate: string;
-            endDate: string;
-            notes: string;
-        };
-        /** @description PRD v2 cover, fixed sections, channel table, diagrams, degradation plan, safety baseline, placeholders, tables, and IR references are validated by the runtime Zod contract. */
-        PrdDocumentV2: {
-            /** @enum {string} */
-            protocol: "workbench.prd.v2";
-            documentId: string;
-            title: string;
-            revision: components["schemas"]["PrdRevision"];
-            cover: {
-                workOrderName: string;
-                title: string;
-            };
-            versionHistory: components["schemas"]["PrdVersionHistoryEntry"][];
-            tableOfContents: {
-                /** @enum {string} */
-                title: "目 录";
-                entries: string[];
-            };
-            assumptions: components["schemas"]["PrdAssumption"][];
-            citations: components["schemas"]["ArtifactCitation"][];
-            sections: {
-                introduction: {
-                    /** @enum {string} */
-                    title: "1 引言";
-                    background: {
-                        /** @enum {string} */
-                        title: "1.1项目背景";
-                        blocks: components["schemas"]["PrdBlock"][];
-                    };
-                    scope: {
-                        /** @enum {string} */
-                        title: "1.2文档范围";
-                        blocks: components["schemas"]["PrdBlock"][];
-                    };
-                    usageScenarios: {
-                        /** @enum {string} */
-                        title: "1.3使用场景（必填）";
-                        blocks: components["schemas"]["PrdBlock"][];
-                        channelTable: {
-                            /** @enum {string} */
-                            title: "活动投放渠道";
-                            rows: components["schemas"]["PrdChannelRow"][];
-                        };
-                    };
-                };
-                businessRequirements: {
-                    /** @enum {string} */
-                    title: "2 业务需求";
-                    summary: components["schemas"]["PrdInlineContent"];
-                    pageLinks: {
-                        /** @enum {string} */
-                        title: "2.1页面链接";
-                        blocks: components["schemas"]["PrdBlock"][];
-                    };
-                    coreRules: {
-                        /** @enum {string} */
-                        title: "2.2 核心业务规则/功能说明";
-                        blocks: components["schemas"]["PrdBlock"][];
-                    };
-                    flowAndPages: {
-                        /** @enum {string} */
-                        title: "2.3 核心流程/状态/页面要求";
-                        blocks: components["schemas"]["PrdBlock"][];
-                        diagrams: components["schemas"]["PrdDiagram"][];
-                    };
-                    acceptanceCriteria: {
-                        /** @enum {string} */
-                        title: "2.4 验收标准";
-                        blocks: components["schemas"]["PrdBlock"][];
-                    };
-                    /** @default [] */
-                    additionalSections: components["schemas"]["PrdAdditionalBusinessSection"][];
-                };
-                degradation: {
-                    /** @enum {string} */
-                    title: "3 业务降级方案（必填）";
-                    applicable: boolean;
-                    content: components["schemas"]["PrdInlineContent"];
-                };
-                safetyBaseline: {
-                    /** @enum {string} */
-                    title: "4 需求安全基线要求（必填）";
-                    /** @enum {string} */
-                    intro: "该部分内容为必填项，请按照如下表格中的内容先进行自查，并按照如下要求完善需求文档：\n1、如选择“是”，代表本项自查内容已符合安全要求，需要提供截图违依据\n2、如选择“否”，代表本项自查内容暂时不符合安全要求，请在需求文档中增加本部分内容安全改造需求，并发送网信安需求评审邮件，附上本需求文档用于安全评审；\n3、如选择“不涉及”，代表本项目各项需求安全基线均不涉及，则无需召开网信安需求评审会。\n建议：该表格请业务人员和开发人员共同参与自查并填写。";
-                    rows: components["schemas"]["PrdSafetyBaselineRow"][];
-                };
-            };
-        };
-        ArtifactVersionInlinePrdV2Detail: {
+        ArtifactVersionInlineSourcePrototypeDetail: {
             artifactId: string;
             artifactVersionId: string;
             version: number;
@@ -3451,118 +3846,13 @@ export interface components {
             /** @enum {string} */
             contentMode: "inline";
             /** @enum {string} */
-            kind: "prd";
+            kind: "prototype";
             /** @enum {number} */
             schemaVersion: 2;
-            content: components["schemas"]["PrdDocumentV2"];
+            content: components["schemas"]["SourcePrototypeDocument"];
         };
-        PrdTemplateDiagram: {
-            id: string;
-            /** @enum {string} */
-            kind: "productFlow" | "productArchitecture";
-            title: string;
-            description: string;
-            nodes: components["schemas"]["PrdDiagramNode"][];
-            edges: components["schemas"]["PrdDiagramEdge"][];
-        };
-        PrdV3FunctionSection: {
-            title: string;
-            blocks: components["schemas"]["PrdBlock"][];
-            id: string;
-            /** @default [] */
-            diagrams: components["schemas"]["PrdTemplateDiagram"][];
-        };
-        /** @description PRD v3 uses contiguous function-specific sections, optional typed diagrams, embedded or later acceptance, and the same complete safety, table, citation and semantic-reference validation. */
-        PrdDocumentV3: {
-            /** @enum {string} */
-            protocol: "workbench.prd.v3";
-            documentId: string;
-            title: string;
-            revision: components["schemas"]["PrdRevision"];
-            cover: {
-                workOrderName: string;
-                title: string;
-            };
-            versionHistory: components["schemas"]["PrdVersionHistoryEntry"][];
-            tableOfContents: {
-                /** @enum {string} */
-                title: "目 录";
-                entries: string[];
-            };
-            assumptions: components["schemas"]["PrdAssumption"][];
-            citations: components["schemas"]["ArtifactCitation"][];
-            sections: {
-                introduction: {
-                    /** @enum {string} */
-                    title: "1 引言";
-                    background: {
-                        /** @enum {string} */
-                        title: "1.1项目背景";
-                        blocks: components["schemas"]["PrdBlock"][];
-                    };
-                    scope: {
-                        /** @enum {string} */
-                        title: "1.2文档范围";
-                        blocks: components["schemas"]["PrdBlock"][];
-                    };
-                    usageScenarios: {
-                        /** @enum {string} */
-                        title: "1.3使用场景（必填）";
-                        blocks: components["schemas"]["PrdBlock"][];
-                        channelTable: {
-                            /** @enum {string} */
-                            title: "活动投放渠道";
-                            rows: components["schemas"]["PrdChannelRow"][];
-                        };
-                    };
-                };
-                businessRequirements: {
-                    /** @enum {string} */
-                    title: "2 业务需求";
-                    summary: components["schemas"]["PrdInlineContent"];
-                    pageLinks: {
-                        /** @enum {string} */
-                        title: "2.1页面链接";
-                        blocks: components["schemas"]["PrdBlock"][];
-                    };
-                    functionSections: components["schemas"]["PrdV3FunctionSection"][];
-                };
-                degradation: {
-                    /** @enum {string} */
-                    title: "3 业务降级方案（必填）";
-                    applicable: boolean;
-                    content: components["schemas"]["PrdInlineContent"];
-                };
-                safetyBaseline: {
-                    /** @enum {string} */
-                    title: "4 需求安全基线要求（必填）";
-                    /** @enum {string} */
-                    intro: "该部分内容为必填项，请按照如下表格中的内容先进行自查，并按照如下要求完善需求文档：\n1、如选择“是”，代表本项自查内容已符合安全要求，需要提供截图违依据\n2、如选择“否”，代表本项自查内容暂时不符合安全要求，请在需求文档中增加本部分内容安全改造需求，并发送网信安需求评审邮件，附上本需求文档用于安全评审；\n3、如选择“不涉及”，代表本项目各项需求安全基线均不涉及，则无需召开网信安需求评审会。\n建议：该表格请业务人员和开发人员共同参与自查并填写。";
-                    rows: components["schemas"]["PrdSafetyBaselineRow"][];
-                };
-            };
-        };
-        ArtifactVersionInlinePrdV3Detail: {
-            artifactId: string;
-            artifactVersionId: string;
-            version: number;
-            status: components["schemas"]["ArtifactVersionStatus"];
-            checksum: string;
-            citations: components["schemas"]["ArtifactCitation"][];
-            createdByRunId: string | null;
-            knowledgeReleaseId: string | null;
-            sourcePrdVersionId?: string | null;
-            /** Format: date-time */
-            createdAt: string;
-            /** @enum {string} */
-            contentMode: "inline";
-            /** @enum {string} */
-            kind: "prd";
-            /** @enum {number} */
-            schemaVersion: 3;
-            content: components["schemas"]["PrdDocumentV3"];
-        };
-        ArtifactVersionDetail: components["schemas"]["ArtifactVersionInlineDetail"] | components["schemas"]["ArtifactVersionInlinePrdV2Detail"] | components["schemas"]["ArtifactVersionInlinePrdV3Detail"] | components["schemas"]["ArtifactVersionBlobDetail"];
+        ArtifactVersionInlineDetail: components["schemas"]["ArtifactVersionInlinePrdDetail"] | components["schemas"]["ArtifactVersionInlinePrototypeDetail"] | components["schemas"]["ArtifactVersionInlineSourcePrototypeDetail"] | components["schemas"]["ArtifactVersionInlineDesignSystemDetail"] | components["schemas"]["ArtifactVersionInlineImageDetail"] | components["schemas"]["ArtifactVersionInlineCodeDetail"] | components["schemas"]["ArtifactVersionInlineDocumentDetail"] | components["schemas"]["ArtifactVersionInlineDataDetail"];
+        ArtifactVersionDetail: components["schemas"]["ArtifactVersionInlinePrdDetail"] | components["schemas"]["ArtifactVersionInlinePrototypeDetail"] | components["schemas"]["ArtifactVersionInlineSourcePrototypeDetail"] | components["schemas"]["ArtifactVersionInlineDesignSystemDetail"] | components["schemas"]["ArtifactVersionInlineImageDetail"] | components["schemas"]["ArtifactVersionInlineCodeDetail"] | components["schemas"]["ArtifactVersionInlineDocumentDetail"] | components["schemas"]["ArtifactVersionInlineDataDetail"] | components["schemas"]["ArtifactVersionBlobDetail"];
         /** @description Prototype favourites identify one screen while non-Prototype favourites cannot expose a screen target. */
         ArtifactVersionFavoriteListItem: {
             artifactId: string;
@@ -3579,7 +3869,7 @@ export interface components {
             items: components["schemas"]["ArtifactVersionFavoriteListItem"][];
             nextCursor: string | null;
         };
-        /** @description PRD and prototype list items require schemaVersion 1; enforced by the runtime Zod contract. */
+        /** @description PRD list items require schemaVersion 3 and prototype list items use schemaVersion 1 or inline schemaVersion 2; enforced by the runtime Zod contract. */
         ArtifactVersionListItem: {
             artifactId: string;
             artifactVersionId: string;
@@ -3620,17 +3910,6 @@ export interface components {
             artifactId: string;
             artifactVersionId: string;
             version: number;
-        };
-        /** @enum {string} */
-        ExportCapabilityUnavailableReason: "EXPORT_FIGMA_UNAVAILABLE" | "EXPORT_EXTERNAL_AI_STUDIO_UNAVAILABLE" | "EXPORT_EXTERNAL_AUTHENTICATION_REQUIRED";
-        /** @enum {string} */
-        ExternalExportAuthentication: "not_required" | "required" | "authenticated";
-        /** @description Export capability availability, authentication state, and stable reason codes remain mutually consistent; enforced by the runtime Zod contract. */
-        AvailableExportCapability: {
-            available: boolean;
-            authentication: components["schemas"]["ExternalExportAuthentication"];
-            /** @enum {string|null} */
-            reasonCode: "EXPORT_FIGMA_UNAVAILABLE" | "EXPORT_EXTERNAL_AI_STUDIO_UNAVAILABLE" | "EXPORT_EXTERNAL_AUTHENTICATION_REQUIRED" | null;
         };
         BoardEdge: {
             id: string;
@@ -3801,6 +4080,7 @@ export interface components {
             projectId: string;
             /** @description Canvas entity ids are bounded opaque identifiers and cannot be URI schemes; enforced by the runtime Zod contract. */
             threadId: string;
+            /** @description Canvas entity ids are bounded opaque identifiers and cannot be URI schemes; enforced by the runtime Zod contract. */
             runId: string | null;
             /** @description Canvas entity ids are bounded opaque identifiers and cannot be URI schemes; enforced by the runtime Zod contract. */
             boardId: string;
@@ -3843,6 +4123,7 @@ export interface components {
             projectId: string;
             /** @description Canvas entity ids are bounded opaque identifiers and cannot be URI schemes; enforced by the runtime Zod contract. */
             threadId: string;
+            /** @description Canvas entity ids are bounded opaque identifiers and cannot be URI schemes; enforced by the runtime Zod contract. */
             runId: string | null;
             /** @description Canvas entity ids are bounded opaque identifiers and cannot be URI schemes; enforced by the runtime Zod contract. */
             boardId: string;
@@ -3875,6 +4156,7 @@ export interface components {
             projectId: string;
             /** @description Canvas entity ids are bounded opaque identifiers and cannot be URI schemes; enforced by the runtime Zod contract. */
             threadId: string;
+            /** @description Canvas entity ids are bounded opaque identifiers and cannot be URI schemes; enforced by the runtime Zod contract. */
             runId: string | null;
             /** @description Canvas entity ids are bounded opaque identifiers and cannot be URI schemes; enforced by the runtime Zod contract. */
             boardId: string;
@@ -3916,6 +4198,7 @@ export interface components {
             projectId: string;
             /** @description Canvas entity ids are bounded opaque identifiers and cannot be URI schemes; enforced by the runtime Zod contract. */
             threadId: string;
+            /** @description Canvas entity ids are bounded opaque identifiers and cannot be URI schemes; enforced by the runtime Zod contract. */
             runId: string | null;
             /** @description Canvas entity ids are bounded opaque identifiers and cannot be URI schemes; enforced by the runtime Zod contract. */
             boardId: string;
@@ -3946,6 +4229,7 @@ export interface components {
             projectId: string;
             /** @description Canvas entity ids are bounded opaque identifiers and cannot be URI schemes; enforced by the runtime Zod contract. */
             threadId: string;
+            /** @description Canvas entity ids are bounded opaque identifiers and cannot be URI schemes; enforced by the runtime Zod contract. */
             runId: string | null;
             /** @description Canvas entity ids are bounded opaque identifiers and cannot be URI schemes; enforced by the runtime Zod contract. */
             boardId: string;
@@ -3992,6 +4276,7 @@ export interface components {
             projectId: string;
             /** @description Canvas entity ids are bounded opaque identifiers and cannot be URI schemes; enforced by the runtime Zod contract. */
             threadId: string;
+            /** @description Canvas entity ids are bounded opaque identifiers and cannot be URI schemes; enforced by the runtime Zod contract. */
             runId: string | null;
             /** @description Canvas entity ids are bounded opaque identifiers and cannot be URI schemes; enforced by the runtime Zod contract. */
             boardId: string;
@@ -4035,6 +4320,7 @@ export interface components {
             projectId: string;
             /** @description Canvas entity ids are bounded opaque identifiers and cannot be URI schemes; enforced by the runtime Zod contract. */
             threadId: string;
+            /** @description Canvas entity ids are bounded opaque identifiers and cannot be URI schemes; enforced by the runtime Zod contract. */
             runId: string | null;
             /** @description Canvas entity ids are bounded opaque identifiers and cannot be URI schemes; enforced by the runtime Zod contract. */
             boardId: string;
@@ -4074,6 +4360,7 @@ export interface components {
                 stateCount: number;
                 motionCount: number;
             };
+            /** @description Canvas entity ids are bounded opaque identifiers and cannot be URI schemes; enforced by the runtime Zod contract. */
             visualCapabilityId: string | null;
         };
         CanvasViewport: {
@@ -4089,6 +4376,7 @@ export interface components {
             projectId: string;
             /** @description Canvas entity ids are bounded opaque identifiers and cannot be URI schemes; enforced by the runtime Zod contract. */
             threadId: string;
+            /** @description Canvas entity ids are bounded opaque identifiers and cannot be URI schemes; enforced by the runtime Zod contract. */
             runId: string | null;
             /** @description Canvas entity ids are bounded opaque identifiers and cannot be URI schemes; enforced by the runtime Zod contract. */
             boardId: string;
@@ -4116,7 +4404,9 @@ export interface components {
             projectId: string;
             /** @description Canvas entity ids are bounded opaque identifiers and cannot be URI schemes; enforced by the runtime Zod contract. */
             threadId: string;
+            /** @description Canvas entity ids are bounded opaque identifiers and cannot be URI schemes; enforced by the runtime Zod contract. */
             runId: string | null;
+            /** @description Canvas entity ids are bounded opaque identifiers and cannot be URI schemes; enforced by the runtime Zod contract. */
             runtimeAttemptId: string | null;
             /** @description Canvas entity ids are bounded opaque identifiers and cannot be URI schemes; enforced by the runtime Zod contract. */
             agentSessionId: string;
@@ -4125,6 +4415,7 @@ export interface components {
             requestId: string;
             /** @description Canvas entity ids are bounded opaque identifiers and cannot be URI schemes; enforced by the runtime Zod contract. */
             traceId: string;
+            /** @description Canvas browser session ids are bounded opaque identifiers and cannot be URI schemes; enforced by the runtime Zod contract. */
             clientSessionId: string | null;
             projectSessionGeneration: components["schemas"]["Revision"];
             /** @description Canvas entity ids are bounded opaque identifiers and cannot be URI schemes; enforced by the runtime Zod contract. */
@@ -4301,7 +4592,9 @@ export interface components {
             status: "succeeded";
             data: components["schemas"]["JsonValue"];
             failure: null;
+            /** @description Canvas entity ids are bounded opaque identifiers and cannot be URI schemes; enforced by the runtime Zod contract. */
             approvalId: string | null;
+            /** @description Canvas entity ids are bounded opaque identifiers and cannot be URI schemes; enforced by the runtime Zod contract. */
             clientCommandId: string | null;
         } | {
             /** @enum {string} */
@@ -4387,6 +4680,7 @@ export interface components {
             projectId: string;
             /** @description Canvas entity ids are bounded opaque identifiers and cannot be URI schemes; enforced by the runtime Zod contract. */
             threadId: string;
+            /** @description Canvas entity ids are bounded opaque identifiers and cannot be URI schemes; enforced by the runtime Zod contract. */
             runId: string | null;
             /** @description Canvas entity ids are bounded opaque identifiers and cannot be URI schemes; enforced by the runtime Zod contract. */
             boardId: string;
@@ -4429,6 +4723,7 @@ export interface components {
             projectId: string;
             /** @description Canvas entity ids are bounded opaque identifiers and cannot be URI schemes; enforced by the runtime Zod contract. */
             threadId: string;
+            /** @description Canvas entity ids are bounded opaque identifiers and cannot be URI schemes; enforced by the runtime Zod contract. */
             runId: string | null;
             /** @description Canvas entity ids are bounded opaque identifiers and cannot be URI schemes; enforced by the runtime Zod contract. */
             boardId: string;
@@ -4461,6 +4756,7 @@ export interface components {
             projectId: string;
             /** @description Canvas entity ids are bounded opaque identifiers and cannot be URI schemes; enforced by the runtime Zod contract. */
             threadId: string;
+            /** @description Canvas entity ids are bounded opaque identifiers and cannot be URI schemes; enforced by the runtime Zod contract. */
             runId: string | null;
             /** @description Canvas entity ids are bounded opaque identifiers and cannot be URI schemes; enforced by the runtime Zod contract. */
             boardId: string;
@@ -4497,6 +4793,7 @@ export interface components {
             projectId: string;
             /** @description Canvas entity ids are bounded opaque identifiers and cannot be URI schemes; enforced by the runtime Zod contract. */
             threadId: string;
+            /** @description Canvas entity ids are bounded opaque identifiers and cannot be URI schemes; enforced by the runtime Zod contract. */
             runId: string | null;
             /** @description Canvas entity ids are bounded opaque identifiers and cannot be URI schemes; enforced by the runtime Zod contract. */
             boardId: string;
@@ -4527,6 +4824,7 @@ export interface components {
             projectId: string;
             /** @description Canvas entity ids are bounded opaque identifiers and cannot be URI schemes; enforced by the runtime Zod contract. */
             threadId: string;
+            /** @description Canvas entity ids are bounded opaque identifiers and cannot be URI schemes; enforced by the runtime Zod contract. */
             runId: string | null;
             /** @description Canvas entity ids are bounded opaque identifiers and cannot be URI schemes; enforced by the runtime Zod contract. */
             boardId: string;
@@ -4559,6 +4857,7 @@ export interface components {
             projectId: string;
             /** @description Canvas entity ids are bounded opaque identifiers and cannot be URI schemes; enforced by the runtime Zod contract. */
             threadId: string;
+            /** @description Canvas entity ids are bounded opaque identifiers and cannot be URI schemes; enforced by the runtime Zod contract. */
             runId: string | null;
             /** @description Canvas entity ids are bounded opaque identifiers and cannot be URI schemes; enforced by the runtime Zod contract. */
             boardId: string;
@@ -4602,6 +4901,7 @@ export interface components {
             projectId: string;
             /** @description Canvas entity ids are bounded opaque identifiers and cannot be URI schemes; enforced by the runtime Zod contract. */
             threadId: string;
+            /** @description Canvas entity ids are bounded opaque identifiers and cannot be URI schemes; enforced by the runtime Zod contract. */
             runId: string | null;
             /** @description Canvas entity ids are bounded opaque identifiers and cannot be URI schemes; enforced by the runtime Zod contract. */
             boardId: string;
@@ -4642,6 +4942,7 @@ export interface components {
             viewport: components["schemas"]["CanvasViewport"];
             visibleScreens: components["schemas"]["CanvasAgentScreenReference"][];
             selectedScreens: components["schemas"]["CanvasAgentScreenReference"][];
+            /** @description Canvas entity ids are bounded opaque identifiers and cannot be URI schemes; enforced by the runtime Zod contract. */
             causedByCommandId?: string;
         };
         CanvasClientStateSyncResponse: {
@@ -4706,6 +5007,7 @@ export interface components {
                 stateCount: number;
                 motionCount: number;
             };
+            /** @description Canvas entity ids are bounded opaque identifiers and cannot be URI schemes; enforced by the runtime Zod contract. */
             visualCapabilityId: string | null;
         };
         /** @description Canvas selection kind matches its item count and screen references are unique. */
@@ -4726,6 +5028,7 @@ export interface components {
             projectId: string;
             /** @description Canvas entity ids are bounded opaque identifiers and cannot be URI schemes; enforced by the runtime Zod contract. */
             threadId: string;
+            /** @description Canvas entity ids are bounded opaque identifiers and cannot be URI schemes; enforced by the runtime Zod contract. */
             runId: string | null;
             /** @description Canvas entity ids are bounded opaque identifiers and cannot be URI schemes; enforced by the runtime Zod contract. */
             boardId: string;
@@ -4827,6 +5130,7 @@ export interface components {
                 code: string;
                 message: string;
             } | null;
+            /** @description Extraction status, timestamps, digest, and failure obey the lifecycle invariant; enforced by the runtime Zod contract. */
             currentExtraction: {
                 id: string;
                 fileAssetId: string;
@@ -4849,6 +5153,7 @@ export interface components {
                 /** Format: date-time */
                 updatedAt: string;
             } | null;
+            /** @description Extraction status, timestamps, digest, and failure obey the lifecycle invariant; enforced by the runtime Zod contract. */
             latestExtraction: {
                 id: string;
                 fileAssetId: string;
@@ -4898,10 +5203,7 @@ export interface components {
             checksum: string;
         };
         CreateImageArtifactRequest: {
-            /**
-             * @description discriminator enum property added by openapi-typescript
-             * @enum {string}
-             */
+            /** @enum {string} */
             kind: "image";
             title: string;
             source: {
@@ -4910,24 +5212,31 @@ export interface components {
                 fileAssetId: string;
             };
         };
-        CreateArtifactRequest: components["schemas"]["CreateImageArtifactRequest"];
+        /** @description Source prototype entries, paths, page ids, routes, and aggregate source size form one bounded virtual project. */
+        SourcePrototypeInput: {
+            /** @enum {string} */
+            protocol: "workbench.prototype-source-input.v1";
+            documentId: string;
+            title: string;
+            revision: number;
+            summary: string;
+            entryFile: components["schemas"]["SourcePrototypePath"];
+            files: components["schemas"]["SourcePrototypeFile"][];
+            pages: components["schemas"]["SourcePrototypePage"][];
+        };
+        /** @description The source prototype artifact title must equal the immutable source document title. */
+        CreateSourcePrototypeArtifactRequest: {
+            /** @enum {string} */
+            kind: "prototype";
+            title: string;
+            document: components["schemas"]["SourcePrototypeInput"];
+        };
+        CreateArtifactRequest: components["schemas"]["CreateImageArtifactRequest"] | components["schemas"]["CreateSourcePrototypeArtifactRequest"];
         CreatePrdArtifactVersionRequest: {
             baseArtifactVersionId: string;
             /** @enum {string} */
             kind: "prd";
-            document: components["schemas"]["PrdDocumentV1"];
-        };
-        CreatePrdV2ArtifactVersionRequest: {
-            baseArtifactVersionId: string;
-            /** @enum {string} */
-            kind: "prd";
-            document: components["schemas"]["PrdDocumentV2"];
-        };
-        CreatePrdV3ArtifactVersionRequest: {
-            baseArtifactVersionId: string;
-            /** @enum {string} */
-            kind: "prd";
-            document: components["schemas"]["PrdDocumentV3"];
+            document: components["schemas"]["PrdDocument"];
         };
         CreatePrototypeArtifactVersionRequest: {
             baseArtifactVersionId: string;
@@ -4935,19 +5244,25 @@ export interface components {
             kind: "prototype";
             document: components["schemas"]["PrototypeDocument"];
         };
-        CreateArtifactVersionRequest: components["schemas"]["CreatePrdArtifactVersionRequest"] | components["schemas"]["CreatePrototypeArtifactVersionRequest"] | components["schemas"]["CreatePrdV2ArtifactVersionRequest"] | components["schemas"]["CreatePrdV3ArtifactVersionRequest"];
+        CreateSourcePrototypeArtifactVersionRequest: {
+            baseArtifactVersionId: string;
+            /** @enum {string} */
+            kind: "prototype";
+            document: components["schemas"]["SourcePrototypeInput"];
+        };
+        CreateArtifactVersionRequest: components["schemas"]["CreatePrdArtifactVersionRequest"] | components["schemas"]["CreatePrototypeArtifactVersionRequest"] | components["schemas"]["CreateSourcePrototypeArtifactVersionRequest"];
         CreateDesignSystemRequest: {
             title: string;
             document: components["schemas"]["DesignSystemDocument"];
         };
-        CreateExportOptions: {
+        /** @enum {string} */
+        ExportFormat: "html" | "react" | "figma" | "mcp" | "docx" | "pdf";
+        ExportOptions: {
             [key: string]: components["schemas"]["JsonValue"];
         };
         /** @enum {string} */
-        ExportFormat: "html" | "react" | "figma" | "mcp" | "docx" | "pdf";
-        /** @enum {string} */
         ExportPackaging: "single_file" | "zip";
-        /** @description Board node ids are unique and in canonical ascending order; enforced by the runtime Zod contract and database constraint. */
+        /** @description Unique Board node ids in canonical ascending identifier order */
         ExportBoardNodeIds: string[];
         ExportSelection: {
             /** @enum {string} */
@@ -4972,12 +5287,7 @@ export interface components {
             format: components["schemas"]["ExportFormat"];
             packaging: components["schemas"]["ExportPackaging"];
             selection: components["schemas"]["ExportSelection"];
-            options?: components["schemas"]["CreateExportOptions"] & unknown;
-        };
-        /** @enum {string} */
-        ExternalExportTarget: "ai_studio" | "netlify" | "lovable" | "bolt";
-        CreateExternalExportDeliveryRequest: {
-            target: components["schemas"]["ExternalExportTarget"];
+            options?: components["schemas"]["ExportOptions"];
         };
         /** @description SubmissionIntent upload slot fingerprints are bounded opaque values without control characters; they are independent from multipart checkpoint fingerprints. */
         SubmissionIntentClientFingerprint: string;
@@ -5069,53 +5379,28 @@ export interface components {
             boardId: string;
             boardRevision: components["schemas"]["Revision"];
         };
-        CreateProjectRemixRequest: {
-            workspaceId: string;
-            title?: string;
-        };
-        /** @enum {string} */
-        ProjectStatus: "active" | "archived";
-        Project: {
-            id: string;
-            workspaceId: string;
-            title: string;
-            summary: string | null;
-            status: components["schemas"]["ProjectStatus"];
-            revision: components["schemas"]["Revision"];
-            /** Format: date-time */
-            createdAt: string;
-            /** Format: date-time */
-            updatedAt: string;
-        };
-        ProjectLineage: {
-            targetProjectId: string;
-            sourceReleaseId: string;
-            sourceShareId: string;
-            createdById: string;
-            workspaceId: string;
-            /** Format: date-time */
-            createdAt: string;
-        };
-        CreateProjectRemixResponse: {
-            project: components["schemas"]["Project"];
-            lineage: components["schemas"]["ProjectLineage"];
-        };
         CreateProjectRequest: {
             title: string;
             summary?: string;
         };
-        SubmissionIntentAttachmentRequest: {
-            /** @enum {string} */
-            kind: "existing";
-            fileAssetId: string;
-        } | {
-            /** @enum {string} */
-            kind: "upload";
-            clientFingerprint: components["schemas"]["SubmissionIntentClientFingerprint"];
-            fileName: components["schemas"]["FileName"];
-            declaredMediaType: string;
-            byteSize: components["schemas"]["UploadObjectByteSize"];
-            lastModified: components["schemas"]["SafeInteger"];
+        /** @enum {string} */
+        PrototypeExportFormat: "html" | "react";
+        CreatePrototypeExportRequest: {
+            revisionId: string;
+            format: components["schemas"]["PrototypeExportFormat"];
+        };
+        PrototypeFeedbackAnchor: {
+            pageId: string;
+            selector: string;
+            quote?: string;
+        };
+        CreatePrototypeFeedbackRequest: {
+            body: string;
+            anchor?: {
+                pageId: string;
+                selector: string;
+                quote?: string;
+            } | null;
         };
         RunArtifactTarget: {
             artifactId: string;
@@ -5123,7 +5408,7 @@ export interface components {
             /** @description Screen ids within one Artifact target are unique; enforced by the runtime Zod contract. */
             screenIds: string[];
         };
-        /** @description Artifact targets preserve original request order, contain one immutable selection per Artifact and ArtifactVersion, and select at most twelve versions or screens; enforced by the runtime Zod contract. */
+        /** @description Immutable ready ArtifactVersion selections in original request order, including explicit Generate Prototype source screens */
         RunArtifactTargets: components["schemas"]["RunArtifactTarget"][];
         RunDesignStyleArtifact: {
             /**
@@ -5156,7 +5441,7 @@ export interface components {
         /** @enum {string} */
         RunGenerationIntent: "followup-design" | "interactive-prototype";
         /**
-         * @description A Run references each immutable Import Source at most once.
+         * @description Unique ready Import Source ids resolved before Run creation
          * @default []
          */
         RunSourceIds: string[];
@@ -5166,6 +5451,79 @@ export interface components {
         RuntimeRequestedArtifactKind: "prd" | "prototype" | "image" | "code" | "document" | "data";
         /** @enum {string} */
         RunWorkflow: "generate" | "redesign" | "ideate" | "edit";
+        /** @description Redesign requires a ready Import Source; Edit requires an Artifact target; Generate accepts explicit non-empty screen targets only when prototype is requested; Redesign and Ideate forbid targets. Enforced by the runtime Zod contract. */
+        StartRunRequest: {
+            prompt: string;
+            modelId: string;
+            workflow: components["schemas"]["RunWorkflow"];
+            /**
+             * @default null
+             * @enum {string|null}
+             */
+            generationIntent: "followup-design" | "interactive-prototype" | null;
+            targetSurface: components["schemas"]["RunTargetSurface"];
+            designStyle: components["schemas"]["RunDesignStyle"];
+            sourceIds?: components["schemas"]["RunSourceIds"];
+            /**
+             * @description Immutable ready ArtifactVersion selections in runtime target order; Generate Prototype requires one or more explicit screen ids on every source target
+             * @default []
+             */
+            artifactTargets: components["schemas"]["RunArtifactTarget"][];
+            /** @default [] */
+            requestedArtifactKinds: components["schemas"]["RuntimeRequestedArtifactKind"][];
+            /**
+             * @description Canvas snapshots use unique screen references and only expose references declared by the snapshot; enforced by the runtime Zod contract.
+             * @default null
+             */
+            canvasSnapshot: {
+                /** @enum {string} */
+                protocol: "workbench.canvas-snapshot.v1";
+                /** @description Canvas entity ids are bounded opaque identifiers and cannot be URI schemes; enforced by the runtime Zod contract. */
+                projectId: string;
+                /** @description Canvas entity ids are bounded opaque identifiers and cannot be URI schemes; enforced by the runtime Zod contract. */
+                threadId: string;
+                /** @description Canvas entity ids are bounded opaque identifiers and cannot be URI schemes; enforced by the runtime Zod contract. */
+                runId: string | null;
+                /** @description Canvas entity ids are bounded opaque identifiers and cannot be URI schemes; enforced by the runtime Zod contract. */
+                boardId: string;
+                /** @description Canvas browser session ids are bounded opaque identifiers and cannot be URI schemes; enforced by the runtime Zod contract. */
+                clientSessionId: string;
+                projectSessionGeneration: components["schemas"]["Revision"];
+                boardRevision: components["schemas"]["Revision"];
+                canvasStateRevision: components["schemas"]["Revision"];
+                /** Format: date-time */
+                capturedAt: string;
+                /** Format: date-time */
+                expiresAt: string;
+                viewport: components["schemas"]["CanvasViewport"];
+                screens: components["schemas"]["CanvasScreenSummary"][];
+                visibleScreens: components["schemas"]["CanvasAgentScreenReference"][];
+                selectedScreens: components["schemas"]["CanvasAgentScreenReference"][];
+            } | null;
+        };
+        CreatePrototypePlanRequest: {
+            prompt: string;
+            title: string;
+            generationRequest: components["schemas"]["StartRunRequest"];
+        };
+        CreatePrototypeShareRequest: {
+            revisionId: string;
+            /** Format: date-time */
+            expiresAt?: string | null;
+        };
+        SubmissionIntentAttachmentRequest: {
+            /** @enum {string} */
+            kind: "existing";
+            fileAssetId: string;
+        } | {
+            /** @enum {string} */
+            kind: "upload";
+            clientFingerprint: components["schemas"]["SubmissionIntentClientFingerprint"];
+            fileName: components["schemas"]["FileName"];
+            declaredMediaType: string;
+            byteSize: components["schemas"]["UploadObjectByteSize"];
+            lastModified: components["schemas"]["SafeInteger"];
+        };
         /** @description SubmissionIntent requests directly enforce the same workflow, Artifact target, requested output, and pre-submission Canvas scope semantics as StartRun. */
         SubmissionIntentRunRequest: {
             prompt: string;
@@ -5186,7 +5544,10 @@ export interface components {
             artifactTargets: components["schemas"]["RunArtifactTarget"][];
             /** @default [] */
             requestedArtifactKinds: components["schemas"]["RuntimeRequestedArtifactKind"][];
-            /** @default null */
+            /**
+             * @description Canvas snapshots use unique screen references and only expose references declared by the snapshot; enforced by the runtime Zod contract.
+             * @default null
+             */
             canvasSnapshot: {
                 /** @enum {string} */
                 protocol: "workbench.canvas-snapshot.v1";
@@ -5194,6 +5555,7 @@ export interface components {
                 projectId: string;
                 /** @description Canvas entity ids are bounded opaque identifiers and cannot be URI schemes; enforced by the runtime Zod contract. */
                 threadId: string;
+                /** @description Canvas entity ids are bounded opaque identifiers and cannot be URI schemes; enforced by the runtime Zod contract. */
                 runId: string | null;
                 /** @description Canvas entity ids are bounded opaque identifiers and cannot be URI schemes; enforced by the runtime Zod contract. */
                 boardId: string;
@@ -5272,6 +5634,7 @@ export interface components {
             updatedAt: string;
         };
         CurrentSubmissionIntent: {
+            /** @description SubmissionIntent request target semantics, attachment positions, and submitted/cancelled lifecycle fields agree; enforced by runtime contracts and database constraints. */
             item: {
                 id: string;
                 projectId: string;
@@ -5446,35 +5809,28 @@ export interface components {
             kind: "embedding";
             dimension: number;
         };
-        ExportCapabilities: {
-            formats: {
-                html: components["schemas"]["AvailableExportCapability"];
-                react: components["schemas"]["AvailableExportCapability"];
-                figma: components["schemas"]["AvailableExportCapability"];
-                mcp: components["schemas"]["AvailableExportCapability"];
-                docx: components["schemas"]["AvailableExportCapability"];
-                pdf: components["schemas"]["AvailableExportCapability"];
-            };
-            packaging: {
-                single_file: components["schemas"]["AvailableExportCapability"];
-                zip: components["schemas"]["AvailableExportCapability"];
-            };
-            external: {
-                ai_studio: components["schemas"]["AvailableExportCapability"];
-                netlify: components["schemas"]["AvailableExportCapability"];
-                lovable: components["schemas"]["AvailableExportCapability"];
-                bolt: components["schemas"]["AvailableExportCapability"];
-            };
-        };
+        /** @enum {string} */
+        ExportCapabilityUnavailableReason: "EXPORT_FIGMA_UNAVAILABLE";
         /** @description Export capability availability, authentication state, and stable reason codes remain mutually consistent; enforced by the runtime Zod contract. */
         ExportCapability: {
             available: boolean;
-            authentication: components["schemas"]["ExternalExportAuthentication"];
             /** @enum {string|null} */
-            reasonCode: "EXPORT_FIGMA_UNAVAILABLE" | "EXPORT_EXTERNAL_AI_STUDIO_UNAVAILABLE" | "EXPORT_EXTERNAL_AUTHENTICATION_REQUIRED" | null;
+            reasonCode: "EXPORT_FIGMA_UNAVAILABLE" | null;
         };
-        /** @enum {string} */
-        ExportDeliveryKind: "download" | "clipboard" | "external";
+        ExportCapabilities: {
+            formats: {
+                html: components["schemas"]["ExportCapability"];
+                react: components["schemas"]["ExportCapability"];
+                figma: components["schemas"]["ExportCapability"];
+                mcp: components["schemas"]["ExportCapability"];
+                docx: components["schemas"]["ExportCapability"];
+                pdf: components["schemas"]["ExportCapability"];
+            };
+            packaging: {
+                single_file: components["schemas"]["ExportCapability"];
+                zip: components["schemas"]["ExportCapability"];
+            };
+        };
         ExportFailure: {
             code: string;
             detail: string | null;
@@ -5491,7 +5847,7 @@ export interface components {
             selection: components["schemas"]["ExportSelection"];
             status: components["schemas"]["ExportStatus"];
             revision: components["schemas"]["Revision"];
-            options: components["schemas"]["CreateExportOptions"];
+            options: components["schemas"]["ExportOptions"];
             output: {
                 blobId: string;
                 mediaType: string;
@@ -5516,72 +5872,11 @@ export interface components {
             items: components["schemas"]["ExportJob"][];
             nextCursor: string | null;
         };
-        ExportOptions: {
-            [key: string]: components["schemas"]["JsonValue"];
-        };
         ExportPreviewTokenResponse: {
             /** Format: uri */
             url: string;
             /** Format: date-time */
             expiresAt: string;
-        };
-        /** @enum {string} */
-        ExternalExportDeliveryStatus: "pending_confirmation" | "queued" | "running" | "cancelling" | "succeeded" | "failed" | "cancelled";
-        ExternalExportFailure: {
-            code: string;
-            detail: string | null;
-        };
-        ExternalExportPayloadSnapshot: {
-            exportJobId: string;
-            releaseId: string;
-            format: components["schemas"]["ExportFormat"];
-            packaging: components["schemas"]["ExportPackaging"];
-            selection: components["schemas"]["ExportSelection"];
-            output: {
-                mediaType: string;
-                byteSize: number;
-                sha256: string;
-                fileName: string;
-            };
-        };
-        /** @description External delivery confirmation, execution timestamps, remote references, and failure state match the durable lifecycle; enforced by the runtime Zod contract and database constraints. */
-        ExternalExportDelivery: {
-            id: string;
-            exportJobId: string;
-            createdById: string;
-            target: components["schemas"]["ExternalExportTarget"];
-            authentication: components["schemas"]["ExternalExportAuthentication"];
-            status: components["schemas"]["ExternalExportDeliveryStatus"];
-            revision: components["schemas"]["Revision"];
-            attempt: number;
-            payload: components["schemas"]["ExternalExportPayloadSnapshot"];
-            remoteReference: string | null;
-            failure: {
-                code: string;
-                detail: string | null;
-            } | null;
-            /** Format: date-time */
-            createdAt: string;
-            /** Format: date-time */
-            confirmedAt: string | null;
-            /** Format: date-time */
-            startedAt: string | null;
-            /** Format: date-time */
-            transferAuthorizedAt: string | null;
-            /** Format: date-time */
-            finishedAt: string | null;
-            /** Format: date-time */
-            updatedAt: string;
-        };
-        ExternalExportDeliveryList: {
-            items: components["schemas"]["ExternalExportDelivery"][];
-        };
-        /** @description Export capability availability, authentication state, and stable reason codes remain mutually consistent; enforced by the runtime Zod contract. */
-        FigmaExportCapability: {
-            available: boolean;
-            authentication: components["schemas"]["ExternalExportAuthentication"];
-            /** @enum {string|null} */
-            reasonCode: "EXPORT_FIGMA_UNAVAILABLE" | "EXPORT_EXTERNAL_AI_STUDIO_UNAVAILABLE" | "EXPORT_EXTERNAL_AUTHENTICATION_REQUIRED" | null;
         };
         FileList: {
             items: components["schemas"]["FileAsset"][];
@@ -5614,7 +5909,10 @@ export interface components {
              * @description Import source locators use HTTP(S); DNS, redirect and private-network checks are enforced by the Import Worker before fetching.
              */
             sourceUrl: string;
-            /** Format: uri */
+            /**
+             * Format: uri
+             * @description Import source locators use HTTP(S); DNS, redirect and private-network checks are enforced by the Import Worker before fetching.
+             */
             resolvedUrl: string | null;
         } | {
             /** @enum {string} */
@@ -5663,7 +5961,10 @@ export interface components {
                  * @description Import source locators use HTTP(S); DNS, redirect and private-network checks are enforced by the Import Worker before fetching.
                  */
                 sourceUrl: string;
-                /** Format: uri */
+                /**
+                 * Format: uri
+                 * @description Import source locators use HTTP(S); DNS, redirect and private-network checks are enforced by the Import Worker before fetching.
+                 */
                 resolvedUrl: string | null;
             } | {
                 /** @enum {string} */
@@ -5946,17 +6247,79 @@ export interface components {
             /** @description Unique partNumber values in strictly ascending order */
             parts: components["schemas"]["UploadedPart"][];
         };
-        PrdDocument: components["schemas"]["PrdDocumentV1"] | components["schemas"]["PrdDocumentV2"] | components["schemas"]["PrdDocumentV3"];
-        /** @enum {string} */
-        PrdSectionKey: "executiveSummary" | "problem" | "goals" | "targetUsers" | "scope" | "requirements" | "userFlows" | "acceptanceCriteria" | "risksAndDependencies";
-        PrdV3Diagram: {
-            id: string;
+        /** @description PRD v3 uses contiguous function-specific sections, optional typed diagrams, embedded or later acceptance, and the same complete safety, table, citation and semantic-reference validation. */
+        PrdDocumentV3: {
             /** @enum {string} */
-            kind: "productFlow" | "productArchitecture";
+            protocol: "workbench.prd.v3";
+            documentId: string;
             title: string;
-            description: string;
-            nodes: components["schemas"]["PrdDiagramNode"][];
-            edges: components["schemas"]["PrdDiagramEdge"][];
+            revision: components["schemas"]["PrdRevision"];
+            cover: {
+                workOrderName: string;
+                title: string;
+            };
+            versionHistory: components["schemas"]["PrdVersionHistoryEntry"][];
+            tableOfContents: {
+                /** @enum {string} */
+                title: "目 录";
+                entries: string[];
+            };
+            assumptions: components["schemas"]["PrdAssumption"][];
+            citations: components["schemas"]["ArtifactCitation"][];
+            sections: {
+                introduction: {
+                    /** @enum {string} */
+                    title: "1 引言";
+                    background: {
+                        /** @enum {string} */
+                        title: "1.1项目背景";
+                        blocks: components["schemas"]["PrdBlock"][];
+                    };
+                    scope: {
+                        /** @enum {string} */
+                        title: "1.2文档范围";
+                        blocks: components["schemas"]["PrdBlock"][];
+                    };
+                    usageScenarios: {
+                        /** @enum {string} */
+                        title: "1.3使用场景（必填）";
+                        blocks: components["schemas"]["PrdBlock"][];
+                        channelTable: {
+                            /** @enum {string} */
+                            title: "活动投放渠道";
+                            rows: components["schemas"]["PrdChannelRow"][];
+                        };
+                    };
+                };
+                businessRequirements: {
+                    /** @enum {string} */
+                    title: "2 业务需求";
+                    summary: components["schemas"]["PrdInlineContent"];
+                    pageLinks: {
+                        /** @enum {string} */
+                        title: "2.1页面链接";
+                        blocks: components["schemas"]["PrdBlock"][];
+                    };
+                    functionSections: components["schemas"]["PrdV3FunctionSection"][];
+                };
+                degradation: {
+                    /** @enum {string} */
+                    title: "3 业务降级方案（必填）";
+                    applicable: boolean;
+                    content: components["schemas"]["PrdInlineContent"];
+                };
+                safetyBaseline: {
+                    /** @enum {string} */
+                    title: "4 需求安全基线要求（必填）";
+                    /** @enum {string} */
+                    intro: "该部分内容为必填项，请按照如下表格中的内容先进行自查，并按照如下要求完善需求文档：\n1、如选择“是”，代表本项自查内容已符合安全要求，需要提供截图违依据\n2、如选择“否”，代表本项自查内容暂时不符合安全要求，请在需求文档中增加本部分内容安全改造需求，并发送网信安需求评审邮件，附上本需求文档用于安全评审；\n3、如选择“不涉及”，代表本项目各项需求安全基线均不涉及，则无需召开网信安需求评审会。\n建议：该表格请业务人员和开发人员共同参与自查并填写。";
+                    rows: components["schemas"]["PrdSafetyBaselineRow"][];
+                };
+            };
+        };
+        PrdSection: {
+            title: string;
+            blocks: components["schemas"]["PrdBlock"][];
         };
         /** @enum {string} */
         PreviewStatus: "queued" | "running" | "succeeded" | "failed" | "cancelled" | "expired";
@@ -5987,6 +6350,20 @@ export interface components {
             errors?: {
                 [key: string]: string[];
             };
+        };
+        /** @enum {string} */
+        ProjectStatus: "active" | "archived";
+        Project: {
+            id: string;
+            workspaceId: string;
+            title: string;
+            summary: string | null;
+            status: components["schemas"]["ProjectStatus"];
+            revision: components["schemas"]["Revision"];
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            updatedAt: string;
         };
         /** @enum {string} */
         RunPhase: "understanding" | "retrieving_knowledge" | "planning" | "generating" | "validating" | "publishing";
@@ -6035,7 +6412,10 @@ export interface components {
                  * @description Import source locators use HTTP(S); DNS, redirect and private-network checks are enforced by the Import Worker before fetching.
                  */
                 sourceUrl: string;
-                /** Format: uri */
+                /**
+                 * Format: uri
+                 * @description Import source locators use HTTP(S); DNS, redirect and private-network checks are enforced by the Import Worker before fetching.
+                 */
                 resolvedUrl: string | null;
             } | {
                 /** @enum {string} */
@@ -6184,6 +6564,7 @@ export interface components {
             entries: components["schemas"]["ThreadEntry"][];
             board: components["schemas"]["Board"];
             artifacts: components["schemas"]["Artifact"][];
+            /** @description Run Import Source snapshots belong to the Run and Project, preserve immutable manifests, and use contiguous request positions; enforced by the runtime Zod contract. */
             latestRun: {
                 id: string;
                 requestId: string;
@@ -6420,6 +6801,65 @@ export interface components {
             /** @enum {string} */
             targetStatus: "adopted";
         };
+        PrototypeExportArtifact: {
+            /** Format: uri */
+            downloadUrl: string;
+            artifactSha256: string;
+            byteSize: number;
+            mediaType: string;
+        };
+        /** @enum {string} */
+        PrototypeExportStatus: "queued" | "building" | "succeeded" | "failed" | "cancelled";
+        /** @description Visual Prototype exports require an immutable artifact on success, failure details on failure, and no output on cancellation; enforced by the runtime V2 contract. */
+        PrototypeExport: {
+            id: string;
+            projectId: string;
+            revisionId: string;
+            format: components["schemas"]["PrototypeExportFormat"];
+            status: components["schemas"]["PrototypeExportStatus"];
+            revision: components["schemas"]["Revision"];
+            artifact: {
+                /** Format: uri */
+                downloadUrl: string;
+                artifactSha256: string;
+                byteSize: number;
+                mediaType: string;
+            } | null;
+            failure: {
+                code: string;
+                detail: string;
+            } | null;
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            updatedAt: string;
+            /** Format: date-time */
+            finishedAt: string | null;
+        };
+        PrototypeExportList: components["schemas"]["PrototypeExport"][];
+        /** @enum {string} */
+        PrototypeFeedbackStatus: "open" | "resolved";
+        PrototypeFeedback: {
+            id: string;
+            projectId: string;
+            revisionId: string;
+            createdById: string;
+            body: string;
+            anchor: {
+                pageId: string;
+                selector: string;
+                quote?: string;
+            } | null;
+            status: components["schemas"]["PrototypeFeedbackStatus"];
+            revision: components["schemas"]["Revision"];
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            updatedAt: string;
+            /** Format: date-time */
+            resolvedAt: string | null;
+        };
+        PrototypeFeedbackList: components["schemas"]["PrototypeFeedback"][];
         PrototypeInsertNodeOperation: {
             /**
              * @description discriminator enum property added by openapi-typescript
@@ -6429,6 +6869,25 @@ export interface components {
             parentId: string;
             index: number;
             node: components["schemas"]["PrototypeNode"];
+        };
+        PrototypeListQuery: {
+            cursor?: string;
+            /** @default 30 */
+            limit: number;
+        };
+        PrototypeMutationHeaders: {
+            idempotencyKey: string;
+            ifMatch?: string;
+        };
+        PrototypePage: {
+            id: string;
+            slug: string;
+            title: string;
+            route: string;
+            order: number;
+            /** @description This page's DOM fragment. Execute the revision's verified previewHtml for the complete shared runtime. */
+            content: string;
+            sha256: string;
         };
         PrototypePutActionOperation: {
             /**
@@ -6572,6 +7031,142 @@ export interface components {
             operations: components["schemas"]["PrototypePatchOperations"];
             resultingChecksum: components["schemas"]["PrototypePatchChecksum"];
         };
+        /** @enum {string} */
+        PrototypePlanStatus: "draft" | "approved" | "generating" | "ready" | "failed" | "cancelled";
+        PrototypePlan: {
+            id: string;
+            projectId: string;
+            /** @default null */
+            rootPlanId: string | null;
+            /** @default null */
+            sourceRevisionId: string | null;
+            /** @default 1 */
+            contentVersion: number;
+            status: components["schemas"]["PrototypePlanStatus"];
+            prompt: string;
+            title: string;
+            revision: components["schemas"]["Revision"];
+            createdById: string;
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            updatedAt: string;
+            failure: {
+                code: string;
+                detail: string;
+            } | null;
+        };
+        PrototypePlanList: components["schemas"]["PrototypePlan"][];
+        /** @enum {string} */
+        PrototypeRevisionStatus: "queued" | "generating" | "ready" | "confirmed" | "rejected" | "failed" | "cancelled";
+        PrototypePublicRevision: {
+            id: string;
+            projectId: string;
+            planId: string;
+            /** @default 1 */
+            version: number;
+            /** @default null */
+            sourceRevisionId: string | null;
+            revision: components["schemas"]["Revision"];
+            status: components["schemas"]["PrototypeRevisionStatus"];
+            title: string;
+            pages: components["schemas"]["PrototypePage"][];
+            /**
+             * @description The same verified immutable HTML document used by the private revision preview.
+             * @default null
+             */
+            previewHtml: string | null;
+            documentSha256: string;
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            updatedAt: string;
+            failure: {
+                code: string;
+                detail: string;
+            } | null;
+        };
+        /** @enum {string} */
+        PrototypeShareStatus: "active" | "revoked" | "expired";
+        PrototypeShare: {
+            id: string;
+            projectId: string;
+            revisionId: string;
+            revision: components["schemas"]["Revision"];
+            status: components["schemas"]["PrototypeShareStatus"];
+            /** Format: uri */
+            url: string;
+            /** Format: date-time */
+            expiresAt: string | null;
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            revokedAt: string | null;
+        };
+        PrototypePublicShare: {
+            share: components["schemas"]["PrototypeShare"];
+            revision: components["schemas"]["PrototypePublicRevision"];
+        };
+        /** @description Visual Prototype revisions contain unique page ids and bounded per-page DOM fragments; the complete executable document is provided once as verified previewHtml. */
+        PrototypeRevision: {
+            id: string;
+            projectId: string;
+            planId: string;
+            /** @default 1 */
+            version: number;
+            /** @default null */
+            sourceRevisionId: string | null;
+            revision: components["schemas"]["Revision"];
+            status: components["schemas"]["PrototypeRevisionStatus"];
+            title: string;
+            documentSha256: string;
+            createdById: string;
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            updatedAt: string;
+            failure: {
+                code: string;
+                detail: string;
+            } | null;
+            pages: components["schemas"]["PrototypePage"][];
+            /**
+             * @description The verified immutable HTML document, loaded only by a direct revision read; null while pending or in mutation responses.
+             * @default null
+             */
+            previewHtml: string | null;
+        };
+        PrototypeRevisionDiff: {
+            sourceRevisionId: string | null;
+            pages: {
+                pageId: string;
+                /** @enum {string} */
+                change: "added" | "removed" | "changed" | "unchanged";
+            }[];
+        };
+        PrototypeRevisionSummary: {
+            id: string;
+            projectId: string;
+            planId: string;
+            /** @default 1 */
+            version: number;
+            /** @default null */
+            sourceRevisionId: string | null;
+            revision: components["schemas"]["Revision"];
+            status: components["schemas"]["PrototypeRevisionStatus"];
+            title: string;
+            documentSha256: string;
+            createdById: string;
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            updatedAt: string;
+            failure: {
+                code: string;
+                detail: string;
+            } | null;
+        };
+        PrototypeRevisionList: components["schemas"]["PrototypeRevisionSummary"][];
         PrototypeScreenProjection: {
             /** @enum {string} */
             protocol: "workbench.prototype-screen-projection.v1";
@@ -6587,6 +7182,7 @@ export interface components {
             bindings: components["schemas"]["PrototypeBinding"][];
             motions: components["schemas"]["PrototypeMotion"][];
         };
+        PrototypeShareList: components["schemas"]["PrototypeShare"][];
         PrototypeSubmitValue: {
             bindingId: string;
             nodeId: string;
@@ -6604,13 +7200,15 @@ export interface components {
             screenId: string;
             values: components["schemas"]["PrototypeSubmitValue"][];
         };
+        PrototypeWorkflowActionRequest: {
+            reason?: string;
+        };
         PublicArtifactContentBlob: {
             mediaType: string;
             byteSize: number;
             sha256: string;
             fileName: string | null;
         };
-        /** @description Public PRD and prototype blob details require schemaVersion 1 without exposing Blob identity. */
         PublicArtifactVersionBlobDetail: {
             artifactId: string;
             artifactVersionId: string;
@@ -6622,176 +7220,12 @@ export interface components {
             /** Format: date-time */
             createdAt: string;
             /** @enum {string} */
-            kind: "prd" | "prototype" | "image" | "code" | "document" | "data";
-            schemaVersion: number;
+            kind: "prototype";
+            /** @enum {number} */
+            schemaVersion: 1;
             /** @enum {string} */
             contentMode: "blob";
             blob: components["schemas"]["PublicArtifactContentBlob"];
-        };
-        PublicArtifactVersionInlineCodeDetail: {
-            artifactId: string;
-            artifactVersionId: string;
-            version: number;
-            /** @enum {string} */
-            status: "ready";
-            checksum: string;
-            citations: components["schemas"]["ArtifactCitation"][];
-            /** Format: date-time */
-            createdAt: string;
-            /** @enum {string} */
-            contentMode: "inline";
-            /**
-             * @description discriminator enum property added by openapi-typescript
-             * @enum {string}
-             */
-            kind: "code";
-            schemaVersion: number;
-            content: components["schemas"]["JsonValue"];
-        };
-        PublicArtifactVersionInlineDataDetail: {
-            artifactId: string;
-            artifactVersionId: string;
-            version: number;
-            /** @enum {string} */
-            status: "ready";
-            checksum: string;
-            citations: components["schemas"]["ArtifactCitation"][];
-            /** Format: date-time */
-            createdAt: string;
-            /** @enum {string} */
-            contentMode: "inline";
-            /**
-             * @description discriminator enum property added by openapi-typescript
-             * @enum {string}
-             */
-            kind: "data";
-            schemaVersion: number;
-            content: components["schemas"]["JsonValue"];
-        };
-        PublicDesignSystemFontAsset: {
-            id: string;
-            name: string;
-            mediaType: string;
-            byteSize: number;
-            sha256: string;
-            /**
-             * @description discriminator enum property added by openapi-typescript
-             * @enum {string}
-             */
-            kind: "font";
-            family: string;
-            weight: number;
-            /** @enum {string} */
-            style: "normal" | "italic";
-        };
-        PublicDesignSystemImageAsset: {
-            id: string;
-            name: string;
-            mediaType: string;
-            byteSize: number;
-            sha256: string;
-            /**
-             * @description discriminator enum property added by openapi-typescript
-             * @enum {string}
-             */
-            kind: "image";
-            width: number;
-            height: number;
-        };
-        PublicDesignSystemAsset: components["schemas"]["PublicDesignSystemImageAsset"] | components["schemas"]["PublicDesignSystemFontAsset"];
-        /** @description Public Design System projections preserve the same semantic graph after private Blob identities are removed. */
-        PublicDesignSystemDocument: {
-            /** @enum {string} */
-            protocol: "workbench.design-system.v1";
-            documentId: string;
-            title: string;
-            tokens: components["schemas"]["DesignSystemToken"][];
-            assets: components["schemas"]["PublicDesignSystemAsset"][];
-            principles: components["schemas"]["DesignSystemPrinciple"][];
-            guidelines: components["schemas"]["DesignSystemGuideline"][];
-            components: components["schemas"]["DesignSystemComponent"][];
-        };
-        PublicArtifactVersionInlineDesignSystemDetail: {
-            artifactId: string;
-            artifactVersionId: string;
-            version: number;
-            /** @enum {string} */
-            status: "ready";
-            checksum: string;
-            citations: components["schemas"]["ArtifactCitation"][];
-            /** Format: date-time */
-            createdAt: string;
-            /** @enum {string} */
-            contentMode: "inline";
-            /**
-             * @description discriminator enum property added by openapi-typescript
-             * @enum {string}
-             */
-            kind: "design_system";
-            /** @enum {number} */
-            schemaVersion: 1;
-            content: components["schemas"]["PublicDesignSystemDocument"];
-        };
-        PublicArtifactVersionInlineDocumentDetail: {
-            artifactId: string;
-            artifactVersionId: string;
-            version: number;
-            /** @enum {string} */
-            status: "ready";
-            checksum: string;
-            citations: components["schemas"]["ArtifactCitation"][];
-            /** Format: date-time */
-            createdAt: string;
-            /** @enum {string} */
-            contentMode: "inline";
-            /**
-             * @description discriminator enum property added by openapi-typescript
-             * @enum {string}
-             */
-            kind: "document";
-            schemaVersion: number;
-            content: components["schemas"]["JsonValue"];
-        };
-        PublicArtifactVersionInlineImageDetail: {
-            artifactId: string;
-            artifactVersionId: string;
-            version: number;
-            /** @enum {string} */
-            status: "ready";
-            checksum: string;
-            citations: components["schemas"]["ArtifactCitation"][];
-            /** Format: date-time */
-            createdAt: string;
-            /** @enum {string} */
-            contentMode: "inline";
-            /**
-             * @description discriminator enum property added by openapi-typescript
-             * @enum {string}
-             */
-            kind: "image";
-            schemaVersion: number;
-            content: components["schemas"]["JsonValue"];
-        };
-        PublicArtifactVersionInlinePrdDetail: {
-            artifactId: string;
-            artifactVersionId: string;
-            version: number;
-            /** @enum {string} */
-            status: "ready";
-            checksum: string;
-            citations: components["schemas"]["ArtifactCitation"][];
-            /** Format: date-time */
-            createdAt: string;
-            /** @enum {string} */
-            contentMode: "inline";
-            /**
-             * @description discriminator enum property added by openapi-typescript
-             * @enum {string}
-             */
-            kind: "prd";
-            /** @enum {number} */
-            schemaVersion: 1;
-            content: components["schemas"]["PrdDocumentV1"];
         };
         PublicPrototypeFontAsset: {
             id: string;
@@ -6855,17 +7289,26 @@ export interface components {
             createdAt: string;
             /** @enum {string} */
             contentMode: "inline";
-            /**
-             * @description discriminator enum property added by openapi-typescript
-             * @enum {string}
-             */
+            /** @enum {string} */
             kind: "prototype";
             /** @enum {number} */
             schemaVersion: 1;
             content: components["schemas"]["PublicPrototypeDocument"];
         };
-        PublicArtifactVersionInlineDetail: components["schemas"]["PublicArtifactVersionInlinePrdDetail"] | components["schemas"]["PublicArtifactVersionInlinePrototypeDetail"] | components["schemas"]["PublicArtifactVersionInlineDesignSystemDetail"] | components["schemas"]["PublicArtifactVersionInlineImageDetail"] | components["schemas"]["PublicArtifactVersionInlineCodeDetail"] | components["schemas"]["PublicArtifactVersionInlineDocumentDetail"] | components["schemas"]["PublicArtifactVersionInlineDataDetail"];
-        PublicArtifactVersionInlinePrdV2Detail: {
+        PublicSourcePrototypeDocument: {
+            /** @enum {string} */
+            protocol: "workbench.prototype-source.v1";
+            documentId: string;
+            title: string;
+            revision: number;
+            summary: string;
+            entryFile: components["schemas"]["SourcePrototypePath"];
+            pages: components["schemas"]["SourcePrototypePage"][];
+            /** @default [] */
+            assets: string[];
+            build: components["schemas"]["SourcePrototypeBuild"];
+        };
+        PublicArtifactVersionInlineSourcePrototypeDetail: {
             artifactId: string;
             artifactVersionId: string;
             version: number;
@@ -6878,30 +7321,56 @@ export interface components {
             /** @enum {string} */
             contentMode: "inline";
             /** @enum {string} */
-            kind: "prd";
+            kind: "prototype";
             /** @enum {number} */
             schemaVersion: 2;
-            content: components["schemas"]["PrdDocumentV2"];
+            content: components["schemas"]["PublicSourcePrototypeDocument"];
         };
-        PublicArtifactVersionInlinePrdV3Detail: {
-            artifactId: string;
-            artifactVersionId: string;
-            version: number;
+        PublicArtifactVersionInlineDetail: components["schemas"]["PublicArtifactVersionInlinePrototypeDetail"] | components["schemas"]["PublicArtifactVersionInlineSourcePrototypeDetail"];
+        PublicArtifactVersionDetail: components["schemas"]["PublicArtifactVersionInlinePrototypeDetail"] | components["schemas"]["PublicArtifactVersionInlineSourcePrototypeDetail"] | components["schemas"]["PublicArtifactVersionBlobDetail"];
+        PublicDesignSystemFontAsset: {
+            id: string;
+            name: string;
+            mediaType: string;
+            byteSize: number;
+            sha256: string;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            kind: "font";
+            family: string;
+            weight: number;
             /** @enum {string} */
-            status: "ready";
-            checksum: string;
-            citations: components["schemas"]["ArtifactCitation"][];
-            /** Format: date-time */
-            createdAt: string;
-            /** @enum {string} */
-            contentMode: "inline";
-            /** @enum {string} */
-            kind: "prd";
-            /** @enum {number} */
-            schemaVersion: 3;
-            content: components["schemas"]["PrdDocumentV3"];
+            style: "normal" | "italic";
         };
-        PublicArtifactVersionDetail: components["schemas"]["PublicArtifactVersionInlineDetail"] | components["schemas"]["PublicArtifactVersionInlinePrdV2Detail"] | components["schemas"]["PublicArtifactVersionInlinePrdV3Detail"] | components["schemas"]["PublicArtifactVersionBlobDetail"];
+        PublicDesignSystemImageAsset: {
+            id: string;
+            name: string;
+            mediaType: string;
+            byteSize: number;
+            sha256: string;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            kind: "image";
+            width: number;
+            height: number;
+        };
+        PublicDesignSystemAsset: components["schemas"]["PublicDesignSystemImageAsset"] | components["schemas"]["PublicDesignSystemFontAsset"];
+        /** @description Public Design System projections preserve the same semantic graph after private Blob identities are removed. */
+        PublicDesignSystemDocument: {
+            /** @enum {string} */
+            protocol: "workbench.design-system.v1";
+            documentId: string;
+            title: string;
+            tokens: components["schemas"]["DesignSystemToken"][];
+            assets: components["schemas"]["PublicDesignSystemAsset"][];
+            principles: components["schemas"]["DesignSystemPrinciple"][];
+            guidelines: components["schemas"]["DesignSystemGuideline"][];
+            components: components["schemas"]["DesignSystemComponent"][];
+        };
         PublicProjectReleaseArtifactPin: {
             position: number;
             artifactId: string;
@@ -6948,11 +7417,10 @@ export interface components {
             /** Format: date-time */
             updatedAt: string;
         };
-        /** @enum {string} */
-        ShareScope: "view" | "remix";
         PublicShare: {
             shareId: string;
-            scope: components["schemas"]["ShareScope"];
+            /** @enum {string} */
+            scope: "view";
             /** Format: date-time */
             expiresAt: string | null;
             release: components["schemas"]["PublicProjectRelease"];
@@ -6970,6 +7438,11 @@ export interface components {
             /** @enum {string} */
             expectedStatus: "candidate" | "poc" | "adopted";
         };
+        RevisePrototypeRevisionRequest: {
+            /** @description Feedback ids must be unique and all belong to the selected source revision. Uniqueness is enforced by Zod; ownership and open status are enforced in the transaction. */
+            feedbackIds: string[];
+            prompt?: string;
+        };
         RevokeProjectShareGrantsResponse: {
             projectId: string;
             /** @enum {number} */
@@ -6978,13 +7451,19 @@ export interface components {
         RotateShareGrantRequest: {
             releaseId: string;
             artifactVersionId?: string;
-            scope?: components["schemas"]["ShareScope"] & unknown;
+            /**
+             * @default view
+             * @enum {string}
+             */
+            scope: "view";
             /**
              * Format: date-time
              * @default null
              */
             expiresAt: string | null;
         };
+        /** @enum {string} */
+        ShareScope: "view" | "remix";
         /** @enum {string} */
         ShareStatus: "active" | "revoked" | "expired";
         /** @description Share status and revocation timestamps agree; enforced by the runtime Zod contract. */
@@ -7166,45 +7645,14 @@ export interface components {
                 target: components["schemas"]["RunArtifactTarget"];
             };
         };
-        RuntimeArtifactDraftPrdV1Revision: {
-            title: string;
-            citations: components["schemas"]["ArtifactCitation"][];
-            /** @enum {string} */
-            kind: "prd";
-            /** @enum {number} */
-            schemaVersion: 1;
-            content: components["schemas"]["PrdDocumentV1"];
-            operation: {
-                /** @enum {string} */
-                kind: "revise";
-                target: components["schemas"]["RunArtifactTarget"];
-            };
-        };
-        RuntimeArtifactDraftPrdV2: {
-            title: string;
-            citations: components["schemas"]["ArtifactCitation"][];
-            /** @enum {string} */
-            kind: "prd";
-            /** @enum {number} */
-            schemaVersion: 2;
-            content: components["schemas"]["PrdDocumentV2"];
-            operation: {
-                /** @enum {string} */
-                kind: "create";
-            } | {
-                /** @enum {string} */
-                kind: "revise";
-                target: components["schemas"]["RunArtifactTarget"];
-            };
-        };
-        RuntimeArtifactDraftPrdV3: {
+        RuntimeArtifactDraftPrd: {
             title: string;
             citations: components["schemas"]["ArtifactCitation"][];
             /** @enum {string} */
             kind: "prd";
             /** @enum {number} */
             schemaVersion: 3;
-            content: components["schemas"]["PrdDocumentV3"];
+            content: components["schemas"]["PrdDocument"];
             operation: {
                 /** @enum {string} */
                 kind: "create";
@@ -7214,7 +7662,6 @@ export interface components {
                 target: components["schemas"]["RunArtifactTarget"];
             };
         };
-        RuntimeArtifactDraftPrd: components["schemas"]["RuntimeArtifactDraftPrdV1Revision"] | components["schemas"]["RuntimeArtifactDraftPrdV2"] | components["schemas"]["RuntimeArtifactDraftPrdV3"];
         RuntimeArtifactDraftPrototype: {
             title: string;
             citations: components["schemas"]["ArtifactCitation"][];
@@ -7286,7 +7733,7 @@ export interface components {
             tokens: components["schemas"]["DesignPresetTokens"];
         };
         RuntimeMaterializedDesignStyleSnapshot: components["schemas"]["RuntimeDesignStyleSnapshot"] | components["schemas"]["RuntimePresetDesignStyleSnapshot"];
-        /** @description Each runtime model declares a non-empty set of unique Workbench workflows; enforced by the runtime Zod contract and Run admission policy. */
+        /** @description Unique Workbench workflows accepted for this runtime model */
         RuntimeModelSupportedWorkflows: components["schemas"]["RunWorkflow"][];
         RuntimeModel: {
             id: string;
@@ -7367,53 +7814,10 @@ export interface components {
             artifactTargets: components["schemas"]["RunArtifactTarget"][];
             /** @default [] */
             requestedArtifactKinds: components["schemas"]["RuntimeRequestedArtifactKind"][];
-            /** @default null */
-            canvasSnapshot: {
-                /** @enum {string} */
-                protocol: "workbench.canvas-snapshot.v1";
-                /** @description Canvas entity ids are bounded opaque identifiers and cannot be URI schemes; enforced by the runtime Zod contract. */
-                projectId: string;
-                /** @description Canvas entity ids are bounded opaque identifiers and cannot be URI schemes; enforced by the runtime Zod contract. */
-                threadId: string;
-                runId: string | null;
-                /** @description Canvas entity ids are bounded opaque identifiers and cannot be URI schemes; enforced by the runtime Zod contract. */
-                boardId: string;
-                /** @description Canvas browser session ids are bounded opaque identifiers and cannot be URI schemes; enforced by the runtime Zod contract. */
-                clientSessionId: string;
-                projectSessionGeneration: components["schemas"]["Revision"];
-                boardRevision: components["schemas"]["Revision"];
-                canvasStateRevision: components["schemas"]["Revision"];
-                /** Format: date-time */
-                capturedAt: string;
-                /** Format: date-time */
-                expiresAt: string;
-                viewport: components["schemas"]["CanvasViewport"];
-                screens: components["schemas"]["CanvasScreenSummary"][];
-                visibleScreens: components["schemas"]["CanvasAgentScreenReference"][];
-                selectedScreens: components["schemas"]["CanvasAgentScreenReference"][];
-            } | null;
-        };
-        /** @description Redesign requires a ready Import Source; Edit requires an Artifact target; Generate accepts explicit non-empty screen targets only when prototype is requested; Redesign and Ideate forbid targets. Enforced by the runtime Zod contract. */
-        StartRunRequest: {
-            prompt: string;
-            modelId: string;
-            workflow: components["schemas"]["RunWorkflow"];
             /**
+             * @description Canvas snapshots use unique screen references and only expose references declared by the snapshot; enforced by the runtime Zod contract.
              * @default null
-             * @enum {string|null}
              */
-            generationIntent: "followup-design" | "interactive-prototype" | null;
-            targetSurface: components["schemas"]["RunTargetSurface"];
-            designStyle: components["schemas"]["RunDesignStyle"];
-            sourceIds?: components["schemas"]["RunSourceIds"];
-            /**
-             * @description Immutable ready ArtifactVersion selections in runtime target order; Generate Prototype requires one or more explicit screen ids on every source target
-             * @default []
-             */
-            artifactTargets: components["schemas"]["RunArtifactTarget"][];
-            /** @default [] */
-            requestedArtifactKinds: components["schemas"]["RuntimeRequestedArtifactKind"][];
-            /** @default null */
             canvasSnapshot: {
                 /** @enum {string} */
                 protocol: "workbench.canvas-snapshot.v1";
@@ -7421,6 +7825,7 @@ export interface components {
                 projectId: string;
                 /** @description Canvas entity ids are bounded opaque identifiers and cannot be URI schemes; enforced by the runtime Zod contract. */
                 threadId: string;
+                /** @description Canvas entity ids are bounded opaque identifiers and cannot be URI schemes; enforced by the runtime Zod contract. */
                 runId: string | null;
                 /** @description Canvas entity ids are bounded opaque identifiers and cannot be URI schemes; enforced by the runtime Zod contract. */
                 boardId: string;
@@ -7595,6 +8000,12 @@ export interface components {
         ProjectId: string;
         PrincipalId: string;
         InvitationId: string;
+        PlanId: string;
+        PrototypeRevisionId: string;
+        PrototypeFeedbackId: string;
+        PrototypeShareId: string;
+        PrototypeExportId: string;
+        PrototypeShareToken: string;
         /** @enum {string} */
         KnowledgeProfileType: "embedding" | "retrieval";
         ThreadId: string;
@@ -7614,7 +8025,6 @@ export interface components {
         ReleaseId: string;
         ShareId: string;
         ExportId: string;
-        ExportDeliveryId: string;
         PreviewId: string;
         PartNumber: number;
         ByteRange: string;
@@ -7649,6 +8059,12 @@ export interface components {
         ProjectId: components["schemas"]["ProjectId"];
         PrincipalId: components["schemas"]["PrincipalId"];
         InvitationId: components["schemas"]["InvitationId"];
+        PlanId: components["schemas"]["PlanId"];
+        PrototypeRevisionId: components["schemas"]["PrototypeRevisionId"];
+        PrototypeFeedbackId: components["schemas"]["PrototypeFeedbackId"];
+        PrototypeShareId: components["schemas"]["PrototypeShareId"];
+        PrototypeExportId: components["schemas"]["PrototypeExportId"];
+        PrototypeShareToken: components["schemas"]["PrototypeShareToken"];
         KnowledgeProfileType: components["schemas"]["KnowledgeProfileType"];
         KnowledgeProfileId: components["schemas"]["KnowledgeProfileId"];
         ThreadId: components["schemas"]["ThreadId"];
@@ -7661,12 +8077,13 @@ export interface components {
         ImportSourceId: components["schemas"]["ImportSourceId"];
         UploadSessionId: components["schemas"]["UploadSessionId"];
         ApprovalId: components["schemas"]["ApprovalId"];
+        /** @description Canvas entity ids are bounded opaque identifiers and cannot be URI schemes; enforced by the runtime Zod contract. */
         CommandId: components["schemas"]["CommandId"];
+        /** @description Canvas entity ids are bounded opaque identifiers and cannot be URI schemes; enforced by the runtime Zod contract. */
         VisualCapabilityId: components["schemas"]["VisualCapabilityId"];
         ReleaseId: components["schemas"]["ReleaseId"];
         ShareId: components["schemas"]["ShareId"];
         ExportId: components["schemas"]["ExportId"];
-        ExportDeliveryId: components["schemas"]["ExportDeliveryId"];
         PreviewId: components["schemas"]["PreviewId"];
         ShareToken: components["schemas"]["ShareToken"];
         PartNumber: components["schemas"]["PartNumber"];
@@ -7857,7 +8274,7 @@ export interface operations {
                 cursor?: string;
                 limit?: number;
                 kind: components["schemas"]["KnowledgeProfileKind"];
-                status?: "candidate" | "poc" | "adopted" | "retired";
+                status?: components["schemas"]["KnowledgeProfileStatus"];
             };
             header?: never;
             path?: never;
@@ -8004,7 +8421,7 @@ export interface operations {
             query?: {
                 cursor?: string;
                 limit?: number;
-                kind?: "embedding" | "retrieval";
+                kind?: components["schemas"]["KnowledgeProfileKind"];
                 profileId?: string;
             };
             header?: never;
@@ -8101,6 +8518,7 @@ export interface operations {
                 "If-None-Match"?: components["parameters"]["IfNoneMatch"];
             };
             path: {
+                /** @description Canvas entity ids are bounded opaque identifiers and cannot be URI schemes; enforced by the runtime Zod contract. */
                 visualCapabilityId: components["parameters"]["VisualCapabilityId"];
             };
             cookie?: never;
@@ -8198,6 +8616,7 @@ export interface operations {
             header?: never;
             path: {
                 projectId: components["parameters"]["ProjectId"];
+                /** @description Canvas entity ids are bounded opaque identifiers and cannot be URI schemes; enforced by the runtime Zod contract. */
                 commandId: components["parameters"]["CommandId"];
             };
             cookie?: never;
@@ -8629,7 +9048,7 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Invitation accepted atomically into its Workspace and Project */
+            /** @description Invitation accepted atomically into its Project without granting Workspace membership */
             200: {
                 headers: {
                     ETag: components["headers"]["ETag"];
@@ -9170,6 +9589,57 @@ export interface operations {
             404: components["responses"]["Problem"];
         };
     };
+    createSourcePrototypePreviewToken: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                artifactId: components["parameters"]["ArtifactId"];
+                artifactVersionId: components["parameters"]["ArtifactVersionId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Short-lived isolated preview for an authorized frozen source prototype */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExportPreviewTokenResponse"];
+                };
+            };
+            400: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+        };
+    };
+    createPublicSourcePrototypePreviewToken: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                shareToken: components["parameters"]["ShareToken"];
+                artifactId: components["parameters"]["ArtifactId"];
+                artifactVersionId: components["parameters"]["ArtifactVersionId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Short-lived share-bound isolated preview, rechecked for revocation on every access */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExportPreviewTokenResponse"];
+                };
+            };
+            400: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+        };
+    };
     getPublicSharedArtifactVersion: {
         parameters: {
             query?: never;
@@ -9312,39 +9782,6 @@ export interface operations {
             404: components["responses"]["Problem"];
             416: components["responses"]["RangeProblem"];
             503: components["responses"]["Problem"];
-        };
-    };
-    createProjectRemix: {
-        parameters: {
-            query?: never;
-            header: {
-                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
-            };
-            path: {
-                shareToken: components["parameters"]["ShareToken"];
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["CreateProjectRemixRequest"];
-            };
-        };
-        responses: {
-            /** @description New isolated Project remixed from the immutable shared release */
-            201: {
-                headers: {
-                    ETag: components["headers"]["ETag"];
-                    Location?: string;
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["CreateProjectRemixResponse"];
-                };
-            };
-            401: components["responses"]["Problem"];
-            404: components["responses"]["Problem"];
-            409: components["responses"]["Problem"];
         };
     };
     getExportCapabilities: {
@@ -9648,182 +10085,6 @@ export interface operations {
             502: components["responses"]["Problem"];
         };
     };
-    listExternalExportDeliveries: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                exportId: components["parameters"]["ExportId"];
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description External delivery audit records for one immutable Export output */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ExternalExportDeliveryList"];
-                };
-            };
-            404: components["responses"]["Problem"];
-        };
-    };
-    createExternalExportDelivery: {
-        parameters: {
-            query?: never;
-            header: {
-                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
-            };
-            path: {
-                exportId: components["parameters"]["ExportId"];
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["CreateExternalExportDeliveryRequest"];
-            };
-        };
-        responses: {
-            /** @description External delivery prepared and awaiting explicit user confirmation */
-            201: {
-                headers: {
-                    ETag: components["headers"]["ETag"];
-                    Location?: string;
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ExternalExportDelivery"];
-                };
-            };
-            400: components["responses"]["Problem"];
-            404: components["responses"]["Problem"];
-            409: components["responses"]["Problem"];
-        };
-    };
-    getExternalExportDelivery: {
-        parameters: {
-            query?: never;
-            header?: {
-                "If-None-Match"?: components["parameters"]["IfNoneMatch"];
-            };
-            path: {
-                deliveryId: components["parameters"]["ExportDeliveryId"];
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description External delivery audit snapshot */
-            200: {
-                headers: {
-                    ETag: components["headers"]["ETag"];
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ExternalExportDelivery"];
-                };
-            };
-            /** @description External delivery revision has not changed */
-            304: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            404: components["responses"]["Problem"];
-        };
-    };
-    confirmExternalExportDelivery: {
-        parameters: {
-            query?: never;
-            header: {
-                "If-Match": components["parameters"]["IfMatch"];
-            };
-            path: {
-                deliveryId: components["parameters"]["ExportDeliveryId"];
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Explicitly confirmed external delivery queued */
-            202: {
-                headers: {
-                    ETag: components["headers"]["ETag"];
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ExternalExportDelivery"];
-                };
-            };
-            404: components["responses"]["Problem"];
-            409: components["responses"]["Problem"];
-            412: components["responses"]["Problem"];
-            428: components["responses"]["Problem"];
-        };
-    };
-    retryExternalExportDelivery: {
-        parameters: {
-            query?: never;
-            header: {
-                "If-Match": components["parameters"]["IfMatch"];
-            };
-            path: {
-                deliveryId: components["parameters"]["ExportDeliveryId"];
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Failed external delivery explicitly retried */
-            202: {
-                headers: {
-                    ETag: components["headers"]["ETag"];
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ExternalExportDelivery"];
-                };
-            };
-            404: components["responses"]["Problem"];
-            409: components["responses"]["Problem"];
-            412: components["responses"]["Problem"];
-            428: components["responses"]["Problem"];
-        };
-    };
-    cancelExternalExportDelivery: {
-        parameters: {
-            query?: never;
-            header: {
-                "If-Match": components["parameters"]["IfMatch"];
-            };
-            path: {
-                deliveryId: components["parameters"]["ExportDeliveryId"];
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description External delivery cancellation accepted or already terminal */
-            202: {
-                headers: {
-                    ETag: components["headers"]["ETag"];
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ExternalExportDelivery"];
-                };
-            };
-            404: components["responses"]["Problem"];
-            409: components["responses"]["Problem"];
-            412: components["responses"]["Problem"];
-            428: components["responses"]["Problem"];
-        };
-    };
     listDesignSystemCatalog: {
         parameters: {
             query?: {
@@ -9922,7 +10183,7 @@ export interface operations {
             query?: {
                 cursor?: string;
                 limit?: number;
-                kind?: "prd" | "prototype" | "image" | "code" | "document" | "data" | "design_system";
+                kind?: components["schemas"]["ArtifactKind"];
             };
             header?: never;
             path: {
@@ -11258,6 +11519,840 @@ export interface operations {
                 };
             };
             404: components["responses"]["Problem"];
+        };
+    };
+    listPrototypePlans: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectId: components["parameters"]["ProjectId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Read persisted prototype history */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PrototypePlanList"];
+                };
+            };
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+        };
+    };
+    createPrototypePlan: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                projectId: components["parameters"]["ProjectId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreatePrototypePlanRequest"];
+            };
+        };
+        responses: {
+            /** @description Create an idempotent visual prototype plan */
+            201: {
+                headers: {
+                    ETag: components["headers"]["ETag"];
+                    Location?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PrototypePlan"];
+                };
+            };
+            400: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            409: components["responses"]["Problem"];
+        };
+    };
+    getPrototypeRevision: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectId: components["parameters"]["ProjectId"];
+                revisionId: components["parameters"]["PrototypeRevisionId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Read persisted prototype history */
+            200: {
+                headers: {
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PrototypeRevision"];
+                };
+            };
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+        };
+    };
+    listPrototypeFeedback: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectId: components["parameters"]["ProjectId"];
+                revisionId: components["parameters"]["PrototypeRevisionId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Read persisted prototype history */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PrototypeFeedbackList"];
+                };
+            };
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+        };
+    };
+    createPrototypeFeedback: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                projectId: components["parameters"]["ProjectId"];
+                revisionId: components["parameters"]["PrototypeRevisionId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreatePrototypeFeedbackRequest"];
+            };
+        };
+        responses: {
+            /** @description Create an anchored prototype feedback item */
+            201: {
+                headers: {
+                    ETag: components["headers"]["ETag"];
+                    Location?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PrototypeFeedback"];
+                };
+            };
+            400: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            409: components["responses"]["Problem"];
+        };
+    };
+    listPrototypeShares: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectId: components["parameters"]["ProjectId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Read persisted prototype history */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PrototypeShareList"];
+                };
+            };
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+        };
+    };
+    createPrototypeShare: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                projectId: components["parameters"]["ProjectId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreatePrototypeShareRequest"];
+            };
+        };
+        responses: {
+            /** @description Create an expiring anonymous prototype share */
+            201: {
+                headers: {
+                    ETag: components["headers"]["ETag"];
+                    Location?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PrototypeShare"];
+                };
+            };
+            400: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            409: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    listPrototypeExports: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectId: components["parameters"]["ProjectId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Read persisted prototype history */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PrototypeExportList"];
+                };
+            };
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+        };
+    };
+    createPrototypeExport: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                projectId: components["parameters"]["ProjectId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreatePrototypeExportRequest"];
+            };
+        };
+        responses: {
+            /** @description Queue a real HTML or React prototype export */
+            202: {
+                headers: {
+                    ETag: components["headers"]["ETag"];
+                    Location?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PrototypeExport"];
+                };
+            };
+            400: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            409: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    getPrototypeRevisionDiff: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectId: components["parameters"]["ProjectId"];
+                revisionId: components["parameters"]["PrototypeRevisionId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Compare semantic page changes against the pinned source revision */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PrototypeRevisionDiff"];
+                };
+            };
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+        };
+    };
+    retryPrototypePlan: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                "If-Match": components["parameters"]["IfMatch"];
+            };
+            path: {
+                projectId: components["parameters"]["ProjectId"];
+                planId: components["parameters"]["PlanId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PrototypeWorkflowActionRequest"];
+            };
+        };
+        responses: {
+            /** @description Retry terminal generation with the same pinned runtime context */
+            202: {
+                headers: {
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PrototypePlan"];
+                };
+            };
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            409: components["responses"]["Problem"];
+            412: components["responses"]["Problem"];
+            428: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    revisePrototype: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                "If-Match": components["parameters"]["IfMatch"];
+            };
+            path: {
+                projectId: components["parameters"]["ProjectId"];
+                revisionId: components["parameters"]["PrototypeRevisionId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RevisePrototypeRevisionRequest"];
+            };
+        };
+        responses: {
+            /** @description Generate a new immutable version from anchored feedback */
+            202: {
+                headers: {
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PrototypePlan"];
+                };
+            };
+            400: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            409: components["responses"]["Problem"];
+            412: components["responses"]["Problem"];
+            428: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    approvePrototypePlan: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                "If-Match": components["parameters"]["IfMatch"];
+            };
+            path: {
+                projectId: components["parameters"]["ProjectId"];
+                planId: components["parameters"]["PlanId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PrototypeWorkflowActionRequest"];
+            };
+        };
+        responses: {
+            /** @description Approve a plan and enqueue the Temporal generation workflow */
+            202: {
+                headers: {
+                    ETag: components["headers"]["ETag"];
+                    Location?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PrototypePlan"];
+                };
+            };
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            409: components["responses"]["Problem"];
+            412: components["responses"]["Problem"];
+            428: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    getPrototypePlan: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectId: components["parameters"]["ProjectId"];
+                planId: components["parameters"]["PlanId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Get a visual prototype plan and current workflow status */
+            200: {
+                headers: {
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PrototypePlan"];
+                };
+            };
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+        };
+    };
+    listPrototypeRevisions: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectId: components["parameters"]["ProjectId"];
+                planId: components["parameters"]["PlanId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description List visual prototype revision summaries without page content or preview HTML */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PrototypeRevisionList"];
+                };
+            };
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+        };
+    };
+    cancelPrototypePlan: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                "If-Match": components["parameters"]["IfMatch"];
+            };
+            path: {
+                projectId: components["parameters"]["ProjectId"];
+                planId: components["parameters"]["PlanId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PrototypeWorkflowActionRequest"];
+            };
+        };
+        responses: {
+            /** @description Cancel a running visual prototype workflow */
+            202: {
+                headers: {
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PrototypePlan"];
+                };
+            };
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            409: components["responses"]["Problem"];
+            412: components["responses"]["Problem"];
+            428: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    confirmPrototypeRevision: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                "If-Match": components["parameters"]["IfMatch"];
+            };
+            path: {
+                projectId: components["parameters"]["ProjectId"];
+                revisionId: components["parameters"]["PrototypeRevisionId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PrototypeWorkflowActionRequest"];
+            };
+        };
+        responses: {
+            /** @description Confirm a ready visual prototype revision with CAS */
+            200: {
+                headers: {
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PrototypeRevision"];
+                };
+            };
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            409: components["responses"]["Problem"];
+            412: components["responses"]["Problem"];
+            428: components["responses"]["Problem"];
+        };
+    };
+    rejectPrototypeRevision: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                "If-Match": components["parameters"]["IfMatch"];
+            };
+            path: {
+                projectId: components["parameters"]["ProjectId"];
+                revisionId: components["parameters"]["PrototypeRevisionId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PrototypeWorkflowActionRequest"];
+            };
+        };
+        responses: {
+            /** @description Reject a ready visual prototype revision with CAS */
+            200: {
+                headers: {
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PrototypeRevision"];
+                };
+            };
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            409: components["responses"]["Problem"];
+            412: components["responses"]["Problem"];
+            428: components["responses"]["Problem"];
+        };
+    };
+    createPrototypePreviewToken: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectId: components["parameters"]["ProjectId"];
+                revisionId: components["parameters"]["PrototypeRevisionId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Create a short-lived preview capability bound to a project, revision and document checksum */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExportPreviewTokenResponse"];
+                };
+            };
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            409: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    resolvePrototypeFeedback: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                "If-Match": components["parameters"]["IfMatch"];
+            };
+            path: {
+                projectId: components["parameters"]["ProjectId"];
+                feedbackId: components["parameters"]["PrototypeFeedbackId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PrototypeWorkflowActionRequest"];
+            };
+        };
+        responses: {
+            /** @description Resolve a feedback item with CAS */
+            200: {
+                headers: {
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PrototypeFeedback"];
+                };
+            };
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            409: components["responses"]["Problem"];
+            412: components["responses"]["Problem"];
+            428: components["responses"]["Problem"];
+        };
+    };
+    getPublicPrototypeShare: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                token: components["parameters"]["PrototypeShareToken"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Resolve an active anonymous visual prototype share */
+            200: {
+                headers: {
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PrototypePublicShare"];
+                };
+            };
+            404: components["responses"]["Problem"];
+        };
+    };
+    getPrototypePreviewDocument: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                token: components["parameters"]["PrototypeShareToken"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Serve a short-lived isolated prototype preview document */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/html": string;
+                };
+            };
+            404: components["responses"]["Problem"];
+        };
+    };
+    revokePrototypeShare: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                "If-Match": components["parameters"]["IfMatch"];
+            };
+            path: {
+                projectId: components["parameters"]["ProjectId"];
+                shareId: components["parameters"]["ShareId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PrototypeWorkflowActionRequest"];
+            };
+        };
+        responses: {
+            /** @description Revoke a prototype share with CAS */
+            200: {
+                headers: {
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PrototypeShare"];
+                };
+            };
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            409: components["responses"]["Problem"];
+            412: components["responses"]["Problem"];
+            428: components["responses"]["Problem"];
+        };
+    };
+    getPrototypeExport: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectId: components["parameters"]["ProjectId"];
+                exportId: components["parameters"]["ExportId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Get a prototype export and immutable artifact identity */
+            200: {
+                headers: {
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PrototypeExport"];
+                };
+            };
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+        };
+    };
+    downloadPrototypeExport: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectId: components["parameters"]["ProjectId"];
+                exportId: components["parameters"]["ExportId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Stream the immutable completed prototype export artifact */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/octet-stream": string;
+                };
+            };
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            409: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    retryPrototypeExport: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                "If-Match": components["parameters"]["IfMatch"];
+            };
+            path: {
+                projectId: components["parameters"]["ProjectId"];
+                exportId: components["parameters"]["ExportId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PrototypeWorkflowActionRequest"];
+            };
+        };
+        responses: {
+            /** @description Retry a failed prototype export */
+            202: {
+                headers: {
+                    ETag: components["headers"]["ETag"];
+                    Location?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PrototypeExport"];
+                };
+            };
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            409: components["responses"]["Problem"];
+            412: components["responses"]["Problem"];
+            428: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    cancelPrototypeExport: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                "If-Match": components["parameters"]["IfMatch"];
+            };
+            path: {
+                projectId: components["parameters"]["ProjectId"];
+                exportId: components["parameters"]["ExportId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PrototypeWorkflowActionRequest"];
+            };
+        };
+        responses: {
+            /** @description Cancel a queued or building prototype export with CAS */
+            200: {
+                headers: {
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PrototypeExport"];
+                };
+            };
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            409: components["responses"]["Problem"];
+            412: components["responses"]["Problem"];
+            428: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
         };
     };
 }

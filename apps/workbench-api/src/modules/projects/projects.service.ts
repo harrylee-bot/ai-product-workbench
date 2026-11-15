@@ -428,7 +428,7 @@ function isCanonicalIsoDateTime(value: string) {
   return Number.isFinite(timestamp) && new Date(timestamp).toISOString() === value;
 }
 
-export function normalizeProjectQuery(value?: string) {
+function normalizeProjectQuery(value?: string) {
   if (value === undefined) return undefined;
   const normalized = value.trim().replace(/\s+/g, " ");
   if (!normalized) throw validationProblem("q must not be blank");
@@ -436,6 +436,6 @@ export function normalizeProjectQuery(value?: string) {
   return normalized;
 }
 
-export function escapeProjectContainsPattern(value: string) {
+function escapeProjectContainsPattern(value: string) {
   return value.replace(/[\\%_]/g, "\\$&");
 }

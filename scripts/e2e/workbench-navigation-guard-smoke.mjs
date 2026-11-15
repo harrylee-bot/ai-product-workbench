@@ -783,32 +783,17 @@ async function routeWorkbenchApi(route) {
     return json(route, { items: [], nextCursor: null });
   }
   if (method === "GET" && requestPath === "/api/v1/exports/capabilities") {
-    const available = { available: true, authentication: "not_required", reasonCode: null };
-    const authRequired = {
-      available: false,
-      authentication: "required",
-      reasonCode: "EXPORT_EXTERNAL_AUTHENTICATION_REQUIRED",
-    };
+    const available = { available: true, reasonCode: null };
     return json(route, {
       formats: {
         html: available,
         react: available,
-        figma: { available: false, authentication: "not_required", reasonCode: "EXPORT_FIGMA_UNAVAILABLE" },
+        figma: { available: false, reasonCode: "EXPORT_FIGMA_UNAVAILABLE" },
         mcp: available,
         docx: available,
         pdf: available,
       },
       packaging: { single_file: available, zip: available },
-      external: {
-        ai_studio: {
-          available: false,
-          authentication: "not_required",
-          reasonCode: "EXPORT_EXTERNAL_AI_STUDIO_UNAVAILABLE",
-        },
-        netlify: authRequired,
-        lovable: authRequired,
-        bolt: authRequired,
-      },
     });
   }
 

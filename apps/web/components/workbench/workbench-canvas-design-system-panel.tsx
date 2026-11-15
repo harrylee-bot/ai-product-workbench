@@ -11,7 +11,7 @@ const workbenchEase = [0.16, 1, 0.3, 1] as const;
 
 export type WorkbenchCanvasDesignSystemDraft = PrototypeCanvasStyleDraft;
 
-export const workbenchCanvasDesignSystemPalette = [
+const workbenchCanvasDesignSystemPalette = [
   "#121315",
   "#202124",
   "#8758f6",

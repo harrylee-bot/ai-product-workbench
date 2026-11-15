@@ -53,7 +53,6 @@ describe("worker database configuration", () => {
         runtimeExecutionMaximumWallClockMs: 1_800_000,
         runtimeExecutionDeadlineCancelMs: 30_000,
         deerFlowSubmissionTimeoutMs: 120_000,
-        runtimeProviderStateMode: "projection-required",
         runtimeExecutionReconcileIntervalMs: 5_000,
         runtimeExecutionReconcileBatchSize: 100,
         concurrency: 2,
@@ -74,25 +73,22 @@ describe("worker database configuration", () => {
     }
   });
 
-  it.each([
-    "legacy-read",
-    "shadow-verify",
-    "projection-required",
-  ] as const)("accepts the %s Runtime provider-state mode", (mode) => {
+  it.each(["", "projection-required"])("accepts the current projection configuration %s", (mode) => {
     stubMinimumWorkerConfig();
     vi.stubEnv("WORKBENCH_RUNTIME_PROVIDER_STATE_MODE", mode);
-
-    expect(loadWorkerConfig().runtimeProviderStateMode).toBe(mode);
+    expect(() => loadWorkerConfig()).not.toThrow();
   });
 
-  it("rejects an unknown Runtime provider-state mode", () => {
-    stubMinimumWorkerConfig();
-    vi.stubEnv("WORKBENCH_RUNTIME_PROVIDER_STATE_MODE", "implicit-fallback");
-
-    expect(() => loadWorkerConfig()).toThrow(
-      "WORKBENCH_RUNTIME_PROVIDER_STATE_MODE must be one of: legacy-read, shadow-verify, projection-required",
-    );
-  });
+  it.each(["legacy-read", "shadow-verify", "implicit-fallback"])(
+    "rejects unsupported Runtime provider-state mode %s",
+    (mode) => {
+      stubMinimumWorkerConfig();
+      vi.stubEnv("WORKBENCH_RUNTIME_PROVIDER_STATE_MODE", mode);
+      expect(() => loadWorkerConfig()).toThrow(
+        "WORKBENCH_RUNTIME_PROVIDER_STATE_MODE must be projection-required",
+      );
+    },
+  );
 
   it.each([
     ["WORKBENCH_RUNTIME_CONCURRENCY", "65"],

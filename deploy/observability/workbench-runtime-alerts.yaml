@@ -17,7 +17,7 @@ spec:
             summary: Runtime provider-state hit a PostgreSQL transaction timeout
             runbook_url: README.md#provider-state-p2028
         - alert: WorkbenchRuntimeProjectionInvariant
-          expr: increase(workbench_runtime_provider_state_failures_total{operation=~"read|update|shadow-verify",error_code=~"RUNTIME_PROVIDER_STATE_.*"}[5m]) > 0
+          expr: increase(workbench_runtime_provider_state_failures_total{operation=~"read|update",error_code=~"RUNTIME_PROVIDER_STATE_.*"}[5m]) > 0
           for: 0m
           labels: { severity: critical, owner: data }
           annotations:

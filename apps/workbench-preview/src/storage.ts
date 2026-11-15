@@ -21,7 +21,7 @@ type PreviewBlobIdentity = {
   mediaType: string;
 };
 
-export class StagedPreviewHtml {
+class StagedPreviewHtml {
   private claimed = false;
   private disposed = false;
 

@@ -65,9 +65,9 @@ const canvasToolSecret = Buffer.alloc(32, 41).toString("base64url");
 const canvasVisualFixtureBase64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=";
 const runtimeCatalogModelId = "quality";
 const runtimeProviderModel = "fake-quality-model";
-const prdV2DocumentId = "e2e-prd";
-const prdV2WorkOrderName = "Workbench PostgreSQL E2E";
-const prdV2Title = `${prdV2WorkOrderName}需求说明书`;
+const prdDocumentId = "e2e-prd";
+const prdWorkOrderName = "Workbench PostgreSQL E2E";
+const prdTitle = `${prdWorkOrderName}需求说明书`;
 const prdGenerationStageSequence = [
   "collecting-prd-context",
   "structuring-prd",
@@ -142,7 +142,7 @@ let fakeRuntime;
 let controlledKnowledge;
 let localTls;
 let cleanupPromise;
-let prdV2DocumentFixture;
+let prdDocumentFixture;
 
 class LogBuffer {
   constructor(name) {
@@ -174,9 +174,9 @@ try {
   } else {
     await buildWorkspaces();
   }
-  const { prdDocumentV2Schema } = await import("@workbench/workbench-contracts");
-  const { prdDocumentV2Example } = await import("@workbench/workbench-contracts/test-fixtures");
-  prdV2DocumentFixture = prdDocumentV2Schema.parse(buildPrdV2DocumentFixture(prdDocumentV2Example));
+  const { prdDocumentSchema } = await import("@workbench/workbench-contracts");
+  const { prdDocumentV3Example } = await import("@workbench/workbench-contracts/test-fixtures");
+  prdDocumentFixture = prdDocumentSchema.parse(buildPrdDocumentFixture(prdDocumentV3Example));
   await rebuildSchemas();
   await migrateDatabase();
 
@@ -864,7 +864,7 @@ async function runSuccessScenario(client, outsiderClient) {
   assert.equal(artifact.kind, "prd");
   assert.equal(artifact.currentVersion.status, "ready");
   assert.equal(artifact.currentVersion.kind, "prd");
-  assert.equal(artifact.currentVersion.schemaVersion, 2);
+  assert.equal(artifact.currentVersion.schemaVersion, 3);
   assert.equal(artifact.currentVersion.createdByRunId, first.body.id);
   assert.equal(artifact.revision, 1);
 
@@ -892,7 +892,7 @@ async function runSuccessScenario(client, outsiderClient) {
   assert.equal(versionPage.body.items.length, 1);
   assert.equal(versionPage.body.items[0].artifactVersionId, artifact.currentVersion.artifactVersionId);
   assert.equal(versionPage.body.items[0].kind, "prd");
-  assert.equal(versionPage.body.items[0].schemaVersion, 2);
+  assert.equal(versionPage.body.items[0].schemaVersion, 3);
   assert.equal(versionPage.body.items[0].contentMode, "inline");
 
   const versionDetail = await client.json(
@@ -903,12 +903,12 @@ async function runSuccessScenario(client, outsiderClient) {
   assert.match(versionEtag ?? "", /^"[a-f0-9]{64}"$/);
   assert.equal(versionDetail.body.contentMode, "inline");
   assert.equal(versionDetail.body.kind, "prd");
-  assert.equal(versionDetail.body.schemaVersion, 2);
-  assert.equal(versionDetail.body.content.protocol, "workbench.prd.v2");
-  assert.equal(versionDetail.body.content.documentId, prdV2DocumentId);
-  assert.equal(versionDetail.body.content.title, prdV2Title);
-  assert.equal(versionDetail.body.content.cover.workOrderName, prdV2WorkOrderName);
-  assert.equal(versionDetail.body.content.cover.title, prdV2Title);
+  assert.equal(versionDetail.body.schemaVersion, 3);
+  assert.equal(versionDetail.body.content.protocol, "workbench.prd.v3");
+  assert.equal(versionDetail.body.content.documentId, prdDocumentId);
+  assert.equal(versionDetail.body.content.title, prdTitle);
+  assert.equal(versionDetail.body.content.cover.workOrderName, prdWorkOrderName);
+  assert.equal(versionDetail.body.content.cover.title, prdTitle);
   assert.equal(versionDetail.body.knowledgeReleaseId, controlledKnowledge.state.releaseId);
   assert.equal(first.body.knowledgeReleaseId, controlledKnowledge.state.releaseId);
   const knowledgeResult = controlledKnowledge.state.results.get(first.body.id);
@@ -1036,8 +1036,8 @@ async function runSuccessScenario(client, outsiderClient) {
   assert.equal(persisted.rows[0]?.design_style_preset_checksum, selectedPreset.checksum);
   assert.match(persisted.rows[0]?.design_style_snapshot_sha256, /^[0-9a-f]{64}$/);
   assert.equal(persisted.rows[0]?.artifact_version_count, 1);
-  assert.equal(persisted.rows[0]?.artifact_schema_version, 2);
-  assert.equal(persisted.rows[0]?.artifact_protocol, "workbench.prd.v2");
+  assert.equal(persisted.rows[0]?.artifact_schema_version, 3);
+  assert.equal(persisted.rows[0]?.artifact_protocol, "workbench.prd.v3");
   assert.equal(persisted.rows[0]?.board_node_count, 1);
   assert.equal(persisted.rows[0]?.queue_schema_exists, true);
   await assertPersistedRunSources(first.body.id, sourceFixtures, sourceSnapshots);
@@ -3891,8 +3891,8 @@ async function writeSuccessfulRuntimeStream(
   const citations = knowledgeCitationsFor(requestBody);
   const draft = {
     kind: "prd",
-    title: prdV2Title,
-    schemaVersion: 2,
+    title: prdTitle,
+    schemaVersion: 3,
     operation: { kind: "create" },
     content: { ...minimalPrdDocument(), citations },
     citations,
@@ -4774,22 +4774,22 @@ function interactiveBrowserPrototypeDocument() {
 }
 
 function minimalPrdDocument() {
-  assert.ok(prdV2DocumentFixture, "PRD v2 fixture was not initialized");
-  return structuredClone(prdV2DocumentFixture);
+  assert.ok(prdDocumentFixture, "current PRD fixture was not initialized");
+  return structuredClone(prdDocumentFixture);
 }
 
-function buildPrdV2DocumentFixture(example) {
+function buildPrdDocumentFixture(example) {
   const document = structuredClone(example);
-  document.documentId = prdV2DocumentId;
-  document.title = prdV2Title;
-  document.cover.workOrderName = prdV2WorkOrderName;
-  document.cover.title = prdV2Title;
+  document.documentId = prdDocumentId;
+  document.title = prdTitle;
+  document.cover.workOrderName = prdWorkOrderName;
+  document.cover.title = prdTitle;
   document.revision.summary = "Initial deterministic E2E version";
   document.sections.introduction.background.blocks[0].content[0].text =
     "本 E2E 工作台覆盖确定性的需求说明书生成、状态反馈与结果确认，确保用户能够从项目入口提交请求、跟踪运行状态并读取最终产物。";
   document.sections.businessRequirements.summary[0].text =
     "总体目标：E2E 用户通过端内入口提交生成请求，连续跟踪处理状态，并完成异常恢复与结果确认。";
-  document.sections.businessRequirements.flowAndPages.blocks[1].content[0].text =
+  document.sections.businessRequirements.functionSections[1].blocks[1].content[0].text =
     "两张图分别描述从请求提交到结果确认的正常与异常路径，以及页面、运行能力、状态记录和验收反馈之间的产品关系。";
   document.sections.degradation.content[0].text =
     "运行依赖发生故障时，页面保留用户已经填写的内容并阻止重复提交，清楚展示失败原因、影响范围和可执行的重试入口；状态同步延迟时继续显示最后一次可信状态及其更新时间，不提前标记成功；权限校验不可用时按无权限处理且不创建运行；产物读取失败时保留运行编号并允许稍后刷新。服务恢复后，用户可以从原运行继续查询或安全重试，幂等请求必须复用已有结果，同时记录异常时间、恢复时间和最终状态，供业务、研发与测试共同核验。";
@@ -4968,7 +4968,6 @@ async function runRealStackBrowserScenario({
     WORKBENCH_API_PORT: String(oidcApiPort),
     WORKBENCH_WEB_ORIGIN: webOrigin,
     WORKBENCH_AUTH_MODE: "oidc",
-    WORKBENCH_E2E_EXTERNAL_DELIVERY_AVAILABLE: "netlify",
     OIDC_ISSUER: webOrigin,
     OIDC_AUDIENCE: "workbench",
     OIDC_JWKS_URL: `${webOrigin}/api/auth/jwks`,
@@ -5435,54 +5434,28 @@ async function runRealStackBrowserScenario({
       scenarioTimeoutMs,
       "product Export panel did not select the persisted Board",
     );
-    const netlifyTarget = exportPanel.getByRole("button", { name: /Netlify/u });
-    await netlifyTarget.waitFor({ state: "visible", timeout: scenarioTimeoutMs });
-    assert.equal(await netlifyTarget.isEnabled(), true, "controlled Netlify capability was unavailable in the product Export panel");
-    await netlifyTarget.click();
-
+    for (const target of ["Netlify", "Lovable", "Bolt", "AI Studio"]) {
+      assert.equal(await exportPanel.getByText(target, { exact: true }).count(), 0,
+        `Retired ${target} publishing action must be absent`);
+    }
+    await exportPanel.getByText("Download .zip", { exact: true }).click();
     const exportCreationResponse = page.waitForResponse((response) => (
       response.request().method() === "POST"
       && /^\/api\/v1\/projects\/[^/]+\/exports$/u.test(new URL(response.url()).pathname)
     ), { timeout: scenarioTimeoutMs });
-    await exportPanel.getByRole("button", { name: "生成并准备 Netlify", exact: true }).click();
+    await exportPanel.getByRole("button", { name: "导出 Download .zip", exact: true }).click();
     assert.equal((await exportCreationResponse).status(), 202, "product Export creation did not return 202");
-    const prepareDeliveryButton = exportPanel.getByRole("button", { name: "准备发布至 Netlify", exact: true });
-    await prepareDeliveryButton.waitFor({ state: "visible", timeout: scenarioTimeoutMs });
-
-    const deliveryCreationResponse = page.waitForResponse((response) => (
-      response.request().method() === "POST"
-      && /^\/api\/v1\/exports\/[^/]+\/deliveries$/u.test(new URL(response.url()).pathname)
-    ), { timeout: scenarioTimeoutMs });
-    await prepareDeliveryButton.click();
-    assert.equal((await deliveryCreationResponse).status(), 201, "product External Delivery preparation did not return 201");
-    await exportPanel.locator("[data-external-delivery-confirmation]")
-      .waitFor({ state: "visible", timeout: scenarioTimeoutMs });
-    const deliveryBeforeConfirmation = await latestBrowserExternalDelivery(projectId);
-    assert.equal(deliveryBeforeConfirmation.status, "pending_confirmation", "External Delivery was not pending confirmation");
-    assert.equal(deliveryBeforeConfirmation.attempt, 0, "pending External Delivery already had an execution attempt");
-    assert.equal(deliveryBeforeConfirmation.confirmedAt, null, "pending External Delivery was already confirmed");
-    assert.equal(deliveryBeforeConfirmation.transferAuthorizedAt, null, "pending External Delivery was already authorized");
-    assert.equal(deliveryBeforeConfirmation.queueJobs, 0, "pending External Delivery was queued before confirmation");
-
-    const deliveryConfirmationResponse = page.waitForResponse((response) => (
-      response.request().method() === "POST"
-      && /^\/api\/v1\/export-deliveries\/[^/]+\/confirm$/u.test(new URL(response.url()).pathname)
-    ), { timeout: scenarioTimeoutMs });
-    await exportPanel.getByRole("button", { name: "确认发布至 Netlify", exact: true }).click();
-    assert.equal((await deliveryConfirmationResponse).status(), 202, "product External Delivery confirmation did not return 202");
-    await exportPanel.getByRole("button", { name: "重试发布 Netlify", exact: true })
-      .waitFor({ state: "visible", timeout: scenarioTimeoutMs });
-    const deliveryAfterConfirmation = await latestBrowserExternalDelivery(projectId);
-    assert.equal(deliveryAfterConfirmation.id, deliveryBeforeConfirmation.id, "External Delivery identity changed after confirmation");
-    assert.equal(deliveryAfterConfirmation.status, "failed", "controlled unavailable external adapter did not fail closed");
-    assert.equal(deliveryAfterConfirmation.failureCode, "EXPORT_EXTERNAL_AUTHENTICATION_REQUIRED", "External Delivery lost its stable failure code");
-    assert.ok(deliveryAfterConfirmation.confirmedAt, "confirmed External Delivery omitted its confirmation timestamp");
-    assert.ok(deliveryAfterConfirmation.transferAuthorizedAt, "confirmed External Delivery omitted transfer authorization");
-    assert.ok(deliveryAfterConfirmation.queueJobs >= 1, "confirmed External Delivery did not enqueue durable work");
+    const downloadButton = exportPanel.getByRole("button", { name: "下载 Download .zip", exact: true });
+    await downloadButton.waitFor({ state: "visible", timeout: scenarioTimeoutMs });
+    const downloadEvent = page.waitForEvent("download", { timeout: scenarioTimeoutMs });
+    await downloadButton.click();
+    const exportedFile = await downloadEvent;
+    assert.equal(await exportedFile.failure(), null, "product Export download failed");
+    assert.ok(exportedFile.suggestedFilename().endsWith(".zip"), "product Export download omitted the ZIP extension");
     assert.ok(fakeRuntime.state.exportReads.some((read) => read.role === "export"), "Export Worker did not read the canonical object with its dedicated identity");
     await page.getByRole("button", { name: "Close", exact: true }).click();
     await exportPanel.waitFor({ state: "detached", timeout: scenarioTimeoutMs });
-    console.log("[e2e] browser export build and external delivery confirmation passed");
+    console.log("[e2e] browser export build and download passed");
 
     assert.ok(projectId, "real-stack browser project URL has no project id");
     await page.getByRole("button", { name: /基于此 PRD 生成 UI/u }).waitFor({ state: "visible", timeout: scenarioTimeoutMs });
@@ -6060,7 +6033,8 @@ async function runRealStackBrowserScenario({
       previewIndependentOriginAndSandbox: true,
       previewCredentialCanaryBlocked: true,
       releaseAndExportBuild: true,
-      externalDeliveryConfirmationGate: true,
+      exportDownload: true,
+      retiredPublishingActionsAbsent: true,
       runFailureRetry: true,
       runCancellation: true,
       failedNetworkRequestsAttributed: true,
@@ -6082,12 +6056,6 @@ async function runRealStackBrowserScenario({
       visualEvidence,
       pendingDocumentEvidence,
       artifactPersistence,
-      externalDeliveryConfirmation: {
-        attemptBeforeConfirmation: deliveryBeforeConfirmation.attempt,
-        queueJobsBeforeConfirmation: deliveryBeforeConfirmation.queueJobs,
-        queueJobsAfterConfirmation: deliveryAfterConfirmation.queueJobs,
-        terminalStatus: deliveryAfterConfirmation.status,
-      },
       bffRequests: bffRequests.map(({ method, pathClass, status }) => ({ method, pathClass, status })),
       authImageResponses,
       httpResponses,
@@ -6108,11 +6076,6 @@ async function runRealStackBrowserScenario({
       evidenceManifest: path.relative(root, evidenceManifestPath),
       checks,
       controlledRuntime,
-      externalDelivery: {
-        attemptBeforeConfirmation: deliveryBeforeConfirmation.attempt,
-        queueJobsBeforeConfirmation: deliveryBeforeConfirmation.queueJobs,
-        queueJobsAfterConfirmation: deliveryAfterConfirmation.queueJobs,
-      },
     }));
   } catch (error) {
     evidenceManifest.status = "failed";
@@ -6808,41 +6771,6 @@ async function attributePersistedTerminalSseAborts(candidates) {
     attributed.push(candidate.failure);
   }
   return attributed;
-}
-
-async function latestBrowserExternalDelivery(projectId) {
-  const result = await queryDatabase(`
-    SELECT
-      delivery.id,
-      delivery.status::text,
-      delivery.attempt,
-      delivery.confirmed_at,
-      delivery.transfer_authorized_at,
-      delivery.failure_code,
-      (
-        SELECT count(*)::int
-        FROM workbench_jobs.job
-        WHERE name = 'export.delivery'
-          AND data->>'deliveryId' = delivery.id
-      ) AS queue_jobs
-    FROM workbench.external_export_deliveries delivery
-    JOIN workbench.export_jobs export_job ON export_job.id = delivery.export_job_id
-    JOIN workbench.project_releases release ON release.id = export_job.release_id
-    WHERE release.project_id = $1
-    ORDER BY delivery.created_at DESC
-    LIMIT 1
-  `, [projectId]);
-  const row = result.rows[0];
-  assert.ok(row, "browser Project External Delivery was not persisted");
-  return {
-    id: row.id,
-    status: row.status,
-    attempt: Number(row.attempt),
-    confirmedAt: row.confirmed_at,
-    transferAuthorizedAt: row.transfer_authorized_at,
-    failureCode: row.failure_code,
-    queueJobs: Number(row.queue_jobs),
-  };
 }
 
 async function captureBrowserPreviewFailure({

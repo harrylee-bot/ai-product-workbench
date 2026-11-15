@@ -2,6 +2,7 @@ node_modules
 /storage/
 .next
 .next-fixture
+.next-e2e/
 dist
 coverage
 output
@@ -27,3 +28,6 @@ agent-skills
 /packages/workbench-db/generated/
 /apps/workbench-figma-importer/build/
 /apps/web/AGENTS.md
+
+# Private source assets are transferred separately during deployment.
+/knowledge-vault/

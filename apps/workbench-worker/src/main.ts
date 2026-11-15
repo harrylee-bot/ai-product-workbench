@@ -56,10 +56,6 @@ async function main() {
       deadlineCancelMs: config.runtimeExecutionDeadlineCancelMs,
       cancellationPollIntervalMs: config.runtimeCancellationPollIntervalMs,
       cancellationQueryBatchSize: config.runtimeCancellationQueryBatchSize,
-      providerStateMode: config.runtimeProviderStateMode,
-      providerStateShadowReporter: (finding) => {
-        console.error("[runtime-provider-state-shadow]", JSON.stringify(finding));
-      },
     },
   );
   const boss = new PgBoss({
@@ -75,7 +71,7 @@ async function main() {
   boss.on("error", (error) => console.error("[pg-boss]", error));
   boss.on("warning", (warning) => console.warn("[pg-boss]", warning));
   await boss.start();
-  await createQueues(boss);
+  await createAndAssertRuntimeQueues(boss);
 
   await boss.work<RuntimeExecuteJob>(runtimeExecuteQueue, {
     includeMetadata: true,
@@ -85,6 +81,7 @@ async function main() {
   }, createRuntimeExecuteJobHandler({
     processor,
     executionSigner,
+    isTemporalRun: async (runId) => Boolean(await db.prototypePlan.findUnique({ where: { runtimeRunId: runId }, select: { id: true } })),
     recordQueueAge,
     recordTerminalRunDrift,
   }));
@@ -107,10 +104,7 @@ async function main() {
         retryCount: job.retryCount,
         retryLimit: job.retryLimit,
       }, job.data, () => (
-        processor.cancel(command.runId, job.signal, {
-          retryCount: job.retryCount,
-          retryLimit: job.retryLimit,
-        })
+        processor.cancel(command.runId, job.signal)
       ));
       recordRuntimeLivenessMetric({
         operation: "cancel",
@@ -185,10 +179,6 @@ async function main() {
   process.once("SIGINT", () => handleShutdown("SIGINT"));
   process.once("SIGTERM", () => handleShutdown("SIGTERM"));
   console.log(`[worker] listening on ${runtimeExecuteQueue}, ${runtimeCancelQueue}`);
-}
-
-async function createQueues(boss: PgBoss) {
-  await createAndAssertRuntimeQueues(boss);
 }
 
 function recordQueueAge(job: Pick<JobWithMetadata, "createdOn" | "startedOn">) {

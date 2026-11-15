@@ -46,23 +46,24 @@ export class ProjectMembersService {
       assertRevision(project.revision, expectedRevision);
       await assertOwner(tx, projectId, principalId);
 
-      const eligible = await tx.workspaceMember.findUnique({
-        where: {
-          workspaceId_principalId: {
-            workspaceId: project.workspaceId,
-            principalId: targetPrincipalId,
-          },
-        },
-        select: { principalId: true },
-      });
-      if (!eligible) throw notFoundProblem("Workspace member");
-
       const current = await tx.projectMember.findUnique({
         where: {
           projectId_principalId: { projectId, principalId: targetPrincipalId },
         },
         include: projectMemberWithPrincipal,
       });
+      if (!current) {
+        const eligible = await tx.workspaceMember.findUnique({
+          where: {
+            workspaceId_principalId: {
+              workspaceId: project.workspaceId,
+              principalId: targetPrincipalId,
+            },
+          },
+          select: { principalId: true },
+        });
+        if (!eligible) throw notFoundProblem("Workspace member");
+      }
       if (current?.role === role) {
         return {
           member: mapProjectMember(current),

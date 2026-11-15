@@ -14,6 +14,19 @@ const signer = createRuntimeWorkerExecutionSigner({
 });
 
 describe("Runtime execute queue handler", () => {
+  it("fences a stale pg-boss job whose Run is owned by a Temporal prototype plan", async () => {
+    const processor = { execute: vi.fn() };
+    const isTemporalRun = vi.fn(async () => true);
+    const recordTerminalRunDrift = vi.fn();
+    const handler = createRuntimeExecuteJobHandler({ processor, executionSigner: signer, isTemporalRun, recordQueueAge: vi.fn(), recordTerminalRunDrift });
+    const result = await handler([queueJob("job-stale", "run-temporal")]);
+    expect(isTemporalRun).toHaveBeenCalledWith("run-temporal");
+    expect(processor.execute).not.toHaveBeenCalled();
+    expect(recordTerminalRunDrift).not.toHaveBeenCalled();
+    expect(result).toMatchObject({ runId: "run-temporal", skipped: true, workerExecution: { statement: { runtimeAttemptId: null, jobId: "job-stale" } } });
+  });
+
+
   it("returns only a signed result bound to the claimed RuntimeAttempt", async () => {
     const recordTerminalRunDrift = vi.fn(async () => undefined);
     const processor = {

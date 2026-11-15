@@ -13,9 +13,7 @@ import {
 } from "@nestjs/common";
 import type { Response } from "express";
 import {
-  createExternalExportDeliveryRequestSchema,
   createExportJobRequestSchema,
-  type CreateExternalExportDeliveryRequest,
   type CreateExportJobRequest,
   createProjectPreviewRequestSchema,
   type CreateProjectPreviewRequest,
@@ -33,14 +31,12 @@ import { CurrentPrincipal } from "../identity/current-principal.decorator.js";
 import type { AuthenticatedPrincipal } from "../identity/identity.types.js";
 import { WorkbenchAuthGuard } from "../identity/workbench-auth.guard.js";
 import { ExportsService } from "./exports.service.js";
-import { ExternalExportDeliveriesService } from "./external-export-deliveries.service.js";
 
 @Controller()
 @UseGuards(WorkbenchAuthGuard)
 export class ExportsController {
   constructor(
     private readonly exportsService: ExportsService,
-    private readonly externalDeliveries: ExternalExportDeliveriesService,
   ) {}
 
   @Get("projects/:projectId/exports")
@@ -194,91 +190,9 @@ export class ExportsController {
     return new StreamableFile(result.body);
   }
 
-  @Get("exports/:exportId/deliveries")
-  listExternalDeliveries(
-    @CurrentPrincipal() principal: AuthenticatedPrincipal,
-    @Param("exportId") exportId: string,
-    @Res({ passthrough: true }) response: Response,
-  ) {
-    response.setHeader("Cache-Control", "private, no-store");
-    return this.externalDeliveries.list(principal.id, exportId);
-  }
-
-  @Post("exports/:exportId/deliveries")
-  @HttpCode(201)
-  async createExternalDelivery(
-    @CurrentPrincipal() principal: AuthenticatedPrincipal,
-    @Param("exportId") exportId: string,
-    @Headers("idempotency-key") idempotencyKey: string | undefined,
-    @Body(new ZodValidationPipe(createExternalExportDeliveryRequestSchema)) body: CreateExternalExportDeliveryRequest,
-    @Res({ passthrough: true }) response: Response,
-  ) {
-    if (!idempotencyKey) throw validationProblem("Idempotency-Key is required");
-    const delivery = await this.externalDeliveries.create(principal.id, exportId, idempotencyKey, body);
-    response.setHeader("ETag", revisionEtag(delivery.revision));
-    response.setHeader("Location", `/api/v1/export-deliveries/${delivery.id}`);
-    return delivery;
-  }
-
-  @Get("export-deliveries/:deliveryId")
-  async getExternalDelivery(
-    @CurrentPrincipal() principal: AuthenticatedPrincipal,
-    @Param("deliveryId") deliveryId: string,
-    @Headers("if-none-match") ifNoneMatch: string | undefined,
-    @Res({ passthrough: true }) response: Response,
-  ) {
-    const delivery = await this.externalDeliveries.get(principal.id, deliveryId);
-    const etag = revisionEtag(delivery.revision);
-    response.setHeader("ETag", etag);
-    response.setHeader("Cache-Control", "private, no-cache");
-    if (entityTagMatches(ifNoneMatch, etag)) {
-      response.status(304);
-      return undefined;
-    }
-    return delivery;
-  }
-
-  @Post("export-deliveries/:deliveryId/confirm")
-  @HttpCode(202)
-  async confirmExternalDelivery(
-    @CurrentPrincipal() principal: AuthenticatedPrincipal,
-    @Param("deliveryId") deliveryId: string,
-    @Headers("if-match") ifMatch: string | undefined,
-    @Res({ passthrough: true }) response: Response,
-  ) {
-    const delivery = await this.externalDeliveries.confirm(principal.id, deliveryId, parseIfMatch(ifMatch));
-    response.setHeader("ETag", revisionEtag(delivery.revision));
-    return delivery;
-  }
-
-  @Post("export-deliveries/:deliveryId/retry")
-  @HttpCode(202)
-  async retryExternalDelivery(
-    @CurrentPrincipal() principal: AuthenticatedPrincipal,
-    @Param("deliveryId") deliveryId: string,
-    @Headers("if-match") ifMatch: string | undefined,
-    @Res({ passthrough: true }) response: Response,
-  ) {
-    const delivery = await this.externalDeliveries.retry(principal.id, deliveryId, parseIfMatch(ifMatch));
-    response.setHeader("ETag", revisionEtag(delivery.revision));
-    return delivery;
-  }
-
-  @Post("export-deliveries/:deliveryId/cancel")
-  @HttpCode(202)
-  async cancelExternalDelivery(
-    @CurrentPrincipal() principal: AuthenticatedPrincipal,
-    @Param("deliveryId") deliveryId: string,
-    @Headers("if-match") ifMatch: string | undefined,
-    @Res({ passthrough: true }) response: Response,
-  ) {
-    const delivery = await this.externalDeliveries.cancel(principal.id, deliveryId, parseIfMatch(ifMatch));
-    response.setHeader("ETag", revisionEtag(delivery.revision));
-    return delivery;
-  }
 }
 
-export function parseExportLimit(value?: string) {
+function parseExportLimit(value?: string) {
   if (value === undefined || value === "") return undefined;
   const parsed = Number(value);
   if (!Number.isSafeInteger(parsed) || parsed < 1 || parsed > 100) {

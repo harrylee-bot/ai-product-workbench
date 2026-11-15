@@ -34,10 +34,10 @@ describe("export worker S3 role configuration", () => {
     expect(() => loadExportWorkerConfig()).toThrow("Missing WORKBENCH_EXPORT_S3_ACCESS_KEY_ID");
   });
 
-  it("keeps lease takeover later than the delivery queue execution deadline", () => {
+  it("keeps reconciliation later than the build queue execution deadline", () => {
     vi.stubEnv("WORKBENCH_EXPORT_STALE_RUNNING_MS", String(15 * 60 * 1_000));
     expect(() => loadExportWorkerConfig()).toThrow(
-      "WORKBENCH_EXPORT_STALE_RUNNING_MS must exceed the export.delivery job expiration",
+      "WORKBENCH_EXPORT_STALE_RUNNING_MS must exceed the export.build job expiration",
     );
 
     vi.stubEnv("WORKBENCH_EXPORT_STALE_RUNNING_MS", String(15 * 60 * 1_000 + 1));

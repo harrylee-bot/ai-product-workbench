@@ -11,6 +11,7 @@ import {
   prdBusinessSections,
   prdSafetyBaselineItems,
   prototypeDocumentSchema,
+  prototypePageSchema,
   resolveExportBoardNodeSelection,
   type DesignSystemDocument,
   type ExportSelection,
@@ -19,6 +20,7 @@ import {
   type PrototypeAsset,
   type PrototypeDocument,
   type PrototypeNode,
+  type PrototypePage,
   type PrototypeToken,
   type PrdBlock,
   type PrdDocument,
@@ -84,7 +86,7 @@ type RuntimePrototype = {
 
 type PrototypeStyle = PrototypeNode["style"];
 
-const baseStyles = String.raw`*{box-sizing:border-box}html,body{margin:0;min-height:100%;background:#f4f5f7;color:#17191d;font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}button,input,textarea,select{font:inherit}.wb-export{min-height:100vh}.wb-export__header{position:sticky;top:0;z-index:100;display:flex;align-items:center;justify-content:space-between;gap:16px;min-height:56px;padding:10px 20px;background:#fff;border-bottom:1px solid #dfe2e7}.wb-export__title{margin:0;font-size:16px;line-height:1.4;font-weight:650}.wb-export__meta{font-size:12px;color:#69707d}.wb-export__content{padding:20px}.wb-board{position:relative;min-width:720px;min-height:360px;margin:0 0 24px;background:#e9ebef;background-image:linear-gradient(#d9dce2 1px,transparent 1px),linear-gradient(90deg,#d9dce2 1px,transparent 1px);background-size:24px 24px;border:1px solid #ced2d9;overflow:auto}.wb-board__node{position:absolute;display:flex;flex-direction:column;justify-content:center;min-width:120px;min-height:72px;padding:12px;background:#fff;border:1px solid #bcc2cc;box-shadow:0 2px 8px rgba(18,22,30,.08)}.wb-board__node--frame{justify-content:flex-start;min-width:0;min-height:0;padding:0;background:transparent;box-shadow:none}.wb-board__node--frame .wb-board__label{position:absolute;left:0;top:-20px;margin:0}.wb-board__node--drawing{display:block;min-width:0;min-height:0;padding:0;background:transparent;border:0;box-shadow:none}.wb-board__drawing{display:block;width:100%;height:100%;overflow:visible}.wb-board__kind{font-size:11px;color:#69707d;text-transform:uppercase}.wb-board__label{margin-top:4px;font-size:13px;font-weight:600}.wb-artifacts{display:grid;gap:20px}.wb-artifact{min-width:0;background:#fff;border:1px solid #d5d9e0}.wb-artifact__header{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 14px;border-bottom:1px solid #e1e4e9}.wb-artifact__title{margin:0;font-size:14px;font-weight:650}.wb-artifact__kind{font-size:11px;color:#69707d}.wb-artifact__body{padding:14px;overflow:auto}.wb-prototype__tabs{display:flex;gap:6px;margin-bottom:12px;overflow:auto}.wb-prototype__tab{height:32px;padding:0 12px;border:1px solid #cbd0d8;background:#fff;color:#3b414b;cursor:pointer}.wb-prototype__tab[aria-selected="true"]{background:#17191d;color:#fff;border-color:#17191d}.wb-prototype__stage{display:flex;justify-content:flex-start;overflow:auto;padding:16px;background:#e8eaee}.wb-screen{position:relative;flex:0 0 auto;background:#fff;box-shadow:0 8px 24px rgba(18,22,30,.14);overflow:hidden}.wb-node[hidden],.wb-screen[hidden]{display:none!important}.wb-node{letter-spacing:0}.wb-design-system{display:grid;gap:22px}.wb-design-system h3{margin:0 0 10px;font-size:13px}.wb-design-system__tokens,.wb-design-system__assets,.wb-design-system__items{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:10px}.wb-design-system__token,.wb-design-system__asset,.wb-design-system__item{min-width:0;padding:10px;border:1px solid #dfe2e7;background:#fafbfc}.wb-design-system__swatch{display:block;width:100%;height:44px;margin-bottom:8px;border:1px solid rgba(0,0,0,.12)}.wb-design-system__label{display:block;font-size:12px;font-weight:650;overflow-wrap:anywhere}.wb-design-system__value{display:block;margin-top:3px;color:#69707d;font:11px/1.45 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;overflow-wrap:anywhere}.wb-design-system__image{display:block;width:100%;height:120px;margin-bottom:8px;object-fit:contain;background:#eef0f3}.wb-design-system__font-preview{display:flex;align-items:center;width:100%;height:72px;margin-bottom:8px;padding:8px;background:#eef0f3;font-size:28px;line-height:1;overflow:hidden}.wb-design-system__copy{margin:4px 0 0;color:#565d68;font-size:12px;line-height:1.5}.wb-json{max-height:70vh;margin:0;overflow:auto;padding:16px;background:#15171b;color:#e8eaed;font:12px/1.55 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;white-space:pre-wrap}.wb-image{display:block;max-width:100%;height:auto}.wb-document{white-space:pre-wrap;line-height:1.6}.wb-prd{max-width:1100px;margin:0 auto;background:#fff;color:#1e2935;padding:48px 64px;font-family:"Noto Sans SC","Microsoft YaHei",sans-serif;line-height:1.7}.wb-prd__cover{min-height:320px;display:flex;flex-direction:column;justify-content:center;border-bottom:1px solid #cbd5e1;margin-bottom:36px}.wb-prd__cover h1{font-size:32px;margin:8px 0;color:#124b7a}.wb-prd h2{font-size:24px;color:#124b7a;border-bottom:2px solid #d8e4ef;padding-bottom:8px;margin:38px 0 16px}.wb-prd h3{font-size:18px;color:#1c628f;margin:24px 0 8px}.wb-prd__muted{color:#64748b;font-size:13px}.wb-prd__toc,.wb-prd__history,.wb-prd__table,.wb-prd__safety{width:100%;border-collapse:collapse;margin:12px 0 22px}.wb-prd__toc td,.wb-prd__history th,.wb-prd__history td,.wb-prd__table th,.wb-prd__table td,.wb-prd__safety th,.wb-prd__safety td{border:1px solid #cbd5e1;padding:8px;text-align:left;vertical-align:top}.wb-prd__history th,.wb-prd__table th,.wb-prd__safety th{background:#edf4f9}.wb-prd__block{margin:10px 0}.wb-prd__card{border:1px solid #d8e1ea;border-left:4px solid #2b6f9f;padding:12px 16px;margin:12px 0}.wb-prd__diagram{border:1px solid #cbd5e1;background:#f8fafc;padding:14px;margin:14px 0}.wb-prd__diagram-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:8px}.wb-prd__diagram-node{border:1px solid #6b8ca8;border-radius:4px;background:#fff;padding:8px;font-size:13px}.wb-prd__assumptions{border-left:4px solid #d97706;background:#fff7ed;padding:12px 16px}.wb-json{max-height:70vh;margin:0;overflow:auto;padding:16px;background:#15171b;color:#e8eaed;font:12px/1.55 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;white-space:pre-wrap}.wb-image{display:block;max-width:100%;height:auto}.wb-document{white-space:pre-wrap;line-height:1.6}.wb-empty{padding:40px;text-align:center;color:#69707d}@media(max-width:700px){.wb-export__content{padding:10px}.wb-export__header{padding:8px 12px}.wb-board{min-width:640px}.wb-artifact__body{padding:8px}.wb-prd{padding:28px 18px}.wb-prd__cover{min-height:220px}.wb-design-system__tokens,.wb-design-system__assets,.wb-design-system__items{grid-template-columns:1fr}}`;
+const baseStyles = String.raw`*{box-sizing:border-box}html,body{margin:0;min-height:100%;background:#f4f5f7;color:#17191d;font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}button,input,textarea,select{font:inherit}.wb-export{min-height:100vh}.wb-export__header{position:sticky;top:0;z-index:100;display:flex;align-items:center;justify-content:space-between;gap:16px;min-height:56px;padding:10px 20px;background:#fff;border-bottom:1px solid #dfe2e7}.wb-export__title{margin:0;font-size:16px;line-height:1.4;font-weight:650}.wb-export__meta{font-size:12px;color:#69707d}.wb-export__content{padding:20px}.wb-board{position:relative;min-width:720px;min-height:360px;margin:0 0 24px;background:#e9ebef;background-image:linear-gradient(#d9dce2 1px,transparent 1px),linear-gradient(90deg,#d9dce2 1px,transparent 1px);background-size:24px 24px;border:1px solid #ced2d9;overflow:auto}.wb-board__node{position:absolute;display:flex;flex-direction:column;justify-content:center;min-width:120px;min-height:72px;padding:12px;background:#fff;border:1px solid #bcc2cc;box-shadow:0 2px 8px rgba(18,22,30,.08)}.wb-board__node--frame{justify-content:flex-start;min-width:0;min-height:0;padding:0;background:transparent;box-shadow:none}.wb-board__node--frame .wb-board__label{position:absolute;left:0;top:-20px;margin:0}.wb-board__node--drawing{display:block;min-width:0;min-height:0;padding:0;background:transparent;border:0;box-shadow:none}.wb-board__drawing{display:block;width:100%;height:100%;overflow:visible}.wb-board__kind{font-size:11px;color:#69707d;text-transform:uppercase}.wb-board__label{margin-top:4px;font-size:13px;font-weight:600}.wb-artifacts{display:grid;gap:20px}.wb-artifact{min-width:0;background:#fff;border:1px solid #d5d9e0}.wb-artifact__header{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 14px;border-bottom:1px solid #e1e4e9}.wb-artifact__title{margin:0;font-size:14px;font-weight:650}.wb-artifact__kind{font-size:11px;color:#69707d}.wb-artifact__body{padding:14px;overflow:auto}.wb-prototype__tabs{display:flex;gap:6px;margin-bottom:12px;overflow:auto}.wb-prototype__tab{height:32px;padding:0 12px;border:1px solid #cbd0d8;background:#fff;color:#3b414b;cursor:pointer}.wb-prototype__tab[aria-selected="true"]{background:#17191d;color:#fff;border-color:#17191d}.wb-prototype__stage{display:flex;justify-content:flex-start;overflow:auto;padding:16px;background:#e8eaee}.wb-screen{position:relative;flex:0 0 auto;background:#fff;box-shadow:0 8px 24px rgba(18,22,30,.14);overflow:hidden}.wb-node[hidden],.wb-screen[hidden]{display:none!important}.wb-node{letter-spacing:0}.wb-design-system{display:grid;gap:22px}.wb-design-system h3{margin:0 0 10px;font-size:13px}.wb-design-system__tokens,.wb-design-system__assets,.wb-design-system__items{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:10px}.wb-design-system__token,.wb-design-system__asset,.wb-design-system__item{min-width:0;padding:10px;border:1px solid #dfe2e7;background:#fafbfc}.wb-design-system__swatch{display:block;width:100%;height:44px;margin-bottom:8px;border:1px solid rgba(0,0,0,.12)}.wb-design-system__label{display:block;font-size:12px;font-weight:650;overflow-wrap:anywhere}.wb-design-system__value{display:block;margin-top:3px;color:#69707d;font:11px/1.45 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;overflow-wrap:anywhere}.wb-design-system__image{display:block;width:100%;height:120px;margin-bottom:8px;object-fit:contain;background:#eef0f3}.wb-design-system__font-preview{display:flex;align-items:center;width:100%;height:72px;margin-bottom:8px;padding:8px;background:#eef0f3;font-size:28px;line-height:1;overflow:hidden}.wb-design-system__copy{margin:4px 0 0;color:#565d68;font-size:12px;line-height:1.5}.wb-json{max-height:70vh;margin:0;overflow:auto;padding:16px;background:#15171b;color:#e8eaed;font:12px/1.55 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;white-space:pre-wrap}.wb-image{display:block;max-width:100%;height:auto}.wb-document{white-space:pre-wrap;line-height:1.6}.wb-prd{max-width:1100px;margin:0 auto;background:#fff;color:#1e2935;padding:48px 64px;font-family:"Noto Sans SC","Microsoft YaHei",sans-serif;line-height:1.7}.wb-prd__cover{min-height:320px;display:flex;flex-direction:column;justify-content:center;border-bottom:1px solid #cbd5e1;margin-bottom:36px}.wb-prd__cover h1{font-size:32px;margin:8px 0;color:#124b7a}.wb-prd h2{font-size:24px;color:#124b7a;border-bottom:2px solid #d8e4ef;padding-bottom:8px;margin:38px 0 16px}.wb-prd h3{font-size:18px;color:#1c628f;margin:24px 0 8px}.wb-prd__muted{color:#64748b;font-size:13px}.wb-prd__toc,.wb-prd__history,.wb-prd__table,.wb-prd__safety{width:100%;border-collapse:collapse;margin:12px 0 22px}.wb-prd__toc td,.wb-prd__history th,.wb-prd__history td,.wb-prd__table th,.wb-prd__table td,.wb-prd__safety th,.wb-prd__safety td{border:1px solid #cbd5e1;padding:8px;text-align:left;vertical-align:top}.wb-prd__history th,.wb-prd__table th,.wb-prd__safety th{background:#edf4f9}.wb-prd__block{margin:10px 0}.wb-prd__card{border:1px solid #d8e1ea;border-left:4px solid #2b6f9f;padding:12px 16px;margin:12px 0}.wb-prd__diagram{border:1px solid #cbd5e1;background:#f8fafc;padding:14px;margin:14px 0}.wb-prd__diagram-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:8px}.wb-prd__diagram-node{border:1px solid #6b8ca8;border-radius:4px;background:#fff;padding:8px;font-size:13px}.wb-prd__assumptions{border-left:4px solid #d97706;background:#fff7ed;padding:12px 16px}.wb-empty{padding:40px;text-align:center;color:#69707d}@media(max-width:700px){.wb-export__content{padding:10px}.wb-export__header{padding:8px 12px}.wb-board{min-width:640px}.wb-artifact__body{padding:8px}.wb-prd{padding:28px 18px}.wb-prd__cover{min-height:220px}.wb-design-system__tokens,.wb-design-system__assets,.wb-design-system__items{grid-template-columns:1fr}}`;
 
 export function renderExportHtml(request: ExportBuildRequest): RenderedHtml {
   if (request.initialScreenId !== undefined && request.selection.kind !== "artifact") {
@@ -128,6 +130,55 @@ export function renderExportHtml(request: ExportBuildRequest): RenderedHtml {
   const bodyMarkup = `<main class="wb-export"><header class="wb-export__header"><h1 class="wb-export__title">${escapeHtml(title)}</h1><div class="wb-export__meta">Release ${request.source.releaseVersion} · ${selected.length} artifact${selected.length === 1 ? "" : "s"}</div></header><div class="wb-export__content">${boardMarkup}<div class="wb-artifacts">${artifactMarkup || '<div class="wb-empty">This selection contains no exportable artifacts.</div>'}</div></div></main>`;
   const document = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light"><title>${escapeHtml(title)}</title><style>${styles}</style></head><body><div id="workbench-export-root">${bodyMarkup}</div><script id="workbench-export-data" type="application/json">${safeScriptJson(runtimeData)}</script><script>${browserRuntimeSource}</script></body></html>`;
   return { document, bodyMarkup, styles, runtimeSource: browserRuntimeSource, runtimeData, fontAssets, title };
+}
+
+/** Render one complete prototype with the shared offline runtime. Every screen
+ * remains available; initialScreenId controls selection, not authorization. */
+export function renderPrototypeDocumentHtml(
+  value: unknown,
+  options: { assets?: ExportBinaryAsset[]; initialScreenId?: string; revisionId?: string } = {},
+): RenderedHtml {
+  const prototype = prototypeDocumentSchema.parse(value);
+  const runtimePrototypes: RuntimePrototype[] = [];
+  const fontFaces: string[] = [];
+  const fontAssets: RenderedFontAsset[] = [];
+  const identity = options.revisionId ?? prototype.documentId;
+  const bodyMarkup = `<main data-prototype-content>${renderPrototypeArtifact({
+    position: 0, artifactId: prototype.documentId, artifactVersionId: identity,
+    kind: "prototype", title: prototype.title, version: prototype.revision,
+    schemaVersion: 1, checksum: createHash("sha256").update(canonicalJson(prototype)).digest("hex"),
+    content: prototype as JsonValue, contentMediaType: "application/json", assets: options.assets ?? [],
+  }, runtimePrototypes, fontFaces, fontAssets, undefined, options.initialScreenId)}</main>`;
+  const styles = `${baseStyles}\n${fontFaces.join("\n")}`;
+  const runtimeData = { protocol: "workbench.export-runtime.v1", prototypes: runtimePrototypes } satisfies JsonValue;
+  const document = `<!doctype html><html lang="zh-CN" data-workbench-prototype-document="v2"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escapeHtml(prototype.title)}</title><style>${styles}</style></head><body data-prototype-revision="${escapeHtml(identity)}"><div id="workbench-export-root">${bodyMarkup}</div><script id="workbench-export-data" type="application/json">${safeScriptJson(runtimeData)}</script><script>${browserRuntimeSource}</script></body></html>`;
+  return { document, bodyMarkup, styles, runtimeData, runtimeSource: browserRuntimeSource, fontAssets, title: prototype.title };
+}
+
+/** Page bodies are real DOM projections for comparison and feedback anchors.
+ * They intentionally omit the shared styles, executable runtime and other
+ * screens; the immutable preview is rendered once for the entire document. */
+export function renderPrototypeDocumentPages(value: unknown, binaryAssets: ExportBinaryAsset[] = []): PrototypePage[] {
+  const document = prototypeDocumentSchema.parse(value);
+  const context: RenderContext = {
+    nodes: new Map(document.nodes.map(node => [node.id, node])),
+    tokens: new Map(document.tokens.map(token => [token.id, token])),
+    assets: new Map(document.assets.map(asset => [asset.id, asset])),
+    blobs: new Map(binaryAssets.map(asset => [asset.assetId, asset])),
+    bindings: new Map(document.bindings.map(binding => [binding.id, binding])),
+    variables: new Map(document.variables.map(variable => [variable.path, variable.initialValue])),
+  };
+  return document.screens.map((screen, order) => {
+    const root = context.nodes.get(screen.rootNodeId);
+    if (!root) throw new TerminalExportError("EXPORT_PROTOTYPE_ROOT_MISSING", `Screen ${screen.id} has no root node`);
+    const content = `<section data-workbench-prototype-page="v2" class="wb-screen" data-wb-screen="${escapeHtml(screen.id)}" style="width:${screen.viewport.width}px;height:${screen.viewport.height}px">${renderNode(root, context)}</section>`;
+    const routeSlug = screen.route.replace(/^\/+/, "").replace(/[^a-z0-9/_-]+/giu, "-").replace(/-+/gu, "-").replace(/^[-/]+|[-/]+$/gu, "").toLowerCase();
+    return prototypePageSchema.parse({
+      id: screen.id, slug: routeSlug || screen.id.toLowerCase().replace(/[^a-z0-9_-]+/gu, "-"),
+      title: screen.name, route: screen.route, order, content,
+      sha256: createHash("sha256").update(content).digest("hex"),
+    });
+  });
 }
 
 export function htmlOutput(request: ExportBuildRequest) {
@@ -378,45 +429,32 @@ function renderPrdArtifact(artifact: ExportArtifactSource) {
 }
 
 function renderPrdDocument(document: PrdDocument) {
-  if (document.protocol !== "workbench.prd.v1") {
-    const introduction = document.sections.introduction;
-    const requirements = document.sections.businessRequirements;
-    return `<div class="wb-prd">
-      <section class="wb-prd__cover">
-        <div class="wb-prd__muted">需求说明书 · v${document.revision.number}</div>
-        <h1>${escapeHtml(document.cover.title)}</h1>
-        <p>${escapeHtml(document.revision.summary)}</p>
-        <p class="wb-prd__muted">变更时间：${escapeHtml(document.revision.changedAt)}</p>
-      </section>
-      ${renderPrdVersionHistory(document.versionHistory)}
-      ${renderPrdToc(document.tableOfContents.entries)}
-      <h2>${escapeHtml(introduction.title)}</h2>
-      ${renderPrdSection(introduction.background)}
-      ${renderPrdSection(introduction.scope)}
-      ${renderPrdSection(introduction.usageScenarios)}
-      ${renderPrdChannelTable(introduction.usageScenarios.channelTable)}
-      <h2>${escapeHtml(requirements.title)}</h2>
-      <div class="wb-prd__block">${renderPrdInlinesHtml(requirements.summary)}</div>
-      ${prdBusinessSections(document).map((section) => renderPrdSection(section)
-        + ("diagrams" in section ? (section.diagrams ?? []).map(renderPrdDiagram).join("") : "")).join("")}
-      <h2>${escapeHtml(document.sections.degradation.title)}</h2>
-      <div class="wb-prd__block">${renderPrdInlinesHtml(document.sections.degradation.content)}</div>
-      <h2>${escapeHtml(document.sections.safetyBaseline.title)}</h2>
-      <p>${escapeHtml(document.sections.safetyBaseline.intro)}</p>
-      ${renderPrdSafetyTable(document.sections.safetyBaseline.rows)}
-      ${renderPrdAssumptions(document.assumptions)}
-    </div>`;
-  }
-
+  const introduction = document.sections.introduction;
+  const requirements = document.sections.businessRequirements;
   return `<div class="wb-prd">
     <section class="wb-prd__cover">
-      <div class="wb-prd__muted">PRD · v${document.revision.number}</div>
-      <h1>${escapeHtml(document.title)}</h1>
+      <div class="wb-prd__muted">需求说明书 · v${document.revision.number}</div>
+      <h1>${escapeHtml(document.cover.title)}</h1>
       <p>${escapeHtml(document.revision.summary)}</p>
+      <p class="wb-prd__muted">变更时间：${escapeHtml(document.revision.changedAt)}</p>
     </section>
-    ${document.sections && Object.entries(document.sections).map(([key, section]) => (
-      `<h2>${escapeHtml(section.title || key)}</h2>${renderPrdSection(section)}`
-    )).join("")}
+    ${renderPrdVersionHistory(document.versionHistory)}
+    ${renderPrdToc(document.tableOfContents.entries)}
+    <h2>${escapeHtml(introduction.title)}</h2>
+    ${renderPrdSection(introduction.background)}
+    ${renderPrdSection(introduction.scope)}
+    ${renderPrdSection(introduction.usageScenarios)}
+    ${renderPrdChannelTable(introduction.usageScenarios.channelTable)}
+    <h2>${escapeHtml(requirements.title)}</h2>
+    <div class="wb-prd__block">${renderPrdInlinesHtml(requirements.summary)}</div>
+    ${prdBusinessSections(document).map((section) => renderPrdSection(section)
+      + ("diagrams" in section ? (section.diagrams ?? []).map(renderPrdDiagram).join("") : "")).join("")}
+    <h2>${escapeHtml(document.sections.degradation.title)}</h2>
+    <div class="wb-prd__block">${renderPrdInlinesHtml(document.sections.degradation.content)}</div>
+    <h2>${escapeHtml(document.sections.safetyBaseline.title)}</h2>
+    <p>${escapeHtml(document.sections.safetyBaseline.intro)}</p>
+    ${renderPrdSafetyTable(document.sections.safetyBaseline.rows)}
+    ${renderPrdAssumptions(document.assumptions)}
   </div>`;
 }
 
@@ -685,7 +723,7 @@ type RenderContext = {
 function renderNode(node: PrototypeNode, context: RenderContext): string {
   const boundVisible = initialBindingValue(node, "visible", context);
   const visible = boundVisible === undefined ? node.visible : Boolean(boundVisible);
-  const attributes = `class="wb-node wb-node--${node.kind}" data-wb-node="${escapeHtml(node.id)}" data-wb-rotation="${node.style.rotation}" data-wb-transform-origin-x="${node.style.transformOrigin.x}" data-wb-transform-origin-y="${node.style.transformOrigin.y}" style="${escapeHtml(nodeStyle(node, context.tokens))}"${visible ? "" : " hidden"}`;
+  const attributes = `class="wb-node wb-node--${node.kind}" data-wb-node="${escapeHtml(node.id)}" data-wb-rotation="${node.style.rotation}" data-wb-transform-origin-x="${node.style.transformOrigin.x}" data-wb-transform-origin-y="${node.style.transformOrigin.y}" style="${escapeHtml(nodeStyle(node, context.tokens, node.style, context.nodes))}"${visible ? "" : " hidden"}`;
   if (node.kind === "frame") {
     return `<div ${attributes}>${node.childIds.map((id) => renderChild(id, context)).join("")}</div>`;
   }
@@ -708,7 +746,7 @@ function renderNode(node: PrototypeNode, context: RenderContext): string {
     const asset = context.assets.get(typeof assetId === "string" ? assetId : node.assetId);
     if (!asset || asset.kind !== "image") throw new TerminalExportError("EXPORT_IMAGE_ASSET_MISSING", `Image node ${node.id} has no valid asset`);
     const blob = requireAssetBlob(asset, context.blobs);
-    return `<img ${attributes} src="${escapeHtml(dataUri(blob.mediaType, blob.bytes))}" alt="${escapeHtml(node.alt)}" style="${escapeHtml(`${nodeStyle(node, context.tokens)};object-fit:${node.fit}`)}">`;
+    return `<img ${attributes} src="${escapeHtml(dataUri(blob.mediaType, blob.bytes))}" alt="${escapeHtml(node.alt)}" style="${escapeHtml(`${nodeStyle(node, context.tokens, node.style, context.nodes)};object-fit:${node.fit}`)}">`;
   }
   if (node.kind === "icon") {
     const asset = context.assets.get(node.assetId);
@@ -766,7 +804,9 @@ function renderInput(
 function nodeStyle(
   node: PrototypeNode,
   tokens: Map<string, PrototypeToken>,
-  style: PrototypeStyle = node.style,
+  style: PrototypeStyle,
+  nodes: ReadonlyMap<string, PrototypeNode>,
+  stateStyles: ReadonlyMap<string, PrototypeStyle> = new Map(),
 ) {
   const { layout } = node;
   const padding = [layout.padding.top, layout.padding.right, layout.padding.bottom, layout.padding.left]
@@ -786,6 +826,10 @@ function nodeStyle(
     ...(layout.display === "grid" && layout.gridColumns ? [`grid-template-columns:repeat(${layout.gridColumns},minmax(0,1fr))`] : []),
     `overflow:${layout.overflow}`,
     ...styleDeclarations(style, tokens, node.kind),
+    ...(node.kind === "button" || node.kind === "input" ? [
+      ...(!style.typography?.color ? [`color:${controlTextColor(node, style, tokens, nodes, stateStyles)}`] : []),
+      ...(!style.fill ? ["background-color:transparent"] : []),
+    ] : []),
   ];
   return declarations.join(";");
 }
@@ -810,6 +854,7 @@ function styleDeclarations(style: PrototypeStyle, tokens: Map<string, PrototypeT
   ];
   if (style.typography) {
     declarations.push(
+      ...(style.typography.color ? [`color:${color(style.typography.color, tokens)}`] : []),
       `font-family:${cssString(stringValue(style.typography.fontFamily, tokens))}`,
       `font-size:${numeric(style.typography.fontSize, tokens)}px`,
       `font-weight:${numeric(style.typography.fontWeight, tokens)}`,
@@ -821,6 +866,43 @@ function styleDeclarations(style: PrototypeStyle, tokens: Map<string, PrototypeT
     );
   }
   return declarations;
+}
+
+// Legacy controls have a background fill but no foreground field. Use the
+// higher-contrast black/white against the composited surface, not the raw RGB
+// of a translucent fill. Unfilled controls retain their parent's text color.
+function controlTextColor(
+  node: PrototypeNode,
+  style: PrototypeStyle,
+  tokens: Map<string, PrototypeToken>,
+  nodes: ReadonlyMap<string, PrototypeNode>,
+  stateStyles: ReadonlyMap<string, PrototypeStyle>,
+) {
+  if (!style.fill || style.opacity !== 1) return "inherit";
+  const fill = rgba(color(style.fill, tokens));
+  if (fill[3] === 0) return "inherit";
+  const layers = [fill];
+  let ancestor = node.parentId === null ? undefined : nodes.get(node.parentId);
+  while (ancestor) {
+    const ancestorStyle = stateStyles.get(ancestor.id) ?? ancestor.style;
+    if (ancestorStyle.opacity !== 1) return "inherit";
+    if (ancestorStyle.fill) layers.push(rgba(color(ancestorStyle.fill, tokens)));
+    ancestor = ancestor.parentId === null ? undefined : nodes.get(ancestor.parentId);
+  }
+  let background = [255, 255, 255]; // .wb-screen has an opaque white surface.
+  for (const layer of layers.reverse()) {
+    background = background.map((channel, index) => layer[index]! * layer[3] + channel * (1 - layer[3]));
+  }
+  const linear = background.map((channel) => {
+    const value = channel / 255;
+    return value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4;
+  });
+  const luminance = linear[0]! * 0.2126 + linear[1]! * 0.7152 + linear[2]! * 0.0722;
+  return (luminance + 0.05) / 0.05 >= 1.05 / (luminance + 0.05) ? "#000000" : "#ffffff";
+}
+
+function rgba(value: string): [number, number, number, number] {
+  return [parseInt(value.slice(1, 3), 16), parseInt(value.slice(3, 5), 16), parseInt(value.slice(5, 7), 16), value.length === 9 ? parseInt(value.slice(7, 9), 16) / 255 : 1];
 }
 
 function runtimeModel(
@@ -845,30 +927,52 @@ function runtimeModel(
     .filter((action) => action.kind !== "setState" || stateIds.has(action.targetStateId))
     .filter((action) => action.kind !== "submit" || action.successStateId === null || stateIds.has(action.successStateId));
   const actionIds = new Set(actions.map((action) => action.id));
+  const translucentControls = document.nodes.filter(node => {
+    if ((node.kind !== "button" && node.kind !== "input") || node.style.typography?.color || !node.style.fill) return false;
+    const alpha = rgba(color(node.style.fill, tokens))[3];
+    return alpha > 0 && alpha < 1;
+  });
   return {
     id,
     documentId: document.documentId,
     initialScreenId,
     screens,
     variables: document.variables,
-    states: states.map((state) => ({
-      id: state.id,
-      screenId: state.screenId,
-      values: state.values,
-      overrides: state.overrides.map((override) => {
-        const node = nodes.get(override.nodeId);
-        const asset = override.assetId ? assets.get(override.assetId) : undefined;
-        const blob = asset && asset.kind === "image" ? requireAssetBlob(asset, blobs) : undefined;
-        return {
-          nodeId: override.nodeId,
-          ...(override.visible === undefined ? {} : { visible: override.visible }),
-          ...(override.enabled === undefined ? {} : { enabled: override.enabled }),
-          ...(override.text === undefined ? {} : { text: override.text }),
-          ...(override.style === undefined || !node ? {} : { style: nodeStyle(node, tokens, override.style) }),
-          ...(blob ? { src: dataUri(blob.mediaType, blob.bytes) } : {}),
-        };
-      }),
-    })),
+    states: states.map((state) => {
+      const stateStyles = new Map(state.overrides.flatMap(override => override.style ? [[override.nodeId, override.style] as const] : []));
+      // A parent's state can change the surface behind a translucent child.
+      // Include that child's derived style so the shared runtime restores and
+      // updates it through the same state override path as explicit styles.
+      const inheritedOverrides: PrototypeDocument["states"][number]["overrides"] = translucentControls.filter(node => {
+        if (node.screenId !== state.screenId || stateStyles.has(node.id) || stateStyles.size === 0) return false;
+        let parent = node.parentId === null ? undefined : nodes.get(node.parentId);
+        while (parent) {
+          if (stateStyles.has(parent.id)) return true;
+          parent = parent.parentId === null ? undefined : nodes.get(parent.parentId);
+        }
+        return false;
+      }).map(node => ({ nodeId: node.id, style: node.style }));
+      const overrides = new Map(state.overrides.map(override => [override.nodeId, override]));
+      for (const override of inheritedOverrides) overrides.set(override.nodeId, { ...overrides.get(override.nodeId), ...override });
+      return {
+        id: state.id,
+        screenId: state.screenId,
+        values: state.values,
+        overrides: [...overrides.values()].map((override) => {
+          const node = nodes.get(override.nodeId);
+          const asset = override.assetId ? assets.get(override.assetId) : undefined;
+          const blob = asset && asset.kind === "image" ? requireAssetBlob(asset, blobs) : undefined;
+          return {
+            nodeId: override.nodeId,
+            ...(override.visible === undefined ? {} : { visible: override.visible }),
+            ...(override.enabled === undefined ? {} : { enabled: override.enabled }),
+            ...(override.text === undefined ? {} : { text: override.text }),
+            ...(override.style === undefined || !node ? {} : { style: nodeStyle(node, tokens, override.style, nodes, stateStyles) }),
+            ...(blob ? { src: dataUri(blob.mediaType, blob.bytes) } : {}),
+          };
+        }),
+      };
+    }),
     actions,
     bindings: document.bindings.filter((binding) => selectedNodeIds.has(binding.nodeId)).map((binding) => ({
       id: binding.id,
@@ -966,7 +1070,6 @@ function numeric(value: { kind: "literal"; value: number } | { kind: "token"; to
   if (!token || !["number", "spacing", "radius", "fontSize", "lineHeight", "borderWidth", "duration", "fontWeight"].includes(token.type)) {
     throw invalidToken(value.tokenId);
   }
-  if (token.type === "fontWeight") return token.value;
   if (token.type === "color" || token.type === "fontFamily" || token.type === "shadow") throw invalidToken(value.tokenId);
   return token.value;
 }
@@ -1038,5 +1141,3 @@ export function artifactCanonicalChecksum(artifact: ExportArtifactSource) {
     : Buffer.from(canonicalJson(artifact.content), "utf8");
   return createHash("sha256").update(bytes).digest("hex");
 }
-
-export const exportHtmlBaseStyles = baseStyles;

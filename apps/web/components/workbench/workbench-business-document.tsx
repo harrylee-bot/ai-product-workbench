@@ -4,7 +4,7 @@ import { businessDocumentSchema } from "@workbench/workbench-contracts";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
-export function safeDocumentLink(value: string): string {
+function safeDocumentLink(value: string): string {
   try {
     const url = new URL(value);
     return ["https:", "http:", "mailto:"].includes(url.protocol) ? url.href : "";

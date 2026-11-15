@@ -4,14 +4,11 @@ import {
   runEventSchema,
   type RunEvent,
 } from "@workbench/workbench-contracts";
-import { WorkbenchDbService } from "../../platform/database/workbench-db.service.js";
 
 type EventType = RunEvent["type"];
 
 @Injectable()
 export class RunEventStore {
-  constructor(private readonly db: WorkbenchDbService) {}
-
   async append(
     tx: Prisma.TransactionClient,
     runId: string,
@@ -32,16 +29,6 @@ export class RunEventStore {
       },
     });
     return toRunEvent(run, event);
-  }
-
-  async listAfter(runId: string, afterSequence: number, limit = 100): Promise<RunEvent[]> {
-    const events = await this.db.runEvent.findMany({
-      where: { runId, sequence: { gt: afterSequence } },
-      include: { run: true },
-      orderBy: { sequence: "asc" },
-      take: Math.min(Math.max(limit, 1), 500),
-    });
-    return events.map((event) => toRunEvent(event.run, event));
   }
 }
 

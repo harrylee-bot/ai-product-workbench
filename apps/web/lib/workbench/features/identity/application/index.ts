@@ -8,20 +8,11 @@ import {
   WorkbenchVersionRequiredError,
   type Versioned,
 } from "../../../transport/contracts";
-import {
-  useWorkbenchIdentityApi,
-  type WorkbenchIdentityApi,
-} from "../api-adapter";
+import { useWorkbenchIdentityApi } from "../api-adapter";
 import type {
   CommunicationPreferences,
   UpdateCommunicationPreferencesRequest,
 } from "../domain";
-
-export type WorkbenchIdentityReader = Pick<WorkbenchIdentityApi, "getIdentity">;
-
-export function useWorkbenchIdentityReader(): WorkbenchIdentityReader {
-  return useWorkbenchIdentityApi();
-}
 
 export function useWorkbenchIdentity() {
   const api = useWorkbenchIdentityApi();

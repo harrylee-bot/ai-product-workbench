@@ -5,6 +5,23 @@ import { freezeImport } from "../src/import/source-types.js";
 
 const prefixes = { pending: "pending/imports", canonical: "blobs" };
 
+describe("PrismaImportSourceStore blob identity", () => {
+  it("reuses the stored ready object key when the configured canonical prefix changes", async () => {
+    const tx = transaction();
+    const sha256 = "a".repeat(64);
+    tx.blob.findFirst.mockResolvedValue({
+      id: "blob-existing", generation: 3, status: "ready", sha256,
+      storageKey: "verified-objects/existing/g3", mediaType: "text/plain", byteSize: 5n,
+    });
+
+    await expect(storeWith(tx).reserveBlob({ sha256, mediaType: "text/plain", byteSize: 5 }))
+      .resolves.toEqual({
+        id: "blob-existing", sha256, canonicalStorageKey: "verified-objects/existing/g3",
+      });
+    expect(tx.blob.create).not.toHaveBeenCalled();
+  });
+});
+
 describe("PrismaImportSourceStore leases", () => {
   it("claims a queued attempt once and returns only the frozen external command", async () => {
     const tx = transaction();
@@ -20,12 +37,7 @@ describe("PrismaImportSourceStore leases", () => {
         attemptId: "attempt-1",
         attemptNumber: 1,
         leaseToken: expect.any(String),
-        command: {
-          id: "source-1",
-          projectId: "project-1",
-          requestHash: "a".repeat(64),
-          request: { kind: "url_snapshot", sourceUrl: "https://example.test" },
-        },
+        request: { kind: "url_snapshot", sourceUrl: "https://example.test" },
       });
     expect(tx.importSourceAttempt.updateMany).toHaveBeenCalledWith(expect.objectContaining({
       where: { id: "attempt-1", status: "queued" },
@@ -145,12 +157,8 @@ describe("PrismaImportSourceStore failure and reconciliation", () => {
     tx.importSourceAttempt.updateMany.mockResolvedValue({ count: 1 });
     const store = storeWith(tx);
 
-    await expect(store.expireStaleAttempts(new Date(), 3, 50)).resolves.toEqual({
-      expired: 2,
-      retryable: 1,
-      exhausted: 1,
-    });
-
+    await store.expireStaleAttempts(new Date(), 3, 50);
+    expect(tx.importSourceAttempt.updateMany).toHaveBeenCalledTimes(2);
     expect(tx.importSourceAttempt.updateMany).toHaveBeenNthCalledWith(1, expect.objectContaining({
       data: expect.objectContaining({ status: "retryable_failed", failureCode: "IMPORT_LEASE_EXPIRED" }),
     }));
@@ -165,13 +173,12 @@ describe("PrismaImportSourceStore failure and reconciliation", () => {
 
   it("returns only bounded retry candidates below the maximum attempt count", async () => {
     const queryRaw = vi.fn().mockResolvedValue([
-      { sourceId: "source-1", projectId: "project-1", requestHash: "a".repeat(64), attemptCount: 1n },
+      { sourceId: "source-1", requestHash: "a".repeat(64), attemptCount: 1n },
     ]);
     const store = new PrismaImportSourceStore({ $queryRaw: queryRaw } as never, prefixes);
 
     await expect(store.reconciliationCandidates(new Date(), 3, 50)).resolves.toEqual([{
       sourceId: "source-1",
-      projectId: "project-1",
       requestHash: "a".repeat(64),
       nextAttempt: 2,
     }]);
@@ -189,7 +196,6 @@ describe("PrismaImportSourceStore failure and reconciliation", () => {
     const enqueue = vi.fn().mockResolvedValue("job-2");
     const candidate = {
       sourceId: "source-1",
-      projectId: "project-1",
       requestHash: "a".repeat(64),
       nextAttempt: 2,
     };
@@ -286,7 +292,6 @@ function lockedAttempt(overrides: Record<string, unknown> = {}) {
 
 function frozenImport() {
   return freezeImport({
-    label: "Website",
     descriptor: {
       kind: "url_snapshot",
       sourceUrl: "https://example.test",
@@ -300,13 +305,7 @@ function reservedBlob() {
   const frozen = frozenImport();
   return {
     id: "blob-1",
-    generation: 1,
-    status: "ready" as const,
-    storageKey: `blobs/${frozen.blobs[0]!.sha256}`,
     canonicalStorageKey: `blobs/${frozen.blobs[0]!.sha256}`,
     sha256: frozen.blobs[0]!.sha256,
-    mediaType: "text/plain",
-    byteSize: 5,
-    latestScanStatus: "clean",
   };
 }

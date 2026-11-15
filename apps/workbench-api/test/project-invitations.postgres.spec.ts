@@ -1,4 +1,6 @@
 import { PrismaClient } from "@workbench/workbench-db";
+import { AccessService } from "../src/modules/access/access.service.js";
+import { ProjectMembersService } from "../src/modules/projects/project-members.service.js";
 
 const databaseUrl = process.env.WORKBENCH_TEST_DATABASE_URL;
 const describeWithPostgres = databaseUrl ? describe : describe.skip;
@@ -76,6 +78,16 @@ describeWithPostgres("Project invitation PostgreSQL constraints", () => {
           members: { some: { principalId: invitee.id } },
         },
       })).resolves.toMatchObject({ id: project.id });
+      const members = new ProjectMembersService(db as never, new AccessService(db as never));
+      const changed = await members.setRole(owner.id, project.id, invitee.id, project.revision, "editor");
+      expect(changed).toMatchObject({
+        member: { principalId: invitee.id, role: "editor" }, projectRevision: project.revision + 1,
+      });
+      await expect(members.setRole(owner.id, project.id, invitee.id, changed.projectRevision, "editor"))
+        .resolves.toEqual(changed);
+      await expect(db.workspaceMember.findUnique({
+        where: { workspaceId_principalId: { workspaceId: workspace.id, principalId: invitee.id } },
+      })).resolves.toBeNull();
     } finally {
       if (workspaceId) {
         await db.workspace.delete({ where: { id: workspaceId } }).catch(() => undefined);

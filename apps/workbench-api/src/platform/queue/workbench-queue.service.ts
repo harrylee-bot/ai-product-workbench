@@ -6,8 +6,7 @@ import {
   assertImportSourceProcessQueueConfiguration,
   createAndAssertRuntimeQueues,
   exportBuildQueue,
-  exportDeliveryQueue,
-  exportDeliveryQueueOptions,
+  exportBuildQueueOptions,
   fileExtractQueue,
   fileExtractQueueOptions,
   fileVerifyQueue,
@@ -54,18 +53,7 @@ export class WorkbenchQueueService implements OnModuleInit, OnModuleDestroy {
       notify: true,
     });
     await this.boss.createQueue(fileExtractQueue, fileExtractQueueOptions);
-    await this.boss.createQueue(exportBuildQueue, {
-      policy: "short",
-      retryLimit: 3,
-      retryDelay: 5,
-      retryBackoff: true,
-      retryDelayMax: 5 * 60,
-      expireInSeconds: 15 * 60,
-      heartbeatSeconds: 30,
-      deleteAfterSeconds: 7 * 24 * 60 * 60,
-      notify: true,
-    });
-    await this.boss.createQueue(exportDeliveryQueue, exportDeliveryQueueOptions);
+    await this.boss.createQueue(exportBuildQueue, exportBuildQueueOptions);
     await this.boss.createQueue(knowledgeReleaseBuildQueue, knowledgeReleaseBuildQueueOptions);
   }
 

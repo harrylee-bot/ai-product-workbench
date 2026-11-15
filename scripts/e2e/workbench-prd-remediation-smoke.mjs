@@ -3,7 +3,7 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
 import { artifactVersionDetailSchema, createArtifactVersionRequestSchema, exportCapabilitiesSchema, projectReleaseSchema } from "@workbench/workbench-contracts";
-import { prdDocumentV2Example } from "@workbench/workbench-contracts/test-fixtures";
+import { prdDocumentV3Example } from "@workbench/workbench-contracts/test-fixtures";
 
 // Controlled browser fixture: validates UI transport and durable draft behavior,
 // not the quality or availability of a production model/knowledge provider.
@@ -13,7 +13,7 @@ const timestamp = "2026-10-08T00:00:00.000Z";
 const checksum = "a".repeat(64);
 const project = { id: "project-prd-remediation", workspaceId: "workspace-1", title: "PRD 草稿验收", summary: null, status: "active", revision: 1, createdAt: timestamp, updatedAt: timestamp };
 const thread = { id: "thread-prd", projectId: project.id, title: "需求", status: "active", revision: 1, createdAt: timestamp, updatedAt: timestamp };
-const documents = new Map([["prd-v1", structuredClone(prdDocumentV2Example)]]);
+const documents = new Map([["prd-v1", structuredClone(prdDocumentV3Example)]]);
 let artifactRevision = 1;
 let currentVersionId = "prd-v1";
 let failSave = false;
@@ -35,7 +35,7 @@ let board = {
   edges: [],
 };
 function version(id = currentVersionId) {
-  return { artifactId: "artifact-prd", artifactVersionId: id, version: Number(id.slice(5)), kind: "prd", schemaVersion: 2,
+  return { artifactId: "artifact-prd", artifactVersionId: id, version: Number(id.slice(5)), kind: "prd", schemaVersion: 3,
     status: "ready", checksum, createdByRunId: null, createdAt: timestamp };
 }
 function artifact() {
@@ -47,7 +47,7 @@ function detail(id) {
 }
 function release() {
   const pin = { position: 0, artifactId: "artifact-prd", artifactVersionId: currentVersionId, title: artifact().title,
-    kind: "prd", version: version().version, schemaVersion: 2, checksum, assets: [] };
+    kind: "prd", version: version().version, schemaVersion: 3, checksum, assets: [] };
   return projectReleaseSchema.parse({
     id: `release-${releases.length + 1}`, projectId: project.id, version: releases.length + 1, status: "ready", createdById: "principal-1",
     boardId: board.id, boardRevision: board.revision, boardSnapshot: structuredClone(board), boardChecksum: checksum,
@@ -56,7 +56,7 @@ function release() {
     failure: null, createdAt: timestamp, finishedAt: timestamp, updatedAt: timestamp,
   });
 }
-const available = { available: true, authentication: "not_required", reasonCode: null };
+const available = { available: true, reasonCode: null };
 async function json(route, value, headers = {}, status = 200) {
   await route.fulfill({ status, contentType: "application/json", headers, body: JSON.stringify(value) });
 }
@@ -136,7 +136,6 @@ await context.route("**/api/v1/**", async (route) => {
   if (method === "GET" && p === "/api/v1/exports/capabilities") return json(route, exportCapabilitiesSchema.parse({
     formats: Object.fromEntries(["html", "react", "figma", "mcp", "docx", "pdf"].map((f) => [f, available])),
     packaging: { single_file: available, zip: available },
-    external: Object.fromEntries(["ai_studio", "netlify", "lovable", "bolt"].map((f) => [f, { available: false, authentication: "required", reasonCode: "EXPORT_EXTERNAL_AUTHENTICATION_REQUIRED" }])),
   }));
   if (method === "POST" && p === `/api/v1/projects/${project.id}/exports`) {
     const body = request.postDataJSON();

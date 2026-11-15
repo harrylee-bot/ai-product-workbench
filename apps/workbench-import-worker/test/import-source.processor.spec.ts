@@ -96,7 +96,6 @@ describe("ImportSourceProcessor", () => {
       bytes: Buffer.from("x"),
     }));
     test.providers.freeze.mockResolvedValueOnce(freezeImport({
-      label: "oversized",
       descriptor: { kind: "github_snapshot", repository: "acme/product", commitSha: "a".repeat(40) },
       blobs,
     }));
@@ -134,7 +133,6 @@ describe("ImportSourceProcessor", () => {
 
 function harness(overrides: { attemptNumber?: number } = {}) {
   const frozen = freezeImport({
-    label: "Website",
     descriptor: {
       kind: "url_snapshot",
       sourceUrl: "https://example.test/start",
@@ -144,14 +142,8 @@ function harness(overrides: { attemptNumber?: number } = {}) {
   });
   const reservation = {
     id: "blob-1",
-    generation: 1,
-    status: "pending" as const,
-    storageKey: "pending/aa/content/g1",
     canonicalStorageKey: "blobs/aa/content/g1",
     sha256: frozen.blobs[0]!.sha256,
-    mediaType: "text/plain",
-    byteSize: 5,
-    latestScanStatus: null,
   };
   const store = {
     beginAttempt: vi.fn().mockResolvedValue({
@@ -159,12 +151,7 @@ function harness(overrides: { attemptNumber?: number } = {}) {
       attemptId: "attempt-1",
       attemptNumber: overrides.attemptNumber ?? 1,
       leaseToken: "lease-1",
-      command: {
-        id: "source-1",
-        projectId: "project-1",
-        requestHash: "a".repeat(64),
-        request: { kind: "url_snapshot", sourceUrl: "https://example.test/start" },
-      },
+      request: { kind: "url_snapshot", sourceUrl: "https://example.test/start" },
     }),
     touchAttempt: vi.fn().mockResolvedValue(undefined),
     reserveBlob: vi.fn().mockResolvedValue(reservation),

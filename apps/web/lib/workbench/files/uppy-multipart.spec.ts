@@ -1,3 +1,7 @@
+import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
+import { Worker as NodeWorker } from "node:worker_threads";
+
 import type {
   CompleteFileUploadRequest,
   CreateFileUploadRequest,
@@ -5,12 +9,16 @@ import type {
   FileExtraction,
   FileUploadSession,
 } from "@workbench/workbench-contracts";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { indexedDB } from "fake-indexeddb";
+import { ModuleKind, transpileModule } from "typescript";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+import { createWorkbenchUploadCheckpointStore } from "./upload-checkpoint-store";
+import { sha256Blob, type WorkbenchDigestWorker } from "./upload-digest";
 
 import {
   createWorkbenchMultipartUpload,
   resumableUploadParts,
-  sha256Blob,
   type WorkbenchFileTransferService,
   type WorkbenchUploadCheckpoint,
   type WorkbenchUploadCheckpointStore,
@@ -20,6 +28,40 @@ import {
 const MEBIBYTE = 1024 * 1024;
 const PART_SIZE = 5 * MEBIBYTE;
 const CREATED_AT = "2026-07-12T00:00:00.000Z";
+
+// Execute the production Worker entry in a real isolated thread. Only the
+// browser message transport is adapted; hashing still uses the shipped code.
+const workerSource = transpileModule(readFileSync(
+  new URL("./upload-digest.worker.ts", import.meta.url), "utf8",
+), { compilerOptions: { module: ModuleKind.CommonJS } }).outputText;
+
+class DigestWorker implements WorkbenchDigestWorker {
+  onmessage: WorkbenchDigestWorker["onmessage"] = null;
+  onerror: WorkbenchDigestWorker["onerror"] = null;
+  private readonly worker = new NodeWorker(`
+    const { parentPort } = require("node:worker_threads");
+    globalThis.self = { postMessage: data => parentPort.postMessage(data) };
+    ${workerSource}
+    parentPort.on("message", data => self.onmessage({ data }));
+  `, { eval: true });
+
+  constructor() {
+    this.worker.on("message", (data) => this.onmessage?.({ data } as MessageEvent));
+    this.worker.on("error", (error) => this.onerror?.({ message: error.message } as ErrorEvent));
+  }
+
+  postMessage(message: Parameters<WorkbenchDigestWorker["postMessage"]>[0]) {
+    this.worker.postMessage(message);
+  }
+
+  terminate() {
+    void this.worker.terminate();
+  }
+}
+
+beforeEach(() => {
+  vi.stubGlobal("Worker", DigestWorker);
+});
 
 const queuedExtraction: FileExtraction = {
   id: "extraction-1",
@@ -305,7 +347,9 @@ describe("Workbench Uppy multipart adapter", () => {
     expect(result.phase).toBe("ready");
     expect(result.file?.status).toBe("ready");
     expect(result.extraction?.status).toBe("ready");
-    expect(result.clientSha256Hint).toMatch(/^[a-f0-9]{64}$/);
+    expect(result.clientSha256Hint).toBe(
+      createHash("sha256").update(new Uint8Array(PART_SIZE + MEBIBYTE)).digest("hex"),
+    );
     expect(result.hashPercent).toBe(100);
     expect(partCalls.map((part) => part.size).sort((a, b) => b - a))
       .toEqual([PART_SIZE, MEBIBYTE]);
@@ -413,6 +457,34 @@ describe("Workbench Uppy multipart adapter", () => {
 
     upload.destroy();
   }, 20_000);
+
+  it.each(["savedAt", "missingSubmissionIntent"])("rejects a retired %s checkpoint before making API calls", async (retiredField) => {
+    const file = testFile();
+    const service = createService();
+    const seed = await createWorkbenchMultipartUpload({ projectId: "project-1", file, service });
+    const checkpoint = seed.getCheckpoint();
+    seed.destroy();
+    const retired = retiredField === "savedAt"
+      ? { ...checkpoint, savedAt: 123 }
+      : { ...checkpoint, submissionIntent: undefined };
+    const databaseName = `retired-upload-${crypto.randomUUID()}`;
+    const store = createWorkbenchUploadCheckpointStore({ databaseName, indexedDB });
+    if (!store) throw new Error("fake IndexedDB was not available");
+    try {
+      await store.save(retired as WorkbenchUploadCheckpoint);
+      await expect(createWorkbenchMultipartUpload({
+        projectId: "project-1", file, service, checkpointStore: store,
+      })).rejects.toThrow("Stored upload checkpoint is invalid");
+      expect(service.createFileUpload).not.toHaveBeenCalled();
+      expect(service.getFileUpload).not.toHaveBeenCalled();
+    } finally {
+      await new Promise<void>((resolve, reject) => {
+        const request = indexedDB.deleteDatabase(databaseName);
+        request.onsuccess = () => resolve();
+        request.onerror = () => reject(request.error);
+      });
+    }
+  });
 
   it("restores a digest-proven pre-session checkpoint and safely replays create", async () => {
     const file = testFile();

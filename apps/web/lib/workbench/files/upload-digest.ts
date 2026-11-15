@@ -1,5 +1,3 @@
-import { createSHA256 } from "hash-wasm";
-
 const HASH_CHUNK_SIZE = 4 * 1024 * 1024;
 const SHA256_PATTERN = /^[a-f0-9]{64}$/;
 
@@ -31,16 +29,9 @@ export async function sha256Blob(
   blob: Blob,
   options: Sha256BlobOptions = {},
 ): Promise<string> {
-  if (options.workerFactory || typeof window !== "undefined") {
-    if (!options.workerFactory && typeof Worker === "undefined") {
-      throw new Error("UPLOAD_DIGEST_WORKER_UNAVAILABLE");
-    }
-    return sha256BlobInWorker(blob, options);
+  if (!options.workerFactory && typeof Worker === "undefined") {
+    throw new Error("UPLOAD_DIGEST_WORKER_UNAVAILABLE");
   }
-  return sha256BlobOutsideBrowser(blob, options);
-}
-
-async function sha256BlobInWorker(blob: Blob, options: Sha256BlobOptions): Promise<string> {
   throwIfAborted(options.signal);
   const worker: WorkbenchDigestWorker = options.workerFactory?.() ?? new Worker(
     new URL("./upload-digest.worker.ts", import.meta.url),
@@ -91,24 +82,6 @@ async function sha256BlobInWorker(blob: Blob, options: Sha256BlobOptions): Promi
       fail(error);
     }
   });
-}
-
-// Vitest runs without a browser Worker. Production browsers never use this path.
-async function sha256BlobOutsideBrowser(blob: Blob, options: Sha256BlobOptions): Promise<string> {
-  const hasher = await createSHA256();
-  let offset = 0;
-  while (offset < blob.size) {
-    throwIfAborted(options.signal);
-    const end = Math.min(blob.size, offset + HASH_CHUNK_SIZE);
-    const bytes = new Uint8Array(await blob.slice(offset, end).arrayBuffer());
-    throwIfAborted(options.signal);
-    hasher.update(bytes);
-    offset = end;
-    options.onProgress?.(offset, blob.size);
-  }
-  const digest = hasher.digest("hex");
-  if (!SHA256_PATTERN.test(digest)) throw new Error("UPLOAD_DIGEST_INVALID_RESULT");
-  return digest;
 }
 
 function throwIfAborted(signal?: AbortSignal) {

@@ -112,7 +112,7 @@ export async function mcpOutput(request: ExportBuildRequest) {
   };
 }
 
-export function mcpPayload(request: ExportBuildRequest) {
+function mcpPayload(request: ExportBuildRequest) {
   const selected = selectExportArtifacts(
     request.source.artifacts,
     request.selection,

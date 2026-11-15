@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Render a validated PRD v2/v3 into the retained requirement-document template.
+"""Render a validated PRD v3 into the retained requirement-document template.
 
 The TypeScript entry point validates the complete source contract. This renderer
 preserves the template's page/style/header/footer definitions, replaces its sample
@@ -626,11 +626,7 @@ class Renderer:
                                 for row in channels["rows"]], [0.6, 3, 1.5])
         self.heading(biz["title"], 1, anchor_for(biz["title"]))
         self.inlines(self.p(), biz["summary"])
-        if s["protocol"] == "workbench.prd.v3":
-            business_sections = [biz["pageLinks"], *biz["functionSections"]]
-        else:
-            business_sections = [biz[key] for key in ("pageLinks", "coreRules", "flowAndPages", "acceptanceCriteria")]
-            business_sections.extend(biz["additionalSections"])
+        business_sections = [biz["pageLinks"], *biz["functionSections"]]
         for section in business_sections:
             self.section(section, anchor_for(section["title"]))
             for diagram in section.get("diagrams", []):

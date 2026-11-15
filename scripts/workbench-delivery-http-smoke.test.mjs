@@ -3,10 +3,11 @@ import { createHash } from "node:crypto";
 import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import test from "node:test";
 import { canonicalJson, createArtifactVersionRequestSchema } from "@workbench/workbench-contracts";
 import { strToU8, zipSync } from "fflate";
-import { prdDocumentV2Example } from "@workbench/workbench-contracts/test-fixtures";
+import { prdDocumentV3Example } from "@workbench/workbench-contracts/test-fixtures";
 import { createDeliveryClient, deliverySmokeConfig, executeDeliveryHttpSmoke, submitDeliveryFromHome,
   verifyDeliveryPrototypeInteractions } from "./workbench-delivery-http-smoke.mjs";
 
@@ -37,7 +38,7 @@ test("credential file must be outside source and owned with mode 0600", (t) => {
   assert.equal(deliverySmokeConfig(env).cookie, `session=${secret}`);
   chmodSync(filename, 0o644);
   assert.throws(() => deliverySmokeConfig(env), { code: "PRIVATE_CONFIG_PERMISSIONS_INVALID" });
-  assert.throws(() => deliverySmokeConfig({ ...env, WORKBENCH_DELIVERY_SMOKE_CONFIG_FILE: new URL(import.meta.url).pathname }),
+  assert.throws(() => deliverySmokeConfig({ ...env, WORKBENCH_DELIVERY_SMOKE_CONFIG_FILE: fileURLToPath(import.meta.url) }),
     { code: "PRIVATE_CONFIG_MUST_BE_OUTSIDE_REPOSITORY" });
 });
 
@@ -161,14 +162,14 @@ test("a session that remains usable after logout cannot pass acceptance", async 
 
 function fixture({ lostSubmit = false, lostProjectCreate = false, corruptDownload = false, archiveFailure = false,
   missingPrototypeCitations = false, staleDocumentDownload = false, interactionFailure = false, logoutFailure = false } = {}) {
-  const prd = structuredClone(prdDocumentV2Example);
+  const prd = structuredClone(prdDocumentV3Example);
   const prototype = JSON.parse(readFileSync(new URL("../integrations/deerflow/skills/workbench/references/prototype-runtime-result.example.json", import.meta.url), "utf8")).artifacts[0].content;
   const citation = { id: "citation-one", documentId: "document-one", chunkId: "chunk-one", sourcePath: "rules/example.md",
     title: "Example", quote: "SECRET_KNOWLEDGE_QUOTE", locator: { heading: "Example", startLine: 1, endLine: 2 } };
   prd.citations = [citation];
   const contents = { prd, prototype };
   const versions = Object.fromEntries(Object.entries(contents).map(([kind, content]) => [kind, {
-    artifactId: `artifact-${kind}`, artifactVersionId: `version-${kind}`, kind, schemaVersion: kind === "prd" ? 2 : 1,
+    artifactId: `artifact-${kind}`, artifactVersionId: `version-${kind}`, kind, schemaVersion: kind === "prd" ? 3 : 1,
     status: "ready", version: 1, checksum: hash(canonicalJson(content)), citations: [citation],
     contentMode: "inline", content, createdByRunId: "run-own", knowledgeReleaseId: "knowledge-release", createdAt: "2026-10-12T00:00:00.000Z",
   }]));

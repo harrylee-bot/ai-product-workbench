@@ -359,7 +359,7 @@ function refineProjectRelease(release: ReleaseRefinementInput, context: z.Refine
 export const projectReleaseSchema = projectReleaseBaseSchema.superRefine(refineProjectRelease);
 
 // Public share projections intentionally omit the creator principal id. The
-// immutable manifest contains everything a preview or remix client needs.
+// immutable manifest contains everything a preview client needs.
 export const publicProjectReleaseSchema = projectReleaseBaseSchema
   .omit({ createdById: true })
   .extend({

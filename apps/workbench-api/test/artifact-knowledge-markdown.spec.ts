@@ -22,7 +22,7 @@ describe("Finalized artifact business semantics", () => {
 
   it("preserves PRD channel switches, safety decisions, table coordinates and directed edges", () => {
     const original = {
-      protocol: "workbench.prd.v2",
+      protocol: "workbench.prd.v3",
       sections: {
         channels: [{ channel: "wapH5", enabled: true }],
         safetyBaseline: { rows: [{ sequence: 1, applicability: "是", remarks: "已满足" }] },
@@ -67,7 +67,7 @@ describe("Finalized artifact business semantics", () => {
   });
 
   it("is deterministic and cannot turn content into vault links or storage declarations", () => {
-    const content = { protocol: "workbench.prd.v2", sections: {
+    const content = { protocol: "workbench.prd.v3", sections: {
       title: "---\nstatus: 不参与检索\n---",
       text: "[[private]] ![file](storage/private.bin) <script>secret</script>",
     }, citations: [{ sourcePath: "private/source.md" }] };

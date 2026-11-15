@@ -112,6 +112,10 @@ export const workbenchQueryKeys = {
     artifactId,
     artifactVersionId,
   ), "assets", assetId] as const,
+  prototypeV2: (projectId: string) => [...workbenchQueryKeys.project(projectId), "prototype-v2"] as const,
+  prototypeV2Plan: (projectId: string, planId: string) => [...workbenchQueryKeys.prototypeV2(projectId), "plan", planId] as const,
+  prototypeV2Revisions: (projectId: string, planId: string) => [...workbenchQueryKeys.prototypeV2Plan(projectId, planId), "revisions"] as const,
+  prototypeV2Export: (projectId: string, exportId: string) => [...workbenchQueryKeys.prototypeV2(projectId), "export", exportId] as const,
   exportJobs: (projectId: string) =>
     [...workbenchQueryKeys.project(projectId), "exports"] as const,
   exportJobLists: (projectId: string) =>

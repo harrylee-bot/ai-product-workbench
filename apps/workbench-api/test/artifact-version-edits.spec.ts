@@ -7,7 +7,7 @@ import {
   type PrdDocument,
   type PrototypeDocument,
 } from "@workbench/workbench-contracts";
-import { prdDocumentV2Example, prdDocumentV3Example } from "@workbench/workbench-contracts/test-fixtures";
+import { prdDocumentV3Example } from "@workbench/workbench-contracts/test-fixtures";
 import { hashRequest } from "../src/common/idempotency.js";
 import { ArtifactsController } from "../src/modules/artifacts/artifacts.controller.js";
 import { ArtifactsService } from "../src/modules/artifacts/artifacts.service.js";
@@ -121,45 +121,12 @@ const request: CreateArtifactVersionRequest = {
   document: prototypeDocument(2),
 };
 
-function prdDocument(revision: number, title = "PRD"): PrdDocument {
-  const text = (value: string) => [{ type: "text" as const, text: value, marks: [] }];
-  return {
-    protocol: "workbench.prd.v1",
-    documentId: "prd-document",
-    title,
-    revision: {
-      number: revision,
-      status: "draft",
-      summary: "Manual edit",
-      changedAt: "2026-07-14T01:00:00.000Z",
-      changedById: null,
-    },
-    assumptions: [],
-    citations: [],
-    sections: {
-      executiveSummary: { title: "Summary", blocks: [{ id: "summary", type: "paragraph", content: text("Summary") }] },
-      problem: { title: "Problem", blocks: [{ id: "problem", type: "paragraph", content: text("Problem") }] },
-      goals: { title: "Goals", blocks: [{ id: "goal", type: "goal", title: "Goal", description: text("Goal"), successMetric: "Metric", priority: "primary" }] },
-      targetUsers: { title: "Users", blocks: [{ id: "persona", type: "persona", name: "User", description: text("User"), needs: ["Need"], painPoints: ["Pain"] }] },
-      scope: { title: "Scope", blocks: [{ id: "scope", type: "bulletList", items: [{ id: "scope-item", content: text("Scope") }] }] },
-      requirements: { title: "Requirements", blocks: [{ id: "requirement", type: "requirement", title: "Requirement", description: text("Requirement"), priority: "must", goalIds: ["goal"], acceptanceCriterionIds: ["criterion"] }] },
-      userFlows: { title: "Flows", blocks: [{ id: "flow", type: "flow", title: "Flow", actor: "User", trigger: "Start", steps: [{ id: "step", text: "Step", requirementIds: ["requirement"] }], outcome: "Done" }] },
-      acceptanceCriteria: { title: "Acceptance", blocks: [{ id: "criterion", type: "acceptanceCriterion", requirementIds: ["requirement"], given: text("Given"), when: text("When"), then: text("Then") }] },
-      risksAndDependencies: { title: "Risks", blocks: [{ id: "risk", type: "risk", description: text("Risk"), likelihood: "low", impact: "low", mitigation: text("Mitigate") }] },
-    },
-  };
-}
-
-function prdDocumentV2(revision: number): PrdDocument {
-  return {
-    ...prdDocumentV2Example,
-    revision: {
-      ...prdDocumentV2Example.revision,
-      number: revision,
-      summary: "Manual edit",
-      changedAt: "2026-07-14T01:00:00.000Z",
-    },
-  };
+function prdDocument(revision: number, workOrderName = "测试工单"): PrdDocument {
+  const document = structuredClone(prdDocumentV3Example);
+  document.title = `${workOrderName}需求说明书`;
+  document.cover = { workOrderName, title: document.title };
+  document.revision.number = revision;
+  return document;
 }
 const checksum = createHash("sha256").update(canonicalJson(request.document)).digest("hex");
 const readyVersion = {
@@ -275,12 +242,11 @@ function createPrdEditHarness(input: {
     baseArtifactVersionId,
     document: input.document,
   };
-  const savedSchemaVersion = input.document.protocol === "workbench.prd.v3" ? 3 : input.document.protocol === "workbench.prd.v2" ? 2 : 1;
   const ready = {
     id: resultArtifactVersionId,
     artifactId,
     version: 2,
-    schemaVersion: savedSchemaVersion,
+    schemaVersion: 3,
     status: "ready" as const,
     content: command.document,
     contentBlobId: null,
@@ -515,7 +481,7 @@ describe("ArtifactVersion user edit command", () => {
     });
   });
 
-  it("validates the complete v1 PRD and Prototype request contracts", () => {
+  it("validates the current PRD and Prototype request contracts", () => {
     expect(createArtifactVersionRequestSchema.parse(request)).toEqual(request);
     const prdRequest: CreateArtifactVersionRequest = {
       kind: "prd",
@@ -526,82 +492,59 @@ describe("ArtifactVersion user edit command", () => {
     expect(() => createArtifactVersionRequestSchema.parse({ ...prdRequest, document: request.document })).toThrow();
   });
 
-  const prdEditFixtures: Array<{
-    baseDocument: PrdDocument;
-    document: PrdDocument;
-    schemaVersion: 1 | 2 | 3;
-    staleDocument: PrdDocument;
-  }> = [
-    {
-      baseDocument: prdDocument(1),
-      document: prdDocument(2, "Edited PRD"),
-      schemaVersion: 1,
-      staleDocument: prdDocument(1, "Stale"),
-    },
-    {
-      baseDocument: prdDocumentV2(1),
-      document: prdDocumentV2(2),
-      schemaVersion: 2,
-      staleDocument: prdDocumentV2(1),
-    },
-    {
-      baseDocument: structuredClone(prdDocumentV3Example),
-      document: { ...structuredClone(prdDocumentV3Example), revision: { ...prdDocumentV3Example.revision, number: 2 } },
-      schemaVersion: 3,
-      staleDocument: structuredClone(prdDocumentV3Example),
-    },
-  ];
+  const fixture = {
+    baseDocument: prdDocument(1), document: prdDocument(2, "已编辑工单"),
+    schemaVersion: 3 as const, staleDocument: prdDocument(1, "旧修订工单"),
+  };
 
-  for (const fixture of prdEditFixtures) {
-    it(`publishes a PRD v${fixture.schemaVersion} version without changing its schema`, async () => {
-      const harness = createPrdEditHarness({
-        baseDocument: fixture.baseDocument,
-        baseSchemaVersion: fixture.schemaVersion,
-        document: fixture.document,
-      });
-
-      const result = await harness.service.createVersion(
-        "principal_1",
-        harness.artifactId,
-        5,
-        harness.editIdempotencyKey,
-        harness.command,
-      );
-      expect(result).toMatchObject({
-        artifactRevision: 6,
-        detail: {
-          artifactVersionId: harness.resultArtifactVersionId,
-          kind: "prd",
-          schemaVersion: fixture.schemaVersion,
-          content: fixture.document,
-        },
-      });
-      expect(harness.tx.artifactVersion.create).toHaveBeenCalledWith({
-        data: expect.objectContaining({
-          schemaVersion: fixture.schemaVersion,
-          content: fixture.document,
-        }),
-      });
-      expect(harness.tx.artifactVersionAsset.createMany).not.toHaveBeenCalled();
-
-      await expect(harness.service.createVersion(
-        "principal_1",
-        harness.artifactId,
-        5,
-        `prd-version:v${fixture.schemaVersion}:stale`,
-        { ...harness.command, document: fixture.staleDocument },
-      )).rejects.toMatchObject({
-        status: 409,
-        response: expect.objectContaining({ code: "ARTIFACT_DOCUMENT_REVISION_CONFLICT" }),
-      });
+  it(`publishes a PRD v${fixture.schemaVersion} version without changing its schema`, async () => {
+    const harness = createPrdEditHarness({
+      baseDocument: fixture.baseDocument,
+      baseSchemaVersion: fixture.schemaVersion,
+      document: fixture.document,
     });
-  }
 
-  it("rejects changing a PRD schema version during a manual revision", async () => {
+    const result = await harness.service.createVersion(
+      "principal_1",
+      harness.artifactId,
+      5,
+      harness.editIdempotencyKey,
+      harness.command,
+    );
+    expect(result).toMatchObject({
+      artifactRevision: 6,
+      detail: {
+        artifactVersionId: harness.resultArtifactVersionId,
+        kind: "prd",
+        schemaVersion: fixture.schemaVersion,
+        content: fixture.document,
+      },
+    });
+    expect(harness.tx.artifactVersion.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        schemaVersion: fixture.schemaVersion,
+        content: fixture.document,
+      }),
+    });
+    expect(harness.tx.artifactVersionAsset.createMany).not.toHaveBeenCalled();
+
+    await expect(harness.service.createVersion(
+      "principal_1",
+      harness.artifactId,
+      5,
+      `prd-version:v${fixture.schemaVersion}:stale`,
+      { ...harness.command, document: fixture.staleDocument },
+    )).rejects.toMatchObject({
+      status: 409,
+      response: expect.objectContaining({ code: "ARTIFACT_DOCUMENT_REVISION_CONFLICT" }),
+    });
+  });
+
+  it.each([1, 2] as const)("rejects a retired PRD schema %i as the revision base", async (baseSchemaVersion) => {
     const harness = createPrdEditHarness({
       baseDocument: prdDocument(1),
-      baseSchemaVersion: 1,
-      document: prdDocumentV2(2),
+      baseSchemaVersion,
+      document: prdDocument(2),
     });
 
     await expect(harness.service.createVersion(
@@ -612,7 +555,7 @@ describe("ArtifactVersion user edit command", () => {
       harness.command,
     )).rejects.toMatchObject({
       status: 409,
-      response: expect.objectContaining({ code: "ARTIFACT_DOCUMENT_SCHEMA_VERSION_MISMATCH" }),
+      response: expect.objectContaining({ code: "ARTIFACT_VERSION_BASE_NOT_CURRENT" }),
     });
     expect(harness.tx.artifactVersion.create).not.toHaveBeenCalled();
   });

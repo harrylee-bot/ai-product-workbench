@@ -2,9 +2,9 @@
 
 import "@testing-library/jest-dom/vitest";
 import {
-  prdTableOfContentsEntriesFor,
+  prdTableOfContentsEntriesForV3,
 } from "@workbench/workbench-contracts";
-import { prdDocumentV2Example, prdDocumentV3Example } from "@workbench/workbench-contracts/test-fixtures";
+import { prdDocumentV3Example } from "@workbench/workbench-contracts/test-fixtures";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -35,7 +35,7 @@ describe("WorkbenchPrdArtifactEditor", () => {
       reference={{ projectId: "project-v3", artifactId: "artifact-v3", artifactVersionId: "version-v3" }}
     /></WorkbenchPrdDraftProvider>);
     await screen.findByRole("textbox", { name: "PRD 编辑器" });
-    await waitFor(() => expect(view.container.querySelectorAll('[data-prd-section="v3:function:section-task-state"] [data-prd-inline-diagram] svg')).toHaveLength(2));
+    await waitFor(() => expect(view.container.querySelectorAll('[data-prd-section="prd:function:section-task-state"] [data-prd-inline-diagram] svg')).toHaveLength(2));
     fireEvent.change(screen.getByRole("textbox", { name: "版本1作者" }), { target: { value: "本地评审人" } });
     fireEvent.click(screen.getByRole("button", { name: "保存 PRD" }));
     await waitFor(() => expect(onDocumentCommit).toHaveBeenCalled());
@@ -45,12 +45,21 @@ describe("WorkbenchPrdArtifactEditor", () => {
     expect(saved?.citations).toEqual(prdDocumentV3Example.citations);
   });
 
+  it("clears a safety explanation when the row becomes non-applicable", async () => {
+    render(<WorkbenchPrdArtifactEditor document={prdDocumentV3Example}
+      onDocumentCommit={vi.fn(async () => undefined)}
+      reference={{ projectId: "project-1", artifactId: "prd-1", artifactVersionId: "version-1" }} />);
+    const explanation = await screen.findByRole("textbox", { name: "1安全基线备注" });
+    fireEvent.change(screen.getByRole("combobox", { name: "1安全基线判定" }), { target: { value: "不涉及" } });
+    expect(explanation).toHaveValue("");
+  });
+
   it("rebinds the editor to a newly saved version without using the destroyed editor", async () => {
     const onDocumentCommit = vi.fn(async () => "prd-v2");
-    const next = structuredClone(prdDocumentV2Example);
+    const next = structuredClone(prdDocumentV3Example);
     next.versionHistory[0]!.author = "保存后的版本作者";
     const view = render(<WorkbenchPrdDraftProvider namespace="principal-1"><WorkbenchPrdArtifactEditor
-      document={prdDocumentV2Example} onDocumentCommit={onDocumentCommit}
+      document={prdDocumentV3Example} onDocumentCommit={onDocumentCommit}
       reference={{ projectId: "project-1", artifactId: "artifact-1", artifactVersionId: "prd-v1" }}
     /></WorkbenchPrdDraftProvider>);
     await screen.findByRole("textbox", { name: "PRD 编辑器" });
@@ -67,7 +76,7 @@ describe("WorkbenchPrdArtifactEditor", () => {
   it("restores an edited author after deselection and supports explicit discard", async () => {
     const reference = { artifactId: "artifact-1", artifactVersionId: "version-v2", projectId: "project-1" };
     const onDocumentCommit = vi.fn(async () => "version-v3");
-    const editor = <WorkbenchPrdArtifactEditor document={prdDocumentV2Example} onDocumentCommit={onDocumentCommit} reference={reference} />;
+    const editor = <WorkbenchPrdArtifactEditor document={prdDocumentV3Example} onDocumentCommit={onDocumentCommit} reference={reference} />;
     const rendered = render(<WorkbenchPrdDraftProvider namespace="principal-1">{editor}</WorkbenchPrdDraftProvider>);
     fireEvent.change(await screen.findByRole("textbox", { name: "版本1作者" }), { target: { value: "审计保留草稿" } });
     rendered.rerender(<WorkbenchPrdDraftProvider namespace="principal-1"><div>其他产物</div></WorkbenchPrdDraftProvider>);
@@ -75,14 +84,14 @@ describe("WorkbenchPrdArtifactEditor", () => {
     expect(await screen.findByRole("textbox", { name: "版本1作者" })).toHaveValue("审计保留草稿");
     expect(screen.getByRole("button", { name: "保存 PRD" })).toBeEnabled();
     fireEvent.click(screen.getByRole("button", { name: "放弃 PRD 修改" }));
-    expect(screen.getByRole("textbox", { name: "版本1作者" })).toHaveValue(prdDocumentV2Example.versionHistory[0]!.author);
+    expect(screen.getByRole("textbox", { name: "版本1作者" })).toHaveValue(prdDocumentV3Example.versionHistory[0]!.author);
     expect(onDocumentCommit).not.toHaveBeenCalled();
   });
 
   it("retains failed edits and saves the edited structured document on retry", async () => {
     const onDocumentCommit = vi.fn().mockRejectedValueOnce(new Error("网络暂不可用")).mockResolvedValue("v3");
     render(<WorkbenchPrdDraftProvider namespace="principal-1"><WorkbenchPrdArtifactEditor
-      document={prdDocumentV2Example} onDocumentCommit={onDocumentCommit}
+      document={prdDocumentV3Example} onDocumentCommit={onDocumentCommit}
       reference={{ artifactId: "artifact-1", artifactVersionId: "version-v2", projectId: "project-1" }}
     /></WorkbenchPrdDraftProvider>);
     fireEvent.change(await screen.findByRole("textbox", { name: "版本1作者" }), { target: { value: "已编辑作者" } });
@@ -106,7 +115,7 @@ describe("WorkbenchPrdArtifactEditor", () => {
     );
 
     expect(await screen.findByRole("textbox", { name: "PRD 编辑器" })).not.toBeNull();
-    expect(screen.getByRole("heading", { name: "Production PRD" })).not.toBeNull();
+    expect(screen.getByRole("heading", { name: prdDocument().title })).not.toBeNull();
     expect((screen.getByRole("button", { name: "保存 PRD" }) as HTMLButtonElement).disabled).toBe(true);
     expect((screen.getByRole("button", { name: "撤销 PRD 编辑" }) as HTMLButtonElement).disabled).toBe(true);
     expect(onDocumentCommit).not.toHaveBeenCalled();
@@ -128,32 +137,33 @@ describe("WorkbenchPrdArtifactEditor", () => {
     expect((screen.getByRole("button", { name: "撤销 PRD 编辑" }) as HTMLButtonElement).disabled).toBe(true);
   });
 
-  it("mounts PRD v2 with its fixed template structures protected", async () => {
+  it("mounts PRD v3 with its fixed template structures protected", async () => {
     const onDocumentCommit = vi.fn(async () => undefined);
     const rendered = render(
       <WorkbenchPrdArtifactEditor
-        document={prdDocumentV2Example}
+        document={prdDocumentV3Example}
         onDocumentCommit={onDocumentCommit}
         reference={{ artifactId: "artifact-1", artifactVersionId: "version-v2", projectId: "project-1" }}
       />,
     );
 
     expect(await screen.findByRole("heading", { name: "示例工单需求说明书" })).not.toBeNull();
-    expect(rendered.container.querySelectorAll("[data-prd-fixed-block]").length).toBeGreaterThan(10);
+    expect(rendered.container.querySelectorAll("[data-prd-fixed-block]").length).toBeGreaterThan(8);
     expect((screen.getByRole("button", { name: "保存 PRD" }) as HTMLButtonElement).disabled).toBe(true);
   });
 
-  it("renders an additional PRD v2 business section in the editor", async () => {
-    const document = structuredClone(prdDocumentV2Example);
-    document.sections.businessRequirements.additionalSections = [{
+  it("renders an additional PRD v3 business section in the editor", async () => {
+    const document = structuredClone(prdDocumentV3Example);
+    document.sections.businessRequirements.functionSections.push({
+      id: "section-config", diagrams: [],
       title: "2.5 配置规则",
       blocks: [{
         id: "additional-config-rule",
         type: "paragraph",
         content: [{ type: "text", text: "补充业务配置规则及对应结果。", marks: [] }],
       }],
-    }];
-    document.tableOfContents.entries = prdTableOfContentsEntriesFor(["2.5 配置规则"]);
+    });
+    document.tableOfContents.entries = prdTableOfContentsEntriesForV3(document.sections.businessRequirements.functionSections.map((section) => section.title));
 
     render(
       <WorkbenchPrdArtifactEditor

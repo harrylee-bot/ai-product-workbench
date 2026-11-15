@@ -14,9 +14,9 @@ test("direct release is executable and bypasses GitHub and local VM release path
   for (const marker of [
     "git -C \"$REPO_ROOT\" archive",
     "StrictHostKeyChecking=yes",
-    "npm run workbench:prepare",
+    "workbench-release-plan.mjs",
     "WORKBENCH_BUILD_BUILDER",
-    "DEPLOY_TARGET=all",
+    'DEPLOY_TARGET="$release_mode"',
     "deploy/server-deploy.sh",
     "WORKBENCH_SSH_BIND_INTERFACE",
     "BindInterface=",

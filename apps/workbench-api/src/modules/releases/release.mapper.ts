@@ -151,10 +151,6 @@ export function mapProjectRelease(record: ReleaseRecord): ProjectRelease {
   });
 }
 
-export function mapPublicProjectRelease(record: ReleaseRecord): PublicProjectRelease {
-  return projectPublicProjectRelease(mapProjectRelease(record));
-}
-
 export function projectPublicProjectRelease(release: ProjectRelease): PublicProjectRelease {
   const artifactPins = release.artifactPins.map(({ assets: _assets, ...pin }) => pin);
   const manifestArtifacts = release.manifest.artifacts.map(({ assets: _assets, ...pin }) => pin);

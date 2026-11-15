@@ -3,7 +3,6 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
 import type {
   ExportSelection,
-  ExternalExportDelivery,
   ProjectPreview,
 } from "@workbench/workbench-contracts";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -13,21 +12,14 @@ import { useWorkbenchPublicationController } from "./workbench-publication-contr
 
 const mocks = vi.hoisted(() => ({
   cancel: vi.fn(),
-  createDelivery: vi.fn(),
   createPreview: vi.fn(),
   createPreviewToken: vi.fn(),
-  deliveriesByExport: {} as Record<string, ExternalDeliveryFixture[]>,
   details: {} as Record<string, { value: ExportFixture; etag: string } | undefined>,
-  getDelivery: vi.fn(),
   getContent: vi.fn(),
   getPreview: vi.fn(),
   jobsByProject: {} as Record<string, ExportFixture[]>,
-  listDeliveries: vi.fn(),
 }));
 
-mocks.listDeliveries.mockImplementation(async (exportId: string) => ({
-  items: mocks.deliveriesByExport[exportId] ?? [],
-}));
 
 vi.mock("./releases", () => ({
   useWorkbenchReleases: () => ({ data: { items: [] }, refetch: vi.fn() }),
@@ -45,31 +37,22 @@ vi.mock("./exports", async (importOriginal) => {
   return {
   ...actual,
   useWorkbenchExportOperations: () => ({
-    createExternalExportDelivery: mocks.createDelivery,
-    getExternalExportDelivery: mocks.getDelivery,
     getExportContent: mocks.getContent,
     createProjectPreview: mocks.createPreview,
     createProjectPreviewToken: mocks.createPreviewToken,
     getProjectPreview: mocks.getPreview,
-    listExternalExportDeliveries: mocks.listDeliveries,
   }),
   useWorkbenchExportCapabilities: () => ({
     data: {
       formats: {
-        html: { available: true, authentication: "not_required", reasonCode: null },
-        react: { available: true, authentication: "not_required", reasonCode: null },
-        figma: { available: false, authentication: "not_required", reasonCode: "EXPORT_FIGMA_UNAVAILABLE" },
-        mcp: { available: true, authentication: "not_required", reasonCode: null },
+        html: { available: true, reasonCode: null },
+        react: { available: true, reasonCode: null },
+        figma: { available: false, reasonCode: "EXPORT_FIGMA_UNAVAILABLE" },
+        mcp: { available: true, reasonCode: null },
       },
       packaging: {
-        single_file: { available: true, authentication: "not_required", reasonCode: null },
-        zip: { available: true, authentication: "not_required", reasonCode: null },
-      },
-      external: {
-        ai_studio: { available: false, authentication: "not_required", reasonCode: "EXPORT_EXTERNAL_AI_STUDIO_UNAVAILABLE" },
-        netlify: { available: false, authentication: "required", reasonCode: "EXPORT_EXTERNAL_AUTHENTICATION_REQUIRED" },
-        lovable: { available: false, authentication: "required", reasonCode: "EXPORT_EXTERNAL_AUTHENTICATION_REQUIRED" },
-        bolt: { available: false, authentication: "required", reasonCode: "EXPORT_EXTERNAL_AUTHENTICATION_REQUIRED" },
+        single_file: { available: true, reasonCode: null },
+        zip: { available: true, reasonCode: null },
       },
     },
     error: null,
@@ -122,12 +105,10 @@ type ExportFixture = {
   updatedAt: string;
 };
 
-type ExternalDeliveryFixture = ExternalExportDelivery;
 
 afterEach(() => {
   vi.clearAllMocks();
   mocks.details = {};
-  mocks.deliveriesByExport = {};
   mocks.jobsByProject = {};
   mocks.createPreview.mockReset();
   mocks.createPreviewToken.mockReset();
@@ -234,61 +215,6 @@ describe("Workbench export recovery", () => {
 
     expect(createObjectUrl).not.toHaveBeenCalled();
     createObjectUrl.mockRestore();
-    rendered.unmount();
-  });
-
-  it("restores the latest external delivery for the active immutable Export", async () => {
-    const succeeded = exportJob({
-      id: "export-external",
-      format: "html",
-      packaging: "zip",
-      status: "succeeded",
-      revision: 2,
-      output: output("blob-external"),
-      startedAt: "2026-07-15T05:00:00.000Z",
-      finishedAt: "2026-07-15T05:00:01.000Z",
-    });
-    const delivery = externalDelivery({ exportJobId: succeeded.id, target: "netlify" });
-    mocks.jobsByProject = { "project-a": [succeeded] };
-    mocks.details[succeeded.id] = { value: succeeded, etag: '"2"' };
-    mocks.deliveriesByExport[succeeded.id] = [delivery];
-
-    const rendered = renderController("project-a");
-    await waitFor(() => expect(rendered.result.current.activeExternalDelivery?.id).toBe(delivery.id));
-    expect(mocks.listDeliveries).toHaveBeenCalledWith(succeeded.id);
-    rendered.unmount();
-  });
-
-  it("single-flights external delivery preparation", async () => {
-    const succeeded = exportJob({
-      id: "export-single-flight",
-      format: "html",
-      packaging: "zip",
-      status: "succeeded",
-      revision: 2,
-      output: output("blob-single-flight"),
-      startedAt: "2026-07-15T06:00:00.000Z",
-      finishedAt: "2026-07-15T06:00:01.000Z",
-    });
-    mocks.jobsByProject = { "project-a": [succeeded] };
-    mocks.details[succeeded.id] = { value: succeeded, etag: '"2"' };
-    let resolveDelivery!: (value: { value: ExternalDeliveryFixture; etag: string }) => void;
-    mocks.createDelivery.mockReturnValue(new Promise((resolve) => { resolveDelivery = resolve; }));
-    const rendered = renderController("project-a");
-    await waitFor(() => expect(rendered.result.current.activeExport?.id).toBe(succeeded.id));
-
-    let first!: Promise<ExternalDeliveryFixture>;
-    act(() => {
-      first = rendered.result.current.prepareExternalDelivery("Netlify");
-    });
-    await expect(rendered.result.current.prepareExternalDelivery("Netlify"))
-      .rejects.toThrow("already in progress");
-    const delivery = externalDelivery({ exportJobId: succeeded.id, target: "netlify" });
-    resolveDelivery({ value: delivery, etag: '"0"' });
-    await act(async () => { await first; });
-
-    expect(mocks.createDelivery).toHaveBeenCalledOnce();
-    expect(rendered.result.current.activeExternalDelivery?.id).toBe(delivery.id);
     rendered.unmount();
   });
 });
@@ -459,41 +385,5 @@ function output(blobId: string) {
     mediaType: "text/html",
     byteSize: 10,
     sha256: "a".repeat(64),
-  };
-}
-
-function externalDelivery(overrides: Partial<ExternalDeliveryFixture> = {}): ExternalDeliveryFixture {
-  const timestamp = "2026-07-15T05:00:02.000Z";
-  return {
-    id: "delivery-1",
-    exportJobId: "export-external",
-    createdById: "principal-1",
-    target: "netlify",
-    authentication: "authenticated",
-    status: "pending_confirmation",
-    revision: 0,
-    attempt: 0,
-    payload: {
-      exportJobId: overrides.exportJobId ?? "export-external",
-      releaseId: "release-1",
-      format: "html",
-      packaging: "zip",
-      selection: { kind: "board" },
-      output: {
-        mediaType: "application/zip",
-        byteSize: 10,
-        sha256: "a".repeat(64),
-        fileName: "project.zip",
-      },
-    },
-    remoteReference: null,
-    failure: null,
-    createdAt: timestamp,
-    confirmedAt: null,
-    startedAt: null,
-    transferAuthorizedAt: null,
-    finishedAt: null,
-    updatedAt: timestamp,
-    ...overrides,
   };
 }

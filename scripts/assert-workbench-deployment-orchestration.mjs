@@ -202,7 +202,7 @@ assert(
 for (const [target, requiredMarkers] of [
   ["all", ["prepare_runtime_queue_cutover", "compose_up_force_recreate preview-gateway gateway"]],
   ["api", ["compose_up workbench-api", "compose_up_force_recreate gateway"]],
-  ["web", ["compose_up workbench-web knowledge", "compose_up_force_recreate gateway"]],
+  ["web", ["compose_up --no-deps workbench-web", "compose_up_force_recreate gateway"]],
   ["knowledge", ["compose_up knowledge", "compose_up_force_recreate gateway"]],
   ["preview", ["compose_up workbench-preview preview-gateway", "compose_up_force_recreate preview-gateway"]],
 ]) {

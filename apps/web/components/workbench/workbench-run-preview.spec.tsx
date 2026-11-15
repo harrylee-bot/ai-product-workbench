@@ -6,7 +6,6 @@ import {
   boardNodeProtocol,
   type ArtifactVersionDetail,
 } from "@workbench/workbench-contracts";
-import { prdDocumentV2Example } from "@workbench/workbench-contracts/test-fixtures";
 import type { BoardFlowNode } from "@/lib/workbench/features/board";
 import { prototypeEditorDocumentFixture } from "@/lib/workbench/prototype-editor/test-fixtures";
 import type { RunArtifactDraftProjection } from "@/lib/workbench/run/reducer";
@@ -37,18 +36,10 @@ import {
 afterEach(cleanup);
 
 describe("PRD immutable version editing", () => {
-  it("keeps legacy v1 and fixed-template v2 documents on their matching revision contracts", () => {
-    const legacyDocument = prdDocument();
-
-    expect(createPrdVersionEditRequest("version-v1", legacyDocument)).toEqual({
-      kind: "prd",
-      baseArtifactVersionId: "version-v1",
-      document: legacyDocument,
-    });
-    expect(createPrdVersionEditRequest("version-v2", prdDocumentV2Example)).toEqual({
-      kind: "prd",
-      baseArtifactVersionId: "version-v2",
-      document: prdDocumentV2Example,
+  it("submits the current document against the selected immutable version", () => {
+    const document = prdDocument();
+    expect(createPrdVersionEditRequest("version-1", document)).toEqual({
+      kind: "prd", baseArtifactVersionId: "version-1", document,
     });
   });
 });

@@ -104,19 +104,24 @@ async function main() {
     }
   };
   await reconcileOnce();
-  const timer = setInterval(() => void reconcileOnce().catch((error) => console.error("[import-worker:reconcile]", error)), config.reconciliationIntervalMs);
+  let reconciliationInFlight: Promise<void> | null = null;
+  const timer = setInterval(() => {
+    if (reconciliationInFlight) return;
+    reconciliationInFlight = reconcileOnce()
+      .catch((error) => console.error("[import-worker:reconcile]", error))
+      .finally(() => { reconciliationInFlight = null; });
+  }, config.reconciliationIntervalMs);
   timer.unref();
 
-  let shuttingDown = false;
-  const shutdown = async (signal: string) => {
-    if (shuttingDown) return;
-    shuttingDown = true;
+  let shutdownInFlight: Promise<void> | null = null;
+  const shutdown = (signal: string) => shutdownInFlight ??= (async () => {
     clearInterval(timer);
+    await reconciliationInFlight;
     await boss.stop({ graceful: true, timeout: 30_000 });
     await db.$disconnect();
     await telemetry.shutdown();
     console.log(`[import-worker] stopped after ${signal}`);
-  };
+  })();
   process.once("SIGINT", () => void shutdown("SIGINT").finally(() => process.exit(0)));
   process.once("SIGTERM", () => void shutdown("SIGTERM").finally(() => process.exit(0)));
   console.log(`[import-worker] listening on ${importSourceProcessQueue}`);

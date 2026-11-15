@@ -1,4 +1,3 @@
-node_modules
 **/node_modules
 **/.next
 **/dist
@@ -18,3 +17,6 @@ apps/workbench-figma-importer/build
 **/__pycache__
 *.pyc
 .DS_Store
+**/._*
+
+**/*.tsbuildinfo

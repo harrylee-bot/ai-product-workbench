@@ -1,0 +1,102 @@
+ARG TEMPORAL_NODE_IMAGE=node:22-bookworm-slim
+
+FROM ${TEMPORAL_NODE_IMAGE} AS base
+WORKDIR /app
+ENV NPM_CONFIG_UPDATE_NOTIFIER=false \
+    NPM_CONFIG_AUDIT=false \
+    NPM_CONFIG_FUND=false \
+    NPM_CONFIG_REGISTRY=https://registry.npmjs.org \
+    PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends ca-certificates openssl \
+  && rm -rf /var/lib/apt/lists/*
+
+FROM base AS dependencies
+ENV NPM_CONFIG_REGISTRY=https://registry.npmmirror.com \
+    NPM_CONFIG_REPLACE_REGISTRY_HOST=always
+COPY package.json package-lock.json tsconfig.base.json ./
+COPY apps/workbench-worker/package.json apps/workbench-worker/package.json
+COPY apps/workbench-build-worker/package.json apps/workbench-build-worker/package.json
+COPY packages/workbench-canvas-tools/package.json packages/workbench-canvas-tools/package.json
+COPY packages/workbench-content-security/package.json packages/workbench-content-security/package.json
+COPY packages/workbench-contracts/package.json packages/workbench-contracts/package.json
+COPY packages/workbench-db/package.json packages/workbench-db/package.json
+COPY packages/workbench-export-core/package.json packages/workbench-export-core/package.json
+COPY packages/workbench-knowledge/package.json packages/workbench-knowledge/package.json
+COPY packages/workbench-telemetry/package.json packages/workbench-telemetry/package.json
+RUN --mount=type=cache,target=/root/.npm \
+  npm ci --include=dev --ignore-scripts --no-audit --no-fund
+
+FROM dependencies AS build
+COPY apps/workbench-worker apps/workbench-worker
+COPY apps/workbench-build-worker apps/workbench-build-worker
+COPY packages/workbench-canvas-tools packages/workbench-canvas-tools
+COPY packages/workbench-content-security packages/workbench-content-security
+COPY packages/workbench-contracts packages/workbench-contracts
+COPY packages/workbench-db packages/workbench-db
+COPY packages/workbench-export-core packages/workbench-export-core
+COPY packages/workbench-knowledge packages/workbench-knowledge
+COPY packages/workbench-telemetry packages/workbench-telemetry
+# Generate Prisma inside the same glibc/architecture image as the executor.
+# Copying a client generated on macOS or Alpine would ship the wrong engine.
+RUN rm -rf packages/workbench-db/generated \
+  && npm --workspace @workbench/workbench-contracts run validate:openapi \
+  && npm --workspace @workbench/workbench-contracts run build \
+  && npm --workspace @workbench/workbench-canvas-tools run build \
+  && npm --workspace @workbench/workbench-db run generate \
+  && npm --workspace @workbench/workbench-export-core run build \
+  && npm --workspace @workbench/workbench-build-worker run build \
+  && npm --workspace @workbench/workbench-content-security run build \
+  && npm --workspace @workbench/workbench-knowledge run build \
+  && npm --workspace @workbench/workbench-telemetry run build \
+  && npm --workspace @workbench/workbench-worker run build
+
+FROM build AS production-dependencies
+COPY deploy/collect-workspace-runtime-dependencies.mjs /usr/local/lib/collect-workspace-runtime-dependencies.mjs
+RUN npm prune --omit=dev --no-audit --no-fund \
+  && node /usr/local/lib/collect-workspace-runtime-dependencies.mjs /app /app/.runtime-workspace-dependencies \
+  && rm -rf /root/.npm
+
+FROM base AS runner
+ARG DEBIAN_MIRROR=https://deb.debian.org
+WORKDIR /app
+ENV NODE_ENV=production \
+    PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 \
+    WORKBENCH_EXPORT_CHROMIUM_PATH=/usr/bin/chromium \
+    XDG_CACHE_HOME=/tmp/workbench-cache \
+    XDG_CONFIG_HOME=/tmp/workbench-config
+RUN sed -i "s|http://deb.debian.org|${DEBIAN_MIRROR}|g" /etc/apt/sources.list.d/debian.sources \
+  && apt-get -o Acquire::Retries=3 -o Acquire::https::Timeout=30 update \
+  && apt-get -o Acquire::Retries=3 -o Acquire::https::Timeout=30 install -y --no-install-recommends chromium fonts-dejavu-core fonts-noto-cjk \
+  && rm -rf /var/lib/apt/lists/*
+
+COPY --chown=node:node package.json package-lock.json ./
+COPY --chown=node:node apps/workbench-worker/package.json apps/workbench-worker/package.json
+COPY --chown=node:node apps/workbench-build-worker/package.json apps/workbench-build-worker/package.json
+COPY --chown=node:node packages/workbench-canvas-tools/package.json packages/workbench-canvas-tools/package.json
+COPY --chown=node:node packages/workbench-content-security/package.json packages/workbench-content-security/package.json
+COPY --chown=node:node packages/workbench-contracts/package.json packages/workbench-contracts/package.json
+COPY --chown=node:node packages/workbench-db/package.json packages/workbench-db/package.json
+COPY --chown=node:node packages/workbench-export-core/package.json packages/workbench-export-core/package.json
+COPY --chown=node:node packages/workbench-knowledge/package.json packages/workbench-knowledge/package.json
+COPY --chown=node:node packages/workbench-telemetry/package.json packages/workbench-telemetry/package.json
+COPY --from=production-dependencies --chown=node:node /app/node_modules node_modules
+COPY --from=production-dependencies --chown=node:node /app/.runtime-workspace-dependencies/ ./
+COPY --from=build --chown=node:node /app/apps/workbench-worker/dist apps/workbench-worker/dist
+COPY --from=build --chown=node:node /app/apps/workbench-build-worker/dist apps/workbench-build-worker/dist
+COPY --from=build --chown=node:node /app/packages/workbench-canvas-tools/dist packages/workbench-canvas-tools/dist
+COPY --from=build --chown=node:node /app/packages/workbench-content-security/dist packages/workbench-content-security/dist
+COPY --from=build --chown=node:node /app/packages/workbench-contracts/dist packages/workbench-contracts/dist
+COPY --from=build --chown=node:node /app/packages/workbench-db/generated packages/workbench-db/generated
+COPY --from=build --chown=node:node /app/packages/workbench-export-core/dist packages/workbench-export-core/dist
+COPY --from=build --chown=node:node /app/packages/workbench-knowledge/dist packages/workbench-knowledge/dist
+COPY --from=build --chown=node:node /app/packages/workbench-telemetry/dist packages/workbench-telemetry/dist
+COPY deploy/remove-node-package-managers.mjs /usr/local/lib/remove-node-package-managers.mjs
+RUN node /usr/local/lib/remove-node-package-managers.mjs
+USER node
+# Exercise the actual native bridge and Chromium as the runtime user. This
+# catches incompatible libc, missing libraries, executables and workspace links.
+RUN node apps/workbench-worker/dist/prototypes/temporal-worker-bootstrap.js --probe
+HEALTHCHECK --interval=20s --timeout=5s --start-period=30s --retries=4 \
+  CMD ["node", "-e", "fetch('http://127.0.0.1:' + (process.env.WORKBENCH_TEMPORAL_WORKER_HEALTH_PORT || '4310') + '/healthz').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+CMD ["node", "apps/workbench-worker/dist/prototypes/temporal-worker-bootstrap.js"]

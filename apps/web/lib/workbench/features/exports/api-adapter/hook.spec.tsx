@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 
 import { renderHook } from "@testing-library/react";
+import { Blob as NodeBlob } from "node:buffer";
 import { createElement, type ReactNode } from "react";
 import { describe, expect, it, vi } from "vitest";
 
@@ -38,9 +39,15 @@ describe("Exports API adapter hook", () => {
       })),
     }));
 
-    const result = await api.getExportContent("export-1");
+    const originalBlob = globalThis.Blob;
+    let result: Awaited<ReturnType<typeof api.getExportContent>>;
+    try {
+      globalThis.Blob = NodeBlob as unknown as typeof Blob;
+      result = await api.getExportContent("export-1");
+    } finally {
+      globalThis.Blob = originalBlob;
+    }
 
-    expect(result.value).not.toBeInstanceOf(Blob);
     expect(Object.prototype.toString.call(result.value)).toBe("[object Blob]");
     expect(new Uint8Array(await result.value.arrayBuffer())).toEqual(bytes);
     expect(result.etag).toBe('"content-hash"');

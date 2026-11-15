@@ -1,10 +1,10 @@
 // @vitest-environment jsdom
-import { prdDocumentV2Example } from "@workbench/workbench-contracts/test-fixtures";
+import { prdDocumentV3Example } from "@workbench/workbench-contracts/test-fixtures";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { PrdDraftStore } from "./draft-store";
 
 const reference = { projectId: "project-1", artifactId: "prd-1", artifactVersionId: "v1" };
-const baseline = prdDocumentV2Example;
+const baseline = prdDocumentV3Example;
 function changed(author = "修改后的作者") {
   const document = structuredClone(baseline);
   document.versionHistory[0]!.author = author;

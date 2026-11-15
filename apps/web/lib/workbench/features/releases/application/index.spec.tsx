@@ -8,13 +8,11 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { workbenchQueryKeys } from "../../../query/keys";
 import {
   useCreateWorkbenchRelease,
-  useWorkbenchRelease,
   useWorkbenchReleases,
 } from "./index";
 
 const mocks = vi.hoisted(() => ({
   createProjectRelease: vi.fn(),
-  getProjectRelease: vi.fn(),
   listProjectReleases: vi.fn(),
 }));
 
@@ -27,34 +25,22 @@ afterEach(() => {
 });
 
 describe("Workbench Release hooks", () => {
-  it("loads Release list and detail state through their public hooks", async () => {
+  it("loads Release list state through its public hook", async () => {
     const queryClient = client();
     const list = { items: [{ id: "release-1" }], nextCursor: null };
-    const detail = { value: { id: "release-1" }, etag: '"digest"' };
     mocks.listProjectReleases.mockResolvedValue(list);
-    mocks.getProjectRelease.mockResolvedValue(detail);
     const listHook = renderHook(
       () => useWorkbenchReleases("project-1", { limit: 25 }),
       { wrapper: wrapper(queryClient) },
     );
-    const detailHook = renderHook(
-      () => useWorkbenchRelease("project-1", "release-1"),
-      { wrapper: wrapper(queryClient) },
-    );
 
     await waitFor(() => expect(listHook.result.current.data).toEqual(list));
-    await waitFor(() => expect(detailHook.result.current.data).toEqual(detail));
     expect(mocks.listProjectReleases).toHaveBeenCalledWith("project-1", { limit: 25 });
-    expect(mocks.getProjectRelease).toHaveBeenCalledWith("release-1");
     expect(queryClient.getQueryData(
       workbenchQueryKeys.releaseList("project-1", { limit: 25 }),
     )).toEqual(list);
-    expect(queryClient.getQueryData(
-      workbenchQueryKeys.release("project-1", "release-1"),
-    )).toEqual(detail);
 
     listHook.unmount();
-    detailHook.unmount();
     queryClient.clear();
   });
 

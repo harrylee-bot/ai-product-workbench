@@ -1,4 +1,4 @@
-export const PROJECT_LIST_LOAD_MORE_THRESHOLD_PX = 240;
+const PROJECT_LIST_LOAD_MORE_THRESHOLD_PX = 240;
 
 export function shouldLoadMoreProjects({
   clientHeight,

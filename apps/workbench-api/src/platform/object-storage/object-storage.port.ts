@@ -4,7 +4,7 @@ export const MULTIPART_STORAGE_PORT = Symbol("MULTIPART_STORAGE_PORT");
 export const READY_BLOB_STORAGE_PORT = Symbol("READY_BLOB_STORAGE_PORT");
 export const CANVAS_VISUAL_STORAGE_PORT = Symbol("CANVAS_VISUAL_STORAGE_PORT");
 
-export type MultipartObjectRef = {
+type MultipartObjectRef = {
   key: string;
   uploadId: string;
 };
@@ -15,7 +15,7 @@ export type StoredMultipartPart = {
   byteSize: number;
 };
 
-export type CompleteMultipartPart = Pick<StoredMultipartPart, "partNumber" | "etag">;
+type CompleteMultipartPart = Pick<StoredMultipartPart, "partNumber" | "etag">;
 
 export type StoredObjectMetadata = {
   byteSize: number;

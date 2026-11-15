@@ -100,9 +100,6 @@ export function WorkbenchHomeRoute() {
       onRetryDesignSystems={() => {
         void workbench.designSystemCatalogQuery.refetch();
       }}
-      onRetryModels={() => {
-        void workbench.runtimeModelsQuery.refetch();
-      }}
       projectSearch={projectSearch}
       projectPageLoading={workbench.projectsQuery.isFetchingNextPage}
       onRetryProjects={() => {

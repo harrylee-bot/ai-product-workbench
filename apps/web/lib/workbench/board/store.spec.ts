@@ -1,9 +1,9 @@
+import { applyEdgeChanges } from "@xyflow/react";
 import { boardNodeProtocol, type Board } from "@workbench/workbench-contracts";
 import type { EdgeChange, NodeChange } from "@xyflow/system";
 import { describe, expect, it } from "vitest";
 
 import {
-  reduceWorkbenchProjectEdgeChanges,
   reduceWorkbenchProjectNodeChanges,
 } from "@/components/workbench/workbench-project-react-flow-adapter";
 import { WorkbenchApiError } from "../api/problem-details";
@@ -1187,5 +1187,5 @@ function applyProjectEdgeChanges(
   store: BoardStore,
   changes: EdgeChange<BoardFlowEdge>[],
 ): void {
-  store.getState().applyEdgeChanges(changes, reduceWorkbenchProjectEdgeChanges);
+  store.getState().applyEdgeChanges(changes, applyEdgeChanges);
 }

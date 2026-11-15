@@ -6,11 +6,8 @@ import { describe, expect, it } from "vitest";
 import {
   floatingToolScale,
   floatingToolTransition,
-  menuItemTransition,
   panelTransition,
   popoverTransition,
-  spatialTransition,
-  tactileTransition,
 } from "@/components/workbench/workbench-motion";
 
 const webRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
@@ -67,9 +64,6 @@ describe("Workbench motion contract", () => {
   });
 
   it("exposes the shared interaction timing tokens", () => {
-    expect(tactileTransition.duration).toBe(0.15);
     expect(popoverTransition.duration).toBe(0.15);
-    expect(menuItemTransition.duration).toBe(0.2);
-    expect(spatialTransition.duration).toBe(0.5);
   });
 });

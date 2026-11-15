@@ -123,7 +123,3 @@ export function useWorkbenchProjectActionsController({
     setArchiveConfirmationOpen,
   };
 }
-
-export type WorkbenchProjectActionsController = ReturnType<
-  typeof useWorkbenchProjectActionsController
->;

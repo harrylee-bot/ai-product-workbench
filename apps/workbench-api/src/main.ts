@@ -25,6 +25,11 @@ function validateConfiguration() {
   for (const name of ["DEERFLOW_LANGGRAPH_URL", "DEERFLOW_INTERNAL_AUTH_TOKEN"] as const) {
     if (!process.env[name]?.trim()) throw new Error(`Missing ${name}`);
   }
+  if (process.env.NODE_ENV === "production") {
+    for (const name of ["WORKBENCH_TEMPORAL_WORKFLOW_START_URL", "WORKBENCH_TEMPORAL_WORKFLOW_CANCEL_URL", "WORKBENCH_TEMPORAL_WORKFLOW_EXECUTE_URL"] as const) {
+      if (!process.env[name]?.trim()) throw new Error(`Missing ${name}`);
+    }
+  }
 
   const authMode = process.env.WORKBENCH_AUTH_MODE || "oidc";
   if (process.env.NODE_ENV === "production" && authMode === "development") {

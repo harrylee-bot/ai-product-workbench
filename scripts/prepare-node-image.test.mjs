@@ -52,43 +52,38 @@ test("the Node image helper maps the approved Alpine package set and pins npm", 
   );
 });
 
-for (const distribution of ["alpine", "debian"]) {
-  test(`the Node image helper installs the document renderer dependencies on ${distribution}`, async (t) => {
-    const fixture = await mkdtemp(path.join(os.tmpdir(), "workbench-document-image-"));
-    t.after(() => rm(fixture, { recursive: true, force: true }));
-    const log = path.join(fixture, "calls.log");
-    const packageManager = distribution === "alpine" ? "apk" : "apt-get";
-    if (distribution === "alpine") await symlink(timeoutExecutable, path.join(fixture, "timeout"));
-    for (const command of [packageManager, "npm", "sed", "rm"]) {
-      const executable = path.join(fixture, command);
-      await writeFile(executable, `#!/bin/sh\nprintf '%s\\n' '${command} '"$*" >> "$WORKBENCH_TEST_LOG"\n`);
-      await chmod(executable, 0o755);
-    }
-    const packages = [
-      "python3",
-      "python3-lxml",
-      "python3-pillow",
-      "python3-virtualenv",
-      "libreoffice-writer",
-      "fonts-noto-cjk",
-    ];
-    const result = spawnSync("/bin/sh", [helper, ...packages], {
-      encoding: "utf8",
-      env: {
-        ...process.env,
-        PATH: fixture,
-        WORKBENCH_CONTAINER_NPM_VERSION: "11.18.0",
-        WORKBENCH_TEST_LOG: log,
-      },
-    });
-    assert.equal(result.status, 0, result.stderr);
-    const packageCalls = (await readFile(log, "utf8")).split("\n")
-      .filter((line) => line.startsWith(`${packageManager} `));
-    assert.deepEqual(packageCalls, distribution === "alpine"
-      ? ["apk add --no-cache --timeout 30 python3 py3-lxml py3-pillow py3-virtualenv libreoffice-writer font-noto-cjk"]
-      : ["apt-get update", "apt-get install -y --no-install-recommends python3 python3-lxml python3-pil python3-virtualenv libreoffice-writer fonts-noto-cjk"]);
+test("the Node image helper installs the document renderer dependencies on Alpine", async (t) => {
+  const fixture = await mkdtemp(path.join(os.tmpdir(), "workbench-document-image-"));
+  t.after(() => rm(fixture, { recursive: true, force: true }));
+  const log = path.join(fixture, "calls.log");
+  await symlink(timeoutExecutable, path.join(fixture, "timeout"));
+  for (const command of ["apk", "npm", "sed", "rm"]) {
+    const executable = path.join(fixture, command);
+    await writeFile(executable, `#!/bin/sh\nprintf '%s\\n' '${command} '"$*" >> "$WORKBENCH_TEST_LOG"\n`);
+    await chmod(executable, 0o755);
+  }
+  const packages = [
+    "python3",
+    "python3-lxml",
+    "python3-pillow",
+    "python3-virtualenv",
+    "libreoffice-writer",
+    "fonts-noto-cjk",
+  ];
+  const result = spawnSync("/bin/sh", [helper, ...packages], {
+    encoding: "utf8",
+    env: {
+      ...process.env,
+      PATH: fixture,
+      WORKBENCH_CONTAINER_NPM_VERSION: "11.18.0",
+      WORKBENCH_TEST_LOG: log,
+    },
   });
-}
+  assert.equal(result.status, 0, result.stderr);
+  const packageCalls = (await readFile(log, "utf8")).split("\n")
+    .filter((line) => line.startsWith("apk "));
+  assert.deepEqual(packageCalls, ["apk add --no-cache --timeout 30 python3 py3-lxml py3-pillow py3-virtualenv libreoffice-writer font-noto-cjk"]);
+});
 
 test("the image helper still rejects unapproved Alpine packages before installing anything", async (t) => {
   const fixture = await mkdtemp(path.join(os.tmpdir(), "workbench-rejected-image-package-"));
@@ -140,6 +135,21 @@ test("Alpine installation fails closed when the deadline utility is missing", as
   const result = spawnSync("/bin/sh", [helper, "openssl"], { encoding: "utf8", env: { ...process.env, PATH: fixture } });
   assert.equal(result.status, 1);
   assert.match(result.stderr, /timeout is required/u);
+});
+
+test("the Node image helper rejects a retired Debian base before installing packages", async (t) => {
+  const fixture = await mkdtemp(path.join(os.tmpdir(), "workbench-retired-node-base-"));
+  t.after(() => rm(fixture, { recursive: true, force: true }));
+  const log = path.join(fixture, "calls.log");
+  for (const command of ["apt-get", "npm"]) {
+    await writeFile(path.join(fixture, command), '#!/bin/sh\nprintf "called\\n" >> "$WORKBENCH_TEST_LOG"\n', { mode: 0o755 });
+  }
+  const result = spawnSync("/bin/sh", [helper, "openssl"], {
+    encoding: "utf8", env: { ...process.env, PATH: fixture, WORKBENCH_TEST_LOG: log },
+  });
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /Alpine apk is required/u);
+  await assert.rejects(readFile(log), { code: "ENOENT" });
 });
 
 test("the Export image includes the template and checker for deployment-time AMD64 verification", async () => {

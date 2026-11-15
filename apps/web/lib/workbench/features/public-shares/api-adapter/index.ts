@@ -1,14 +1,10 @@
 "use client";
 
 import {
-  createProjectRemixRequestSchema,
-  createProjectRemixResponseSchema,
   publicArtifactVersionDetailSchema,
   publicShareSchema,
   exportPreviewTokenResponseSchema,
   type ExportPreviewTokenResponse,
-  type CreateProjectRemixRequest,
-  type CreateProjectRemixResponse,
   type PublicArtifactVersionDetail,
   type PublicShare,
 } from "@workbench/workbench-contracts";
@@ -17,15 +13,11 @@ import { useMemo } from "react";
 import type { WorkbenchApiClient } from "../../../api/client";
 import { useWorkbenchTransport } from "../../../transport/context";
 import {
-  createIdempotencyKey,
   immutableVersioned,
-  normalizeIdempotencyKey,
   parseContract,
   requireData,
-  versioned,
   WorkbenchContractError,
   type ImmutableVersioned,
-  type Versioned,
 } from "../../../transport/contracts";
 
 export class WorkbenchPublicSharesApi {
@@ -106,25 +98,6 @@ export class WorkbenchPublicSharesApi {
     return parseContract(exportPreviewTokenResponseSchema, result.data, "create public source prototype preview");
   }
 
-  async createProjectRemix(
-    shareToken: string,
-    request: CreateProjectRemixRequest,
-    idempotencyKey = createIdempotencyKey("remix"),
-  ): Promise<Versioned<CreateProjectRemixResponse>> {
-    const result = await this.api.POST("/public/shares/{shareToken}/remixes", {
-      params: {
-        path: { shareToken },
-        header: { "Idempotency-Key": normalizeIdempotencyKey(idempotencyKey) },
-      },
-      body: createProjectRemixRequestSchema.parse(request),
-    });
-    return versioned(
-      createProjectRemixResponseSchema,
-      result.data,
-      result.response,
-      "create project remix",
-    );
-  }
 }
 
 export function useWorkbenchPublicSharesApi(): WorkbenchPublicSharesApi {

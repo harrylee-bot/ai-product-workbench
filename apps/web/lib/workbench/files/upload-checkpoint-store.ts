@@ -10,13 +10,9 @@ import type {
  * The server upload session and its listParts response remain the source of
  * truth for the bytes that have reached object storage.
  */
-export const WORKBENCH_UPLOAD_CHECKPOINT_DB_NAME = "workbench-upload-checkpoints";
-export const WORKBENCH_UPLOAD_CHECKPOINT_DB_VERSION = 1;
-export const WORKBENCH_UPLOAD_CHECKPOINT_STORE_NAME = "checkpoints";
-
-export type WorkbenchUploadCheckpointListingStore = WorkbenchUploadCheckpointStore & {
-  list(projectId: string): Promise<WorkbenchUploadCheckpoint[]>;
-};
+const WORKBENCH_UPLOAD_CHECKPOINT_DB_NAME = "workbench-upload-checkpoints";
+const WORKBENCH_UPLOAD_CHECKPOINT_DB_VERSION = 1;
+const WORKBENCH_UPLOAD_CHECKPOINT_STORE_NAME = "checkpoints";
 
 export type WorkbenchIndexedDbCheckpointStoreOptions = {
   databaseName?: string;
@@ -26,10 +22,9 @@ export type WorkbenchIndexedDbCheckpointStoreOptions = {
 
 type StoredCheckpoint = WorkbenchUploadCheckpoint & {
   key: string;
-  savedAt: number;
 };
 
-let defaultStore: WorkbenchUploadCheckpointListingStore | null | undefined;
+let defaultStore: WorkbenchUploadCheckpointStore | null | undefined;
 
 /**
  * Returns the process-wide browser store when IndexedDB is available. The
@@ -38,7 +33,7 @@ let defaultStore: WorkbenchUploadCheckpointListingStore | null | undefined;
  * durable.
  */
 export function getDefaultWorkbenchUploadCheckpointStore():
-  WorkbenchUploadCheckpointListingStore | undefined {
+  WorkbenchUploadCheckpointStore | undefined {
   if (defaultStore !== undefined) return defaultStore ?? undefined;
   defaultStore = createWorkbenchUploadCheckpointStore() ?? null;
   return defaultStore ?? undefined;
@@ -51,39 +46,13 @@ export function getDefaultWorkbenchUploadCheckpointStore():
  */
 export function createWorkbenchUploadCheckpointStore(
   options: WorkbenchIndexedDbCheckpointStoreOptions = {},
-): WorkbenchUploadCheckpointListingStore | undefined {
+): WorkbenchUploadCheckpointStore | undefined {
   const indexedDBFactory = options.indexedDB ?? resolveIndexedDbFactory();
   if (!indexedDBFactory) return undefined;
   return new IndexedDbWorkbenchUploadCheckpointStore(indexedDBFactory, options);
 }
 
-/**
- * Read pending checkpoints for a project without exposing storage internals to
- * UI code. A missing browser store means there are no durable checkpoints.
- */
-export async function listWorkbenchUploadCheckpoints(
-  projectId: string,
-  store: WorkbenchUploadCheckpointListingStore | undefined = getDefaultWorkbenchUploadCheckpointStore(),
-): Promise<WorkbenchUploadCheckpoint[]> {
-  if (!store) return [];
-  return store.list(projectId);
-}
-
-/**
- * Clear all durable upload checkpoints for one Project. This is intentionally
- * project-scoped so changing Projects can never reveal another Project's
- * pending upload metadata.
- */
-export async function clearWorkbenchUploadCheckpoints(
-  projectId: string,
-  store: WorkbenchUploadCheckpointListingStore | undefined = getDefaultWorkbenchUploadCheckpointStore(),
-): Promise<void> {
-  if (!store) return;
-  const checkpoints = await store.list(projectId);
-  await Promise.all(checkpoints.map((checkpoint) => store.remove(projectId, checkpoint.fingerprint)));
-}
-
-class IndexedDbWorkbenchUploadCheckpointStore implements WorkbenchUploadCheckpointListingStore {
+class IndexedDbWorkbenchUploadCheckpointStore implements WorkbenchUploadCheckpointStore {
   private readonly databaseName: string;
   private readonly indexedDB: IDBFactory;
   private readonly onError?: (error: unknown) => void;
@@ -116,7 +85,6 @@ class IndexedDbWorkbenchUploadCheckpointStore implements WorkbenchUploadCheckpoi
       const record: StoredCheckpoint = {
         ...cloneCheckpoint(checkpoint),
         key: checkpointKey(checkpoint.projectId, checkpoint.fingerprint),
-        savedAt: Date.now(),
       };
       transaction.objectStore(WORKBENCH_UPLOAD_CHECKPOINT_STORE_NAME).put(record);
       await transactionComplete(transaction);
@@ -131,21 +99,6 @@ class IndexedDbWorkbenchUploadCheckpointStore implements WorkbenchUploadCheckpoi
         checkpointKey(projectId, fingerprint),
       );
       await transactionComplete(transaction);
-    });
-  }
-
-  async list(projectId: string): Promise<WorkbenchUploadCheckpoint[]> {
-    return this.withErrorReporting(async () => {
-      const database = await this.open();
-      const transaction = database.transaction(WORKBENCH_UPLOAD_CHECKPOINT_STORE_NAME, "readonly");
-      const completion = transactionComplete(transaction);
-      const request = transaction.objectStore(WORKBENCH_UPLOAD_CHECKPOINT_STORE_NAME).getAll();
-      const records = await requestResult<StoredCheckpoint[]>(request);
-      await completion;
-      return records
-        .filter((record) => record.projectId === projectId)
-        .sort((left, right) => right.savedAt - left.savedAt)
-        .map(stripStorageFields);
     });
   }
 
@@ -190,15 +143,9 @@ function openDatabase(indexedDB: IDBFactory, databaseName: string): Promise<IDBD
     request.onupgradeneeded = () => {
       const database = request.result;
       if (!database.objectStoreNames.contains(WORKBENCH_UPLOAD_CHECKPOINT_STORE_NAME)) {
-        const store = database.createObjectStore(WORKBENCH_UPLOAD_CHECKPOINT_STORE_NAME, {
+        database.createObjectStore(WORKBENCH_UPLOAD_CHECKPOINT_STORE_NAME, {
           keyPath: "key",
         });
-        store.createIndex("projectId", "projectId", { unique: false });
-      } else {
-        const store = request.transaction?.objectStore(WORKBENCH_UPLOAD_CHECKPOINT_STORE_NAME);
-        if (store && !store.indexNames.contains("projectId")) {
-          store.createIndex("projectId", "projectId", { unique: false });
-        }
       }
     };
     request.onsuccess = () => resolve(request.result);
@@ -227,11 +174,7 @@ function checkpointKey(projectId: string, fingerprint: string): string {
 }
 
 function stripStorageFields(record: StoredCheckpoint): WorkbenchUploadCheckpoint {
-  const {
-    key: _key,
-    savedAt: _savedAt,
-    ...checkpoint
-  } = record;
+  const { key: _key, ...checkpoint } = record;
   return cloneCheckpoint(checkpoint);
 }
 

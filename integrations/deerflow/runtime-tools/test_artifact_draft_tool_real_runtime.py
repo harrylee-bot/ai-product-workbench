@@ -42,7 +42,11 @@ async def check(asynchronous, reference):
     assert json.loads(repaired.content)['ok'] is True and repaired.artifact['draft'] == draft
     placeholder = copy.deepcopy(draft)
     placeholder.update(title=[None], content=[None], operation=[None])
-    entry = json.loads(repaired.content)['finalSubmissionArtifact'] if reference else placeholder
+    rejected_candidate = {'protocol':'workbench.runtime.result.v1','message':'Done','artifacts':[placeholder]}
+    rejected_result = await call('workbench_runtime_result_submit','placeholder',{'candidate':rejected_candidate})
+    assert json.loads(rejected_result.content)['ok'] is False and rejected_result.artifact['ok'] is False
+    assert 'result' not in rejected_result.artifact
+    entry = json.loads(repaired.content)['finalSubmissionArtifact'] if reference else copy.deepcopy(draft)
     final_candidate = {'protocol':'workbench.runtime.result.v1','message':'Done','artifacts':[entry]}
     original = copy.deepcopy(final_candidate)
     final = await call('workbench_runtime_result_submit','final',{'candidate':final_candidate})

@@ -251,7 +251,7 @@ class RuntimeResultToolTests(unittest.TestCase):
         self.assertTrue(accepted_artifact["ok"])
         self.assertEqual(accepted_artifact["result"], repaired)
 
-    def test_recovers_null_prototype_result_fields_from_the_latest_successful_draft(self) -> None:
+    def test_rejects_null_prototype_fields_even_with_an_accepted_draft(self) -> None:
         draft = json.loads(
             (
                 Path(__file__).resolve().parents[3]
@@ -275,27 +275,13 @@ class RuntimeResultToolTests(unittest.TestCase):
 
         content, artifact = workbench_runtime_result_submit.func(runtime, candidate)
 
-        self.assertTrue(json.loads(content)["ok"])
-        self.assertEqual(artifact["result"], {
-            **candidate,
-            "artifacts": [draft],
-        })
+        self.assertFalse(json.loads(content)["ok"])
+        self.assertFalse(artifact["ok"])
+        self.assertNotIn("result", artifact)
         self.assertEqual(candidate, original)
-        normalizations = json.loads(content)["normalizations"]
-        self.assertEqual(
-            [normalization["path"] for normalization in normalizations],
-            [
-                ["artifacts", 0, "title"],
-                ["artifacts", 0, "content"],
-                ["artifacts", 0, "operation"],
-            ],
-        )
-        self.assertTrue(all(
-            normalization["action"] == "recovered-from-artifact-draft"
-            for normalization in normalizations
-        ))
+        self.assertEqual(json.loads(content)["normalizations"], [])
 
-    def test_recovers_null_prd_result_fields_from_the_latest_successful_draft(self) -> None:
+    def test_rejects_null_prd_fields_even_with_an_accepted_draft(self) -> None:
         draft = json.loads(
             (
                 Path(__file__).resolve().parents[3]
@@ -317,18 +303,13 @@ class RuntimeResultToolTests(unittest.TestCase):
 
         content, artifact = workbench_runtime_result_submit.func(runtime, candidate)
 
-        self.assertTrue(json.loads(content)["ok"])
-        self.assertEqual(artifact["result"]["artifacts"][0], draft)
-        self.assertEqual(
-            [normalization["path"] for normalization in json.loads(content)["normalizations"]],
-            [
-                ["artifacts", 0, "title"],
-                ["artifacts", 0, "content"],
-                ["artifacts", 0, "operation"],
-            ],
-        )
+        self.assertFalse(json.loads(content)["ok"])
+        self.assertFalse(artifact["ok"])
+        self.assertNotIn("result", artifact)
+        self.assertEqual(candidate["artifacts"][0]["content"], [None])
+        self.assertEqual(json.loads(content)["normalizations"], [])
 
-    def test_does_not_coerce_null_or_other_invalid_types_without_an_exact_placeholder(self) -> None:
+    def test_does_not_coerce_null_or_other_invalid_types(self) -> None:
         draft = json.loads(
             (
                 Path(__file__).resolve().parents[3]
@@ -354,100 +335,6 @@ class RuntimeResultToolTests(unittest.TestCase):
         self.assertFalse(artifact["ok"])
         self.assertEqual(candidate["artifacts"][0]["title"], None)
         self.assertEqual(candidate["artifacts"][0]["content"], [None])
-        self.assertEqual(
-            json.loads(content)["normalizations"][0]["path"],
-            ["artifacts", 0, "content"],
-        )
-
-    def test_rejects_a_draft_with_a_tampered_envelope_checksum(self) -> None:
-        draft = json.loads(
-            (
-                Path(__file__).resolve().parents[3]
-                / "integrations/deerflow/skills/workbench/references"
-                / "prototype-runtime-result.example.json"
-            ).read_text(encoding="utf-8"),
-        )["artifacts"][0]
-        candidate_artifact = copy.deepcopy(draft)
-        candidate_artifact.update({
-            "title": [None],
-            "content": [None],
-            "operation": [None],
-        })
-        candidate = {
-            "protocol": "workbench.runtime.result.v1",
-            "message": "done",
-            "artifacts": [candidate_artifact],
-        }
-        message = _draft_message(draft)
-        message.artifact["checksum"] = "0" * 64
-
-        content, artifact = workbench_runtime_result_submit.func(
-            _runtime_with_messages([message]),
-            candidate,
-        )
-
-        self.assertFalse(json.loads(content)["ok"])
-        self.assertFalse(artifact["ok"])
-        self.assertEqual(json.loads(content)["normalizations"], [])
-
-    def test_rejects_a_draft_when_the_message_tool_call_id_does_not_match(self) -> None:
-        draft = json.loads(
-            (
-                Path(__file__).resolve().parents[3]
-                / "integrations/deerflow/skills/workbench/references"
-                / "prototype-runtime-result.example.json"
-            ).read_text(encoding="utf-8"),
-        )["artifacts"][0]
-        candidate_artifact = copy.deepcopy(draft)
-        candidate_artifact.update({
-            "title": [None],
-            "content": [None],
-            "operation": [None],
-        })
-        candidate = {
-            "protocol": "workbench.runtime.result.v1",
-            "message": "done",
-            "artifacts": [candidate_artifact],
-        }
-        message = _draft_message(draft, tool_call_id="draft-artifact-id")
-        message.tool_call_id = "different-message-id"
-
-        content, artifact = workbench_runtime_result_submit.func(
-            _runtime_with_messages([message]),
-            candidate,
-        )
-
-        self.assertFalse(json.loads(content)["ok"])
-        self.assertFalse(artifact["ok"])
-        self.assertEqual(json.loads(content)["normalizations"], [])
-
-    def test_rejects_an_invalid_draft_even_when_its_checksums_are_consistent(self) -> None:
-        draft = {
-            "kind": "prototype",
-            "schemaVersion": 1,
-            "title": "Draft",
-            "operation": {"kind": "create"},
-            "citations": [],
-            "content": {},
-        }
-        candidate = {
-            "protocol": "workbench.runtime.result.v1",
-            "message": "done",
-            "artifacts": [{
-                **copy.deepcopy(draft),
-                "title": [None],
-                "content": [None],
-                "operation": [None],
-            }],
-        }
-
-        content, artifact = workbench_runtime_result_submit.func(
-            _runtime_with_messages([_draft_message(draft)]),
-            candidate,
-        )
-
-        self.assertFalse(json.loads(content)["ok"])
-        self.assertFalse(artifact["ok"])
         self.assertEqual(json.loads(content)["normalizations"], [])
 
     def test_rejects_missing_runtime_scope_before_validation(self) -> None:
@@ -463,6 +350,33 @@ class RuntimeResultToolTests(unittest.TestCase):
                 workbench_runtime_result_submit.func(runtime, {})
 
         validate.assert_not_called()
+
+    def test_prototype_submission_requires_current_shape_without_silent_repairs(self):
+        root = Path(__file__).resolve().parents[3]
+        candidate = json.loads((root / "integrations/deerflow/skills/workbench/references/prototype-runtime-result.example.json").read_text())
+        content, artifact = workbench_runtime_result_submit.func(_runtime(), candidate)
+        self.assertTrue(json.loads(content)["ok"])
+        self.assertEqual(artifact["result"], candidate)
+        mutations = {
+            "layout-alias": lambda content: content["nodes"][0]["layout"].update(justify="space-between"),
+            "literal-typo": lambda content: content["nodes"][0]["layout"]["width"].update(kind="literal长"),
+            "missing-collection": lambda content: content.pop("motions"),
+            "unknown-node": lambda content: content["nodes"].append({"id": "legacy", "kind": "unknown"}),
+            "extra-field": lambda content: content["nodes"][0].update(unsupported="authored text"),
+            "missing-binding": lambda content: content["nodes"][2].update(bindingIds=["missing-binding"]),
+            "dangling-child": lambda content: content["nodes"][0]["childIds"].append("missing-child"),
+        }
+        for case, mutate in mutations.items():
+            with self.subTest(case=case):
+                malformed = copy.deepcopy(candidate)
+                mutate(malformed["artifacts"][0]["content"])
+                original = copy.deepcopy(malformed)
+                feedback, rejected = workbench_runtime_result_submit.func(_runtime(), malformed)
+                self.assertFalse(json.loads(feedback)["ok"])
+                self.assertFalse(rejected["ok"])
+                self.assertNotIn("result", rejected)
+                self.assertEqual(json.loads(feedback)["normalizations"], [])
+                self.assertEqual(malformed, original)
 
 
 class AcceptedDraftReferenceTests(unittest.TestCase):
@@ -526,6 +440,28 @@ class AcceptedDraftReferenceTests(unittest.TestCase):
             mutation(runtime)
             with self.assertRaisesRegex(ValueError, "^WORKBENCH_RUNTIME_DRAFT_REFERENCE_INVALID$"):
                 workbench_runtime_result_submit.func(runtime, self.candidate)
+
+    def test_reference_rejects_a_tampered_envelope_checksum(self):
+        self.messages[0].artifact["checksum"] = "0" * 64
+        with self.assertRaisesRegex(ValueError, "^WORKBENCH_RUNTIME_DRAFT_REFERENCE_INVALID$"):
+            workbench_runtime_result_submit.func(self.runtime, self.candidate)
+
+    def test_reference_rejects_a_mismatched_message_tool_call_id(self):
+        self.messages[0].tool_call_id = "different-message-id"
+        with self.assertRaisesRegex(ValueError, "^WORKBENCH_RUNTIME_DRAFT_REFERENCE_INVALID$"):
+            workbench_runtime_result_submit.func(self.runtime, self.candidate)
+
+    def test_reference_rejects_an_invalid_draft_with_consistent_checksums(self):
+        draft = {"kind": "prototype", "schemaVersion": 1, "title": "Draft",
+                 "operation": {"kind": "create"}, "citations": [], "content": {}}
+        message = _draft_message(draft)
+        runtime = _runtime_with_messages([message])
+        runtime.context["workbench"]["requestedArtifactKinds"] = ["prototype"]
+        candidate = {"protocol": "workbench.runtime.result.v1", "message": "Done",
+                     "artifacts": [{"draftReference": {"artifactIndex": 0,
+                                    "draftChecksum": message.artifact["draftChecksum"]}}]}
+        with self.assertRaisesRegex(ValueError, "^WORKBENCH_RUNTIME_DRAFT_REFERENCE_INVALID$"):
+            workbench_runtime_result_submit.func(runtime, candidate)
 
     def test_expanded_result_still_requires_full_envelope_validation(self):
         candidate = copy.deepcopy(self.candidate)

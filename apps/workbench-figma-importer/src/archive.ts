@@ -107,7 +107,7 @@ export async function parseFigmaExportArchive(
   return { document, assets };
 }
 
-export function parseFigmaExportDocument(value: unknown): FigmaExportDocument {
+function parseFigmaExportDocument(value: unknown): FigmaExportDocument {
   const parsed = figmaExportDocumentSchema.safeParse(value);
   if (!parsed.success) {
     throw new FigmaImportArchiveError(

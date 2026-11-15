@@ -112,6 +112,9 @@ export type RuntimeSubmissionState =
     };
 
 export type RuntimeExecution = {
+  /** Fixed plan context only; never authorizes live Canvas access. */
+  historicalCanvasSnapshot?: NonNullable<StartRunRequest["canvasSnapshot"]>;
+  historicalCanvasArtifacts?: RuntimeArtifactTarget[];
   runId: string;
   runtimeAttemptId: string;
   attempt: number;
@@ -132,7 +135,7 @@ export type RuntimeExecution = {
   submission: RuntimeSubmissionState;
 };
 
-export type RuntimeExternalEventPart = {
+type RuntimeExternalEventPart = {
   externalRunId: string;
   externalEventId: string;
   event: string;
@@ -153,7 +156,7 @@ export type RuntimeExecutionObserver = {
   ) => Promise<void>;
 };
 
-export const runtimeSubmissionUnknownErrorCodes = [
+const runtimeSubmissionUnknownErrorCodes = [
   "RUNTIME_SUBMISSION_UNKNOWN",
   "RUNTIME_SUBMISSION_RECONCILIATION_UNAVAILABLE",
   "RUNTIME_SUBMISSION_RECONCILIATION_PERSISTENCE_UNKNOWN",

@@ -211,7 +211,6 @@ describe("UrlImportProvider", () => {
 
     await expect(provider.freeze({ kind: "url_snapshot", sourceUrl: "https://docs.example.test/start" }))
       .resolves.toMatchObject({
-        label: "docs.example.test",
         descriptor: {
           kind: "url_snapshot",
           sourceUrl: "https://docs.example.test/start",

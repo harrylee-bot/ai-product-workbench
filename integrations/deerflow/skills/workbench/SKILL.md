@@ -192,7 +192,7 @@ Every artifact requires nonempty citations copied exactly from successful
 Knowledge retrieval in the current attempt. Missing knowledge is a blocker,
 not permission to generate from memory or fabricate sources.
 
-Output is the user's fixed requirement-document template, not a freeform lightweight PRD. A newly authored PRD uses Artifact `schemaVersion: 3` with content protocol `workbench.prd.v3`. Existing v1 and v2 documents retain their original protocols when revised; valid v2 drafts remain accepted for transport and causal-history compatibility. Protocol v1 is never the shape for a new PRD. Every PRD Artifact in this Runtime uses the following exact structure; a request for an incompatible format is not permission to submit schema-invalid content:
+Output is the user's fixed requirement-document template, not a freeform lightweight PRD. Every created or revised PRD uses Artifact `schemaVersion: 3` with content protocol `workbench.prd.v3`. Retired PRD protocols are not accepted. Every PRD Artifact in this Runtime uses the following exact structure; a request for an incompatible format is not permission to submit schema-invalid content:
 
 In this Canvas Runtime, apply the canonical skill's content, section, table,
 diagram, degradation, safety, and quality rules through typed IR. Its DOCX copy,

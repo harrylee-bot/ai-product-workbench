@@ -16,7 +16,8 @@ import { prototypeEditorDocumentFixture } from "../../../prototype-editor/test-f
 import type { PrototypePatchCheckpointTransport } from "../api-adapter";
 import {
   PrototypePatchProjectorStore,
-  findPrototypePatchProjection,
+  type PrototypePatchProjectorSnapshot,
+  type PrototypePatchProjectionView,
 } from "./projector-store";
 
 const scope = {
@@ -547,4 +548,13 @@ function deferred<T>() {
     resolve = accept;
   });
   return { promise, resolve };
+}
+
+function findPrototypePatchProjection(
+  snapshot: PrototypePatchProjectorSnapshot,
+  artifactVersionId: string,
+  screenId: string | undefined,
+): PrototypePatchProjectionView | null {
+  if (!screenId) return null;
+  return snapshot.projections.get(`${artifactVersionId}\u0000${screenId}`) ?? null;
 }

@@ -41,7 +41,7 @@ describe("preview capability tokens", () => {
     expect(() => decodePreviewTokenSecret("not-a-secret")).toThrow("PREVIEW_TOKEN_SECRET_INVALID");
   });
 
-  it("only issues requester-bound v2 tokens and retains bounded verification of existing v1 tokens", () => {
+  it("only accepts requester-bound v2 tokens and rejects correctly signed obsolete v1 tokens", () => {
     const expiresAt = new Date(now.getTime() + 60_000);
     const current = createPreviewToken({ exportJobId: "export_1", principalId: "viewer_1", expiresAt }, secret, { now });
     expect(current).toMatch(/^wbpv2\./u);
@@ -49,9 +49,7 @@ describe("preview capability tokens", () => {
       .toThrow("PREVIEW_TOKEN_PRINCIPAL_ID_INVALID");
     const unsigned = `wbpv1.${Buffer.from(JSON.stringify({ v: 1, exportJobId: "export_1", exp: expiresAt.getTime() / 1000 })).toString("base64url")}`;
     const legacy = `${unsigned}.${createHmac("sha256", secret).update(unsigned).digest("base64url")}`;
-    expect(verifyPreviewToken(legacy, secret, { now })).toEqual({ exportJobId: "export_1", expiresAt });
-    expect(() => verifyPreviewToken(legacy, secret, { now: expiresAt })).toThrow("PREVIEW_TOKEN_EXPIRED");
-    expect(() => verifyPreviewToken(legacy, secret, { now, maximumTtlSeconds: 30 })).toThrow("PREVIEW_TOKEN_TTL_EXCEEDED");
+    expect(() => verifyPreviewToken(legacy, secret, { now })).toThrow("PREVIEW_TOKEN_INVALID");
     const parts = current.split(".");
     const changed = JSON.parse(Buffer.from(parts[1]!, "base64url").toString());
     changed.principalId = "other_viewer";

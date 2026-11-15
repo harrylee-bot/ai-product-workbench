@@ -86,7 +86,6 @@ export function LeftInspector({
   runPhaseLabel: string | null;
   runStatus: Run["status"] | null;
   selectedTask: string | null;
-  zoomLabel: string;
 }) {
   const [stackOpen, setStackOpen] = useState(true);
   const [activeTaskVisible, setActiveTaskVisible] = useState(true);

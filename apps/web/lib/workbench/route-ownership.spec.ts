@@ -114,7 +114,8 @@ describe("Workbench route ownership", () => {
     expect(projectRouteSource).not.toContain("WorkbenchRouteTransition");
     expect(projectRouteSource).toContain('import "./workbench-project.css"');
     expect(loaderSource.match(/\?\?= import\("\.\/workbench-project-route"\)/g)).toHaveLength(1);
-    expect(loaderSource).toContain("await loadRoute()");
+    const navigationSource = await readFile(path.join(webRoot, "lib/workbench/features/workbench-project-navigation.ts"), "utf8");
+    expect(navigationSource).toContain("await callbacksRef.current.prepareProjectRoute(");
     expect(globalCss).not.toContain('@import "@xyflow/react/dist/style.css"');
     expect(globalCss).not.toMatch(/@import\s+url\(/u);
     expect(globalCss).not.toContain("fonts.googleapis.com");

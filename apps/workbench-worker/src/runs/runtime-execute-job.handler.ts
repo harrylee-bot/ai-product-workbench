@@ -14,6 +14,7 @@ import { runtimeExecutionErrorCode, type RunProcessor } from "./run-processor.js
 type RuntimeExecuteHandlerDependencies = Readonly<{
   processor: Pick<RunProcessor, "execute">;
   executionSigner: RuntimeWorkerExecutionSigner;
+  isTemporalRun?: (runId: string) => Promise<boolean>;
   recordQueueAge: (job: Pick<JobWithMetadata, "createdOn" | "startedOn">) => void;
   recordTerminalRunDrift: (runId: string) => Promise<void>;
 }>;
@@ -23,12 +24,18 @@ export function createRuntimeExecuteJobHandler({
   executionSigner,
   recordQueueAge,
   recordTerminalRunDrift,
+  isTemporalRun,
 }: RuntimeExecuteHandlerDependencies) {
   return async (jobs: Job<RuntimeExecuteJob>[]) => {
     const job = jobs[0] as JobWithMetadata<RuntimeExecuteJob> | undefined;
     if (!job) return;
     const command = queuePayload<RuntimeExecuteJob>(job.data);
     recordQueueAge(job);
+    // Temporal owns these runs, including recovery. A stale pg-boss job must
+    // never start a second scheduler for the same generation.
+    if (await isTemporalRun?.(command.runId)) {
+      return executionSigner.attest({ runId: command.runId, skipped: true }, { jobId: job.id, runtimeAttemptId: null });
+    }
     try {
       let resolvedRuntimeAttemptId: string | null = null;
       const rawResult = await traceQueueConsume({

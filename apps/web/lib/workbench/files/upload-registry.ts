@@ -21,7 +21,7 @@ export type WorkbenchUploadStage =
   | "failed"
   | "cancelled";
 
-export type WorkbenchUploadAction = "cancel" | "retry";
+type WorkbenchUploadAction = "cancel" | "retry";
 
 export type WorkbenchUploadItemViewModel = {
   id: string;

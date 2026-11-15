@@ -21,7 +21,7 @@ test("new direct builder enforces a single bounded build, loads images, and stop
   assert.equal(create.args.at(-1), "unix:///var/run/docker.sock");
   assert.deepEqual(builds(result).map(entry => entry.args), [[
     "compose", "--env-file", "/private/env", "-f", "/candidate/compose.yml",
-    "--parallel", "1", "build", "--builder", builderName, "--with-dependencies", "workbench-web", "knowledge",
+    "--parallel", "1", "build", "--builder", builderName, "workbench-web", "knowledge",
   ]]);
   assert.equal(builds(result)[0].bake, "false");
   assert.equal(builds(result)[0].buildkit, "1");
@@ -35,7 +35,7 @@ test("matching persistent builder is reused and an empty service list builds all
   assert.equal(result.status, 0, result.stderr);
   assert.equal(find(result, "buildx", "create"), undefined);
   assert.equal(builds(result).length, 1);
-  assert.equal(builds(result)[0].args.at(-1), "--with-dependencies");
+  assert.equal(builds(result)[0].args.at(-1), builderName);
 });
 
 test("Buildx normalized TOML retains the same resource policy", () => {

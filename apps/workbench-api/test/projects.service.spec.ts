@@ -303,6 +303,50 @@ describe("Projects service", () => {
 });
 
 describe("Project members service", () => {
+  it.each(["viewer", "editor"] as const)("updates a project-only invitee to %s without requiring Workspace access", async (role) => {
+    const current = {
+      projectId: "project_1", workspaceId: "workspace_1", principalId: "invitee_1",
+      role: "viewer" as const, createdAt: now, updatedAt: now,
+      principal: { displayName: "Invitee", email: "invitee@example.com" },
+    };
+    const tx = {
+      $queryRaw: vi.fn().mockResolvedValue([project]),
+      projectMember: {
+        findUnique: vi.fn().mockResolvedValueOnce({ role: "owner" }).mockResolvedValueOnce(current),
+        upsert: vi.fn().mockResolvedValue({ ...current, role }),
+      },
+      workspaceMember: { findUnique: vi.fn().mockResolvedValue(null) },
+      project: { update: vi.fn().mockResolvedValue({ revision: 4 }) },
+    };
+    const service = new ProjectMembersService(
+      { $transaction: vi.fn((callback) => callback(tx)) } as never,
+      { findProject: vi.fn().mockResolvedValue(project) } as never,
+    );
+    await expect(service.setRole("principal_1", "project_1", "invitee_1", 3, role))
+      .resolves.toMatchObject({ member: { role }, projectRevision: role === "viewer" ? 3 : 4 });
+    expect(tx.workspaceMember.findUnique).not.toHaveBeenCalled();
+  });
+
+  it("still requires Workspace eligibility when directly adding a new Project member", async () => {
+    const tx = {
+      $queryRaw: vi.fn().mockResolvedValue([project]),
+      projectMember: {
+        findUnique: vi.fn().mockResolvedValueOnce({ role: "owner" }).mockResolvedValueOnce(null),
+        upsert: vi.fn(),
+      },
+      workspaceMember: { findUnique: vi.fn().mockResolvedValue(null) },
+      project: { update: vi.fn() },
+    };
+    const service = new ProjectMembersService(
+      { $transaction: vi.fn((callback) => callback(tx)) } as never,
+      { findProject: vi.fn().mockResolvedValue(project) } as never,
+    );
+    await expect(service.setRole("principal_1", "project_1", "outsider_1", 3, "editor"))
+      .rejects.toMatchObject({ status: 404 });
+    expect(tx.projectMember.upsert).not.toHaveBeenCalled();
+    expect(tx.project.update).not.toHaveBeenCalled();
+  });
+
   it("treats PUT of the existing role as a no-op without revision churn", async () => {
     const current = {
       projectId: "project_1",

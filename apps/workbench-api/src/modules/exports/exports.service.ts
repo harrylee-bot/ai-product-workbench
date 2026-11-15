@@ -153,7 +153,6 @@ export class ExportsService {
     assertBoardNodeSelection(request.selection, releaseSnapshot);
     const existing = await this.findByReceipt(request.releaseId, idempotencyKey);
     if (existing) return this.resolveIdempotent(existing, principalId, requestHash);
-    const persistedOptions = this.capabilitiesConfig.materializeOptions(request.format, request.options);
     assertFigmaSelection(request.format, request.selection, releaseSnapshot);
 
     try {
@@ -221,7 +220,7 @@ export class ExportsService {
             selectionNodeIds: request.selection.kind === "board_nodes"
               ? request.selection.nodeIds
               : [],
-            options: persistedOptions as Prisma.InputJsonValue,
+            options: request.options as Prisma.InputJsonValue,
           },
         });
         const payload = exportBuildJobSchema.parse({ exportJobId: job.id });
@@ -796,14 +795,14 @@ function selectedReleasePins(selection: ExportSelection, release: ProjectRelease
   return release.artifactPins.filter((pin) => versionIds.has(pin.artifactVersionId));
 }
 
-export function encodeExportCursor(cursor: ExportCursor) {
+function encodeExportCursor(cursor: ExportCursor) {
   return Buffer.from(JSON.stringify(cursor)).toString("base64url");
 }
 
-export function decodeExportCursor(value: string): ExportCursor {
+function decodeExportCursor(value: string): ExportCursor {
   try {
     const parsed = JSON.parse(Buffer.from(value, "base64url").toString("utf8")) as Partial<ExportCursor>;
-    if (!parsed.id || !parsed.createdAt || Number.isNaN(Date.parse(parsed.createdAt))) throw new Error();
+    if (typeof parsed.id !== "string" || !parsed.id || typeof parsed.createdAt !== "string" || Number.isNaN(Date.parse(parsed.createdAt))) throw new Error();
     return { id: parsed.id, createdAt: parsed.createdAt };
   } catch {
     throw validationProblem("The Export cursor is invalid");

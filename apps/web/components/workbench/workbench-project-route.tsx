@@ -1,6 +1,7 @@
 "use client";
 
 import "./workbench-project.css";
+import { writePrototypeSelection } from "./workbench-prototype-v2-panel";
 
 import {
   applyNodeChanges,
@@ -20,6 +21,7 @@ import {
 import { toast } from "sonner";
 import type {
   ArtifactVersionDetail,
+  PrototypePlan,
   CreateArtifactVersionRequest,
   DesignPresetCatalogItem,
   CanvasScreenSummary,
@@ -257,21 +259,7 @@ export function createPrdVersionEditRequest(
   baseArtifactVersionId: string,
   document: PrdDocument,
 ): CreateArtifactVersionRequest {
-  if (document.protocol === "workbench.prd.v1") {
-    return {
-      kind: "prd",
-      baseArtifactVersionId,
-      document,
-    };
-  }
-  if (document.protocol === "workbench.prd.v3") {
-    return { kind: "prd", baseArtifactVersionId, document };
-  }
-  return {
-    kind: "prd",
-    baseArtifactVersionId,
-    document,
-  };
+  return { kind: "prd", baseArtifactVersionId, document };
 }
 
 
@@ -1137,7 +1125,17 @@ function WorkbenchProjectRouteInner() {
     if (!text) return null;
     setShareOpen(false);
     setExportOpen(false);
-    const runId = await workbench.startProjectRun(submission);
+    let runId: string | null;
+    if ((submission.requestedArtifactKinds ?? []).includes("prototype")) {
+      try {
+        const plan = await workbench.createPrototypePlan(submission);
+        runId = plan?.id ?? null;
+        if (plan && projectSession.isCurrent()) {
+          writePrototypeSelection({ planId: plan.id, revisionId: "", pageId: "" });
+          window.dispatchEvent(new Event("workbench:prototype-open"));
+        }
+      } catch (error) { toast.error(errorMessage(error, "创建原型计划失败")); return null; }
+    } else runId = await workbench.startProjectRun(submission);
     if (!runId || !projectSession.isCurrent()) return null;
     setPersistedPrompt(text);
     setProjectDraft("");
@@ -1149,6 +1147,7 @@ function WorkbenchProjectRouteInner() {
     setProjectDraft,
     setShareOpen,
     workbench.startProjectRun,
+    workbench.createPrototypePlan,
   ]);
   const projectStatus = workbench.bootstrapQuery.isError || workbench.boardController.query.isError
     ? "error"
@@ -1316,9 +1315,6 @@ function WorkbenchProjectRouteInner() {
               onRetryDesignPresets: () => {
                 void workbench.designPresetsQuery.refetch();
               },
-              onRetryModels: () => {
-                void workbench.runtimeModelsQuery.refetch();
-              },
               projectDesignSystemChoices: workbench.projectDesignSystemChoices,
             }}
             key="project"
@@ -1391,6 +1387,7 @@ function WorkbenchProjectRouteInner() {
               onCancelRun: runActions.cancel,
               onRetryRun: runActions.retry,
               onSubmitPrompt: submitPrompt,
+              onCreatePrototypePlan: workbench.createPrototypePlan,
               onSubmitRunApproval: runActions.submitApproval,
               prompt: persistedPrompt,
               prototypePatchProjector: workbench.runController.prototypePatchProjector,
@@ -1444,7 +1441,6 @@ function WorkbenchProjectRouteInner() {
       <ExportDialog
         activeExport={publication.activeExport}
         activeExportSelection={publication.activeExportSelection}
-        activeExternalDelivery={publication.activeExternalDelivery}
         busy={publication.busy}
         capabilities={publication.exportCapabilities}
         capabilitiesError={publication.exportCapabilitiesError}
@@ -1455,14 +1451,10 @@ function WorkbenchProjectRouteInner() {
         hasSelection={exportHasSelection}
         onDownload={publication.downloadExport}
         onCancelExport={publication.cancelExport}
-        onCancelExternalDelivery={publication.cancelExternalDelivery}
-        onConfirmExternalDelivery={publication.confirmExternalDelivery}
         onCopyCode={publication.copyExportCode}
         open={routeView === "project" && exportOpen && workbench.capabilities.canExport}
         onOpenChange={setExportOpen}
-        onPrepareExternalDelivery={publication.prepareExternalDelivery}
         onRetryCapabilities={() => publication.retryExportCapabilities({ throwOnError: true })}
-        onRetryExternalDelivery={publication.retryExternalDelivery}
         onSelectAll={() => setSelectAllRequest((request) => request + 1)}
         onStartExport={publication.startExport}
         selection={exportSelection}
@@ -1526,7 +1518,6 @@ type ProjectScreenProps = {
     modelCatalog: WorkbenchModelCatalogState;
     modelChoices: WorkbenchModelChoice[];
     onRetryDesignPresets: () => void;
-    onRetryModels: () => void;
     projectDesignSystemChoices: WorkbenchProjectDesignSystemChoice[];
   };
   project: {
@@ -1561,6 +1552,7 @@ type ProjectScreenProps = {
     onCancelRun: () => Promise<unknown>;
     onRetryRun: () => Promise<unknown>;
     onSubmitPrompt: WorkbenchRunSubmitHandler;
+    onCreatePrototypePlan: (submission: WorkbenchRunSubmission) => Promise<PrototypePlan | null>;
     onSubmitRunApproval: ReturnType<typeof useWorkbenchRunActions>["submitApproval"];
     prompt: string;
     prototypePatchProjector: PrototypePatchProjectorStore;
@@ -1625,7 +1617,6 @@ function ProjectScreen({
     modelCatalog,
     modelChoices,
     onRetryDesignPresets,
-    onRetryModels,
     projectDesignSystemChoices,
   },
   project: {
@@ -1660,6 +1651,7 @@ function ProjectScreen({
     onCancelRun,
     onRetryRun,
     onSubmitPrompt,
+    onCreatePrototypePlan,
     onSubmitRunApproval,
     prompt,
     prototypePatchProjector,
@@ -1711,6 +1703,17 @@ function ProjectScreen({
     projectSession,
     () => false,
   );
+  const [prototypeV2Open, setPrototypeV2Open] = useWorkbenchProjectState(
+    projectSession,
+    () => typeof window !== "undefined" && /(?:[?&])prototype(?:Plan|Revision|Page)?=/.test(window.location.search),
+  );
+  useEffect(() => {
+    const restorePrototype = () => setPrototypeV2Open(/(?:[?&])prototype(?:Plan|Revision|Page)?=/.test(window.location.search));
+    restorePrototype();
+    window.addEventListener("popstate", restorePrototype);
+    window.addEventListener("workbench:prototype-open", restorePrototype);
+    return () => { window.removeEventListener("popstate", restorePrototype); window.removeEventListener("workbench:prototype-open", restorePrototype); };
+  }, [projectId, setPrototypeV2Open]);
   const [projectMembersOpen, setProjectMembersOpen] = useWorkbenchProjectState(
     projectSession,
     () => false,
@@ -2612,7 +2615,7 @@ function ProjectScreen({
 
   useEffect(() => {
     const stage = stageRef.current;
-    if (!stage) return;
+    if (!stage || prototypeV2Open || submitting) return;
 
     let frame = 0;
     const viewportTransitionKey = `${projectMode}:${phase}`;
@@ -2684,6 +2687,8 @@ function ProjectScreen({
     phase,
     projectId,
     projectMode,
+    prototypeV2Open,
+    submitting,
     runId,
     setBoardViewport,
     setViewport,
@@ -3933,6 +3938,9 @@ function ProjectScreen({
     const handlePointerDown = (event: MouseEvent) => {
       const target = event.target;
       if (!(target instanceof Element)) return;
+      // V2 owns its panel interaction lifecycle. Closing it on mousedown
+      // would unmount the approval/review button before its click fires.
+      if (target.closest("[data-workbench-prototype-v2-panel]")) return;
       if (target.closest("[data-project-composer]")) {
         setProjectMenuOpen(false);
         setSelectedActionOpen(false);
@@ -4052,6 +4060,9 @@ function ProjectScreen({
       onDuplicateSelectedNodes: duplicateSelectedBoardNodes,
       onFitSelection: fitSelection,
       onMoveEnd: (event, viewport) => {
+        // The V2 request pins the Canvas snapshot. Background auto-fit must not
+        // advance its Board revision while that workspace is being submitted.
+        if (prototypeV2Open || submitting) return;
         const poller = canvasAgentPollerRef.current;
         if (event) {
           poller?.cancelViewportMoveForUserGesture();
@@ -4276,10 +4287,19 @@ function ProjectScreen({
         setProjectMembersOpen(true);
       },
       onMembersOpenChange: (open) => setProjectMembersOpen(open),
-      onOpenPreview: () => {
-        if (previewArtifacts.length > 0) {
-          openPreview(previewArtifacts.map(({ reference }) => reference));
-        }
+      onOpenPrototypeV2: () => {
+        setProjectMenuOpen(false);
+        setPrototypeV2Open(true);
+      },
+      onClosePrototypeV2: () => {
+        const url = new URL(window.location.href);
+        ["prototype", "prototypePlan", "prototypeRevision", "prototypePage"].forEach((key) => url.searchParams.delete(key));
+        window.history.replaceState(window.history.state, "", url);
+        setPrototypeV2Open(false);
+      },
+      onOpenMedia: () => {
+        setProjectMenuOpen(false);
+        setActivePanel("media");
       },
       onRenameProject: projectActions.renameProject,
       onRequestArchive: () => {
@@ -4318,6 +4338,7 @@ function ProjectScreen({
         nodes.find((node) => node.id === selectedNodeId),
       ) ?? undefined,
       previewOpen,
+      prototypeV2Open,
       projectActionBusy: projectActions.projectActionBusy,
       projectMembersOpen,
       projectMenuOpen,
@@ -4326,6 +4347,7 @@ function ProjectScreen({
       shareOpen,
     },
     composer: {
+      onCreatePrototypePlan: (submission) => onCreatePrototypePlan({ ...submission, captureCanvasSnapshot }),
       onSelectSuggestion: (text) => {
         if (projectMode === "document" && /UI|界面/i.test(text)) {
           void submitPromptWithCanvasSnapshot({
@@ -4378,7 +4400,6 @@ function ProjectScreen({
         },
         onRefresh: onRetryRun,
         onRetryDesignPresets,
-        onRetryModels,
         onSubmitPrompt: submitPromptWithCanvasSnapshot,
         onSourcePrototypeCreated: placeSourcePrototype,
         onTargetSurfaceChange: changeTargetSurface,

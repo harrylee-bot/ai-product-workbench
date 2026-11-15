@@ -8,6 +8,7 @@ import {
   Grid3X3Icon,
   HistoryIcon,
   HomeIcon,
+  ImageIcon,
   MenuIcon,
   MonitorIcon,
   PencilIcon,
@@ -60,7 +61,7 @@ const PRD_GENERATION_STAGES: readonly RunGenerationStage[] = [
 
 type ActiveProjectStageMotionKind = Exclude<WorkbenchRunMotionKind, "neutral">;
 
-export function getProjectStageMotionKind({
+function getProjectStageMotionKind({
   generationStage,
   isOverview,
   motionKind,
@@ -399,7 +400,8 @@ export function ProjectTopBar({
   onDuplicate,
   onMembers,
   onExport,
-  onPreview,
+  onOpenPrototypeV2,
+  onOpenMedia,
   onRename,
   onShare,
   onToggleMenu,
@@ -414,7 +416,8 @@ export function ProjectTopBar({
   onDuplicate: () => void;
   onMembers: () => void;
   onExport: () => void;
-  onPreview: () => void;
+  onOpenPrototypeV2: () => void;
+  onOpenMedia?: () => void;
   onRename: () => void;
   onShare: () => void;
   onToggleMenu: () => void;
@@ -450,6 +453,8 @@ export function ProjectTopBar({
               onDuplicate={onDuplicate}
               onMembers={onMembers}
               onExport={onExport}
+              onOpenPrototypeV2={onOpenPrototypeV2}
+              onOpenMedia={onOpenMedia}
               onRename={onRename}
               onShare={onShare}
               projectTitle={projectTitle}
@@ -467,11 +472,11 @@ export function ProjectTopBar({
       </div>
       <div className="flex shrink-0 items-center gap-[4px] sm:gap-[8px]">
         <button
-          aria-label="预览项目"
+          aria-label="打开交互原型 V2"
           className="workbench-chrome-button group hidden size-[34px] place-items-center rounded-full border border-white/[0.10] bg-[#1c1d20]/86 text-[#f1f3f4] transition hover:border-white/[0.18] hover:bg-[#34353a]/94 active:scale-95 disabled:cursor-not-allowed disabled:opacity-45 sm:grid"
-          onClick={() => onPreview()}
+          onClick={() => onOpenPrototypeV2()}
           disabled={!capabilities.canPreview}
-          title={capabilities.canPreview ? "预览" : "当前角色无法创建预览"}
+          title={!capabilities.canPreview ? "当前角色无法创建预览" : "打开交互原型 V2"}
           type="button"
         >
           <PlayIcon className="size-[17px]" />
@@ -525,6 +530,8 @@ function ProjectMenu({
   onDuplicate,
   onMembers,
   onExport,
+  onOpenPrototypeV2,
+  onOpenMedia,
   onRename,
   onShare,
   projectTitle,
@@ -535,6 +542,8 @@ function ProjectMenu({
   onDuplicate: () => void;
   onMembers: () => void;
   onExport: () => void;
+  onOpenPrototypeV2: () => void;
+  onOpenMedia?: () => void;
   onRename: () => void;
   onShare: () => void;
   projectTitle: string;
@@ -556,6 +565,8 @@ function ProjectMenu({
     disabled?: boolean;
     onClick?: () => void;
   }> = [
+    { icon: PlayIcon, label: "交互原型预览（V2）", disabled: !capabilities.canPreview, onClick: onOpenPrototypeV2 },
+    { icon: ImageIcon, label: "文件与素材", disabled: !onOpenMedia, onClick: onOpenMedia },
     { icon: FileTextIcon, label: "Docs", onClick: () => openWorkbenchKnowledgePage() },
     { icon: Share2Icon, label: "共享", disabled: !capabilities.canShare, onClick: onShare },
     { icon: MonitorIcon, label: "导出", disabled: !capabilities.canExport, onClick: onExport },
@@ -598,6 +609,7 @@ function ProjectMenu({
             return (
               <button
                 className="flex h-[42px] w-full items-center gap-[12px] rounded-[10px] px-[12px] text-left text-[14px] font-semibold text-[#f1f3f4] hover:bg-white/[0.06]"
+                data-workbench-prototype-entry={item.label === "交互原型预览（V2）" ? "v2" : undefined}
                 disabled={item.disabled}
                 key={item.label}
                 onClick={item.onClick}

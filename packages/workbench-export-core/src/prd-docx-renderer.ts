@@ -30,18 +30,13 @@ export async function docxOutput(request: ExportBuildRequest, execution: ExportB
   if (request.source.artifacts.length !== 1
     || !artifact
     || (artifact.kind !== "prd" && artifact.kind !== "document")) {
-    throw new TerminalExportError("EXPORT_CONTENT_INVALID", "DOCX export requires exactly one PRD artifact");
+    throw new TerminalExportError("EXPORT_CONTENT_INVALID", "DOCX export requires exactly one PRD or business document artifact");
   }
 
   const businessDocument = artifact.kind === "document" ? businessDocumentSchema.safeParse(artifact.content) : null;
-  if (!businessDocument?.success && (!artifact.content || typeof artifact.content !== "object"
-    || !("protocol" in artifact.content)
-    || !["workbench.prd.v2", "workbench.prd.v3"].includes(String(artifact.content.protocol)))) {
-    throw new TerminalExportError("EXPORT_CONTENT_INVALID", "DOCX export only supports PRD v2 or v3");
-  }
-  const parsed = prdDocumentSchema.safeParse(artifact.content);
-  if (!parsed.success && !businessDocument?.success) {
-    throw new TerminalExportError("EXPORT_CONTENT_INVALID", "DOCX export requires a complete valid PRD v2 or v3 document");
+  const parsed = artifact.kind === "prd" ? prdDocumentSchema.safeParse(artifact.content) : null;
+  if (!parsed?.success && !businessDocument?.success) {
+    throw new TerminalExportError("EXPORT_CONTENT_INVALID", "DOCX export requires a valid PRD v3 or business document");
   }
 
   const workDir = join(tmpdir(), `prd-docx-${randomBytes(8).toString("hex")}`);
@@ -60,7 +55,7 @@ export async function docxOutput(request: ExportBuildRequest, execution: ExportB
         }),
       }), "utf-8");
       await runDocumentExportCommand(PYTHON_PATH, [DOCUMENT_RENDERER_PATH, "--source", sourcePath, "--output", docxPath], execution);
-    } else if (parsed.success) {
+    } else if (parsed?.success) {
       await writeFile(sourcePath, JSON.stringify(parsed.data), "utf-8");
       await runDocumentExportCommand(PYTHON_PATH, [RENDERER_PATH, "--source", sourcePath, "--template", TEMPLATE_PATH, "--output", docxPath], execution);
       await runDocumentExportCommand(PYTHON_PATH, [CHECKER_PATH, docxPath], execution);
@@ -83,7 +78,7 @@ export async function pdfOutput(request: ExportBuildRequest, execution: ExportBu
   if (request.source.artifacts.length !== 1
     || !artifact
     || (artifact.kind !== "prd" && artifact.kind !== "document")) {
-    throw new TerminalExportError("EXPORT_CONTENT_INVALID", "PDF export requires exactly one PRD artifact");
+    throw new TerminalExportError("EXPORT_CONTENT_INVALID", "PDF export requires exactly one PRD or business document artifact");
   }
 
   const docxResult = await docxOutput(request, execution);

@@ -235,7 +235,7 @@ function setPublicCapabilityHeaders(response: Response) {
   response.setHeader("Referrer-Policy", "no-referrer");
 }
 
-export function parseShareLimit(value?: string) {
+function parseShareLimit(value?: string) {
   if (value === undefined || value === "") return undefined;
   const parsed = Number(value);
   if (!Number.isSafeInteger(parsed) || parsed < 1 || parsed > 100) {

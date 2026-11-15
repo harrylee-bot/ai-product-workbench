@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { prdDocumentV2Example } from "@workbench/workbench-contracts/test-fixtures";
+import { prdDocumentV3Example } from "@workbench/workbench-contracts/test-fixtures";
 
 import { createWorkbenchApiClient } from "../../../api/client";
 import {
@@ -185,18 +185,18 @@ describe("Artifacts API contracts", () => {
     expect(fetch).toHaveBeenCalledOnce();
   });
 
-  it("creates a PRD v2 ArtifactVersion through the generated API boundary", async () => {
+  it("creates a PRD v3 ArtifactVersion through the generated API boundary", async () => {
     const requestBody = {
       kind: "prd" as const,
       baseArtifactVersionId: "version-1",
-      document: prdDocumentV2Example,
+      document: prdDocumentV3Example,
     };
     const detail = {
       artifactId: "artifact-1",
       artifactVersionId: "version-2",
       version: 2,
       kind: "prd" as const,
-      schemaVersion: 2,
+      schemaVersion: 3,
       status: "ready" as const,
       checksum: "b".repeat(64),
       citations: [],
@@ -204,7 +204,7 @@ describe("Artifacts API contracts", () => {
       knowledgeReleaseId: null,
       createdAt,
       contentMode: "inline" as const,
-      content: prdDocumentV2Example,
+      content: prdDocumentV3Example,
     };
     const fetch = vi.fn(async (request: Request) => {
       expect(await request.json()).toEqual(requestBody);

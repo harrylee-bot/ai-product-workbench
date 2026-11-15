@@ -33,7 +33,7 @@ function request(document: SourcePrototypeDocument, format: "html" | "react" = "
 function sha(value: string) { return createHash("sha256").update(value, "utf8").digest("hex"); }
 function textEntry(entries: Record<string, Uint8Array>, name: string) { const data = entries[name]; if (!data) throw new Error(`Missing ${name}`); return new TextDecoder("utf-8", { fatal: true }).decode(data); }
 
-const executablePath = chromium.executablePath();
+const executablePath = process.env.WORKBENCH_EXPORT_CHROMIUM_PATH ?? chromium.executablePath();
 
 describe("Source prototype immutable build and delivery", () => {
   it("bundles supplied TSX, JSON and CSS deterministically with a pinned runtime", async () => {

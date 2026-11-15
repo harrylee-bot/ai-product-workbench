@@ -11,7 +11,7 @@ export type BlobGcEligibilityResult = {
   readonly marked: number;
 };
 
-export type BlobGcDeletionResult = "complete" | "deleted" | "missing" | "referenced";
+type BlobGcDeletionResult = "complete" | "deleted" | "missing" | "referenced";
 
 export interface BlobGcStore {
   reconcileEligibility(

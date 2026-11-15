@@ -71,7 +71,6 @@ export class GithubImportProvider implements ImportProvider {
       blobs.push({ path, mediaType: authenticated ? mediaTypeForPath(path) : response.mediaType ?? mediaTypeForPath(path), bytes: response.body });
     }
     return freezeImport({
-      label: request.label ?? `${request.repository}@${commitSha.slice(0, 12)}`,
       descriptor: { kind: "github_snapshot", repository: request.repository, commitSha },
       blobs,
     });

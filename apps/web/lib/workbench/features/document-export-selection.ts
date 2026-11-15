@@ -1,5 +1,5 @@
 import {
-  prdDocumentV2Schema,
+  prdDocumentSchema,
   businessDocumentSchema,
   resolveExportBoardNodeSelection,
   type ArtifactVersionDetail,
@@ -78,15 +78,15 @@ export function resolveDocumentExportSelection(
       || version.status !== "ready"
       || version.contentMode !== "inline"
       || (version.kind !== "prd" && version.kind !== "document")) return [];
-    const document = prdDocumentV2Schema.safeParse(version.content);
-    if (!document.success && version.kind === "document") {
+    if (version.kind === "document") {
       const business = businessDocumentSchema.safeParse(version.content);
-      if (business.success) return [{ reference, title: business.data.title ?? "业务文档" }];
+      return business.success ? [{ reference, title: business.data.title ?? "业务文档" }] : [];
     }
+    const document = prdDocumentSchema.safeParse(version.content);
     if (!document.success) return [];
     return [{ reference, title: document.data.title }];
   });
-  if (documents.length === 0) return unavailable("Word/PDF 支持完整 PRD v2 或正文文档");
+  if (documents.length === 0) return unavailable("Word/PDF 支持完整需求说明书或正文文档");
   if (documents.length !== 1) return unavailable("项目中有多个文档，请先选择一个");
   const { reference, title } = documents[0]!;
   return {

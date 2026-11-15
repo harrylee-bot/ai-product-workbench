@@ -9,15 +9,11 @@ import {
 import { lockRunStatus } from "../runs/run-state-lock.js";
 import { runtimeProviderCancellationUnconfirmedCode } from "../runs/runtime-cancellation-state.js";
 import {
-  rebuildRuntimeProviderTextState,
   assertRuntimeProviderProjection,
   createRuntimeProviderProjection,
   reduceRuntimeProviderProjection,
   runtimeProviderTextStateFromProjection,
-  runtimeProviderTextStateFromLegacy,
-  runtimeProviderTextReplayEventLimit,
   type RuntimeProviderProjection,
-  type RuntimeProviderTextEvent,
 } from "./runtime-assistant-text.js";
 import {
   runtimeExternalFinalizationEvent,
@@ -107,21 +103,6 @@ export type RuntimeExternalEventInput = {
   payload: JsonValue;
 };
 
-export type RuntimeProviderStateMode = "legacy-read" | "shadow-verify" | "projection-required";
-
-export type RuntimeProviderStateShadowFinding = {
-  protocol: "workbench.runtime-provider-state-shadow-finding.v1";
-  code: "RUNTIME_PROVIDER_STATE_SHADOW_MISMATCH" | "RUNTIME_PROVIDER_STATE_SHADOW_VERIFY_FAILED";
-  runIdSha256: string;
-  attemptIdSha256: string;
-};
-
-type RuntimeProviderProjectionRead = {
-  state: ReturnType<typeof runtimeProviderTextStateFromProjection>;
-  attempt: number;
-  lastAppliedSequence: number;
-};
-
 export class RuntimeExecutionClaimBusyError extends Error {
   constructor() {
     super("RUNTIME_EXECUTION_CLAIM_BUSY");
@@ -144,13 +125,7 @@ export class RuntimeAttemptService {
   constructor(
     private readonly db: PrismaClient,
     private readonly leaseMs = 45_000,
-    private readonly providerStateMode: RuntimeProviderStateMode = "projection-required",
-    private readonly onShadowMismatch?: (finding: RuntimeProviderStateShadowFinding) => void,
-  ) {
-    if (providerStateMode === "shadow-verify" && !onShadowMismatch) {
-      throw new Error("RUNTIME_PROVIDER_STATE_SHADOW_REPORTER_REQUIRED");
-    }
-  }
+  ) {}
 
   async ensure(runId: string, attempt: number, binding: RuntimeBindingRecord) {
     return this.db.$transaction(async (tx) => {
@@ -643,15 +618,6 @@ export class RuntimeAttemptService {
   async providerTextState(claim: RuntimeExecutionClaim) {
     const startedAt = performance.now();
     try {
-      if (this.providerStateMode === "legacy-read") {
-        const state = runtimeProviderTextStateFromLegacy(await this.providerTextStateLegacy(claim));
-        recordRuntimeProviderStateMetric({
-          operation: "read",
-          outcome: "ok",
-          durationMs: performance.now() - startedAt,
-        });
-        return state;
-      }
       const projected = await this.readProviderTextStateProjection(claim);
       recordRuntimeProviderStateMetric({
         operation: "read",
@@ -659,34 +625,7 @@ export class RuntimeAttemptService {
         durationMs: performance.now() - startedAt,
         projectionLag: 0,
       });
-      if (this.providerStateMode === "shadow-verify") {
-        const shadowStartedAt = performance.now();
-        void this.verifyProjectionShadow(claim, projected).then(() => {
-          recordRuntimeProviderStateMetric({
-            operation: "shadow-verify",
-            outcome: "ok",
-            durationMs: performance.now() - shadowStartedAt,
-            projectionLag: 0,
-          });
-        }).catch((error: unknown) => {
-          const code = error instanceof Error && error.message === "RUNTIME_PROVIDER_STATE_SHADOW_MISMATCH"
-            ? "RUNTIME_PROVIDER_STATE_SHADOW_MISMATCH"
-            : "RUNTIME_PROVIDER_STATE_SHADOW_VERIFY_FAILED";
-          recordRuntimeProviderStateMetric({
-            operation: "shadow-verify",
-            outcome: "error",
-            durationMs: performance.now() - shadowStartedAt,
-            errorCode: code,
-          });
-          this.onShadowMismatch!({
-            protocol: "workbench.runtime-provider-state-shadow-finding.v1",
-            code,
-            runIdSha256: opaqueIdSha256(claim.runId),
-            attemptIdSha256: opaqueIdSha256(claim.attemptId),
-          });
-        });
-      }
-      return projected.state;
+      return projected;
     } catch (error) {
       recordRuntimeProviderStateMetric({
         operation: "read",
@@ -703,7 +642,7 @@ export class RuntimeAttemptService {
 
   private async readProviderTextStateProjection(
     claim: RuntimeExecutionClaim,
-  ): Promise<RuntimeProviderProjectionRead> {
+  ) {
     return this.providerStateTransaction("provider-state-read", async (tx) => {
       const scope = await this.assertClaimTx(tx, claim);
       const [projectionRow, draft] = await Promise.all([
@@ -726,109 +665,11 @@ export class RuntimeAttemptService {
           projection.lastAppliedSequence,
         );
       }
-      return {
-        state: runtimeProviderTextStateFromProjection(
-          projection,
-          runtimeDraftText(draft?.content),
-        ),
-        attempt: scope.attempt,
-        lastAppliedSequence: projection.lastAppliedSequence,
-      };
-    });
-  }
-
-  private async providerTextStateLegacy(claim: RuntimeExecutionClaim) {
-    return this.db.$transaction(async (tx) => {
-      await this.assertClaimTx(tx, claim);
-      const rows = await tx.$queryRaw<Array<RuntimeProviderTextEvent & { payload: Prisma.JsonValue }>>(
-        Prisma.sql`
-          SELECT
-            event."runtime_attempt_id" AS "runtimeAttemptId",
-            attempt."attempt" AS "attempt",
-            event."external_event_id" AS "externalEventId",
-            event."sequence" AS "sequence",
-            event."event" AS "event",
-            event."payload" AS "payload",
-            event."payload_sha256" AS "payloadSha256"
-          FROM "runtime_external_events" AS event
-          JOIN "runtime_attempts" AS attempt ON attempt."id" = event."runtime_attempt_id"
-          WHERE event."run_id" = ${claim.runId}
-            AND event."status" = 'processed'
-          ORDER BY attempt."attempt" DESC, event."sequence" DESC
-          LIMIT ${runtimeProviderTextReplayEventLimit + 1}
-        `,
+      return runtimeProviderTextStateFromProjection(
+        projection,
+        runtimeDraftText(draft?.content),
       );
-      const truncated = rows.length > runtimeProviderTextReplayEventLimit;
-      const events = rows
-        .slice(0, runtimeProviderTextReplayEventLimit)
-        .reverse()
-        .map((row) => ({ ...row, payload: jsonValueSchema.parse(row.payload) }));
-      const draft = await tx.runDraft.findUnique({
-        where: { runId: claim.runId },
-        select: { content: true },
-      });
-      return rebuildRuntimeProviderTextState({
-        currentRuntimeAttemptId: claim.attemptId,
-        durableVisibleAssistantText: runtimeDraftText(draft?.content),
-        events,
-        truncated,
-      });
     });
-  }
-
-  private async verifyProjectionShadow(
-    claim: RuntimeExecutionClaim,
-    projected: RuntimeProviderProjectionRead,
-  ) {
-    const rows = await this.db.$queryRaw<Array<RuntimeProviderTextEvent & { payload: Prisma.JsonValue }>>(
-      Prisma.sql`
-        SELECT
-          event."runtime_attempt_id" AS "runtimeAttemptId",
-          attempt."attempt" AS "attempt",
-          event."external_event_id" AS "externalEventId",
-          event."sequence" AS "sequence",
-          event."event" AS "event",
-          event."payload" AS "payload",
-          event."payload_sha256" AS "payloadSha256"
-        FROM "runtime_external_events" AS event
-        JOIN "runtime_attempts" AS attempt ON attempt."id" = event."runtime_attempt_id"
-        WHERE event."run_id" = ${claim.runId}
-          AND event."status" = 'processed'
-          AND (
-            attempt."attempt" < ${projected.attempt}
-            OR (
-              attempt."id" = ${claim.attemptId}
-              AND event."sequence" <= ${projected.lastAppliedSequence}
-            )
-          )
-        ORDER BY attempt."attempt" DESC, event."sequence" DESC
-        LIMIT ${runtimeProviderTextReplayEventLimit + 1}
-      `,
-    );
-    const truncated = rows.length > runtimeProviderTextReplayEventLimit;
-    const events = rows
-      .slice(0, runtimeProviderTextReplayEventLimit)
-      .reverse()
-      .map((row) => ({ ...row, payload: jsonValueSchema.parse(row.payload) }));
-    const legacy = rebuildRuntimeProviderTextState({
-      currentRuntimeAttemptId: claim.attemptId,
-      durableVisibleAssistantText: projected.state.durableVisibleAssistantText,
-      events,
-      truncated,
-    });
-    const normalizedLegacy = runtimeProviderTextStateFromLegacy(legacy);
-    if (
-      projected.state.rawAssistantText !== normalizedLegacy.rawAssistantText
-      || projected.state.visibleAssistantText !== normalizedLegacy.visibleAssistantText
-      || projected.state.redactionBuffer !== normalizedLegacy.redactionBuffer
-      || projected.state.durableVisibleAssistantText !== normalizedLegacy.durableVisibleAssistantText
-      || projected.state.committedFinalization?.externalEventId
-        !== normalizedLegacy.committedFinalization?.externalEventId
-      || projected.state.committedFinalization?.payloadSha256
-        !== normalizedLegacy.committedFinalization?.payloadSha256
-    ) {
-      throw new Error("RUNTIME_PROVIDER_STATE_SHADOW_MISMATCH");
-    }
   }
 
   async externalEventProcessed(
@@ -1768,10 +1609,6 @@ function providerIdempotencyKey(attemptId: string) {
 
 function sha256Canonical(value: unknown) {
   return createHash("sha256").update(canonicalJson(value)).digest("hex");
-}
-
-function opaqueIdSha256(value: string) {
-  return createHash("sha256").update(value).digest("hex");
 }
 
 function runtimeDraftText(value: unknown) {

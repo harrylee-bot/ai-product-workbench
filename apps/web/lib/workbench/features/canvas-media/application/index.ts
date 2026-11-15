@@ -19,23 +19,23 @@ import {
   workbenchCanvasMediaUploadProgress,
 } from "../domain";
 
-export type WorkbenchCanvasMediaPoint = {
+type WorkbenchCanvasMediaPoint = {
   x: number;
   y: number;
 };
 
-export type WorkbenchCanvasMediaStageRect = WorkbenchCanvasMediaPoint & {
+type WorkbenchCanvasMediaStageRect = WorkbenchCanvasMediaPoint & {
   height: number;
   width: number;
 };
 
-export type WorkbenchCanvasMediaArtifactReference = {
+type WorkbenchCanvasMediaArtifactReference = {
   artifactId: string;
   artifactVersionId: string;
   projectId: string;
 };
 
-export type WorkbenchCanvasMediaSelection = {
+type WorkbenchCanvasMediaSelection = {
   artifact: WorkbenchCanvasMediaArtifactReference | null;
   hasSelection: boolean;
   nodeIds: string[];

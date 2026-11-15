@@ -40,7 +40,7 @@ const share = {
   id: "share-1",
   releaseId: release.id,
   createdById: "principal-1",
-  scope: "remix",
+  scope: "view",
   status: "active",
   revision: 1,
   expiresAt: null,
@@ -50,12 +50,12 @@ const share = {
 };
 
 describe("Workbench Public Shares API adapter", () => {
-  it("loads token-scoped snapshots and remixes through public-only routes", async () => {
+  it("loads token-scoped snapshots and content through public-only routes", async () => {
     const token = `wbs_${"B".repeat(43)}`;
     const { createdById: _createdById, ...publicRelease } = release;
     const publicShare = {
       shareId: share.id,
-      scope: "remix",
+      scope: "view",
       expiresAt: null,
       release: publicRelease,
     };
@@ -63,35 +63,14 @@ describe("Workbench Public Shares API adapter", () => {
       artifactId: "artifact-1",
       artifactVersionId: "version-1",
       version: 1,
-      kind: "code",
+      kind: "prototype",
       schemaVersion: 1,
       status: "ready",
       checksum: "e".repeat(64),
       citations: [],
       createdAt: timestamp,
-      contentMode: "inline",
-      content: { language: "typescript" },
-    };
-    const project = {
-      id: "project-remix",
-      workspaceId: "workspace-1",
-      title: "Remix",
-      summary: null,
-      status: "active",
-      revision: 0,
-      createdAt: timestamp,
-      updatedAt: timestamp,
-    };
-    const remix = {
-      project,
-      lineage: {
-        targetProjectId: project.id,
-        sourceReleaseId: release.id,
-        sourceShareId: share.id,
-        createdById: "principal-2",
-        workspaceId: project.workspaceId,
-        createdAt: timestamp,
-      },
+      contentMode: "blob",
+      blob: { mediaType: "application/octet-stream", byteSize: 3, sha256: "e".repeat(64), fileName: null },
     };
     const bytes = new Uint8Array([1, 2, 3]);
     const adapter = createAdapter(async (request) => {
@@ -110,11 +89,6 @@ describe("Workbench Public Shares API adapter", () => {
       }
       if (url.pathname.endsWith("/versions/version-1")) {
         return Response.json(publicVersion, { headers: { ETag: `"${publicVersion.checksum}"` } });
-      }
-      if (url.pathname.endsWith("/remixes")) {
-        expect(request.headers.get("idempotency-key")).toBe("remix:req_123");
-        expect(await request.json()).toEqual({ workspaceId: "workspace-1", title: "Remix" });
-        return Response.json(remix, { status: 201, headers: { ETag: '"0"' } });
       }
       return Response.json(publicShare, { headers: { ETag: `"${manifestSha256}"` } });
     });
@@ -138,11 +112,6 @@ describe("Workbench Public Shares API adapter", () => {
       "version-1",
     );
     expect(new Uint8Array(await content.arrayBuffer())).toEqual(bytes);
-    await expect(adapter.createProjectRemix(
-      token,
-      { workspaceId: "workspace-1", title: "Remix" },
-      "remix:req_123",
-    )).resolves.toEqual({ value: remix, etag: '"0"' });
   });
 });
 

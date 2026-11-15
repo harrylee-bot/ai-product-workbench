@@ -189,7 +189,7 @@ assert(
 );
 assert(
   Array.isArray(patchManifest.additionalSources)
-    && patchManifest.additionalSources.length === 3,
+    && patchManifest.additionalSources.length === 4,
   "DeerFlow source patch must declare the audited subagent tool filter",
 );
 const subagentToolPatch = patchManifest.additionalSources[0];
@@ -222,7 +222,7 @@ const gatewayContextPatch = patchManifest.gatewaySources[0];
 assert(
   gatewayContextPatch.path === "app/gateway/services.py"
     && gatewayContextPatch.upstreamSha256 === "8379c34eeb2ddb46270b0e937035d5ee032dab68459b36b10435d28b8e2ab601"
-    && gatewayContextPatch.patchedSha256 === "7dc25649ff92ff42c3a81ca8f23f3ce987f29e7ee00127a84f206ecd3a5cf8dc",
+    && gatewayContextPatch.patchedSha256 === "9f61dd5fd9c1f1496590bcc372d696f4c5a685a2dbe492d837c15c7f995e7889",
   "DeerFlow Gateway context patch must bind the audited upstream and patched hashes",
 );
 assert(
@@ -248,12 +248,14 @@ assert(
   gatewayContextPatchText.includes('sanitized.pop(\\"recursion_limit\\", None)')
     && gatewayContextPatchText.includes("_DEFAULT_LEAD_GRAPH_RECURSION_LIMIT = 100")
     && gatewayContextPatchText.includes("_WORKBENCH_PRD_LEAD_GRAPH_RECURSION_LIMIT = 200")
+    && gatewayContextPatchText.includes("_WORKBENCH_PROTOTYPE_LEAD_GRAPH_RECURSION_LIMIT = 200")
     && gatewayContextPatchText.includes("_WORKBENCH_LINKED_LEAD_GRAPH_RECURSION_LIMIT = 400")
     && gatewayContextPatchText.includes("_apply_workbench_lead_recursion_limit")
     && gatewayContextPatchText.includes("trusted_internal_caller is True")
     && gatewayContextPatchText.includes('set(requested_kinds) == {\\"prd\\", \\"prototype\\"}')
-    && gatewayContextPatchText.includes('requested_kinds == [\\"prd\\"]'),
-  "DeerFlow Gateway patch must keep bounded trusted budgets of 400 for linked delivery, 200 for PRD-only, and 100 otherwise",
+    && gatewayContextPatchText.includes('requested_kinds == [\\"prd\\"]')
+    && gatewayContextPatchText.includes('requested_kinds == [\\"prototype\\"]'),
+  "DeerFlow Gateway patch must keep bounded trusted budgets of 400 for linked delivery, 200 for PRD-only or Prototype-only, and 100 otherwise",
 );
 assert(
   patchManifest.agent?.insertion?.includes("WorkbenchToolScopeMiddleware(")
@@ -270,6 +272,16 @@ assert(
   sha256(toolScopeMiddlewareSource)
     === patchManifest.toolScopeMiddleware?.sha256,
   "Workbench tool-scope middleware does not match its manifest",
+);
+assert(
+  toolScopeMiddlewareSource.includes("def _prototype_preflight(")
+    && toolScopeMiddlewareSource.includes("WORKBENCH_PROTOTYPE_STAGES_REQUIRED")
+    && toolScopeMiddlewareSource.includes("WORKBENCH_PROTOTYPE_PATCH_CHECKPOINT_REQUIRED")
+    && toolScopeMiddlewareSource.split("blocked = self._prototype_preflight(request)").length === 3
+    && patchContractTestSource.includes("test_old_run_attempt_or_previous_turn_stages_do_not_authorize_publication")
+    && patchContractTestSource.includes("test_unacknowledged_sibling_stage_cannot_unlock_publication")
+    && patchContractTestSource.includes("test_patch_requires_the_current_run_checkpoint_for_the_same_artifact_and_screen"),
+  "Prototype publication must reject premature stages and missing current-run patch checkpoints in sync and async ToolNode execution",
 );
 assert(
   toolScopeMiddlewareSource.includes("def workbench_canvas_policy_from_runnable_config(config: Any) -> Any:")
@@ -299,7 +311,7 @@ const prdReferencePins = [
   ],
   [
     "/mnt/skills/public/workbench/references/prd-runtime-result.schema.json",
-    "76c1ae2338854cb68133fc242f7efde534278878bbd89e297a4f8ee010479065",
+    "25d95c16c5577408807a70cf8371cbafb857f648f649555f8e2abe46b4a2593f",
   ],
 ];
 const canonicalPrdReferenceReader = {
@@ -453,8 +465,11 @@ assert(
 );
 assert(
   patchRequestContextTestSource.includes("test_trusted_linked_scope_receives_a_bounded_budget_in_either_order")
+    && patchRequestContextTestSource.includes("test_exact_trusted_prototype_scope_receives_a_bounded_budget")
+    && patchRequestContextTestSource.includes("test_real_lead_graph_completes_minimal_prototype_only_with_delivery_budget")
+    && patchRequestContextTestSource.includes("test_real_edit_graph_recovers_from_early_and_same_batch_publication_without_side_effects")
     && patchRequestContextTestSource.includes("test_joint_budget_requires_a_literal_trusted_internal_identity")
-    && patchRequestContextTestSource.includes("test_non_prd_malformed_untrusted_and_forged_fields_keep_default_budget"),
+    && patchRequestContextTestSource.includes("test_non_delivery_malformed_untrusted_and_forged_fields_keep_default_budget"),
   "DeerFlow request-context tests must cover trusted linked budgets and reject forged or malformed scope",
 );
 assert(
@@ -463,9 +478,26 @@ assert(
 );
 assertDeepEqual(
   patchManifest.additionalSources.map((source) => source.path),
-  ["deerflow/tools/builtins/task_tool.py", "deerflow/runtime/checkpoint_state.py", "deerflow/runtime/runs/worker.py"],
-  "DeerFlow must retain subagent isolation, materialized history filtering and fallback rollback",
+  ["deerflow/tools/builtins/task_tool.py", "deerflow/runtime/checkpoint_state.py", "deerflow/runtime/runs/worker.py", "deerflow/runtime/stream_bridge/memory.py"],
+  "DeerFlow must retain subagent isolation, materialized history filtering, fallback rollback and active stream backpressure",
 );
+const streamBridgePatch = patchManifest.additionalSources.find((source) => source.path === "deerflow/runtime/stream_bridge/memory.py");
+assert(
+  streamBridgePatch.upstreamSha256 === "bd6ad363ee1c94857c09417401a74ae899a93b3ef3085ab566400e8722938af1"
+    && streamBridgePatch.patchedSha256 === "eb41d34e4346c2e4b677da1dcdf0a57c5d97da28856fd25cde2989225168fadd",
+  "DeerFlow stream backpressure must bind the audited upstream and patched hashes",
+);
+const streamUpgradeTests = readText(`${patchRoot}/test_workbench_upgrade.py`);
+for (const testName of [
+  "test_active_subscriber_receives_burst_larger_than_retention_without_gap",
+  "test_slow_subscriber_advancement_releases_one_blocked_write",
+  "test_disconnected_subscriber_releases_blocked_publisher",
+  "test_cancelled_waiting_subscriber_does_not_block_later_writes",
+  "test_cancelled_blocked_write_does_not_reserve_an_event_identity",
+  "test_slowest_active_subscriber_controls_retention",
+  "test_cleanup_and_close_release_waiters_without_writing_to_closed_stream",
+  "test_expired_resume_cursor_still_reports_a_real_gap",
+]) assert(streamUpgradeTests.includes(testName), `DeerFlow stream backpressure contract is missing ${testName}`);
 assertDeepEqual(
   patchManifest.gatewaySources.map((source) => source.path),
   ["app/gateway/services.py", "app/gateway/routers/threads.py", "app/gateway/routers/thread_runs.py"],
@@ -545,7 +577,7 @@ assert(
     && patchRequestContextTestSource.includes("test_knowledge_visibility_requires_the_exact_true_flag_and_capability")
     && patchRequestContextTestSource.includes("test_malformed_scope_does_not_create_a_runtime_secret_channel")
     && patchRequestContextTestSource.includes("test_exact_trusted_prd_scope_receives_the_named_recursion_budget")
-    && patchRequestContextTestSource.includes("test_non_prd_malformed_untrusted_and_forged_fields_keep_default_budget"),
+    && patchRequestContextTestSource.includes("test_non_delivery_malformed_untrusted_and_forged_fields_keep_default_budget"),
   "DeerFlow request-context contract must cover caller auth, redaction, and malformed scope",
 );
 assert(
@@ -556,12 +588,14 @@ assert(
 );
 assert(
   toolScopeMiddlewareSource.includes('CLARIFICATION_TOOL_NAME = "ask_clarification"')
-    && /name == CLARIFICATION_TOOL_NAME and self\._prd_gate_enabled/u.test(toolScopeMiddlewareSource)
+    && /name == CLARIFICATION_TOOL_NAME and self\._clarification_disabled/u.test(toolScopeMiddlewareSource)
     && toolScopeMiddlewareSource.includes("WORKBENCH_PRD_CLARIFICATION_NOT_SUPPORTED")
+    && toolScopeMiddlewareSource.includes("WORKBENCH_CLARIFICATION_NOT_SUPPORTED")
     && toolScopeMiddlewareSource.includes("<workbench_prd_clarification_policy>")
+    && toolScopeMiddlewareSource.includes("<workbench_prototype_clarification_policy>")
     && toolScopeMiddlewareSource.includes("Ignore any general instruction that requires clarification")
     && /overrides\["system_message"\] = SystemMessage/u.test(toolScopeMiddlewareSource),
-  "PRD Runtime must override generic clarification instructions, hide the tool, and fail closed on execution",
+  "Workbench PRD/Prototype Runtime must override generic clarification instructions, hide the tool, and fail closed on execution",
 );
 assert(
   normalizedWorkbenchSkillSource.includes("no free-form clarification resume path")

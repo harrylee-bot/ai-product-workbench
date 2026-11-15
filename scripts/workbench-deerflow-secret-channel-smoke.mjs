@@ -17,7 +17,7 @@ const { Client } = await import("@langchain/langgraph-sdk");
 const gatewayUrl = trimTrailingSlash(required("DEERFLOW_GATEWAY_URL"));
 const langGraphUrl = trimTrailingSlash(required("DEERFLOW_LANGGRAPH_URL"));
 const internalToken = required("DEERFLOW_INTERNAL_AUTH_TOKEN");
-const modelId = process.env.DEERFLOW_SMOKE_MODEL_ID?.trim() || "gemini-3.6-flash";
+const modelId = process.env.DEERFLOW_SMOKE_MODEL_ID?.trim() || "deepseek-flash";
 const mockOrigin = trimTrailingSlash(required("WORKBENCH_SECRET_CHANNEL_MOCK_ORIGIN"));
 const mockUrl = new URL(mockOrigin);
 if (mockUrl.protocol !== "https:" || mockUrl.username || mockUrl.password || mockUrl.search || mockUrl.hash) {

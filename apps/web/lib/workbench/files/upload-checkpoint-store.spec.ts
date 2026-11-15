@@ -2,9 +2,7 @@ import { indexedDB } from "fake-indexeddb";
 import { afterEach, describe, expect, it } from "vitest";
 
 import {
-  clearWorkbenchUploadCheckpoints,
   createWorkbenchUploadCheckpointStore,
-  listWorkbenchUploadCheckpoints,
 } from "./upload-checkpoint-store";
 import type { WorkbenchUploadCheckpoint } from "./uppy-multipart";
 
@@ -68,7 +66,6 @@ describe("Workbench IndexedDB upload checkpoints", () => {
       checkpoint("project-b", "same-file-metadata"),
     );
     await expect(second.load("project-c", "same-file-metadata")).resolves.toBeNull();
-    await expect(second.list("project-a")).resolves.toEqual([value]);
   });
 
   it("does not persist browser File/blob or provider transport details", async () => {
@@ -90,23 +87,25 @@ describe("Workbench IndexedDB upload checkpoints", () => {
       request.onerror = () => reject(request.error);
     });
 
+    expect(record).not.toHaveProperty("savedAt");
+    expect(database.transaction("checkpoints").objectStore("checkpoints").indexNames.contains("projectId")).toBe(false);
     expect(record).not.toHaveProperty("file");
     expect(record).not.toHaveProperty("blob");
     expect(record).not.toHaveProperty("signedUrl");
     expect(record).not.toHaveProperty("providerUploadId");
   });
 
-  it("clears only one Project's pending checkpoints", async () => {
+  it("removes checkpoints without affecting another Project", async () => {
     const checkpointStore = store();
     await checkpointStore.save(checkpoint("project-a", "a"));
     await checkpointStore.save(checkpoint("project-a", "b"));
     await checkpointStore.save(checkpoint("project-b", "c"));
 
-    await clearWorkbenchUploadCheckpoints("project-a", checkpointStore);
+    await checkpointStore.remove("project-a", "a");
+    await checkpointStore.remove("project-a", "b");
 
-    await expect(listWorkbenchUploadCheckpoints("project-a", checkpointStore)).resolves.toEqual([]);
-    await expect(listWorkbenchUploadCheckpoints("project-b", checkpointStore)).resolves.toEqual([
-      checkpoint("project-b", "c"),
-    ]);
+    await expect(checkpointStore.load("project-a", "a")).resolves.toBeNull();
+    await expect(checkpointStore.load("project-a", "b")).resolves.toBeNull();
+    await expect(checkpointStore.load("project-b", "c")).resolves.toEqual(checkpoint("project-b", "c"));
   });
 });

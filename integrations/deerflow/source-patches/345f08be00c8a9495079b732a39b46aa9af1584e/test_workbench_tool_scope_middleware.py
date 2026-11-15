@@ -50,6 +50,14 @@ def install_import_stubs() -> bool:
     class Command:
         pass
 
+    class ExtendedModelResponse:
+        def __init__(self, *, model_response, command):
+            self.model_response = model_response
+            self.command = command
+
+    def hook_config(**_kwargs):
+        return lambda function: function
+
     modules = {
         "langchain": types.ModuleType("langchain"),
         "langchain.agents": types.ModuleType("langchain.agents"),
@@ -68,6 +76,9 @@ def install_import_stubs() -> bool:
     model_types.ModelCallResult = object
     model_types.ModelRequest = object
     model_types.ModelResponse = type("ModelResponse", (), {})
+    model_types.ExtendedModelResponse = ExtendedModelResponse
+    model_types.PrivateStateAttr = object()
+    model_types.hook_config = hook_config
     modules["langchain_core.messages"].SystemMessage = SystemMessage
     modules["langchain_core.messages"].ToolMessage = ToolMessage
     modules["langchain_core.messages"].AIMessage = AIMessage
@@ -599,6 +610,7 @@ class DraftRepairScopeTests(unittest.IsolatedAsyncioTestCase):
         from langchain_core.tools import StructuredTool
         from deerflow.tools.types import Runtime
         from deerflow_workbench_tools.artifact_draft_tool import workbench_artifact_draft_publish
+        from deerflow_workbench_tools.generation_stage_tool import workbench_generation_stage_update
         from deerflow_workbench_tools.runtime_result_validator import validate_runtime_artifact_draft
 
         class BoundModel(FakeMessagesListChatModel):
@@ -635,6 +647,8 @@ class DraftRepairScopeTests(unittest.IsolatedAsyncioTestCase):
                     for ident in ("parallel-first", "parallel-second")
                 ]
                 model = BoundModel(responses=[
+                    *[AIMessage(content="", tool_calls=[call("workbench_generation_stage_update", f"stage-{index}", {"stage": stage})])
+                      for index, stage in enumerate(middleware_module.PROTOTYPE_STAGE_SEQUENCE)],
                     AIMessage(content="", tool_calls=[call("workbench_artifact_draft_publish", "base", {"artifact_index": 0, "draft": copy.deepcopy(broken)})]),
                     AIMessage(content="", tool_calls=calls),
                     AIMessage(content="", tool_calls=[call("workbench_artifact_draft_publish", "retry-alone", {"artifact_index": 0, "repair": copy.deepcopy(repair)})]),
@@ -643,8 +657,8 @@ class DraftRepairScopeTests(unittest.IsolatedAsyncioTestCase):
                 graph = create_agent(model, tools=[StructuredTool.from_function(
                     publication, name="workbench_artifact_draft_publish", description="Publish an authored artifact",
                     response_format="content_and_artifact",
-                )], middleware=[self.middleware(["prototype"])])
-                kwargs = {"context": {"workbench": {
+                ), workbench_generation_stage_update], middleware=[self.middleware(["prototype"])])
+                kwargs = {"config": {"recursion_limit": 200}, "context": {"workbench": {
                     "runId": "run-auto", "runtimeAttemptId": "attempt-auto", "requestedArtifactKinds": ["prototype"],
                 }}}
                 initial = {"messages": [HumanMessage(content="Build this prototype")]}
@@ -733,11 +747,10 @@ class PrototypeTransportContextTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(request.state, before)
         self.assertIs(scoped.state, request.state)
         self.assertEqual([tool.name for tool in scoped.tools], [
-            RUNTIME_RESULT_TOOL_NAME, CLARIFICATION_TOOL_NAME,
+            RUNTIME_RESULT_TOOL_NAME,
             *ARTIFACT_PROGRESS_TOOL_NAMES, *PROTOTYPE_ONLY_TOOL_NAMES,
         ])
-        self.assertFalse(middleware._prototype_reference_enabled)
-        self.assertFalse(middleware._prototype_stage_gate_enabled)
+        self.assertIn("<workbench_prototype_clarification_policy>", scoped.system_message.text)
         again = middleware.wrap_model_call(scoped, lambda captured: captured)
         self.assertEqual(again.system_message.text, scoped.system_message.text)
 
@@ -1284,11 +1297,20 @@ class WorkbenchToolScopeMiddlewareTests(unittest.TestCase):
                     FakeModelRequest(tools),
                     lambda scoped: scoped,
                 )
+                expected_tools = ["workbench_runtime_result_submit"]
+                if non_exact_prd_scope in (["document"], ["prd", "prd"]):
+                    expected_tools.append(CLARIFICATION_TOOL_NAME)
                 self.assertEqual(
                     [tool.name for tool in observed_non_exact_prd.tools],
-                    ["workbench_runtime_result_submit", CLARIFICATION_TOOL_NAME],
+                    expected_tools,
                 )
-                self.assertIsNone(observed_non_exact_prd.system_message)
+                if non_exact_prd_scope == ["prototype"]:
+                    self.assertIn(
+                        "<workbench_prototype_clarification_policy>",
+                        observed_non_exact_prd.system_message.text,
+                    )
+                else:
+                    self.assertIsNone(observed_non_exact_prd.system_message)
 
         called = False
 
@@ -1302,6 +1324,15 @@ class WorkbenchToolScopeMiddlewareTests(unittest.TestCase):
         self.assertEqual(blocked.status, "error")
         self.assertEqual(blocked.name, CLARIFICATION_TOOL_NAME)
         self.assertEqual(blocked.content, "Error: WORKBENCH_PRD_CLARIFICATION_NOT_SUPPORTED")
+
+        prototype = WorkbenchToolScopeMiddleware(None, ["prototype"])
+        prototype_blocked = prototype.wrap_tool_call(
+            FakeToolRequest(CLARIFICATION_TOOL_NAME),
+            lambda _request: object(),
+        )
+        self.assertEqual(prototype_blocked.status, "error")
+        self.assertEqual(prototype_blocked.name, CLARIFICATION_TOOL_NAME)
+        self.assertEqual(prototype_blocked.content, "Error: WORKBENCH_CLARIFICATION_NOT_SUPPORTED")
 
     @unittest.skipIf(USING_IMPORT_STUBS, "requires the pinned DeerFlow middleware stack")
     def test_real_middleware_chain_hides_clarification_from_prd_model_binding(self) -> None:
@@ -1483,15 +1514,18 @@ class WorkbenchToolScopeMiddlewareTests(unittest.TestCase):
                 result = middleware.wrap_tool_call(FakeToolRequest(name), lambda _request: sentinel)
                 self.assertEqual(result.content, "Error: WORKBENCH_PROTOTYPE_TOOL_NOT_REQUESTED")
 
-    def test_prototype_execution_is_allowed_when_prototype_is_requested(self) -> None:
+    def test_prototype_execution_starts_with_design_before_publication(self) -> None:
         sentinel = object()
         middleware = WorkbenchToolScopeMiddleware(None, ["prototype"])
-        for name in (*ARTIFACT_PROGRESS_TOOL_NAMES, *PROTOTYPE_ONLY_TOOL_NAMES):
+        self.assertIs(middleware.wrap_tool_call(
+            FakeToolRequest("workbench_generation_stage_update", args={"stage": "design-system"}),
+            lambda _request: sentinel,
+        ), sentinel)
+        for name in ("workbench_artifact_draft_publish", RUNTIME_RESULT_TOOL_NAME, *PROTOTYPE_ONLY_TOOL_NAMES):
             with self.subTest(name=name):
-                self.assertIs(
-                    middleware.wrap_tool_call(FakeToolRequest(name), lambda _request: sentinel),
-                    sentinel,
-                )
+                blocked = middleware.wrap_tool_call(FakeToolRequest(name), lambda _request: sentinel)
+                self.assertEqual(blocked.status, "error")
+                self.assertIn("WORKBENCH_PROTOTYPE_STAGES_REQUIRED", blocked.content)
 
     def test_declared_canvas_execution_and_non_canvas_tools_are_unchanged(self) -> None:
         sentinel = object()
@@ -1972,6 +2006,98 @@ class WorkbenchToolScopeMiddlewareTests(unittest.TestCase):
         )
         result = middleware.wrap_tool_call(request, lambda _request: self.fail("handler called"))
         self.assertIn("WORKBENCH_PRD_DRAFT_REQUIRED", result.content)
+
+
+class PrototypeStageAdmissionTests(unittest.TestCase):
+    def setUp(self):
+        self.middleware = WorkbenchToolScopeMiddleware(None, ["prototype"], run_scope=("run-current", "attempt-current"))
+
+    def stages(self, count=4, run_id="run-current", attempt_id="attempt-current"):
+        messages = [{"type": "human", "content": "Edit the fixed prototype."}]
+        for index, stage in enumerate(middleware_module.PROTOTYPE_STAGE_SEQUENCE[:count]):
+            call_id = f"stage-{index}"
+            append_stage(messages, stage, call_id)
+            messages[-1]["artifact"].update(runId=run_id, runtimeAttemptId=attempt_id, toolCallId=call_id)
+        return messages
+
+    def rejected(self, messages, name, args, code):
+        request = request_in_state(messages, name, "current-call", args)
+        result = self.middleware.wrap_tool_call(request, lambda _request: self.fail("rejected tool must not execute"))
+        self.assertEqual(result.status, "error")
+        self.assertIsNone(getattr(result, "artifact", None))
+        self.assertIn(code, result.content)
+        return result
+
+    def test_old_run_attempt_or_previous_turn_stages_do_not_authorize_publication(self):
+        histories = [self.stages(run_id="old-run"), self.stages(attempt_id="old-attempt"),
+                     [*self.stages(), {"type": "human", "content": "A new turn"}]]
+        for history in histories:
+            for name in (ARTIFACT_PROGRESS_TOOL_NAMES[1], RUNTIME_RESULT_TOOL_NAME, *PROTOTYPE_ONLY_TOOL_NAMES):
+                with self.subTest(name=name):
+                    self.rejected(copy.deepcopy(history), name, {}, "WORKBENCH_PROTOTYPE_STAGES_REQUIRED")
+
+    def test_unacknowledged_sibling_stage_cannot_unlock_publication(self):
+        for name in (ARTIFACT_PROGRESS_TOOL_NAMES[1], RUNTIME_RESULT_TOOL_NAME, *PROTOTYPE_ONLY_TOOL_NAMES):
+            messages = self.stages(3)
+            calls = [call("workbench_generation_stage_update", "pending-stage", {"stage": "generating-ui"}),
+                     call(name, "publication")]
+            messages.append({"type": "ai", "content": "", "tool_calls": calls})
+            result = self.middleware.wrap_tool_call(
+                FakeToolRequest(name, "publication", state={"messages": messages}),
+                lambda _request: self.fail("sibling stage was not acknowledged"),
+            )
+            self.assertIn("WORKBENCH_PROTOTYPE_STAGES_REQUIRED", result.content)
+            self.assertIsNone(getattr(result, "artifact", None))
+
+    def test_stage_order_duplicates_and_parallel_stage_batch_are_recoverable(self):
+        self.rejected(self.stages(0), "workbench_generation_stage_update", {"stage": "generating-ui"},
+                      "WORKBENCH_PROTOTYPE_STAGE_ORDER_INVALID")
+        self.rejected(self.stages(1), "workbench_generation_stage_update", {"stage": "design-system"},
+                      "WORKBENCH_PROTOTYPE_STAGE_ORDER_INVALID")
+        messages = self.stages(0)
+        messages.append({"type": "ai", "content": "", "tool_calls": [
+            call("workbench_generation_stage_update", "first", {"stage": "design-system"}),
+            call("workbench_generation_stage_update", "second", {"stage": "mapping-components"}),
+        ]})
+        result = self.middleware.wrap_tool_call(FakeToolRequest(
+            "workbench_generation_stage_update", "second", {"stage": "mapping-components"}, {"messages": messages},
+        ), lambda _request: self.fail("parallel stage must wait for ACK"))
+        self.assertIn("WORKBENCH_PROTOTYPE_STAGE_BATCH_INVALID", result.content)
+
+    def test_patch_requires_the_current_run_checkpoint_for_the_same_artifact_and_screen(self):
+        args = {"artifact_index": 0, "screen_id": "screen-main"}
+        self.rejected(self.stages(), "workbench_prototype_patch_publish", args,
+                      "WORKBENCH_PROTOTYPE_PATCH_CHECKPOINT_REQUIRED")
+        messages = self.stages()
+        messages.append({"type": "ai", "content": "", "tool_calls": [
+            call("workbench_artifact_draft_publish", "pending-checkpoint", {"artifact_index": 0}),
+            call("workbench_prototype_patch_publish", "sibling-patch", args),
+        ]})
+        blocked = self.middleware.wrap_tool_call(FakeToolRequest(
+            "workbench_prototype_patch_publish", "sibling-patch", args, {"messages": messages},
+        ), lambda _request: self.fail("sibling checkpoint was not acknowledged"))
+        self.assertIn("WORKBENCH_PROTOTYPE_PATCH_CHECKPOINT_REQUIRED", blocked.content)
+        for run_id, artifact_index, screen_id, accepted in [
+            ("old-run", 0, "screen-main", True), ("run-current", 1, "screen-main", True),
+            ("run-current", 0, "other-screen", True), ("run-current", 0, "screen-main", False),
+            ("run-current", 0, "screen-main", True),
+        ]:
+            messages = self.stages()
+            draft = {"kind": "prototype", "content": {"screens": [{"id": screen_id}]}}
+            append_tool_batch(messages, [call("workbench_artifact_draft_publish", "checkpoint", {
+                "artifact_index": artifact_index, "draft": draft,
+            })], [tool_message("workbench_artifact_draft_publish", "checkpoint", artifact={
+                "protocol": "workbench.runtime.artifact-draft.v1", "ok": accepted, "draft": draft,
+                "runId": run_id, "runtimeAttemptId": "attempt-current", "toolCallId": "checkpoint",
+                "artifactIndex": artifact_index,
+            })])
+            if (run_id, artifact_index, screen_id, accepted) == ("run-current", 0, "screen-main", True):
+                sentinel = object()
+                request = request_in_state(messages, "workbench_prototype_patch_publish", "valid-patch", args)
+                self.assertIs(self.middleware.wrap_tool_call(request, lambda _request: sentinel), sentinel)
+            else:
+                self.rejected(messages, "workbench_prototype_patch_publish", args,
+                              "WORKBENCH_PROTOTYPE_PATCH_CHECKPOINT_REQUIRED")
 
 
 class LinkedFinalReferenceTests(unittest.IsolatedAsyncioTestCase):
@@ -2462,10 +2588,12 @@ class WorkbenchToolScopeMiddlewareAsyncTests(unittest.IsolatedAsyncioTestCase):
                 "workbench_runtime_result_submit",
                 *ARTIFACT_PROGRESS_TOOL_NAMES,
                 *PROTOTYPE_ONLY_TOOL_NAMES,
-                CLARIFICATION_TOOL_NAME,
             ],
         )
-        self.assertIsNone(prototype_result.system_message)
+        self.assertIn(
+            "<workbench_prototype_clarification_policy>",
+            prototype_result.system_message.text,
+        )
 
     async def test_async_prd_and_prototype_tool_execution_enforces_artifact_scope_matrix(
         self,
@@ -2508,20 +2636,24 @@ class WorkbenchToolScopeMiddlewareAsyncTests(unittest.IsolatedAsyncioTestCase):
                 self.assertNotIn(name, called)
 
         prototype_middleware = WorkbenchToolScopeMiddleware(None, ["prototype"])
-        self.assertIs(
-            await prototype_middleware.awrap_tool_call(
-                FakeToolRequest(CLARIFICATION_TOOL_NAME),
-                handler,
-            ),
-            sentinel,
+        blocked_prototype_clarification = await prototype_middleware.awrap_tool_call(
+            FakeToolRequest(CLARIFICATION_TOOL_NAME),
+            handler,
         )
-        for name in (*ARTIFACT_PROGRESS_TOOL_NAMES, *PROTOTYPE_ONLY_TOOL_NAMES):
+        self.assertEqual(
+            blocked_prototype_clarification.content,
+            "Error: WORKBENCH_CLARIFICATION_NOT_SUPPORTED",
+        )
+        self.assertNotIn(CLARIFICATION_TOOL_NAME, called)
+        self.assertIs(await prototype_middleware.awrap_tool_call(
+            FakeToolRequest("workbench_generation_stage_update", args={"stage": "design-system"}), handler,
+        ), sentinel)
+        for name in ("workbench_artifact_draft_publish", RUNTIME_RESULT_TOOL_NAME, *PROTOTYPE_ONLY_TOOL_NAMES):
             with self.subTest(scope="prototype", name=name):
-                self.assertIs(
-                    await prototype_middleware.awrap_tool_call(FakeToolRequest(name), handler),
-                    sentinel,
-                )
-                self.assertIn(name, called)
+                blocked = await prototype_middleware.awrap_tool_call(FakeToolRequest(name), handler)
+                self.assertEqual(blocked.status, "error")
+                self.assertIn("WORKBENCH_PROTOTYPE_STAGES_REQUIRED", blocked.content)
+                self.assertNotIn(name, called)
 
         blocked_reference = await prototype_middleware.awrap_tool_call(
             FakeToolRequest(

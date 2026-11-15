@@ -172,6 +172,8 @@ if (!expectedPolicies.has(policy)) process.exit(1);
 NODE
   printf 'Building with %s: %s MiB RAM, %s CPU(s), one build step; required %s MiB service headroom at start.\n' \
     "$builder" "$memory_mib" "$cpus" "$reserve_mib"
+  build_started_seconds=$SECONDS
   COMPOSE_BAKE=false DOCKER_BUILDKIT=1 \
-    "${COMPOSE[@]}" --parallel 1 build --builder "$builder" --with-dependencies "$@"
+    "${COMPOSE[@]}" --parallel 1 build --builder "$builder" "$@"
+  printf 'WORKBENCH_BUILD_SECONDS=%s WORKBENCH_BUILD_SERVICES=%s\n' "$((SECONDS - build_started_seconds))" "${*:-all}"
 )

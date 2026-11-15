@@ -25,7 +25,6 @@ import {
   workbenchPrdExtensions,
 } from "../../lib/workbench/prd-editor";
 import type { WorkbenchArtifactReference } from "./workbench-artifact-reference";
-import { WorkbenchPrdDiagramCanvas } from "./workbench-prd-diagram-canvas";
 
 type PrdDocumentCommit = PrdDraftCommit;
 
@@ -105,8 +104,7 @@ export function WorkbenchPrdArtifactEditor({
   }, [save]);
 
   const busy = saving || editingBusy;
-  const updateV2 = useCallback((update: (document: PrdTemplateDocument) => PrdTemplateDocument) => {
-    if (draftRef.current.protocol === "workbench.prd.v1") return;
+  const updateDocument = useCallback((update: (document: PrdTemplateDocument) => PrdTemplateDocument) => {
     const next = update(draftRef.current);
     draftRef.current = next;
     store.update(reference, document, next);
@@ -162,26 +160,11 @@ export function WorkbenchPrdArtifactEditor({
         className="workbench-prd-editor-content min-w-0 break-words [overflow-wrap:anywhere]"
         editor={editor}
       />
-      {draftDocument.protocol !== "workbench.prd.v1" && (
-        <PrdStructuredFieldsEditor
-          document={draftDocument}
-          disabled={busy}
-          onChange={updateV2}
-        />
-      )}
-      {draftDocument.protocol === "workbench.prd.v2" && (
-        <section className="mt-[34px] border-t border-white/[0.12] pt-[34px]" data-prd-editor-diagrams>
-          {draftDocument.sections.businessRequirements.flowAndPages.diagrams.map((diagram) => (
-            <figure className="mb-[28px] last:mb-0" key={diagram.id}>
-              <figcaption>
-                <h3 className="text-[18px] font-semibold text-[#f1f3f4]">{diagram.title}</h3>
-                <p className="mt-[5px] text-[13px] leading-[21px] text-[#aeb4bd]">{diagram.description}</p>
-              </figcaption>
-              <WorkbenchPrdDiagramCanvas diagram={diagram} />
-            </figure>
-          ))}
-        </section>
-      )}
+      <PrdStructuredFieldsEditor
+        document={draftDocument}
+        disabled={busy}
+        onChange={updateDocument}
+      />
     </article>
   );
 }

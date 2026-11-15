@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 import { runtimeResultSchema } from "../src/runtime.js";
-import { prdBlockSchema, prdDocumentV2Schema, prdSafetyBaselineIntro, prdSafetyBaselineItems } from "../src/prd.js";
+import { prdBlockSchema, prdDocumentV3Schema, prdSafetyBaselineIntro, prdSafetyBaselineItems } from "../src/prd.js";
 
 const prototypeExamplePath = fileURLToPath(new URL(
   "../../../integrations/deerflow/skills/workbench/references/prototype-runtime-result.example.json",
@@ -50,7 +50,7 @@ describe("DeerFlow PRD Runtime Result reference", () => {
     expect(result.artifacts).toHaveLength(1);
     expect(result.artifacts[0]).toMatchObject({
       kind: "prd",
-      schemaVersion: 2,
+      schemaVersion: 3,
       operation: { kind: "create" },
     });
     expect(Buffer.byteLength(prdExampleSource, "utf8")).toBeLessThan(64_000);
@@ -146,7 +146,7 @@ describe("DeerFlow PRD Runtime Result reference", () => {
     expect(schema.properties).toEqual({
       protocol: { type: "string", enum: ["workbench.runtime.result.v1"] },
       message: { type: "string", maxLength: 100_000 },
-      artifacts: { type: "array", items: { $ref: "#/$defs/RuntimeArtifactDraftPrdV3" }, minItems: 1, maxItems: 1 },
+      artifacts: { type: "array", items: { $ref: "#/$defs/RuntimeArtifactDraftPrd" }, minItems: 1, maxItems: 1 },
     });
     for (const [name, definition] of Object.entries(schema.$defs)) {
       expect(definition, name).toEqual(runtimeSchema.$defs[name]);
@@ -191,7 +191,7 @@ describe("DeerFlow PRD Runtime Result reference", () => {
     let result = runtimeResultSchema.safeParse(example);
     expect(result.success).toBe(false);
     if (result.success) throw new Error("Misplaced section name was accepted");
-    const documentResult = prdDocumentV2Schema.safeParse(example.artifacts[0].content);
+    const documentResult = prdDocumentV3Schema.safeParse(example.artifacts[0].content);
     if (documentResult.success) throw new Error("Misplaced section name was accepted by document schema");
     expect(documentResult.error.issues).toEqual(expect.arrayContaining([
       expect.objectContaining({

@@ -1,33 +1,6 @@
-import { createHmac, randomUUID, timingSafeEqual } from "node:crypto";
+import { createHmac, timingSafeEqual } from "node:crypto";
 
 const TOKEN_TTL_SECONDS = 60;
-
-export function signSsoToken({
-  secret,
-  issuer,
-  audience,
-  userId,
-  email,
-  next,
-  now = Math.floor(Date.now() / 1000),
-  jti = randomUUID(),
-}) {
-  assertSecret(secret);
-  const header = encode({ alg: "HS256", typ: "JWT" });
-  const payload = encode({
-    v: 1,
-    iss: normalizedOrigin(issuer),
-    aud: normalizedOrigin(audience),
-    sub: userId,
-    email,
-    next,
-    iat: now,
-    exp: now + TOKEN_TTL_SECONDS,
-    jti,
-  });
-  const unsigned = `${header}.${payload}`;
-  return `${unsigned}.${signature(unsigned, secret)}`;
-}
 
 export function verifySsoToken(token, {
   secret,
@@ -85,10 +58,6 @@ export function createReplayGuard() {
 
 function signature(unsigned, secret) {
   return createHmac("sha256", secret).update(unsigned).digest("base64url");
-}
-
-function encode(value) {
-  return Buffer.from(JSON.stringify(value)).toString("base64url");
 }
 
 function decode(value) {

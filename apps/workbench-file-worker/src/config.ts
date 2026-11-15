@@ -5,9 +5,9 @@ import { parseConditionalObjectCreateMode } from "@workbench/workbench-content-s
 
 export type FileWorkerConfig = ReturnType<typeof loadFileWorkerConfig>;
 
-export const canonicalBlobPrefix = "blobs";
-export const pendingBlobPrefix = "pending/blobs";
-export const quarantineBlobPrefix = "quarantine/blobs";
+const canonicalBlobPrefix = "blobs";
+const pendingBlobPrefix = "pending/blobs";
+const quarantineBlobPrefix = "quarantine/blobs";
 export const doclingImageDigest = "sha256:7e07522e0240c1db3ff5b837ffa969c2ecd5a71664c0e0369f5a69fc169e30ba";
 
 const MEBIBYTE = 1024 ** 2;
@@ -229,7 +229,7 @@ export function loadFileWorkerConfig(environment: NodeJS.ProcessEnv = process.en
   } as const;
 }
 
-export function pgConnectionString(value: string) {
+function pgConnectionString(value: string) {
   const url = new URL(value);
   url.searchParams.delete("schema");
   return url.toString();

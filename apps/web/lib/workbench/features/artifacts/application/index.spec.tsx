@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { prdDocumentV2Example } from "@workbench/workbench-contracts/test-fixtures";
+import { prdDocumentV3Example } from "@workbench/workbench-contracts/test-fixtures";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -13,7 +13,6 @@ import {
   usePersistWorkbenchPrdVersion,
   useInfiniteWorkbenchArtifactVersions,
   useWorkbenchArtifactVersionBatch,
-  useWorkbenchArtifactVersions,
   useWorkbenchArtifactVersionContent,
   useWorkbenchArtifactVersionAsset,
 } from "./index";
@@ -95,11 +94,11 @@ describe("Workbench ArtifactVersion mutation", () => {
     const rendered = renderHook(() => usePersistWorkbenchPrdVersion("project-1"), { wrapper });
     await act(async () => { await rendered.result.current.mutateAsync({
       reference: { projectId: "project-1", artifactId: "prd-1", artifactVersionId: "prd-v1" },
-      document: prdDocumentV2Example,
+      document: prdDocumentV3Example,
     }); });
     expect(mocks.getArtifact).toHaveBeenCalledWith("prd-1");
     expect(mocks.createArtifactVersion).toHaveBeenCalledWith("prd-1", {
-      kind: "prd", baseArtifactVersionId: "prd-v1", document: prdDocumentV2Example,
+      kind: "prd", baseArtifactVersionId: "prd-v1", document: prdDocumentV3Example,
     }, '"7"', expect.any(String));
     expect(queryClient.getQueryData(workbenchQueryKeys.artifactVersion("project-1", "prd-1", "prd-v2"))).toEqual(saved);
     rendered.unmount();
@@ -113,7 +112,7 @@ describe("Workbench ArtifactVersion mutation", () => {
     const rendered = renderHook(() => usePersistWorkbenchPrdVersion("project-1"), { wrapper });
     await act(async () => { await expect(rendered.result.current.mutateAsync({
       reference: { projectId: "project-1", artifactId: "prd-1", artifactVersionId: "prd-v1" },
-      document: prdDocumentV2Example,
+      document: prdDocumentV3Example,
     })).rejects.toThrow("文档不属于当前项目"); });
     expect(mocks.createArtifactVersion).not.toHaveBeenCalled();
     rendered.unmount();
@@ -190,26 +189,6 @@ describe("Workbench ArtifactVersion list query", () => {
     expect(queryClient.getQueryData(
       workbenchQueryKeys.artifactVersion("project-1", "artifact-2", "version-2"),
     )).toMatchObject({ value: { artifactVersionId: "version-2" } });
-
-    rendered.unmount();
-    queryClient.clear();
-  });
-
-  it("requests the explicit first-100 version window", async () => {
-    mocks.listArtifactVersions.mockResolvedValue({ items: [], nextCursor: "version-100" });
-    const queryClient = new QueryClient({
-      defaultOptions: { queries: { retry: false } },
-    });
-    const wrapper = ({ children }: { children: ReactNode }) => (
-      <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
-    );
-    const rendered = renderHook(
-      () => useWorkbenchArtifactVersions("project-1", "artifact-1", { limit: 100 }),
-      { wrapper },
-    );
-
-    await waitFor(() => expect(rendered.result.current.data?.nextCursor).toBe("version-100"));
-    expect(mocks.listArtifactVersions).toHaveBeenCalledWith("artifact-1", { limit: 100 });
 
     rendered.unmount();
     queryClient.clear();

@@ -21,7 +21,7 @@ export type PreviewResolvedViewport = PreviewCustomViewport & {
   fixed: boolean;
 };
 
-export const previewCustomViewportBounds = {
+const previewCustomViewportBounds = {
   minWidth: 240,
   maxWidth: 2_560,
   minHeight: 240,

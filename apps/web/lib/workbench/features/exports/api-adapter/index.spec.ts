@@ -157,7 +157,7 @@ describe("Exports API contracts", () => {
       ...capabilities(),
       formats: {
         ...capabilities().formats,
-        figma: { available: true, authentication: "not_required", reasonCode: null, internalProof: "not-public" },
+        figma: { available: true, reasonCode: null, internalProof: "not-public" },
       },
     };
     const capabilityApi = createApi(async () => Response.json(invalidCapabilities));
@@ -187,28 +187,17 @@ describe("Exports API contracts", () => {
 });
 
 function capabilities() {
-  const available = { available: true, authentication: "not_required", reasonCode: null } as const;
-  const authRequired = {
-    available: false,
-    authentication: "required",
-    reasonCode: "EXPORT_EXTERNAL_AUTHENTICATION_REQUIRED",
-  } as const;
+  const available = { available: true, reasonCode: null } as const;
   return {
     formats: {
       html: available,
       react: available,
-      figma: { available: false, authentication: "not_required", reasonCode: "EXPORT_FIGMA_UNAVAILABLE" } as const,
+      figma: { available: false, reasonCode: "EXPORT_FIGMA_UNAVAILABLE" } as const,
       mcp: available,
       docx: available,
       pdf: available,
     },
     packaging: { single_file: available, zip: available },
-    external: {
-      ai_studio: { available: false, authentication: "not_required", reasonCode: "EXPORT_EXTERNAL_AI_STUDIO_UNAVAILABLE" } as const,
-      netlify: authRequired,
-      lovable: authRequired,
-      bolt: authRequired,
-    },
   };
 }
 

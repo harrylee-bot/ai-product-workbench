@@ -5,7 +5,7 @@ import type { PrismaClient } from "@workbench/workbench-db";
 import { verifySourcePrototypePreviewToken, verifyPreviewToken } from "@workbench/workbench-preview-token";
 import type { PreviewConfig } from "./config.js";
 import { previewContentSecurityPolicy, previewContentSecurityPolicyFromHashes } from "./csp.js";
-import { createWorkbenchPreviewBridgeInjection } from "./preview-bridge.js";
+import { createWorkbenchPreviewBridgeInjection, WorkbenchPreviewHtmlInspector } from "./preview-bridge.js";
 import type { PreviewStorage } from "./storage.js";
 
 export class PreviewService {
@@ -49,7 +49,6 @@ export class PreviewService {
       select: {
         id: true,
         purpose: true,
-        createdById: true,
         release: { select: { projectId: true } },
         preview: { select: { projectId: true } },
         outputBlob: {
@@ -64,10 +63,8 @@ export class PreviewService {
       ? await this.db.projectMember.findFirst({
           where: {
             projectId,
-            // Legacy capabilities keep their original short-lived semantics.
-            // Newly issued capabilities follow the authorized requester.
-            principalId: payload.principalId ?? job.createdById,
-            ...(payload.principalId && job.purpose === "export"
+            principalId: payload.principalId,
+            ...(job.purpose === "export"
               ? { role: { in: ["owner", "editor"] as ("owner" | "editor")[] } }
               : {}),
             principal: { status: "active" },
@@ -140,11 +137,11 @@ export class PreviewService {
   ) {
     if ("sourceHtml" in resolved) {
       signal?.throwIfAborted();
+      const inspector = new WorkbenchPreviewHtmlInspector();
+      await inspector.write(resolved.sourceHtml);
+      const { headEndOffset } = await inspector.finish();
       const bridge = createWorkbenchPreviewBridgeInjection(this.config.webOrigin, resolved.capabilityToken);
-      const closing = resolved.sourceHtml.toLowerCase().lastIndexOf("</body>");
-      const html = closing >= 0
-        ? resolved.sourceHtml.slice(0, closing) + bridge.markup + resolved.sourceHtml.slice(closing)
-        : resolved.sourceHtml + bridge.markup;
+      const html = resolved.sourceHtml.slice(0, headEndOffset) + bridge.markup + resolved.sourceHtml.slice(headEndOffset);
       const bytes = Buffer.from(html, "utf8");
       return {
         body: Readable.from([bytes]), byteSize: bytes.byteLength, etag: resolved.etag,
@@ -177,10 +174,6 @@ export class PreviewService {
       await staged.dispose();
       throw error;
     }
-  }
-
-  async get(token: string, signal?: AbortSignal) {
-    return this.render(await this.resolve(token), signal);
   }
 }
 

@@ -1,7 +1,8 @@
 import { randomUUID } from "node:crypto";
 import { Prisma, PrismaClient } from "@workbench/workbench-db";
 import { canonicalJson, canonicalSha256, parseEmbeddingProfileV1, parseRetrievalProfileV1, type JsonValue } from "@workbench/workbench-knowledge";
-import { ArtifactFinalizationsService, artifactKnowledgeMarkdown, mapArtifactFinalization } from "../src/modules/artifacts/artifact-finalizations.service.js";
+import { ArtifactFinalizationsService, mapArtifactFinalization } from "../src/modules/artifacts/artifact-finalizations.service.js";
+import { artifactKnowledgeMarkdown } from "../src/modules/artifacts/artifact-knowledge-markdown.js";
 import { AccessService } from "../src/modules/access/access.service.js";
 import { PrismaKnowledgeRetrievalStore } from "../src/modules/knowledge/prisma-knowledge-retrieval.store.js";
 import { createBatches, PrismaKnowledgeBuildStore } from "../../workbench-file-worker/src/knowledge/prisma-knowledge-build.store.js";

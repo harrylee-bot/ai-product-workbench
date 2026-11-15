@@ -7,7 +7,6 @@ import {
   createFileUploadResponseSchema,
   fileAssetSchema,
   fileExtractionSchema,
-  fileListSchema,
   fileUploadSessionSchema,
   listUploadPartsResponseSchema,
   signUploadPartRequestSchema,
@@ -18,7 +17,6 @@ import {
   type CreateFileUploadResponse,
   type FileAsset,
   type FileExtraction,
-  type FileList,
   type FileUploadSession,
   type ListUploadPartsResponse,
   type SignUploadPartRequest,
@@ -36,17 +34,9 @@ import {
   versioned,
   type Versioned,
 } from "../../../transport/contracts";
-import type { FileListOptions } from "../domain";
 
 export class WorkbenchFilesApi {
   constructor(private readonly api: WorkbenchApiClient) {}
-
-  async listFiles(projectId: string, options: FileListOptions = {}): Promise<FileList> {
-    const result = await this.api.GET("/projects/{projectId}/files", {
-      params: { path: { projectId }, query: options },
-    });
-    return parseContract(fileListSchema, result.data, "list files");
-  }
 
   async createFileUpload(
     projectId: string,
@@ -73,15 +63,6 @@ export class WorkbenchFilesApi {
       params: { path: { fileId } },
     });
     return versioned(fileAssetSchema, result.data, result.response, "get file");
-  }
-
-  async deleteFile(fileId: string, ifMatch: string): Promise<void> {
-    await this.api.DELETE("/files/{fileId}", {
-      params: {
-        path: { fileId },
-        header: { "If-Match": normalizeEtag(ifMatch) },
-      },
-    });
   }
 
   async createFileExtraction(

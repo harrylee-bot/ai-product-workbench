@@ -54,6 +54,7 @@ export function AuthForm({
   defaultAccount?: string;
 }) {
   const { handleSubmit, pending } = useAuthFormSubmission(action);
+  const [passwordVisible, setPasswordVisible] = useState(false);
 
   return (
     <form aria-busy={pending} className="flex flex-col gap-4" onSubmit={handleSubmit}>
@@ -78,15 +79,25 @@ export function AuthForm({
         <Label className="font-normal text-muted-foreground" htmlFor="password">
           密码
         </Label>
-        <Input
-          autoComplete="current-password"
-          className="h-10 rounded-lg border-border/50 bg-muted/50 text-base sm:text-sm transition-colors focus:border-foreground/20 focus:bg-muted"
-          id="password"
-          name="password"
-          placeholder="&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;"
-          required
-          type="password"
-        />
+        <div className="relative">
+          <Input
+            autoComplete="current-password"
+            className="h-10 rounded-lg border-border/50 bg-muted/50 pr-20 text-base sm:text-sm transition-colors focus:border-foreground/20 focus:bg-muted"
+            id="password"
+            name="password"
+            placeholder="&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;"
+            required
+            type={passwordVisible ? "text" : "password"}
+          />
+          <button
+            aria-controls="password"
+            className="absolute inset-y-0 right-0 rounded-r-lg px-3 text-xs text-muted-foreground hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring"
+            onClick={() => setPasswordVisible((visible) => !visible)}
+            type="button"
+          >
+            {passwordVisible ? "隐藏密码" : "显示密码"}
+          </button>
+        </div>
       </div>
 
       <AuthFormPendingContext.Provider value={pending}>

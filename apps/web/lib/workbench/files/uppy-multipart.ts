@@ -52,7 +52,6 @@ import {
 const DEFAULT_POLL_INTERVAL_MS = 1_000;
 const DEFAULT_POLL_TIMEOUT_MS = 30 * 60 * 1_000;
 
-export { sha256Blob } from "./upload-digest";
 
 type AdapterMeta = {
   workbenchLocalUploadId: string;
@@ -145,7 +144,7 @@ export type WorkbenchUploadSnapshot = {
   error: WorkbenchUploadError | null;
 };
 
-export type WorkbenchUploadPartRequest = {
+type WorkbenchUploadPartRequest = {
   method: "PUT";
   url: string;
   headers: Readonly<Record<string, string>>;
@@ -187,7 +186,7 @@ const checkpointSchema = z.object({
   createIdempotencyKey: z.string(),
   completionIdempotencyKey: z.string(),
   extractionIdempotencyKey: z.string(),
-  submissionIntent: submissionIntentUploadBindingSchema.nullable().optional().default(null),
+  submissionIntent: submissionIntentUploadBindingSchema.nullable(),
   clientSha256Hint: sha256Schema.nullable(),
   session: z.object({
     fileAssetId: opaqueIdSchema,
@@ -198,21 +197,21 @@ const checkpointSchema = z.object({
   }).strict().nullable(),
 }).strict();
 
-export class WorkbenchUploadCheckpointError extends Error {
+class WorkbenchUploadCheckpointError extends Error {
   constructor(message: string, options?: { cause?: unknown }) {
     super(message, options?.cause === undefined ? undefined : { cause: options.cause });
     this.name = "WorkbenchUploadCheckpointError";
   }
 }
 
-export class WorkbenchUploadStateError extends Error {
+class WorkbenchUploadStateError extends Error {
   constructor(message: string) {
     super(message);
     this.name = "WorkbenchUploadStateError";
   }
 }
 
-export class WorkbenchUploadPollingTimeoutError extends Error {
+class WorkbenchUploadPollingTimeoutError extends Error {
   constructor(readonly fileAssetId: string) {
     super(`Timed out while waiting for File ${fileAssetId} processing`);
     this.name = "WorkbenchUploadPollingTimeoutError";
@@ -263,7 +262,7 @@ export async function createWorkbenchMultipartUpload(
   return new WorkbenchMultipartUpload(options, checkpoint, candidate !== null, checkpointStore);
 }
 
-export function createWorkbenchFileFingerprint(projectId: string, file: File): string {
+function createWorkbenchFileFingerprint(projectId: string, file: File): string {
   return [
     "workbench-file-v1",
     encodeURIComponent(projectId),
@@ -452,14 +451,6 @@ export class WorkbenchMultipartUpload {
     });
     this.activePromise = tracked;
     return this.activePromise;
-  }
-
-  async refresh(): Promise<WorkbenchUploadSnapshot> {
-    this.assertNotDestroyed();
-    const session = this.requireSession();
-    const result = await this.service.getFile(session.fileAssetId);
-    this.applyFile(result);
-    return this.getSnapshot();
   }
 
   cancel(): Promise<void> {

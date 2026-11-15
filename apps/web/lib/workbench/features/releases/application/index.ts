@@ -27,15 +27,6 @@ export function useWorkbenchReleases(
   });
 }
 
-export function useWorkbenchRelease(projectId: string, releaseId: string) {
-  const service = useWorkbenchReleasesApi();
-  return useQuery({
-    queryKey: workbenchQueryKeys.release(projectId, releaseId),
-    queryFn: () => service.getProjectRelease(releaseId),
-    enabled: Boolean(projectId && releaseId),
-  });
-}
-
 export function useCreateWorkbenchRelease(projectId: string) {
   const service = useWorkbenchReleasesApi();
   const queryClient = useQueryClient();

@@ -38,9 +38,9 @@ docker compose --env-file deploy/workbench.env \
 
 空数据库须先完成下面的首次知识初始化。Web 可在 API 启动后提供登录，API 的业务就绪检查仍要求有效知识发布和真实检索服务。主页面与预览使用独立访问来源。数据库迁移、事件与产物合同位于 `packages/workbench-db/`、`packages/workbench-contracts/`；生产预检和部署合同位于 `deploy/` 与 `scripts/`。
 
-正式发布入口是 `deploy/workbench-direct-release.sh`：本机只从干净 Git 提交生成源码归档，通过受保护 SSH 交给线上 AMD64 主机；线上执行 `npm ci`、合同预检、原生镜像构建、迁移、服务切换和公网健康检查。发布不经过 GitHub Actions、GitHub Artifact、本机 Colima 或 self-hosted Runner。版本固定为 `1.0.0`；发布前比较当前运行版本和变更文件摘要，只更新本次涉及的服务。历史 owner/GitHub 发布入口已删除，不再保留第二套生产发布链。
+正式发布入口是 `deploy/workbench-direct-release.sh`：本机只从干净 Git 提交生成源码归档，通过受保护 SSH 交给线上 AMD64 主机；线上比较上次健康发布的源码摘要，再执行生产预检、受影响镜像构建、服务切换和公网健康检查；首次发布或数据库/协议/部署配置变更才执行主机 `npm ci`、全套准备和迁移。发布不经过 GitHub Actions、GitHub Artifact、本机 Colima 或 self-hosted Runner。版本固定为 `1.0.0`；发布前比较当前运行版本和变更文件摘要，只更新本次涉及的服务。历史 owner/GitHub 发布入口已删除，不再保留第二套生产发布链。
 
-直接发布需要本机环境变量 `WORKBENCH_PRODUCTION_HOST`、`WORKBENCH_PRODUCTION_USER`、`WORKBENCH_WEB_ORIGIN`，以及受控提供的 `WORKBENCH_PRODUCTION_KNOWN_HOSTS` 或 `WORKBENCH_PRODUCTION_KNOWN_HOSTS_FILE`；可选 `WORKBENCH_SSH_KEY_PATH`，未提供时使用本机 SSH 配置。`WORKBENCH_SSH_BIND_INTERFACE` 可指定单次 SSH/SCP 使用的本地物理接口，不修改系统路由或关闭 VPN。默认不绑定；先用 `networksetup -listallhardwareports`、`ifconfig` 确认当前有地址的物理接口（如 Wi-Fi `en0` 或 USB 有线网卡 `en6`），不可照抄示例。绑定失败会立即停止，不回退到 VPN 默认路由；SSH 主机校验与身份认证保持不变。线上目录默认为 `$WORKBENCH_PRODUCTION_APP_DIR` 和 `$WORKBENCH_PRODUCTION_PRIVATE_DIR`，可通过对应 `WORKBENCH_PRODUCTION_*_DIR` 覆盖。工作树必须干净；当前线上状态只维护在 `docs/audit/1.0.0.md`，不保留历史发布证据文件。
+直接发布需要本机环境变量 `WORKBENCH_PRODUCTION_HOST`、`WORKBENCH_PRODUCTION_USER`、`WORKBENCH_WEB_ORIGIN`，以及受控提供的 `WORKBENCH_PRODUCTION_KNOWN_HOSTS` 或 `WORKBENCH_PRODUCTION_KNOWN_HOSTS_FILE`；可选 `WORKBENCH_SSH_KEY_PATH`，未提供时使用本机 SSH 配置。`WORKBENCH_SSH_BIND_INTERFACE` 可指定单次 SSH/SCP 使用的本地物理接口，不修改系统路由或关闭 VPN。默认不绑定；先用 `networksetup -listallhardwareports`、`ifconfig` 确认当前有地址的物理接口（如 Wi-Fi `en0` 或 USB 有线网卡 `en6`），不可照抄示例。绑定失败会立即停止，不回退到 VPN 默认路由；SSH 主机校验与身份认证保持不变。线上目录默认为 `/opt/workbench-1.0.0` 和 `[SERVER_PRIVATE_PATH]`，可通过对应 `WORKBENCH_PRODUCTION_*_DIR` 覆盖。工作树必须干净；当前线上状态只维护在 `docs/audit/1.0.0.md`，不保留历史发布证据文件。
 
 示例：
 
@@ -51,6 +51,10 @@ WORKBENCH_PRODUCTION_KNOWN_HOSTS_FILE="$HOME/.ssh/workbench_known_hosts" \
 WORKBENCH_WEB_ORIGIN=https://aionbench.com \
 bash deploy/workbench-direct-release.sh
 ```
+
+增量选择来自 `deploy/workbench-release-plan.mjs`，按 Dockerfile 的源码 `COPY` 传播依赖：Web 改动只构建 Web；API 改动只构建 API；共享包改动构建其所有镜像消费者；知识内容只构建 Knowledge。数据库、协议、部署脚本和无法分类的新文件保守走全量；只有审计/文档改动时跳过构建。首次使用、配置变化、上次切换未完成或 `WORKBENCH_FORCE_FULL_RELEASE=1` 也走全量。健康通过后才更新服务器 `current/workbench.env` 和 `current/release-plan.json`，未更新镜像保留原引用，Runtime Worker 单独保留真实源码提交用于执行证明。
+
+构建器固定复用 `workbench-direct-release`，仅停止进程，保留缓存卷；Web 通过 BuildKit cache mount 复用 `.next/cache`。不要在每次发布后删除该 builder 或它的缓存。资源预算仍为单步、2 CPU、4GB 构建内存，并保留线上服务余量。首次需要建立缓存，具体耗时以服务器实测为准。
 
 需要绕开 VPN 时，在确认接口后将 `WORKBENCH_SSH_BIND_INTERFACE` 加入上述命令。DNS 应按 [生产运行手册](docs/runbooks/apitable-production-operations.md) 使用 HTTPS DoH 交叉核验；绑定接口不能代替 DNS、SSH 主机或用户身份校验。
 
@@ -125,7 +129,7 @@ npm run knowledge:release -- \
 
 ## Runtime 告警处置
 
-Provider State 变更先迁移、受控回填并验证事件与 projection 一致，再观察小范围 Worker 后推广。实际命令参数见 `node scripts/workbench-runtime-provider-state-rollout.mjs --help`。以下锚点供运行告警直接引用。
+Provider State 只使用当前 v2 projection；Worker 不再回放历史事件或执行后台双读。数据修复仍须受控回填并验证事件与 projection 一致，实际参数见 `npm run runtime:provider-state:backfill -- --help`。以下锚点供运行告警直接引用。
 
 ### Provider State P2028
 

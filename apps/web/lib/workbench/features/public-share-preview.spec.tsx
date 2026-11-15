@@ -5,17 +5,11 @@ import type {
   PublicProjectRelease,
   PublicShare,
 } from "@workbench/workbench-contracts";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ShareView } from "@/components/share/share-view";
 import { publicSharePreviewEntries } from "./public-share-preview";
-
-const mocks = vi.hoisted(() => ({
-  getIdentity: vi.fn(),
-  remix: vi.fn(),
-  user: null as { id: string } | null,
-}));
 
 vi.mock("@/components/workbench/workbench-artifact-content", () => ({
   WorkbenchArtifactContent: ({ reference }: { reference: unknown }) => (
@@ -23,21 +17,7 @@ vi.mock("@/components/workbench/workbench-artifact-content", () => ({
   ),
 }));
 
-vi.mock("@/lib/auth/workbench-auth", () => ({
-  useWorkbenchAuth: () => ({ user: mocks.user }),
-}));
-
-vi.mock("@/lib/workbench/features", () => ({
-  useCreateWorkbenchProjectRemix: () => ({ mutateAsync: mocks.remix }),
-  useWorkbenchIdentityReader: () => ({ getIdentity: mocks.getIdentity }),
-}));
-
-afterEach(() => {
-  cleanup();
-  mocks.getIdentity.mockReset();
-  mocks.remix.mockReset();
-  mocks.user = null;
-});
+afterEach(cleanup);
 
 describe("Public Share screen selection", () => {
   it("restores every explicit Prototype screen from the immutable Board snapshot", () => {
@@ -88,34 +68,17 @@ describe("Public Share screen selection", () => {
     });
   });
 
-  it("reads Identity lazily before submitting an authenticated remix", async () => {
-    mocks.user = { id: "user-1" };
-    mocks.getIdentity.mockResolvedValue({ defaultWorkspaceId: "workspace-2" });
-    mocks.remix.mockRejectedValue(new Error("stop before navigation"));
-    render(<ShareView share={share("remix")} token="wbs_public_token" />);
 
-    expect(mocks.getIdentity).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole("button", { name: "重混项目" }));
-
-    await waitFor(() => expect(mocks.getIdentity).toHaveBeenCalledOnce());
-    expect(mocks.remix).toHaveBeenCalledWith({
-      request: {
-        workspaceId: "workspace-2",
-        title: "重混项目 v3",
-      },
-    });
-    await waitFor(() => expect(screen.getByText("重混失败，请重试")).toBeTruthy());
-  });
 });
 
 function reference() {
   return JSON.parse(screen.getByTestId("artifact-reference").textContent ?? "null") as Record<string, unknown>;
 }
 
-function share(scope: "remix" | "view" = "view"): PublicShare {
+function share(): PublicShare {
   return {
     shareId: "share-1",
-    scope,
+    scope: "view",
     expiresAt: null,
     release: release(),
   } as PublicShare;

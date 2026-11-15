@@ -5,7 +5,7 @@ import {
   type CanvasVisualCaptureWire,
 } from "@workbench/workbench-contracts";
 
-export const canvasVisualCaptureLimits = Object.freeze({
+const canvasVisualCaptureLimits = Object.freeze({
   maxBytes: 1_048_576,
   maxDimension: 2_048,
   maxBase64Length: 1_500_000,

@@ -52,7 +52,7 @@ export function previewContentSecurityPolicyFromHashes(
   ].join("; ");
 }
 
-export function inlineSourceSha256(value: string) {
+function inlineSourceSha256(value: string) {
   return createHash("sha256").update(value, "utf8").digest("base64");
 }
 

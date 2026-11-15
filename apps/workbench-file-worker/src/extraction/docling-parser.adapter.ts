@@ -469,5 +469,3 @@ function safeFileName(value: string) {
 function abortError(signal: AbortSignal) {
   return signal.reason instanceof Error ? signal.reason : new Error("FILE_EXTRACTION_ABORTED");
 }
-
-export const doclingParserOptions = doclingOptions;

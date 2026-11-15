@@ -67,31 +67,9 @@ if command -v apk >/dev/null 2>&1; then
       exit 1
     fi
   fi
-elif command -v apt-get >/dev/null 2>&1; then
-  if [ -f /etc/apt/sources.list.d/debian.sources ]; then
-    sed -i \
-      -e 's#http://deb.debian.org/debian#http://mirrors.aliyun.com/debian#g' \
-      -e 's#http://deb.debian.org/debian-security#http://mirrors.aliyun.com/debian-security#g' \
-      /etc/apt/sources.list.d/debian.sources
-  fi
-  if [ "$#" -gt 0 ]; then
-    debian_packages=""
-    for package in "$@"; do
-      case "$package" in
-        # The renderer uses portable package names in the Dockerfile. Debian
-        # calls Pillow's system package python3-pil.
-        python3-pillow) package="python3-pil" ;;
-      esac
-      debian_packages="${debian_packages}${debian_packages:+ }${package}"
-    done
-    apt-get update
-    # Package names passed to this helper are fixed allowlisted image inputs.
-    # shellcheck disable=SC2086
-    apt-get install -y --no-install-recommends $debian_packages
-    rm -rf /var/lib/apt/lists/* /var/cache/apt/*
-  fi
+
 else
-  echo "no supported container package manager found" >&2
+  echo "Alpine apk is required for Node images" >&2
   exit 1
 fi
 

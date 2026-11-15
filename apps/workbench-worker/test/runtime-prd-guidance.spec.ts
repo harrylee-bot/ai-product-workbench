@@ -33,8 +33,8 @@ describe("runtimePrdResultGuidance", () => {
 
     expect(runtimePrdResultFixture.artifacts[0]).toMatchObject({
       kind: "prd",
-      schemaVersion: 2,
-      content: { protocol: "workbench.prd.v2" },
+      schemaVersion: 3,
+      content: { protocol: "workbench.prd.v3" },
     });
     expect(guidance).toContain("schemaVersion 3 with protocol workbench.prd.v3");
     expect(guidance).toContain("each required reference exactly once in this order");
@@ -142,8 +142,9 @@ describe("runtimePrdResultGuidance", () => {
   it("preserves the targeted protocol for edits without injecting a create starter", () => {
     const guidance = runtimePrdResultGuidance(["prd"], "edit");
 
-    expect(guidance).toContain("Legacy workbench.prd.v1 targets remain v1");
-    expect(guidance).toContain("workbench.prd.v2 targets remain v2");
+    expect(guidance).toContain("workbench.prd.v3 and Artifact schemaVersion 3");
+    expect(guidance).not.toContain("workbench.prd.v1");
+    expect(guidance).not.toContain("workbench.prd.v2");
     expect(guidance).not.toContain("<workbench_prd_result_starter>");
     expect(guidance).not.toContain("fixed requirement-document profile");
     expect(guidance).not.toContain("all 21 safety-row meanings");
@@ -153,7 +154,7 @@ describe("runtimePrdResultGuidance", () => {
 
   it("keeps linked edits progressing through both drafts without PRD-only stop instructions", () => {
     const linked = runtimePrdResultGuidance(["prd", "prototype"], "edit") ?? "";
-    expect(linked).toContain("Legacy workbench.prd.v1 targets remain v1");
+    expect(linked).toContain("workbench.prd.v3 and Artifact schemaVersion 3");
     expect(linked).toContain("complete the linked Prototype at artifact_index 1");
     expect(linked).toContain("submit both accepted ACKs' finalSubmissionArtifact references together");
     expect(linked).not.toContain("do not call a Draft or Result tool");

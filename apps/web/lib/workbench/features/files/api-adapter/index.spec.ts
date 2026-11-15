@@ -95,34 +95,20 @@ describe("Files API contracts", () => {
     rendered.unmount();
   });
 
-  it("owns File discovery, detail, deletion, and extraction CAS", async () => {
+  it("owns File detail and extraction CAS", async () => {
     const requests: Request[] = [];
     const api = createApi(async (request) => {
       requests.push(request);
       const url = new URL(request.url);
-      if (request.method === "GET" && url.pathname.endsWith("/projects/project-1/files")) {
-        expect(url.searchParams.get("status")).toBe("ready");
-        expect(url.searchParams.get("cursor")).toBe("cursor-1");
-        expect(url.searchParams.get("limit")).toBe("25");
-        return Response.json({ items: [readyFile], nextCursor: "cursor-2" });
-      }
       if (request.method === "GET" && url.pathname.endsWith("/files/file-1")) {
         return Response.json(readyFile, { headers: { ETag: '"2"' } });
       }
       if (request.method === "POST" && url.pathname.endsWith("/files/file-1/extractions")) {
         return Response.json(queuedExtraction, { status: 202, headers: { ETag: '"3"' } });
       }
-      if (request.method === "DELETE" && url.pathname.endsWith("/files/file-1")) {
-        return new Response(null, { status: 204 });
-      }
       throw new Error(`Unexpected request: ${request.method} ${url.pathname}`);
     });
 
-    await expect(api.listFiles("project-1", {
-      status: "ready",
-      cursor: "cursor-1",
-      limit: 25,
-    })).resolves.toEqual({ items: [readyFile], nextCursor: "cursor-2" });
     await expect(api.getFile(readyFile.id))
       .resolves.toEqual({ value: readyFile, etag: '"2"' });
     await expect(api.createFileExtraction(
@@ -130,13 +116,10 @@ describe("Files API contracts", () => {
       '  "2"  ',
       "extract:req_123",
     )).resolves.toEqual({ value: queuedExtraction, etag: '"3"' });
-    await expect(api.deleteFile(readyFile.id, '  "3"  ')).resolves.toBeUndefined();
 
     const extractionRequest = requests.find((request) => request.method === "POST");
-    const deleteRequest = requests.find((request) => request.method === "DELETE");
     expect(extractionRequest?.headers.get("if-match")).toBe('"2"');
     expect(extractionRequest?.headers.get("idempotency-key")).toBe("extract:req_123");
-    expect(deleteRequest?.headers.get("if-match")).toBe('"3"');
   });
 
   it("owns multipart session creation, signing, completion, reconciliation, and abort", async () => {

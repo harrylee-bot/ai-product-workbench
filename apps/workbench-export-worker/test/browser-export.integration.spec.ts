@@ -5,12 +5,17 @@ import { renderExportHtml } from "@workbench/workbench-export-core";
 import { BrowserExportService } from "../src/browser/browser-export.service.js";
 import { exportRequest } from "../../../packages/workbench-export-core/test/fixtures.js";
 
-const executablePath = chromium.executablePath();
-const available = process.env.WORKBENCH_RUN_BROWSER_INTEGRATION === "1"
-  && existsSync(executablePath);
+const executablePath = process.env.WORKBENCH_EXPORT_CHROMIUM_PATH ?? chromium.executablePath();
+const available = existsSync(executablePath);
 
 describe("isolated browser export", () => {
-  it.runIf(available)("executes generated HTML without browser errors", async () => {
+  it("does not silently skip a requested browser integration", async () => {
+    if (!available) {
+      // The release gate sets this flag. A missing executable must fail the
+      // test run instead of turning the browser acceptance into a skip.
+      expect(process.env.WORKBENCH_RUN_BROWSER_INTEGRATION).not.toBe("1");
+      return;
+    }
     const browser = service();
     const html = Buffer.from(renderExportHtml(exportRequest("html")).document, "utf8");
     await expect(browser.validateHtml(html, "release-1")).resolves.toBeUndefined();

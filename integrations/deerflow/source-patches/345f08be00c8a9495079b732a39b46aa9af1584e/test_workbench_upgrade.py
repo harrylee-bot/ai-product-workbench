@@ -16,6 +16,8 @@ from deerflow.runtime.checkpoint_state import CheckpointStateAccessor
 from deerflow.runtime.runs.manager import RunManager
 from deerflow.runtime.runs.schemas import RunStatus
 from deerflow.runtime.runs.worker import RunContext, run_agent
+from deerflow.runtime.stream_bridge.base import END_SENTINEL, StreamGap
+from deerflow.runtime.stream_bridge.memory import MemoryStreamBridge
 from deerflow.runtime.user_context import reset_current_user, set_current_user
 
 
@@ -101,6 +103,139 @@ class UpgradeCompatibility(unittest.IsolatedAsyncioTestCase):
         bridge.publish_end.assert_awaited_once_with(record.run_id)
         next_record = await manager.create(thread_id)
         self.assertNotEqual(next_record.run_id, record.run_id)
+
+
+class StreamBackpressureCompatibility(unittest.IsolatedAsyncioTestCase):
+    def bridge(self, size=2):
+        bridge = MemoryStreamBridge(queue_maxsize=size)
+        self.addAsyncCleanup(bridge.close)
+        return bridge
+
+    async def blocked_publisher(self, bridge):
+        await bridge.publish("run", "values", {"sequence": 0})
+        reader = bridge.subscribe("run")
+        self.addAsyncCleanup(reader.aclose)
+        await anext(reader)
+        await bridge.publish("run", "values", {"sequence": 1})
+        await bridge.publish("run", "values", {"sequence": 2})
+        pending = asyncio.create_task(bridge.publish("run", "values", {"sequence": 3}))
+        await asyncio.sleep(0)
+        self.assertFalse(pending.done(), "unread active history must apply backpressure")
+        return reader, pending
+
+    async def test_active_subscriber_receives_burst_larger_than_retention_without_gap(self):
+        bridge = self.bridge(8)
+        ready = asyncio.Event()
+        received = []
+
+        async def consume():
+            async for item in bridge.subscribe("run"):
+                self.assertNotIsInstance(item, StreamGap)
+                if item is END_SENTINEL:
+                    return
+                received.append(item)
+                ready.set()
+                # SSE serialization and socket writes yield to the producer.
+                await asyncio.sleep(0)
+
+        consumer = asyncio.create_task(consume())
+        await bridge.publish("run", "metadata", {"sequence": 0})
+        await ready.wait()
+        async def publish_burst():
+            for sequence in range(1, 1001):
+                await bridge.publish("run", "messages", {"sequence": sequence})
+            await bridge.publish_end("run")
+
+        await asyncio.wait_for(asyncio.gather(publish_burst(), consumer), 5)
+        self.assertEqual([int(item.id.split("-")[1]) for item in received], list(range(1001)))
+        self.assertEqual([item.data["sequence"] for item in received], list(range(1001)))
+        self.assertLessEqual(len(bridge._streams["run"].events), 8)
+
+    async def test_slow_subscriber_advancement_releases_one_blocked_write(self):
+        bridge = self.bridge()
+        reader, pending = await self.blocked_publisher(bridge)
+        self.assertEqual((await anext(reader)).data, {"sequence": 1})
+        await asyncio.wait_for(pending, 2)
+        self.assertEqual((await anext(reader)).data, {"sequence": 2})
+        self.assertEqual((await anext(reader)).data, {"sequence": 3})
+        self.assertEqual(len(bridge._streams["run"].events), 2)
+
+    async def test_disconnected_subscriber_releases_blocked_publisher(self):
+        bridge = self.bridge()
+        reader, pending = await self.blocked_publisher(bridge)
+        await reader.aclose()
+        await asyncio.wait_for(pending, 2)
+        for sequence in range(4, 12):
+            await asyncio.wait_for(bridge.publish("run", "values", {"sequence": sequence}), 2)
+        self.assertEqual(len(bridge._streams["run"].events), 2)
+        self.assertEqual(bridge._streams["run"].subscriber_offsets, {})
+
+    async def test_cancelled_waiting_subscriber_does_not_block_later_writes(self):
+        bridge = self.bridge()
+        reader = bridge.subscribe("run")
+        pending_read = asyncio.create_task(anext(reader))
+        await asyncio.sleep(0)
+        pending_read.cancel()
+        with self.assertRaises(asyncio.CancelledError):
+            await pending_read
+        for sequence in range(8):
+            await asyncio.wait_for(bridge.publish("run", "values", {"sequence": sequence}), 2)
+        self.assertEqual(bridge._streams["run"].subscriber_offsets, {})
+        self.assertEqual(len(bridge._streams["run"].events), 2)
+
+    async def test_cancelled_blocked_write_does_not_reserve_an_event_identity(self):
+        bridge = self.bridge()
+        reader, pending = await self.blocked_publisher(bridge)
+        pending.cancel()
+        with self.assertRaises(asyncio.CancelledError):
+            await pending
+        await reader.aclose()
+        await bridge.publish("run", "values", {"sequence": 4})
+        self.assertEqual(bridge._streams["run"].events[-1].id.split("-")[1], "3")
+        self.assertEqual(bridge._streams["run"].events[-1].data, {"sequence": 4})
+
+    async def test_slowest_active_subscriber_controls_retention(self):
+        bridge = self.bridge()
+        slow, pending = await self.blocked_publisher(bridge)
+        fast = bridge.subscribe("run")
+        self.addAsyncCleanup(fast.aclose)
+        self.assertEqual((await anext(fast)).data, {"sequence": 1})
+        self.assertEqual((await anext(fast)).data, {"sequence": 2})
+        await asyncio.sleep(0)
+        self.assertFalse(pending.done())
+        await slow.aclose()
+        await asyncio.wait_for(pending, 2)
+        self.assertEqual((await anext(fast)).data, {"sequence": 3})
+
+    async def test_cleanup_and_close_release_waiters_without_writing_to_closed_stream(self):
+        for operation in ("cleanup", "close"):
+            with self.subTest(operation=operation):
+                bridge = self.bridge()
+                reader, pending = await self.blocked_publisher(bridge)
+                if operation == "cleanup":
+                    await bridge.cleanup("run")
+                else:
+                    await bridge.close()
+                with self.assertRaisesRegex(RuntimeError, "STREAM_BRIDGE_CLOSED"):
+                    await asyncio.wait_for(pending, 2)
+                self.assertIs(await anext(reader), END_SENTINEL)
+                self.assertFalse(await bridge.stream_exists("run"))
+
+    async def test_expired_resume_cursor_still_reports_a_real_gap(self):
+        bridge = self.bridge()
+        await bridge.publish("run", "values", {"sequence": 0})
+        old_cursor = bridge._streams["run"].events[-1].id
+        for sequence in range(1, 6):
+            await bridge.publish("run", "values", {"sequence": sequence})
+        reader = bridge.subscribe("run", last_event_id=old_cursor)
+        self.addAsyncCleanup(reader.aclose)
+        gap = await anext(reader)
+        self.assertIsInstance(gap, StreamGap)
+        self.assertEqual(gap.requested_event_id, old_cursor)
+        self.assertEqual(gap.earliest_available_event_id.split("-")[1], "4")
+        self.assertEqual(gap.latest_available_event_id.split("-")[1], "5")
+        with self.assertRaises(StopAsyncIteration):
+            await anext(reader)
 
 
 if __name__ == "__main__":

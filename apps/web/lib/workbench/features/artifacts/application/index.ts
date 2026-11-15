@@ -13,7 +13,6 @@ import type {
 } from "@workbench/workbench-contracts";
 import { createArtifactVersionRequestSchema } from "@workbench/workbench-contracts";
 import {
-  keepPreviousData,
   useInfiniteQuery,
   useMutation,
   useQueries,
@@ -30,7 +29,6 @@ import {
   type Versioned,
 } from "../../../transport/contracts";
 import { useWorkbenchArtifactsApi } from "../api-adapter";
-import type { ArtifactListOptions } from "../domain";
 import { prdDocumentEditIdempotencyKey } from "../../prd-edit";
 import type { PrdDraftReference } from "../../../prd-editor/draft-store";
 
@@ -60,19 +58,6 @@ export function usePersistWorkbenchPrdVersion(projectId: string) {
         queryClient.invalidateQueries({ queryKey: workbenchQueryKeys.bootstraps(projectId) }),
       ]);
     },
-  });
-}
-
-export function useWorkbenchArtifacts(
-  projectId: string,
-  options: ArtifactListOptions = {},
-) {
-  const api = useWorkbenchArtifactsApi();
-  return useQuery({
-    queryKey: workbenchQueryKeys.artifactList(projectId, options),
-    queryFn: () => api.listArtifacts(projectId, options),
-    enabled: Boolean(projectId),
-    placeholderData: keepPreviousData,
   });
 }
 
@@ -137,20 +122,6 @@ export function useCreateWorkbenchArtifactVersion(projectId: string, artifactId:
         }),
       ]);
     },
-  });
-}
-
-export function useWorkbenchArtifactVersions(
-  projectId: string,
-  artifactId: string,
-  options: CursorPageOptions = {},
-) {
-  const api = useWorkbenchArtifactsApi();
-  return useQuery({
-    queryKey: workbenchQueryKeys.artifactVersionList(projectId, artifactId, options),
-    queryFn: () => api.listArtifactVersions(artifactId, options),
-    enabled: Boolean(projectId && artifactId),
-    placeholderData: keepPreviousData,
   });
 }
 

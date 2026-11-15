@@ -70,7 +70,7 @@ export class ReleasesController {
   }
 }
 
-export function parseReleaseLimit(value?: string) {
+function parseLimit(value?: string) {
   if (value === undefined || value === "") return undefined;
   const parsed = Number(value);
   if (!Number.isSafeInteger(parsed) || parsed < 1 || parsed > 100) {
@@ -78,5 +78,3 @@ export function parseReleaseLimit(value?: string) {
   }
   return parsed;
 }
-
-const parseLimit = parseReleaseLimit;

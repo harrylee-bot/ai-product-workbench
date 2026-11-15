@@ -6,7 +6,7 @@ const exportJobIdPattern = /^[A-Za-z0-9_-]{1,200}$/;
 export type PreviewTokenPayload = {
   exportJobId: string;
   expiresAt: Date;
-  principalId?: string;
+  principalId: string;
 };
 
 export class PreviewTokenError extends Error {
@@ -17,7 +17,7 @@ export class PreviewTokenError extends Error {
 }
 
 export function createPreviewToken(
-  payload: PreviewTokenPayload & { principalId: string },
+  payload: PreviewTokenPayload,
   secret: Uint8Array,
   options: { now?: Date; maximumTtlSeconds?: number } = {},
 ) {
@@ -45,7 +45,7 @@ export function verifyPreviewToken(
   assertSecret(secret);
   if (token.length > 1_024) throw new PreviewTokenError("PREVIEW_TOKEN_INVALID");
   const [prefix, encodedPayload, suppliedSignature, extra] = token.split(".");
-  if ((prefix !== protocol && prefix !== "wbpv1") || !encodedPayload || !suppliedSignature || extra !== undefined || !/^[A-Za-z0-9_-]+$/.test(encodedPayload) || !/^[A-Za-z0-9_-]{43}$/.test(suppliedSignature)) {
+  if (prefix !== protocol || !encodedPayload || !suppliedSignature || extra !== undefined || !/^[A-Za-z0-9_-]+$/.test(encodedPayload) || !/^[A-Za-z0-9_-]{43}$/.test(suppliedSignature)) {
     throw new PreviewTokenError("PREVIEW_TOKEN_INVALID");
   }
   const unsigned = `${prefix}.${encodedPayload}`;
@@ -70,7 +70,7 @@ export function verifyPreviewToken(
   return {
     exportJobId: payload.exportJobId,
     expiresAt: new Date(payload.exp * 1_000),
-    ...(payload.v === 2 ? { principalId: payload.principalId } : {}),
+    principalId: payload.principalId,
   };
 }
 
@@ -89,18 +89,13 @@ function assertSecret(secret: Uint8Array) {
   if (secret.byteLength < 32) throw new PreviewTokenError("PREVIEW_TOKEN_SECRET_INVALID");
 }
 
-function isExactPayload(value: unknown): value is
-  | { v: 1; exportJobId: string; exp: number }
-  | { v: 2; exportJobId: string; exp: number; principalId: string } {
+function isExactPayload(value: unknown): value is { v: 2; exportJobId: string; exp: number; principalId: string } {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
   const candidate = value as Record<string, unknown>;
-  const validVersion = candidate.v === 1
-    ? Object.keys(candidate).sort().join(",") === "exp,exportJobId,v"
-    : candidate.v === 2
-      && Object.keys(candidate).sort().join(",") === "exp,exportJobId,principalId,v"
-      && typeof candidate.principalId === "string"
-      && exportJobIdPattern.test(candidate.principalId);
-  return validVersion
+  return candidate.v === 2
+    && Object.keys(candidate).sort().join(",") === "exp,exportJobId,principalId,v"
+    && typeof candidate.principalId === "string"
+    && exportJobIdPattern.test(candidate.principalId)
     && typeof candidate.exportJobId === "string"
     && exportJobIdPattern.test(candidate.exportJobId)
     && typeof candidate.exp === "number"

@@ -2,8 +2,6 @@
 
 import type {
   Board,
-  ExternalExportDelivery,
-  ExternalExportTarget,
   ExportCapabilities,
   ExportFormat,
   ExportJob,
@@ -51,12 +49,8 @@ import {
 import { useWorkbenchPrdDraftStore } from "../prd-editor/draft-context";
 
 export type WorkbenchExportTarget =
-  | "AI Studio"
   | "Figma"
   | "MCP"
-  | "Netlify"
-  | "Lovable"
-  | "Bolt"
   | "Download .zip"
   | "Copy code"
   | "React"
@@ -66,8 +60,7 @@ export type WorkbenchExportTarget =
 export type WorkbenchExportTargetDescriptor = {
   format: ExportFormat;
   packaging: ExportPackaging;
-  delivery: "download" | "clipboard" | "external";
-  externalTarget: ExternalExportTarget | null;
+  delivery: "download" | "clipboard";
 };
 
 type PublishableBoardController = {
@@ -85,11 +78,6 @@ type ShareSession = {
 type ActiveExportSession = {
   projectId: string;
   job: ExportJob;
-};
-
-type ActiveExternalDeliverySession = {
-  projectId: string;
-  delivery: ExternalExportDelivery;
 };
 
 const previewPollIntervalMs = 500;
@@ -130,10 +118,6 @@ export function useWorkbenchPublicationController({
     session,
     () => null,
   );
-  const [activeExternalDeliverySession, setActiveExternalDeliverySession] = useWorkbenchProjectState<ActiveExternalDeliverySession | null>(
-    session,
-    () => null,
-  );
   const [shareOperationError, setShareOperationError] = useWorkbenchProjectState<unknown>(
     session,
     () => null,
@@ -150,20 +134,13 @@ export function useWorkbenchPublicationController({
     projectId: string;
     operationId: number;
   } | null>(session, () => null);
-  const [externalDeliveryOperationPending, setExternalDeliveryOperationPending] = useWorkbenchProjectState(
-    session,
-    () => false,
-  );
   const [previewOperationCount, setPreviewOperationCount] = useWorkbenchProjectState(
     session,
     () => 0,
   );
   const previewIdsRef = useWorkbenchProjectRef(session, () => new Map<string, string>());
   const hydratedExportProjectRef = useWorkbenchProjectRef(session, () => "");
-  const hydratedExternalDeliveryRef = useWorkbenchProjectRef(session, () => "");
   const downloadOperationRef = useWorkbenchProjectRef(session, () => 0);
-  const externalDeliveryOperationRef = useWorkbenchProjectRef(session, () => false);
-  const currentExportIdRef = useWorkbenchProjectRef(session, () => "");
   const activeExportId = activeExportSession?.projectId === projectId
     ? activeExportSession.job.id
     : "";
@@ -172,64 +149,20 @@ export function useWorkbenchPublicationController({
     ? activeExportQuery.data?.value ?? activeExportSession.job
     : null;
   const activeExportSelection = activeExport?.selection ?? null;
-  const activeExternalDelivery = activeExternalDeliverySession?.projectId === projectId
-    ? activeExternalDeliverySession.delivery
-    : null;
-  currentExportIdRef.current = activeExport?.id ?? "";
   const cancelExport = useCancelWorkbenchExportJob(projectId, activeExportId);
 
   useEffect(() => {
     if (!canShare) setShareSession(null);
     if (!canExport) {
       setActiveExportSession(null);
-      setActiveExternalDeliverySession(null);
       hydratedExportProjectRef.current = "";
-      hydratedExternalDeliveryRef.current = "";
     }
   }, [
     canExport,
     canShare,
     hydratedExportProjectRef,
-    hydratedExternalDeliveryRef,
     setActiveExportSession,
-    setActiveExternalDeliverySession,
     setShareSession,
-  ]);
-
-  useEffect(() => {
-    if (!canExport || !activeExport || activeExport.status !== "succeeded") return;
-    const exportId = activeExport.id;
-    const hydrationKey = `${projectId}:${exportId}`;
-    if (hydratedExternalDeliveryRef.current === hydrationKey) return;
-    hydratedExternalDeliveryRef.current = hydrationKey;
-
-    void exportOperations.listExternalExportDeliveries(exportId)
-      .then((result) => {
-        if (!session.isCurrent()
-          || currentExportIdRef.current !== exportId
-          || hydratedExternalDeliveryRef.current !== hydrationKey) {
-          return;
-        }
-        const restored = selectLatestRestorableExternalDelivery(result.items);
-        setActiveExternalDeliverySession(restored ? { projectId, delivery: restored } : null);
-      })
-      .catch((error) => {
-        if (session.isCurrent()
-          && currentExportIdRef.current === exportId
-          && hydratedExternalDeliveryRef.current === hydrationKey) {
-          setExportOperationError(error);
-        }
-      });
-  }, [
-    activeExport,
-    canExport,
-    currentExportIdRef,
-    exportOperations,
-    hydratedExternalDeliveryRef,
-    projectId,
-    session,
-    setActiveExternalDeliverySession,
-    setExportOperationError,
   ]);
 
   useEffect(() => {
@@ -257,45 +190,6 @@ export function useWorkbenchPublicationController({
     hydratedExportProjectRef,
     projectId,
     setActiveExportSession,
-  ]);
-
-  useEffect(() => {
-    if (!activeExternalDelivery || !["queued", "running", "cancelling"].includes(activeExternalDelivery.status)) return;
-    const timer = window.setTimeout(() => {
-      void exportOperations.getExternalExportDelivery(activeExternalDelivery.id)
-        .then((result) => {
-          if (session.isCurrent()) {
-            setActiveExternalDeliverySession({ projectId, delivery: result.value });
-          }
-        })
-        .catch((error) => {
-          if (session.isCurrent()) setExportOperationError(error);
-        });
-    }, 1_000);
-    return () => window.clearTimeout(timer);
-  }, [
-    activeExternalDelivery,
-    exportOperations,
-    projectId,
-    session,
-    setActiveExternalDeliverySession,
-    setExportOperationError,
-  ]);
-
-  const beginExternalDeliveryOperation = useCallback(() => {
-    if (externalDeliveryOperationRef.current) {
-      throw new Error("An external Export delivery operation is already in progress");
-    }
-    externalDeliveryOperationRef.current = true;
-    setExternalDeliveryOperationPending(true);
-    return () => {
-      externalDeliveryOperationRef.current = false;
-      if (session.isCurrent()) setExternalDeliveryOperationPending(false);
-    };
-  }, [
-    externalDeliveryOperationRef,
-    session,
-    setExternalDeliveryOperationPending,
   ]);
 
   const shareStateReady = canShare
@@ -442,8 +336,6 @@ export function useWorkbenchPublicationController({
       });
       if (session.isCurrent()) {
         setActiveExportSession({ projectId: requestProjectId, job: result.value });
-        setActiveExternalDeliverySession(null);
-        hydratedExternalDeliveryRef.current = `${requestProjectId}:${result.value.id}`;
       }
       return result.value;
     } catch (error) {
@@ -455,12 +347,10 @@ export function useWorkbenchPublicationController({
     createExport,
     ensureRelease,
     exportCapabilitiesQuery,
-    hydratedExternalDeliveryRef,
     prdDrafts,
     projectId,
     session,
     setActiveExportSession,
-    setActiveExternalDeliverySession,
     setExportOperationError,
   ]);
 
@@ -555,88 +445,6 @@ export function useWorkbenchPublicationController({
     }
   }, [activeExport, canExport, exportOperations, session, setExportOperationError]);
 
-  const prepareExternalDelivery = useCallback(async (target: WorkbenchExportTarget) => {
-    if (!canExport) throw new Error("This Project role cannot publish Exports");
-    const descriptor = exportTargetDescriptor(target);
-    if (descriptor.delivery !== "external" || descriptor.externalTarget === null) {
-      throw new Error("The selected Export target is not external");
-    }
-    if (!activeExport
-      || activeExport.status !== "succeeded"
-      || activeExport.format !== descriptor.format
-      || activeExport.packaging !== descriptor.packaging) {
-      throw new Error("Build the immutable Export output before preparing external delivery");
-    }
-    const finishOperation = beginExternalDeliveryOperation();
-    setExportOperationError(null);
-    try {
-      const result = await exportOperations.createExternalExportDelivery(
-        activeExport.id,
-        { target: descriptor.externalTarget },
-      );
-      if (session.isCurrent()) {
-        setActiveExternalDeliverySession({ projectId, delivery: result.value });
-      }
-      return result.value;
-    } catch (error) {
-      if (session.isCurrent()) setExportOperationError(error);
-      throw error;
-    } finally {
-      finishOperation();
-    }
-  }, [
-    activeExport,
-    beginExternalDeliveryOperation,
-    canExport,
-    exportOperations,
-    projectId,
-    session,
-    setActiveExternalDeliverySession,
-    setExportOperationError,
-  ]);
-
-  const mutateExternalDelivery = useCallback(async (
-    action: "confirm" | "retry" | "cancel",
-    target: WorkbenchExportTarget,
-  ) => {
-    if (!activeExternalDelivery) throw new Error("No external delivery is active");
-    const descriptor = exportTargetDescriptor(target);
-    if (descriptor.externalTarget === null
-      || descriptor.externalTarget !== activeExternalDelivery.target
-      || !activeExport
-      || activeExternalDelivery.exportJobId !== activeExport.id) {
-      throw new Error("The active external delivery does not match the selected Export target");
-    }
-    const finishOperation = beginExternalDeliveryOperation();
-    setExportOperationError(null);
-    try {
-      const etag = `"${activeExternalDelivery.revision}"`;
-      const result = action === "confirm"
-        ? await exportOperations.confirmExternalExportDelivery(activeExternalDelivery.id, etag)
-        : action === "retry"
-          ? await exportOperations.retryExternalExportDelivery(activeExternalDelivery.id, etag)
-          : await exportOperations.cancelExternalExportDelivery(activeExternalDelivery.id, etag);
-      if (session.isCurrent()) {
-        setActiveExternalDeliverySession({ projectId, delivery: result.value });
-      }
-      return result.value;
-    } catch (error) {
-      if (session.isCurrent()) setExportOperationError(error);
-      throw error;
-    } finally {
-      finishOperation();
-    }
-  }, [
-    activeExternalDelivery,
-    activeExport,
-    beginExternalDeliveryOperation,
-    exportOperations,
-    projectId,
-    session,
-    setActiveExternalDeliverySession,
-    setExportOperationError,
-  ]);
-
   const createPreview = useCallback(async (
     selection: ExportSelection,
     signal?: AbortSignal,
@@ -725,19 +533,15 @@ export function useWorkbenchPublicationController({
   return {
     activeExport,
     activeExportSelection,
-    activeExternalDelivery,
     activeExportQuery,
     busy: createRelease.isPending
       || rotateShare.isPending
       || revokeProjectShares.isPending
       || createExport.isPending
       || cancelExport.isPending
-      || externalDeliveryOperationPending
       || downloadingExportState?.projectId === projectId
       || previewOperationCount > 0,
     cancelExport: cancelActiveExport,
-    cancelExternalDelivery: (target: WorkbenchExportTarget) => mutateExternalDelivery("cancel", target),
-    confirmExternalDelivery: (target: WorkbenchExportTarget) => mutateExternalDelivery("confirm", target),
     copyExportCode,
     disableShare,
     downloadExport,
@@ -755,7 +559,6 @@ export function useWorkbenchPublicationController({
     previewError: previewOperationError,
     previewBusy: previewOperationCount > 0,
     retryExportCapabilities: exportCapabilitiesQuery.refetch,
-    retryExternalDelivery: (target: WorkbenchExportTarget) => mutateExternalDelivery("retry", target),
     retryShareState: sharesQuery.refetch,
     shareEnabled: canShare && (
       (shareStateReady && activeShareCount > 0)
@@ -769,7 +572,6 @@ export function useWorkbenchPublicationController({
     shareUrl: shareSession?.projectId === projectId
       && shareSession.selectionKey === shareSelectionKey(boardController.store) ? shareSession.url : null,
     startExport,
-    prepareExternalDelivery,
     toggleShare,
   };
 }
@@ -781,46 +583,6 @@ function shareSelectionKey(store: BoardStore | null): string {
     [...new Set(state?.nodes.filter((node) => node.selected)
       .map((node) => node.workbench.artifactVersionId))].sort(),
   ]);
-}
-
-export async function waitForPreviewExport(
-  api: Pick<WorkbenchExportOperations, "getExportJob">,
-  initialJob: ExportJob,
-  {
-    signal,
-    intervalMs = previewPollIntervalMs,
-    timeoutMs = previewPollTimeoutMs,
-  }: {
-    signal?: AbortSignal;
-    intervalMs?: number;
-    timeoutMs?: number;
-  } = {},
-): Promise<ExportJob> {
-  if (!Number.isFinite(intervalMs) || intervalMs < 0) {
-    throw new RangeError("Preview poll interval must be a non-negative finite number");
-  }
-  if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
-    throw new RangeError("Preview poll timeout must be a positive finite number");
-  }
-  if (initialJob.format !== "html") throw new Error("Only HTML Exports can be previewed");
-
-  const deadline = Date.now() + timeoutMs;
-  let job = initialJob;
-  while (job.status === "queued" || job.status === "running") {
-    throwIfPreviewAborted(signal);
-    if (Date.now() >= deadline) throw new Error("Timed out while preparing the isolated Preview");
-    await previewDelay(Math.min(intervalMs, Math.max(0, deadline - Date.now())), signal);
-    throwIfPreviewAborted(signal);
-    job = (await api.getExportJob(job.id)).value;
-    if (job.format !== "html" || job.id !== initialJob.id) {
-      throw new Error("Preview Export identity changed while polling");
-    }
-  }
-  if (job.status === "succeeded") return job;
-  if (job.status === "failed") {
-    throw new Error(job.failure?.detail || job.failure?.code || "Preview Export failed");
-  }
-  throw new Error("Preview Export was cancelled");
 }
 
 export async function waitForProjectPreview(
@@ -903,7 +665,7 @@ export async function flushWorkbenchBoard(
   throw new Error("The Project Board kept changing while it was being published");
 }
 
-export async function persistedPreviewBoard(
+async function persistedPreviewBoard(
   controller: PublishableBoardController,
   canPersist: boolean,
 ): Promise<{ id: string; revision: number }> {
@@ -914,10 +676,6 @@ export async function persistedPreviewBoard(
     throw new Error("Only the persisted Project Board can be previewed");
   }
   return { id: state.boardId, revision: state.serverRevision };
-}
-
-export function exportFormatForTarget(target: WorkbenchExportTarget): ExportFormat {
-  return exportTargetDescriptor(target).format;
 }
 
 export function exportTargetForFormat(
@@ -932,36 +690,15 @@ export function exportTargetForFormat(
   return packaging === "zip" ? "Download .zip" : "Copy code";
 }
 
-export function exportTargetForExternalDelivery(target: ExternalExportTarget): WorkbenchExportTarget {
-  const targets: Record<ExternalExportTarget, WorkbenchExportTarget> = {
-    ai_studio: "AI Studio",
-    netlify: "Netlify",
-    lovable: "Lovable",
-    bolt: "Bolt",
-  };
-  return targets[target];
-}
-
-export function selectLatestRestorableExternalDelivery(
-  deliveries: readonly ExternalExportDelivery[] | undefined,
-): ExternalExportDelivery | null {
-  const latest = deliveries?.[0];
-  return latest && latest.status !== "cancelled" ? latest : null;
-}
-
 export function exportTargetDescriptor(target: WorkbenchExportTarget): WorkbenchExportTargetDescriptor {
   const descriptors: Record<WorkbenchExportTarget, WorkbenchExportTargetDescriptor> = {
-    "AI Studio": { format: "react", packaging: "zip", delivery: "external", externalTarget: "ai_studio" },
-    Figma: { format: "figma", packaging: "zip", delivery: "download", externalTarget: null },
-    MCP: { format: "mcp", packaging: "zip", delivery: "download", externalTarget: null },
-    Netlify: { format: "html", packaging: "zip", delivery: "external", externalTarget: "netlify" },
-    Lovable: { format: "react", packaging: "zip", delivery: "external", externalTarget: "lovable" },
-    Bolt: { format: "react", packaging: "zip", delivery: "external", externalTarget: "bolt" },
-    "Download .zip": { format: "html", packaging: "zip", delivery: "download", externalTarget: null },
-    "Copy code": { format: "html", packaging: "single_file", delivery: "clipboard", externalTarget: null },
-    React: { format: "react", packaging: "zip", delivery: "download", externalTarget: null },
-    "Download Word": { format: "docx", packaging: "single_file", delivery: "download", externalTarget: null },
-    "Download PDF": { format: "pdf", packaging: "single_file", delivery: "download", externalTarget: null },
+    Figma: { format: "figma", packaging: "zip", delivery: "download" },
+    MCP: { format: "mcp", packaging: "zip", delivery: "download" },
+    "Download .zip": { format: "html", packaging: "zip", delivery: "download" },
+    "Copy code": { format: "html", packaging: "single_file", delivery: "clipboard" },
+    React: { format: "react", packaging: "zip", delivery: "download" },
+    "Download Word": { format: "docx", packaging: "single_file", delivery: "download" },
+    "Download PDF": { format: "pdf", packaging: "single_file", delivery: "download" },
   };
   return descriptors[target];
 }
@@ -976,23 +713,15 @@ export function exportTargetAvailability(
   const packagingCapability = capabilities.packaging[descriptor.packaging];
   if (!formatCapability.available) return { available: false, reason: capabilityReason(formatCapability.reasonCode) };
   if (!packagingCapability.available) return { available: false, reason: capabilityReason(packagingCapability.reasonCode) };
-  if (descriptor.externalTarget) {
-    const capability = capabilities.external[descriptor.externalTarget];
-    if (!capability.available || capability.authentication === "required") {
-      return { available: false, reason: capabilityReason(capability.reasonCode) };
-    }
-  }
   return { available: true, reason: null };
 }
 
 function capabilityReason(reasonCode: string | null) {
-  if (reasonCode === "EXPORT_EXTERNAL_AUTHENTICATION_REQUIRED") return "需要先完成企业账号授权";
-  if (reasonCode === "EXPORT_EXTERNAL_AI_STUDIO_UNAVAILABLE") return "当前部署未启用 AI Studio 发布";
   if (reasonCode === "EXPORT_FIGMA_UNAVAILABLE") return "当前部署尚未完成 Figma 导出验收";
   return "当前部署不支持此导出能力";
 }
 
-export function buildPublicShareUrl(token: string): string {
+function buildPublicShareUrl(token: string): string {
   if (typeof window === "undefined") throw new Error("Share links can only be created in a browser");
   return `${window.location.origin}/share/${encodeURIComponent(token)}`;
 }

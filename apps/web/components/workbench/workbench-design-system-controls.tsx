@@ -63,7 +63,7 @@ export const automaticDesignStyleSelection: WorkbenchDesignStyleSelection = {
   swatch: "#8f949c",
 };
 
-export function designStyleSelectionFromPreset(
+function designStyleSelectionFromPreset(
   item: DesignPresetCatalogItem,
 ): WorkbenchDesignStyleSelection {
   return {
@@ -79,7 +79,7 @@ export function designStyleSelectionFromPreset(
   };
 }
 
-export function designStyleSelectionFromCatalog(
+function designStyleSelectionFromCatalog(
   item: DesignSystemCatalogItem,
 ): WorkbenchDesignStyleSelection {
   return {
@@ -95,7 +95,7 @@ export function designStyleSelectionFromCatalog(
   };
 }
 
-export function designStyleSelectionFromProject(
+function designStyleSelectionFromProject(
   item: WorkbenchProjectDesignSystemChoice,
 ): WorkbenchDesignStyleSelection {
   return {

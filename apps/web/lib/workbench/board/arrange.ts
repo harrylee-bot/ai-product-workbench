@@ -14,13 +14,13 @@ export type BoardNodeAlignment =
   | "middle"
   | "bottom";
 
-export type BoardNodeDistributionAxis = "horizontal" | "vertical";
+type BoardNodeDistributionAxis = "horizontal" | "vertical";
 
 export type BoardNodeArrangeOperation =
   | { kind: "align"; alignment: BoardNodeAlignment }
   | { kind: "distribute"; axis: BoardNodeDistributionAxis };
 
-export type BoardNodeArrangeNoopReason =
+type BoardNodeArrangeNoopReason =
   | "insufficient-selection"
   | "missing-size"
   | "unchanged";

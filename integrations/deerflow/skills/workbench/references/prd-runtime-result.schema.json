@@ -18,7 +18,7 @@
     "artifacts": {
       "type": "array",
       "items": {
-        "$ref": "#/$defs/RuntimeArtifactDraftPrdV3"
+        "$ref": "#/$defs/RuntimeArtifactDraftPrd"
       },
       "minItems": 1,
       "maxItems": 1
@@ -489,7 +489,7 @@
       ],
       "additionalProperties": false
     },
-    "PrdDocumentV3": {
+    "PrdDocument": {
       "type": "object",
       "properties": {
         "protocol": {
@@ -1754,7 +1754,7 @@
       ],
       "additionalProperties": false
     },
-    "RuntimeArtifactDraftPrdV3": {
+    "RuntimeArtifactDraftPrd": {
       "type": "object",
       "properties": {
         "title": {
@@ -1783,7 +1783,7 @@
           ]
         },
         "content": {
-          "$ref": "#/$defs/PrdDocumentV3"
+          "$ref": "#/$defs/PrdDocument"
         },
         "operation": {
           "oneOf": [

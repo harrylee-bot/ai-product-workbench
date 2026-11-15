@@ -304,11 +304,11 @@ function invalidFavoriteContentError() {
   return new Error("ARTIFACT_VERSION_FAVORITE_CONTENT_INVALID");
 }
 
-export function encodeFavoriteCursor(cursor: FavoriteCursor): string {
+function encodeFavoriteCursor(cursor: FavoriteCursor): string {
   return Buffer.from(JSON.stringify(cursor)).toString("base64url");
 }
 
-export function decodeFavoriteCursor(
+function decodeFavoriteCursor(
   value: string,
 ): FavoriteCursor {
   try {

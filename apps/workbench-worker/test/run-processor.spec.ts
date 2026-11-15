@@ -1,3 +1,4 @@
+import { persistArtifactDraft, persistDelta } from "./run-persistence.fixture.js";
 import {
   boardNodeProtocol,
   messageDeltaMaxLength,
@@ -6,7 +7,7 @@ import {
 vi.mock("../src/runs/generation-knowledge-evidence.js", () => ({
   assertGenerationKnowledgeEvidence: vi.fn(async () => undefined),
 }));
-import { prdDocumentV2Example } from "@workbench/workbench-contracts/test-fixtures";
+import { prdDocumentV3Example } from "@workbench/workbench-contracts/test-fixtures";
 import {
   boardPlacementsForArtifact,
   canonicalJson,
@@ -14,7 +15,6 @@ import {
   mapRuntimeArtifactTarget,
   mapRuntimeSources,
   mapRuntimeDesignAssets,
-  publicErrorMessage,
   prototypeAssetPins,
   RunProcessor,
   RuntimeCancelledError,
@@ -114,10 +114,7 @@ describe("Runtime retry classification", () => {
     const error = new Error("SDK wrapper with private generated content", { cause: new Error(code) });
 
     expect(runtimeExecutionErrorCode(error)).toBe(code);
-    expect(publicErrorMessage(error)).toBe(code);
     expect(isRetryableRuntimeError(error)).toBe(false);
-    expect(publicErrorMessage(new Error(`${code}: private generated content`)))
-      .toBe("Runtime execution failed");
     expect(runtimeExecutionErrorCode(new Error(`${code}: private generated content`)))
       .toBe("RUNTIME_EXECUTION_FAILED");
 
@@ -142,7 +139,7 @@ describe("Runtime retry classification", () => {
     const error = new RuntimeProviderContentFilterError();
     expect(isRetryableRuntimeError(error)).toBe(false);
     expect(runtimeExecutionErrorCode(error)).toBe("RUNTIME_PROVIDER_CONTENT_FILTERED");
-    expect(publicErrorMessage(error)).toBe("模型服务商拦截了本次输出，任务已停止。");
+    expect(error.message).toBe("模型服务商拦截了本次输出，任务已停止。");
     expect(runtimeExecutionErrorCode(new Error("RUNTIME_PROVIDER_CONTENT_FILTERED")))
       .toBe("RUNTIME_EXECUTION_FAILED");
   });
@@ -179,7 +176,7 @@ describe("Runtime retry classification", () => {
 
   it("does not retry deterministic stream protocol or identity failures", () => {
     const rejected = new Error("DEERFLOW_RUN_REQUEST_REJECTED");
-    expect(publicErrorMessage(rejected)).toBe("DEERFLOW_RUN_REQUEST_REJECTED");
+    expect(runtimeExecutionErrorCode(rejected)).toBe("DEERFLOW_RUN_REQUEST_REJECTED");
     expect(isRetryableRuntimeError(rejected)).toBe(false);
     expect(isRetryableRuntimeError(new Error("DEERFLOW_STREAM_REPLAY_GAP"))).toBe(false);
     expect(isRetryableRuntimeError(new Error("DEERFLOW_STREAM_LOCATION_INVALID"))).toBe(false);
@@ -243,12 +240,10 @@ describe("Runtime retry classification", () => {
     expect(isRetryableRuntimeError(prismaError)).toBe(false);
     expect(runtimeExecutionErrorCode(prismaError))
       .toBe("RUNTIME_PROVIDER_STATE_TERMINAL_ATTEMPT");
-    expect(publicErrorMessage(prismaError))
-      .toBe("RUNTIME_PROVIDER_STATE_TERMINAL_ATTEMPT");
-    expect(publicErrorMessage(prismaError)).not.toContain("runtimeProviderState.update");
+    expect(runtimeExecutionErrorCode(prismaError)).not.toContain("runtimeProviderState.update");
   });
 
-  it("publishes only controlled error codes and rejects provider text at every nesting depth", () => {
+  it("publishes only controlled error codes and rejects provider text at every nesting depth", async () => {
     const secrets = [
       "Bearer provider-bearer-secret",
       `wbkg1.${"a".repeat(64)}.${"b".repeat(43)}`,
@@ -258,10 +253,17 @@ describe("Runtime retry classification", () => {
       "response body: upstream returned private generated content",
     ];
     for (const secret of secrets) {
-      expect(publicErrorMessage(new Error(secret))).toBe("Runtime execution failed");
-      expect(publicErrorMessage(new Error("SDK request failed", {
+      const tx = eventTransaction();
+      const { processor } = processorWithTransaction(tx);
+      await processor.failRun("run-1", "runtime-attempt-1", new Error("SDK wrapper", { cause: new Error(secret) }), false);
+      expect(tx.run.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+        data: expect.objectContaining({ errorCode: "RUNTIME_EXECUTION_FAILED", errorDetail: "RUNTIME_EXECUTION_FAILED" }),
+      }));
+      expect(JSON.stringify(tx.runEvent.create.mock.calls)).not.toContain(secret);
+      expect(runtimeExecutionErrorCode(new Error(secret))).toBe("RUNTIME_EXECUTION_FAILED");
+      expect(runtimeExecutionErrorCode(new Error("SDK request failed", {
         cause: new Error(secret),
-      }))).toBe("Runtime execution failed");
+      }))).toBe("RUNTIME_EXECUTION_FAILED");
     }
 
     const liveness = new RuntimeLivenessError("RUNTIME_PROVIDER_STREAM_IDLE_TIMEOUT", true);
@@ -269,11 +271,9 @@ describe("Runtime retry classification", () => {
       "RUNTIME_SUBMISSION_RECONCILIATION_UNAVAILABLE",
       { cause: new Error(secrets.join(" ")) },
     );
-    expect(publicErrorMessage(new Error("wrapper", { cause: liveness })))
+    expect(runtimeExecutionErrorCode(new Error("wrapper", { cause: liveness })))
       .toBe("RUNTIME_PROVIDER_STREAM_IDLE_TIMEOUT");
-    expect(publicErrorMessage(new RuntimeCancelledError())).toBe("RUNTIME_CANCELLED");
-    expect(publicErrorMessage(submissionUnknown))
-      .toBe("RUNTIME_SUBMISSION_RECONCILIATION_UNAVAILABLE");
+    expect(runtimeExecutionErrorCode(new RuntimeCancelledError())).toBe("RUNTIME_CANCELLED");
     expect(runtimeExecutionErrorCode(submissionUnknown))
       .toBe("RUNTIME_SUBMISSION_RECONCILIATION_UNAVAILABLE");
   });
@@ -1569,8 +1569,8 @@ describe("Runtime Artifact revision publication", () => {
     return { draft, processor, target, tx };
   }
 
-  function prdRevisionHarness(baseSchemaVersion = 2) {
-    const baseContent = prdDocumentV2Example;
+  function prdRevisionHarness(baseSchemaVersion = 3) {
+    const baseContent = prdDocumentV3Example;
     const nextContent = {
       ...baseContent,
       revision: {
@@ -1611,7 +1611,7 @@ describe("Runtime Artifact revision publication", () => {
           artifactId: target.artifactId,
           projectId: "project-1",
           version: 2,
-          schemaVersion: 2,
+          schemaVersion: 3,
           status: "staging",
           content: nextContent,
           contentBlobId: null,
@@ -1646,7 +1646,7 @@ describe("Runtime Artifact revision publication", () => {
     ) as unknown as ProcessorInternals;
     const draft = {
       kind: "prd" as const,
-      schemaVersion: 2 as const,
+      schemaVersion: 3 as const,
       title: nextContent.title,
       citations: [],
       operation: { kind: "revise" as const, target },
@@ -2094,7 +2094,7 @@ describe("Runtime Artifact draft staging and publication", () => {
     const { asset, source, content, draft, event } = createDraftFixture();
     const { db, processor, tx } = draftStagingHarness();
 
-    await processor.persistArtifactDraft(
+    await persistArtifactDraft(processor,
       executionClaim,
       event,
       [source],
@@ -2195,7 +2195,7 @@ describe("Runtime Artifact draft staging and publication", () => {
       knowledgeReleaseId: "knowledge-release-1",
     });
 
-    await expect(processor.persistArtifactDraft(
+    await expect(persistArtifactDraft(processor,
       executionClaim,
       event,
       [source],
@@ -2211,7 +2211,7 @@ describe("Runtime Artifact draft staging and publication", () => {
     const draft = runtimePrdResultFixture.artifacts[0]!;
     const existing = {
       id: "version-prd", artifactId: "artifact-prd", projectId: "project-1",
-      version: 1, schemaVersion: 2, status: "staging", content: draft.content, contentBlobId: null,
+      version: 1, schemaVersion: 3, status: "staging", content: draft.content, contentBlobId: null,
       checksum: sha256Canonical(draft.content), citations: draft.citations, createdByRunId: "run-1",
       runtimeDraftSourceId: "prd-checkpoint", runtimeDraftIndex: 0, runtimeDraftTitle: draft.title,
       knowledgeReleaseId: "knowledge-release-1",
@@ -2224,7 +2224,7 @@ describe("Runtime Artifact draft staging and publication", () => {
     });
     tx.artifactVersion.update.mockResolvedValue(existing as never);
     tx.runEvent.findMany.mockResolvedValue([{ payload: { attempt: 1, stage: "summarizing" } }]);
-    await processor.persistArtifactDraft(executionClaim, {
+    await persistArtifactDraft(processor, executionClaim, {
       type: "artifact.draft", artifactIndex: 0, sourceEventId: "linked-terminal:prd",
       draft, checkpointScreens: [],
     }, [], []);
@@ -2247,7 +2247,7 @@ describe("Runtime Artifact draft staging and publication", () => {
     const findFirst = vi.fn().mockResolvedValue({ id: "version-prd" });
     Object.assign(tx.artifactVersion, { findFirst });
     const { event, source } = createDraftFixture();
-    await processor.persistArtifactDraft(executionClaim, { ...event, artifactIndex: 1 }, [source], []);
+    await persistArtifactDraft(processor, executionClaim, { ...event, artifactIndex: 1 }, [source], []);
     expect(findFirst).toHaveBeenCalledWith(expect.objectContaining({
       where: { createdByRunId: "run-1", projectId: "project-1", runtimeDraftIndex: 0, artifact: { kind: "prd" } },
     }));
@@ -2274,7 +2274,7 @@ describe("Runtime Artifact draft staging and publication", () => {
       assets: [], knowledgeReleaseId: "knowledge-release-1", sourcePrdVersionId: "version-prd",
     }).mockResolvedValueOnce(null);
     Object.assign(tx.artifactVersion, { findFirst: vi.fn().mockResolvedValue({ version: 1 }) });
-    await processor.persistArtifactDraft(executionClaim, {
+    await persistArtifactDraft(processor, executionClaim, {
       type: "artifact.draft", artifactIndex: 0, sourceEventId: "revise-linked",
       draft: { kind: "prototype", schemaVersion: 1, title: "Revised", content, citations: runtimePrdResultFixture.artifacts[0]!.citations,
         operation: { kind: "revise", target } },
@@ -2318,7 +2318,7 @@ describe("Runtime Artifact draft staging and publication", () => {
       name: "Source hero",
     };
 
-    await processor.persistArtifactDraft(
+    await persistArtifactDraft(processor,
       executionClaim,
       event,
       [],
@@ -2366,7 +2366,7 @@ describe("Runtime Artifact draft staging and publication", () => {
     const { source, draft, event } = createDraftFixture();
     const { processor, tx } = draftStagingHarness();
 
-    await processor.persistArtifactDraft(
+    await persistArtifactDraft(processor,
       executionClaim,
       event,
       [source],
@@ -2376,7 +2376,7 @@ describe("Runtime Artifact draft staging and publication", () => {
       type: "artifact.draft.created",
       payload: draftCreatedPayload(draft),
     });
-    await processor.persistArtifactDraft(
+    await persistArtifactDraft(processor,
       executionClaim,
       event,
       [source],
@@ -2427,13 +2427,13 @@ describe("Runtime Artifact draft staging and publication", () => {
       .mockResolvedValueOnce(null)
       .mockResolvedValueOnce(existing);
 
-    await processor.persistArtifactDraft(
+    await persistArtifactDraft(processor,
       executionClaim,
       first.event,
       [first.source],
       [],
     );
-    await processor.persistArtifactDraft(
+    await persistArtifactDraft(processor,
       executionClaim,
       latestEvent,
       [first.source],
@@ -2475,7 +2475,7 @@ describe("Runtime Artifact draft staging and publication", () => {
       type: "artifact.draft.created",
       payload: draftCreatedPayload(first.draft),
     });
-    await processor.persistArtifactDraft(
+    await persistArtifactDraft(processor,
       executionClaim,
       first.event,
       [first.source],
@@ -2495,7 +2495,7 @@ describe("Runtime Artifact draft staging and publication", () => {
       payload: draftCreatedPayload(draft),
     });
 
-    await expect(processor.persistArtifactDraft(
+    await expect(persistArtifactDraft(processor,
       executionClaim,
       { ...event, draft: { ...draft, content: conflictingContent } },
       [source],
@@ -2513,7 +2513,7 @@ describe("Runtime Artifact draft staging and publication", () => {
     const { processor, tx } = draftStagingHarness();
     rejectExecutionClaim(processor);
 
-    await expect(processor.persistArtifactDraft(
+    await expect(persistArtifactDraft(processor,
       executionClaim,
       event,
       [source],
@@ -2534,7 +2534,7 @@ describe("Runtime Artifact draft staging and publication", () => {
       { payload: { attempt: 1, stage: "creating-flows" } },
     ]);
 
-    await expect(processor.persistArtifactDraft(
+    await expect(persistArtifactDraft(processor,
       executionClaim,
       event,
       [source],
@@ -2580,7 +2580,7 @@ describe("Runtime Artifact draft staging and publication", () => {
       { payload: { attempt: 1, stage: "thinking" } },
     ]);
 
-    await expect(processor.persistArtifactDraft(
+    await expect(persistArtifactDraft(processor,
       executionClaim,
       event,
       [],
@@ -2887,7 +2887,6 @@ type ProcessorInternals = {
     stage: "design-system" | "mapping-components";
     sourceEventId: string;
   }): Promise<void>;
-  persistDelta(claim: typeof executionClaim, entryId: string, fullText: string, delta: string): Promise<void>;
   waitForInput(claim: typeof executionClaim, input: {
     protocol: "workbench.runtime.input-required.v1";
     approvals: Array<{
@@ -2897,19 +2896,6 @@ type ProcessorInternals = {
       options: [];
     }>;
   }): Promise<void>;
-  persistArtifactDraft(
-    claim: typeof executionClaim,
-    event: {
-      type: "artifact.draft";
-      artifactIndex: number;
-      sourceEventId: string;
-      draft: unknown;
-      checkpointScreens: Array<{ screenId: string; revision: number; checksum: string }>;
-    },
-    sources: unknown[],
-    designAssets: unknown[],
-    artifactTargets?: unknown[],
-  ): Promise<void>;
   publishResult(claim: typeof executionClaim, entryId: string, streamedText: string, result: {
     protocol: "workbench.runtime.result.v1";
     message: string;
@@ -5598,7 +5584,7 @@ describe("Run durable snapshots", () => {
     const tx = eventTransaction();
     const { processor } = processorWithTransaction(tx);
     const delta = "a".repeat(messageDeltaMaxLength - 1) + "\uD83D\uDE00" + "b".repeat(messageDeltaMaxLength);
-    await processor.persistDelta(executionClaim, "entry-1", delta, delta);
+    await persistDelta(processor, executionClaim, "entry-1", delta, delta);
     const chunks = tx.runEvent.create.mock.calls.map(([input]) => input.data.payload as { delta: string });
     expect(chunks.map((item) => item.delta).join("")).toBe(delta);
     expect(chunks).toHaveLength(3);
@@ -5614,7 +5600,7 @@ describe("Run durable snapshots", () => {
     const { processor } = processorWithTransaction(tx);
     rejectExecutionClaim(processor);
 
-    await expect(processor.persistDelta(
+    await expect(persistDelta(processor,
       executionClaim,
       "entry-1",
       "partial response",

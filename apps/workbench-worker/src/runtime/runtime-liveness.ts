@@ -165,7 +165,7 @@ export function raceWithAbort<T>(operation: Promise<T>, signal: AbortSignal): Pr
   });
 }
 
-export function abortReason(signal: AbortSignal): unknown {
+function abortReason(signal: AbortSignal): unknown {
   return signal.reason ?? new Error("RUNTIME_ABORTED");
 }
 

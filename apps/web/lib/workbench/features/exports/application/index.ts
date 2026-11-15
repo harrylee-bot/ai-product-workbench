@@ -3,7 +3,6 @@
 import type {
   CreateExportJobRequest,
   ExportJob,
-  ProjectPreview,
 } from "@workbench/workbench-contracts";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
@@ -23,17 +22,11 @@ const DEFAULT_EXPORT_POLL_INTERVAL_MS = 1_000;
 
 export type WorkbenchExportOperations = Pick<
   WorkbenchExportsApi,
-  | "cancelExternalExportDelivery"
-  | "confirmExternalExportDelivery"
-  | "createExternalExportDelivery"
   | "createProjectPreview"
   | "createProjectPreviewToken"
   | "getExportContent"
   | "getExportJob"
-  | "getExternalExportDelivery"
-  | "listExternalExportDeliveries"
   | "getProjectPreview"
-  | "retryExternalExportDelivery"
 >;
 
 export function useWorkbenchExportOperations(): WorkbenchExportOperations {
@@ -113,55 +106,5 @@ export function useCancelWorkbenchExportJob(projectId: string, exportId: string)
         queryKey: workbenchQueryKeys.exportJobLists(projectId),
       });
     },
-  });
-}
-
-export function useCreateWorkbenchExportPreviewToken(exportId: string) {
-  const api = useWorkbenchExportsApi();
-  return useMutation({
-    mutationFn: () => api.createExportPreviewToken(exportId),
-  });
-}
-
-export function useCreateWorkbenchProjectPreview(projectId: string) {
-  const api = useWorkbenchExportsApi();
-  return useMutation({
-    mutationKey: [...workbenchQueryKeys.projectPreviews(projectId), "create"],
-    mutationFn: ({ boardId, boardRevision, selection }: Pick<
-      ProjectPreview,
-      "boardId" | "boardRevision" | "selection"
-    >) => (
-      api.createProjectPreview(projectId, { boardId, boardRevision, selection })
-    ),
-  });
-}
-
-export function useWorkbenchProjectPreview(previewId: string) {
-  const api = useWorkbenchExportsApi();
-  return useQuery({
-    queryKey: workbenchQueryKeys.projectPreview(previewId),
-    queryFn: () => api.getProjectPreview(previewId),
-    enabled: Boolean(previewId),
-    refetchInterval: (query) => {
-      const status = query.state.data?.status;
-      return status === "queued" || status === "running" ? DEFAULT_EXPORT_POLL_INTERVAL_MS : false;
-    },
-  });
-}
-
-export function useCreateWorkbenchProjectPreviewToken(previewId: string) {
-  const api = useWorkbenchExportsApi();
-  return useMutation({
-    mutationFn: () => api.createProjectPreviewToken(previewId),
-  });
-}
-
-export function useWorkbenchExportContent(projectId: string, exportId: string) {
-  const api = useWorkbenchExportsApi();
-  return useQuery({
-    queryKey: workbenchQueryKeys.exportContent(projectId, exportId),
-    queryFn: () => api.getExportContent(exportId),
-    enabled: Boolean(projectId && exportId),
-    staleTime: Number.POSITIVE_INFINITY,
   });
 }

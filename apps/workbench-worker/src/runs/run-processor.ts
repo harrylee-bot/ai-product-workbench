@@ -46,7 +46,6 @@ import type {
   RuntimeContentLocator,
   RuntimeDesignAsset,
   RuntimePort,
-  RuntimeExternalEventPart,
   RuntimeSubmissionState,
 } from "../runtime/runtime.port.js";
 import {
@@ -67,8 +66,6 @@ import {
   type RuntimeExecutionClaim,
   type RuntimeProviderCancellationOperation,
   type RuntimeProviderCancellationOperationSettlement,
-  type RuntimeProviderStateMode,
-  type RuntimeProviderStateShadowFinding,
 } from "../runtime/runtime-attempt.service.js";
 import {
   RuntimeBindingService,
@@ -89,7 +86,6 @@ import {
 } from "./canvas-staged-intents.js";
 import { RunEventStore } from "./run-event.store.js";
 import { assertGenerationKnowledgeEvidence } from "./generation-knowledge-evidence.js";
-import { lockRunStatus } from "./run-state-lock.js";
 import { runtimeProviderCancellationUnconfirmedCode } from "./runtime-cancellation-state.js";
 import {
   isPrototypeDraft,
@@ -224,20 +220,16 @@ export class RunProcessor {
       deadlineCancelMs?: number;
       cancellationPollIntervalMs?: number;
       cancellationQueryBatchSize?: number;
-      providerStateMode?: RuntimeProviderStateMode;
-      providerStateShadowReporter?: (finding: RuntimeProviderStateShadowFinding) => void;
     } = {},
   ) {
-    this.events = new RunEventStore(db);
+    this.events = new RunEventStore();
     this.bindings = new RuntimeBindingService(db, runtime);
     const leaseMs = execution.leaseMs ?? 45_000;
     this.attempts = new RuntimeAttemptService(
       db,
       leaseMs,
-      execution.providerStateMode ?? "projection-required",
-      execution.providerStateShadowReporter,
     );
-    this.prototypePatches = prototypePatches ?? new PrototypePatchService(db);
+    this.prototypePatches = prototypePatches ?? new PrototypePatchService();
     this.executionOwnerPrefix = execution.ownerPrefix ?? "runtime-worker";
     this.executionHeartbeatMs = execution.heartbeatMs ?? 15_000;
     this.executionMaximumWallClockMs = execution.maximumWallClockMs ?? 30 * 60_000;
@@ -753,7 +745,6 @@ export class RunProcessor {
   async cancel(
     runId: string,
     jobSignal?: AbortSignal,
-    retry = { retryCount: 0, retryLimit: 0 },
   ) {
     this.active.get(runId)?.abort(new RuntimeCancelledError());
     const run = await this.db.run.findUnique({
@@ -1433,18 +1424,6 @@ export class RunProcessor {
     }
   }
 
-  private async persistDelta(
-    claim: RuntimeExecutionClaim,
-    entryId: string,
-    fullText: string,
-    delta: string,
-  ) {
-    await this.db.$transaction(async (tx) => {
-      await this.assertActiveClaimTx(tx, claim);
-      await this.persistDeltaTx(tx, claim.runId, entryId, fullText, delta);
-    });
-  }
-
   private async persistDeltaTx(
     tx: Prisma.TransactionClient,
     runId: string,
@@ -1466,27 +1445,6 @@ export class RunProcessor {
     for (const chunk of messageDeltaChunks(delta)) {
       await this.events.append(tx, runId, "message.delta", { entryId, delta: chunk });
     }
-  }
-
-  private async persistArtifactDraft(
-    claim: RuntimeExecutionClaim,
-    event: Extract<RuntimeProgressEvent, { type: "artifact.draft" }>,
-    sources: RuntimeSource[],
-    designAssets: RuntimeDesignAsset[],
-    artifactTargets: RuntimeArtifactTarget[] = [],
-  ) {
-    await this.db.$transaction(async (tx) => {
-      await this.assertActiveClaimTx(tx, claim);
-      await this.persistArtifactDraftTx(
-        tx,
-        claim.runId,
-        claim.attemptId,
-        event,
-        sources,
-        designAssets,
-        artifactTargets,
-      );
-    });
   }
 
   private async persistArtifactDraftTx(
@@ -1539,7 +1497,6 @@ export class RunProcessor {
         return;
       }
 
-      validateRuntimeArtifactDraftOperation(request, event.draft);
       const target = event.draft.operation.kind === "revise"
         ? await lockRuntimeArtifactDraftTarget(tx, run, event.draft)
         : null;
@@ -4051,15 +4008,6 @@ function generationStagePresentation(stage: RunGenerationStage) {
   const presentation = generationStagePresentations[stage];
   if (!presentation) throw new Error("RUNTIME_GENERATION_STAGE_INVALID");
   return presentation;
-}
-
-export function publicErrorMessage(error: unknown) {
-  if (error instanceof RuntimeProviderContentFilterError) return error.message;
-  const controlledCode = controlledRuntimePublicErrorCode(error);
-  if (controlledCode) return controlledCode;
-  const providerStateCode = knownRuntimeProviderStateErrorCode(error);
-  if (providerStateCode) return providerStateCode;
-  return "Runtime execution failed";
 }
 
 function controlledRuntimePublicErrorCode(error: unknown): string | null {

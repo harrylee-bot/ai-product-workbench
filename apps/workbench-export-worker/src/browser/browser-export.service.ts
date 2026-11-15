@@ -17,7 +17,6 @@ export class BrowserExportService {
       const evidence = await page.evaluate(() => ({
         root: Boolean(document.getElementById("workbench-export-root")),
         title: document.title,
-        artifactCount: document.querySelectorAll("[data-artifact-version-id]").length,
         viewportWidth: document.documentElement.scrollWidth,
         viewportHeight: document.documentElement.scrollHeight,
       }));
@@ -55,9 +54,10 @@ export class BrowserExportService {
       ],
     });
     let context: BrowserContext | undefined;
-    const abort = () => void browser.close();
+    const abort = () => void browser.close().catch(() => undefined);
     signal?.addEventListener("abort", abort, { once: true });
     try {
+      if (signal?.aborted) throw abortError(signal);
       context = await browser.newContext({
         javaScriptEnabled: true,
         serviceWorkers: "block",
@@ -72,7 +72,10 @@ export class BrowserExportService {
       page.on("console", (message) => {
         if (message.type() === "error") errors.push(message.text().slice(0, 1_000));
       });
-      await page.route(/^(?:https?|wss?):/i, (route) => route.abort("blockedbyclient"));
+      await page.route(/^(?:https?|wss?):/i, (route) => {
+        errors.push(`EXPORT_NETWORK_REQUEST_BLOCKED:${route.request().url().slice(0, 240)}`);
+        return route.abort("blockedbyclient");
+      });
       return await operation(page, errors);
     } finally {
       signal?.removeEventListener("abort", abort);

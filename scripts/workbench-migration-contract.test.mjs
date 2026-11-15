@@ -131,7 +131,7 @@ test("document export packaging expands the old check without disabling guards o
 test("Canvas grant snapshot digest migration is append-only and fences legacy grants", async () => {
   const migrationEntries = await readdir(migrationsDirectory, { withFileTypes: true });
   const migrationCount = migrationEntries.filter((entry) => entry.isDirectory()).length;
-  assert.equal(migrationCount, 78, "candidate migration inventory must be updated explicitly");
+  assert.equal(migrationCount, 88, "candidate migration inventory must be updated explicitly");
   assert(migrationEntries.some((entry) => (
     entry.isDirectory()
     && entry.name === "20260719010000_canvas_grant_snapshot_digest"
@@ -555,4 +555,85 @@ test("database roles keep migrations separate from runtime DML", () => {
   assert.match(databaseRoleProvisioning, /REVOKE CREATE ON SCHEMA \$\{jobsSchema\}/u);
   assert.match(migratorEntrypoint, /--phase=bootstrap/u);
   assert.match(migratorEntrypoint, /--phase=grant/u);
+});
+
+
+test("prototype commands preserve delivery obligations and immutable content versions", async () => {
+  const sql = await readFile(new URL("../packages/workbench-db/prisma/migrations/20261115020000_prototype_durable_commands/migration.sql", import.meta.url), "utf8");
+  assert.match(sql, /^BEGIN;/u);
+  assert.match(sql, /COMMIT;\s*$/u);
+  assert.match(sql, /SET LOCAL lock_timeout = '5s'/u);
+  assert.match(sql, /CREATE TABLE "prototype_workflow_commands"/u);
+  assert.match(sql, /"delivered_at" TIMESTAMP/u);
+  assert.match(sql, /"result" JSONB/u);
+  assert.match(sql, /prototype_revisions_plan_version_key/u);
+  assert.match(sql, /DROP INDEX "prototype_revisions_plan_revision_key"/u);
+  assert.match(sql, /Ready prototype revision content is immutable/u);
+  assert.match(sql, /Prototype generation inputs are immutable/u);
+  assert.match(sql, /NEW\.generation_request IS DISTINCT FROM OLD\.generation_request/u);
+  assert.match(sql, /prototype_revisions_plan_project_fkey/u);
+  assert.match(sql, /SET search_path = pg_catalog, public/u);
+  assert.doesNotMatch(sql, /DROP TABLE|DELETE FROM/u);
+});
+
+test("prototype retries commit their enum addition without rewriting historical inputs", async () => {
+  const sql = await readFile(new URL("../packages/workbench-db/prisma/migrations/20261115030000_prototype_plan_retry/migration.sql", import.meta.url), "utf8");
+  assert.match(sql, /^BEGIN;/u);
+  assert.match(sql, /COMMIT;\s*$/u);
+  assert.match(sql, /ADD VALUE IF NOT EXISTS 'plan_retry'/u);
+  assert.doesNotMatch(sql, /UPDATE |DELETE |DROP TABLE|ALTER TABLE/u);
+});
+
+test("frozen prototype manifests are all-or-none immutable and commands have durable sequence ordering", async () => {
+  const sql = await readFile(new URL("../packages/workbench-db/prisma/migrations/20261115040000_prototype_frozen_preview/migration.sql", import.meta.url), "utf8");
+  assert.match(sql, /^BEGIN;/u);
+  assert.match(sql, /COMMIT;\s*$/u);
+  assert.match(sql, /ADD COLUMN sequence BIGSERIAL NOT NULL/u);
+  assert.match(sql, /prototype_workflow_commands_sequence_key/u);
+  assert.match(sql, /prototype_frozen_manifest_complete CHECK/u);
+  assert.match(sql, /built_artifact_byte_size > 0/u);
+  assert.match(sql, /Frozen prototype artifact manifest is immutable/u);
+  assert.match(sql, /SET search_path = pg_catalog, public/u);
+  assert.doesNotMatch(sql, /DELETE FROM|DROP TABLE/u);
+});
+
+
+test("frozen manifests reject SQL UNKNOWN from a missing media type", async () => {
+  const sql = await readFile(new URL("../packages/workbench-db/prisma/migrations/20261115050000_prototype_manifest_null_guard/migration.sql", import.meta.url), "utf8");
+  assert.match(sql, /built_artifact_media_type IS NOT NULL AND built_artifact_media_type =/u);
+  assert.match(sql, /length\(built_artifact_key\) > 0/u);
+  assert.doesNotMatch(sql, /DELETE FROM|UPDATE prototype_revisions/u);
+});
+
+
+test("prototype export executions are scoped to immutable commands and fenced on retry", async () => {
+  const sql = await readFile(new URL("../packages/workbench-db/prisma/migrations/20261115060000_prototype_export_command_fence/migration.sql", import.meta.url), "utf8");
+  assert.match(sql, /^BEGIN;/u);
+  assert.match(sql, /COMMIT;\s*$/u);
+  assert.match(sql, /ADD COLUMN active_command_id TEXT/u);
+  assert.match(sql, /FOREIGN KEY \(active_command_id, project_id, id\)/u);
+  assert.match(sql, /kind = 'export_start'/u);
+  assert.match(sql, /OLD.status <> 'failed' OR NEW.status <> 'queued'/u);
+  assert.match(sql, /command_sequence <= previous_sequence/u);
+  assert.match(sql, /SET search_path = pg_catalog AS/u);
+  assert.equal((sql.match(/EXECUTE format\('SELECT sequence FROM %I\.prototype_workflow_commands/gu) ?? []).length, 2);
+  assert.equal((sql.match(/TG_TABLE_SCHEMA\)/gu) ?? []).length, 2);
+  assert.match(sql, /INTO command_sequence USING NEW\.active_command_id, NEW\.project_id, NEW\.id, NEW\.revision_id, NEW\.format::text/u);
+  assert.match(sql, /INTO previous_sequence USING OLD\.active_command_id/u);
+  assert.doesNotMatch(sql.slice(sql.indexOf("CREATE FUNCTION")), /FROM prototype_workflow_commands|search_path = pg_catalog, public/u);
+  assert.doesNotMatch(sql, /DELETE FROM|DROP TABLE/u);
+});
+
+
+test("prototype build retries reuse only a successful immutable generation source in the active schema", async () => {
+  const sql = await readFile(new URL("../packages/workbench-db/prisma/migrations/20261115070000_prototype_build_retry_source/migration.sql", import.meta.url), "utf8");
+  assert.match(sql, /prototype_plans_retry_project_fkey/u);
+  assert.match(sql, /prototype_plans_reused_run_project_fkey/u);
+  assert.match(sql, /PROTOTYPE_RETRY_SOURCE_IMMUTABLE/u);
+  assert.match(sql, /source_run.status <> 'succeeded'/u);
+  assert.match(sql, /NEW.generation_request IS DISTINCT FROM source_run.request/u);
+  assert.match(sql, /SET search_path = pg_catalog AS/u);
+  assert.match(sql, /%I[.]prototype_plans/u);
+  assert.match(sql, /%I[.]runs/u);
+  assert.doesNotMatch(sql, /public[.](prototype_plans|runs)/u);
 });

@@ -10,7 +10,7 @@ import { fileURLToPath } from "node:url";
 import { setTimeout as delay } from "node:timers/promises";
 import { artifactVersionDetailSchema, canonicalJson } from "@workbench/workbench-contracts";
 import { unzipSync } from "fflate";
-import { assertPrdV2Structure } from "./workbench-prd-http-smoke.mjs";
+import { assertPrdStructure } from "./workbench-prd-http-smoke.mjs";
 
 const repository = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const terminal = new Set(["succeeded", "failed", "cancelled"]);
@@ -19,7 +19,7 @@ const prompt = [
   "这是隔离验收项目，无需追问。请基于项目知识库中的需求模板、渠道与安全规范，同时生成一份完整中文需求说明书和一份可交互网页原型。",
   "业务主题：已登录消费者的电商订单通知设置。需要通知开关、订单状态分类、发送结果记录、失败重试、权限反馈及完整性和一致性校验。",
   "通知开关沿用消费者现有设置，不新增默认状态；订单状态分类沿用订单中心既有分类，不新增或枚举分类。仅端内渠道启用，不投放 WAP/H5 或小程序。",
-  "先检索知识库并引用实际命中的资料，产物保留可追溯引用，不编造来源。PRD 使用 workbench.prd.v2，prototype 使用当前原型协议；原型包含设置页、记录页和可操作的切换或导航。",
+  "先检索知识库并引用实际命中的资料，产物保留可追溯引用，不编造来源。PRD 使用 workbench.prd.v3，prototype 使用当前原型协议；原型包含设置页、记录页和可操作的切换或导航。",
   "原型首屏为设置页，通知开关必须使用带可访问名称的原生 checkbox，并通过 value binding 绑定布尔变量；保持用户当前值，不通过跳页重置。设置页和记录页各有带固定中文名称的按钮，通过 navigate action 双向跳转。不要用外链、静态图片或装饰文字代替控件。",
   "按以上明确前提一次完成两种产物，不向外部服务发布，不发送消息。",
 ].join("\n");
@@ -199,7 +199,7 @@ export async function executeDeliveryHttpSmoke({ env = process.env, fetchImpl = 
       ensure(createHash("sha256").update(canonicalJson(version.content)).digest("hex") === version.checksum, "ARTIFACT_CHECKSUM_INVALID");
       versions[artifact.kind] = version;
     }
-    assertPrdV2Structure(versions.prd.content);
+    assertPrdStructure(versions.prd.content);
     ensure(versions.prd.citations.length > 0 && versions.prototype.citations.length > 0, "KNOWLEDGE_CITATIONS_MISSING");
     ensure(versions.prototype.content.screens?.length > 0, "PROTOTYPE_SCREENS_MISSING");
     pass("knowledge-grounded-joint-artifacts", { prdCitations: versions.prd.citations.length,

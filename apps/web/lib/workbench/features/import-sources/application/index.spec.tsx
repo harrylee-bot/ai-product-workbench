@@ -23,7 +23,7 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("../api-adapter", () => ({
-  useOptionalWorkbenchImportSourcesApi: () => mocks,
+  useWorkbenchImportSourcesApi: () => mocks,
 }));
 
 const timestamp = "2026-07-18T00:00:00.000Z";

@@ -4,7 +4,7 @@ import httpProxy from "http-proxy";
 
 import { createReplayGuard, verifySsoToken } from "./sso-token.mjs";
 
-export const IDENTITY_HEADER = "x-workbench-email";
+const IDENTITY_HEADER = "x-workbench-email";
 const SET_DEFAULT_LOCALE = Symbol("set-default-locale");
 
 export function createGatewayServer({
@@ -144,7 +144,7 @@ function hasCookie(header, name) {
     part.trim().startsWith(`${name}=`));
 }
 
-export async function getWorkbenchSession({ request, workbench, fetchImpl }) {
+async function getWorkbenchSession({ request, workbench, fetchImpl }) {
   const headers = new Headers({ accept: "application/json" });
   if (request.headers.cookie) headers.set("cookie", request.headers.cookie);
   if (request.headers["user-agent"]) {

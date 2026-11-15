@@ -1,0 +1,109 @@
+name: workbench-temporal
+
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "20m"
+    max-file: "3"
+
+x-database: &database
+  DB: postgres12
+  DB_PORT: "5432"
+  POSTGRES_SEEDS: temporal-postgres
+  POSTGRES_USER: temporal_owner
+  POSTGRES_PWD: ${WORKBENCH_TEMPORAL_DATABASE_PASSWORD:?WORKBENCH_TEMPORAL_DATABASE_PASSWORD is required}
+
+services:
+  temporal-postgres:
+    image: ${WORKBENCH_POSTGRES_IMAGE:?WORKBENCH_POSTGRES_IMAGE is required}
+    logging: *logging
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: temporal_admin
+      POSTGRES_DB: postgres
+      POSTGRES_PASSWORD: ${WORKBENCH_TEMPORAL_POSTGRES_ADMIN_PASSWORD:?WORKBENCH_TEMPORAL_POSTGRES_ADMIN_PASSWORD is required}
+      WORKBENCH_TEMPORAL_DATABASE_PASSWORD: ${WORKBENCH_TEMPORAL_DATABASE_PASSWORD:?WORKBENCH_TEMPORAL_DATABASE_PASSWORD is required}
+    volumes:
+      - temporal-postgres-data:/var/lib/postgresql/data
+      - ./workbench-temporal-postgres-init.sh:/docker-entrypoint-initdb.d/001-temporal.sh:ro
+    healthcheck:
+      test: [CMD-SHELL, "pg_isready -U temporal_admin -d postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    mem_limit: 512m
+    cpus: 1
+    networks: [persistence]
+
+  temporal-schema:
+    image: ${WORKBENCH_TEMPORAL_ADMIN_IMAGE:?WORKBENCH_TEMPORAL_ADMIN_IMAGE is required}
+    logging: *logging
+    restart: "no"
+    environment:
+      <<: *database
+      SQL_PASSWORD: ${WORKBENCH_TEMPORAL_DATABASE_PASSWORD:?WORKBENCH_TEMPORAL_DATABASE_PASSWORD is required}
+    entrypoint: [/bin/sh, /scripts/schema.sh]
+    volumes:
+      - ./workbench-temporal-schema.sh:/scripts/schema.sh:ro
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    tmpfs: [/tmp]
+    mem_limit: 256m
+    cpus: 1
+    networks: [persistence]
+
+  workbench-temporal:
+    image: ${WORKBENCH_TEMPORAL_SERVER_IMAGE:?WORKBENCH_TEMPORAL_SERVER_IMAGE is required}
+    logging: *logging
+    restart: unless-stopped
+    init: true
+    user: "1000:1000"
+    environment:
+      <<: *database
+    entrypoint: [/bin/sh, /scripts/server.sh]
+    volumes:
+      - ./workbench-temporal-server.sh:/scripts/server.sh:ro
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    tmpfs: ["/tmp:size=67108864,mode=1777"]
+    pids_limit: 256
+    mem_limit: 1g
+    cpus: 2
+    stop_grace_period: 45s
+    healthcheck:
+      test: [CMD, nc, -z, -w, "3", 127.0.0.1, "7233"]
+      interval: 10s
+      timeout: 5s
+      start_period: 30s
+      retries: 18
+    networks: [persistence, workbench-internal]
+
+  temporal-namespace:
+    image: ${WORKBENCH_TEMPORAL_ADMIN_IMAGE:?WORKBENCH_TEMPORAL_ADMIN_IMAGE is required}
+    logging: *logging
+    restart: "no"
+    environment:
+      TEMPORAL_ADDRESS: workbench-temporal:7233
+      TEMPORAL_NAMESPACE: ${WORKBENCH_TEMPORAL_NAMESPACE:?WORKBENCH_TEMPORAL_NAMESPACE is required}
+    entrypoint: [/bin/sh, /scripts/namespace.sh]
+    volumes:
+      - ./workbench-temporal-namespace.sh:/scripts/namespace.sh:ro
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    tmpfs: [/tmp]
+    mem_limit: 256m
+    cpus: 1
+    networks: [workbench-internal]
+
+volumes:
+  temporal-postgres-data:
+
+networks:
+  persistence:
+    internal: true
+  workbench-internal:
+    external: true
+    name: workbench_workbench-internal

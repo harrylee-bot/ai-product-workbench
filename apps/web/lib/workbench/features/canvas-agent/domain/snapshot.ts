@@ -11,12 +11,12 @@ import type { Viewport } from "@xyflow/system";
 
 import type { BoardFlowNode } from "../../../board";
 
-export const DEFAULT_CANVAS_AGENT_SELECTED_SCREEN_LIMIT = maximumCanvasScreenCount;
-export const DEFAULT_CANVAS_AGENT_VISIBLE_SCREEN_LIMIT = maximumCanvasScreenCount;
+const DEFAULT_CANVAS_AGENT_SELECTED_SCREEN_LIMIT = maximumCanvasScreenCount;
+const DEFAULT_CANVAS_AGENT_VISIBLE_SCREEN_LIMIT = maximumCanvasScreenCount;
 
 export type CanvasAgentScreenReference = CanvasScreenReference;
 
-export type CanvasAgentStageSize = {
+type CanvasAgentStageSize = {
   height: number;
   width: number;
 };
