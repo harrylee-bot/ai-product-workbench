@@ -1340,6 +1340,149 @@ components:
         - withdrawnAt
         - ingestionJob
       additionalProperties: false
+    ArtifactLinkEndpoint:
+      type: object
+      properties:
+        artifactId:
+          type: string
+          minLength: 1
+          maxLength: 128
+        artifactVersionId:
+          type: string
+          minLength: 1
+          maxLength: 128
+        version:
+          type: integer
+          exclusiveMinimum: 0
+        title:
+          type: string
+          minLength: 1
+          maxLength: 240
+        kind:
+          $ref: "#/components/schemas/ArtifactKind"
+        status:
+          $ref: "#/components/schemas/ArtifactVersionStatus"
+      required:
+        - artifactId
+        - artifactVersionId
+        - version
+        - title
+        - kind
+        - status
+      additionalProperties: false
+    ArtifactLink:
+      type: object
+      properties:
+        id:
+          type: string
+          minLength: 1
+          maxLength: 128
+        projectId:
+          type: string
+          minLength: 1
+          maxLength: 128
+        source:
+          $ref: "#/components/schemas/ArtifactLinkEndpoint"
+        target:
+          $ref: "#/components/schemas/ArtifactLinkEndpoint"
+        kind:
+          type: string
+          minLength: 1
+          maxLength: 80
+        label:
+          type:
+            - string
+            - "null"
+          maxLength: 240
+        origin:
+          type: string
+          enum:
+            - manual
+            - imported
+        revision:
+          type: integer
+          minimum: 0
+        createdAt:
+          type: string
+          format: date-time
+        removedAt:
+          type:
+            - string
+            - "null"
+          format: date-time
+      required:
+        - id
+        - projectId
+        - source
+        - target
+        - kind
+        - label
+        - origin
+        - revision
+        - createdAt
+        - removedAt
+      additionalProperties: false
+    ArtifactLinkKind:
+      type: string
+      enum:
+        - related
+        - reference
+        - derived
+        - variant
+    ArtifactLinkList:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/ArtifactLink"
+          maxItems: 100
+        nextCursor:
+          type:
+            - string
+            - "null"
+      required:
+        - items
+        - nextCursor
+      additionalProperties: false
+    ArtifactLinksQuery:
+      type: object
+      properties:
+        artifactVersionId:
+          type: string
+          minLength: 1
+          maxLength: 128
+        includeRemoved:
+          type: string
+          enum:
+            - "true"
+            - "false"
+          default: "false"
+        cursor:
+          type: string
+          minLength: 1
+          maxLength: 2048
+        limit:
+          type: integer
+          minimum: 1
+          maximum: 100
+          default: 30
+      additionalProperties: false
+    ArtifactLinkTarget:
+      type: object
+      properties:
+        artifactId:
+          type: string
+          minLength: 1
+          maxLength: 128
+        artifactVersionId:
+          type: string
+          minLength: 1
+          maxLength: 128
+      required:
+        - artifactId
+        - artifactVersionId
+      additionalProperties: false
     ArtifactList:
       type: object
       properties:
@@ -11595,6 +11738,28 @@ components:
       required:
         - checksum
       additionalProperties: false
+    CreateArtifactLinkRequest:
+      type: object
+      properties:
+        source:
+          $ref: "#/components/schemas/ArtifactLinkTarget"
+        target:
+          $ref: "#/components/schemas/ArtifactLinkTarget"
+        kind:
+          $ref: "#/components/schemas/ArtifactLinkKind"
+        label:
+          type:
+            - string
+            - "null"
+          minLength: 1
+          maxLength: 240
+          default: null
+      required:
+        - source
+        - target
+        - kind
+      additionalProperties: false
+      description: Source and target must identify two distinct ready versions of this project. The server validates artifact/version identity and permissions.
     CreateImageArtifactRequest:
       type: object
       properties:
@@ -11606,6 +11771,8 @@ components:
           type: string
           minLength: 1
           maxLength: 240
+        derivedFrom:
+          $ref: "#/components/schemas/ArtifactLinkTarget"
         source:
           type: object
           properties:
@@ -23921,6 +24088,10 @@ components:
       type: string
       minLength: 1
       maxLength: 128
+    ArtifactLinkId:
+      type: string
+      minLength: 1
+      maxLength: 128
     ShareId:
       type: string
       minLength: 1
@@ -24106,6 +24277,12 @@ components:
         $ref: "#/components/schemas/ReleaseId"
       required: true
       name: releaseId
+      in: path
+    ArtifactLinkId:
+      schema:
+        $ref: "#/components/schemas/ArtifactLinkId"
+      required: true
+      name: linkId
       in: path
     ShareId:
       schema:
@@ -26123,6 +26300,108 @@ paths:
         "404":
           $ref: "#/components/responses/Problem"
         "409":
+          $ref: "#/components/responses/Problem"
+  /projects/{projectId}/artifact-links:
+    get:
+      operationId: listArtifactLinks
+      summary: Fixed version relations in this project, with filter-bound cursor pagination
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - schema:
+            type: string
+            minLength: 1
+            maxLength: 128
+          required: false
+          name: artifactVersionId
+          in: query
+        - schema:
+            type: string
+            enum:
+              - "true"
+              - "false"
+            default: "false"
+          required: false
+          name: includeRemoved
+          in: query
+        - schema:
+            type: string
+            minLength: 1
+            maxLength: 2048
+          required: false
+          name: cursor
+          in: query
+        - schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 30
+          required: false
+          name: limit
+          in: query
+      responses:
+        "200":
+          description: Fixed version relations in this project, with filter-bound cursor pagination
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ArtifactLinkList"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+    post:
+      operationId: createArtifactLink
+      summary: Persisted relation between two ready versions in this project
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateArtifactLinkRequest"
+      responses:
+        "201":
+          description: Persisted relation between two ready versions in this project
+          headers:
+            ETag:
+              $ref: "#/components/headers/ETag"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ArtifactLink"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+        "409":
+          $ref: "#/components/responses/Problem"
+  /projects/{projectId}/artifact-links/{linkId}/remove:
+    post:
+      operationId: removeArtifactLink
+      summary: Removed relation; fixed endpoints and artifacts remain unchanged
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/ArtifactLinkId"
+        - $ref: "#/components/parameters/IfMatch"
+      responses:
+        "200":
+          description: Removed relation; fixed endpoints and artifacts remain unchanged
+          headers:
+            ETag:
+              $ref: "#/components/headers/ETag"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ArtifactLink"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+        "412":
+          $ref: "#/components/responses/Problem"
+        "428":
           $ref: "#/components/responses/Problem"
   /projects/{projectId}/artifacts:
     get:

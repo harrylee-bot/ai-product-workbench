@@ -44,6 +44,7 @@ import {
 } from "./prd-semantics";
 import { ImageEditor } from "./image-editor";
 import { ArtifactRelations } from "./relations";
+import { ArtifactLinks } from "./artifact-links";
 const documentDraftRecordSchema = z
   .object({
     version: z.literal(1),
@@ -710,6 +711,14 @@ export function DocumentView({
             {editing ? render(content) : <StructuredContent value={content} />}
           </article>
         )
+      )}
+      {value?.status === "ready" && !detail.error && (
+        <ArtifactLinks
+          key={versionId}
+          artifact={artifact}
+          versionId={versionId}
+          canEdit={canEdit}
+        />
       )}
     </>
   );

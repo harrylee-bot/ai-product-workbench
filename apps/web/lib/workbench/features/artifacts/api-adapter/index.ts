@@ -1,6 +1,11 @@
 "use client";
 
 import {
+  artifactLinkSchema,
+  artifactLinkListSchema,
+  artifactLinksQuerySchema,
+  createArtifactLinkRequestSchema,
+  type CreateArtifactLinkRequest,
   artifactVersionRelationsSchema,
   artifactCreationSchema,
   artifactFinalizationStateSchema,
@@ -53,6 +58,29 @@ import type { ArtifactListOptions } from "../domain";
 
 export class WorkbenchArtifactsApi {
   constructor(private readonly api: WorkbenchApiClient) {}
+
+  async listArtifactLinks(projectId: string, options: CursorPageOptions & {artifactVersionId?: string; includeRemoved?: boolean} = {}) {
+    const query = artifactLinksQuerySchema.parse({...options, includeRemoved: options.includeRemoved ? "true" : "false"});
+    const result = await this.api.GET("/projects/{projectId}/artifact-links", {params: {path: {projectId}, query}});
+    const page = parseContract(artifactLinkListSchema, result.data, "list artifact links");
+    if (page.items.some(link => link.projectId !== projectId || (!options.includeRemoved && link.removedAt) || (options.artifactVersionId && ![link.source.artifactVersionId,link.target.artifactVersionId].includes(options.artifactVersionId)))) throw new WorkbenchContractError("artifact link list scope");
+    return page;
+  }
+
+  async createArtifactLink(projectId: string, request: CreateArtifactLinkRequest, idempotencyKey: string) {
+    const body = createArtifactLinkRequestSchema.parse(request);
+    const result = await this.api.POST("/projects/{projectId}/artifact-links", {params: {path: {projectId}, header: {"Idempotency-Key": normalizeIdempotencyKey(idempotencyKey)}}, body});
+    const value = versioned(artifactLinkSchema, result.data, result.response, "create artifact link");
+    if (value.value.projectId !== projectId || value.value.source.artifactId !== body.source.artifactId || value.value.source.artifactVersionId !== body.source.artifactVersionId || value.value.target.artifactId !== body.target.artifactId || value.value.target.artifactVersionId !== body.target.artifactVersionId || value.value.kind !== body.kind || value.value.label !== body.label) throw new WorkbenchContractError("artifact link creation identity");
+    return value;
+  }
+
+  async removeArtifactLink(projectId: string, linkId: string, ifMatch: string) {
+    const result = await this.api.POST("/projects/{projectId}/artifact-links/{linkId}/remove", {params: {path: {projectId, linkId}, header: {"If-Match": normalizeEtag(ifMatch)}}});
+    const value = versioned(artifactLinkSchema, result.data, result.response, "remove artifact link");
+    if (value.value.projectId !== projectId || value.value.id !== linkId || !value.value.removedAt) throw new WorkbenchContractError("artifact link removal identity");
+    return value;
+  }
 
   async getFinalization(artifactId: string, artifactVersionId: string) {
     const result = await this.api.GET("/artifacts/{artifactId}/versions/{artifactVersionId}/finalization", {

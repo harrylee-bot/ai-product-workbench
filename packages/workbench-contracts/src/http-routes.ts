@@ -2,6 +2,7 @@ import { z, type ZodTypeAny } from "zod";
 import { artifactFinalizationStateSchema, confirmArtifactFinalizationRequestSchema } from "./finalizations.js";
 import {
   artifactKindSchema,
+  artifactLinkSchema, artifactLinkListSchema, artifactLinksQuerySchema, createArtifactLinkRequestSchema,
   artifactRelationsQuerySchema, artifactVersionRelationsSchema, prototypeRevisionRelationsSchema,
   artifactCreationSchema,
   artifactListSchema,
@@ -709,6 +710,20 @@ export const workbenchHttpRoutes = [
     requestHeaders: ["idempotencyKey"], requestBody: named("ImportDesignSystemRequest", importDesignSystemRequestSchema),
     response: response(201, "Immutable Design System version imported into the target Project", named("DesignSystemImport", designSystemImportSchema), ["location"]),
     problemStatuses: problems(400, 404, 409),
+  },
+  {
+    method:"get", path:"/projects/{projectId}/artifact-links", operationId:"listArtifactLinks",
+    query:artifactLinksQuerySchema,
+    response:response(200,"Fixed version relations in this project, with filter-bound cursor pagination",named("ArtifactLinkList",artifactLinkListSchema)),problemStatuses:problems(400,404),
+  },
+  {
+    method:"post", path:"/projects/{projectId}/artifact-links", operationId:"createArtifactLink",
+    requestHeaders:["idempotencyKey"],requestBody:named("CreateArtifactLinkRequest",createArtifactLinkRequestSchema),
+    response:response(201,"Persisted relation between two ready versions in this project",named("ArtifactLink",artifactLinkSchema),["etag"]),problemStatuses:problems(400,404,409),
+  },
+  {
+    method:"post",path:"/projects/{projectId}/artifact-links/{linkId}/remove",operationId:"removeArtifactLink",
+    requestHeaders:["ifMatch"],response:response(200,"Removed relation; fixed endpoints and artifacts remain unchanged",named("ArtifactLink",artifactLinkSchema),["etag"]),problemStatuses:problems(400,404,412,428),
   },
   {
     method: "get", path: "/projects/{projectId}/artifacts", operationId: "listArtifacts",

@@ -1,3 +1,5 @@
+import { ArtifactLinksService } from "./artifact-links.service.js";
+import { ArtifactLinksController } from "./artifact-links.controller.js";
 import { Module } from "@nestjs/common";
 import { AccessModule } from "../access/access.module.js";
 import { IdentityModule } from "../identity/identity.module.js";
@@ -11,8 +13,8 @@ import { ArtifactFinalizationsService } from "./artifact-finalizations.service.j
 
 @Module({
   imports: [AccessModule, IdentityModule, ObjectStorageModule],
-  controllers: [ArtifactsController, ArtifactVersionPreferencesController, ArtifactFinalizationsController],
-  providers: [ArtifactsService, ArtifactVersionPreferencesService, ArtifactFinalizationsService],
+  controllers: [ArtifactLinksController, ArtifactsController, ArtifactVersionPreferencesController, ArtifactFinalizationsController],
+  providers: [ArtifactLinksService, ArtifactsService, ArtifactVersionPreferencesService, ArtifactFinalizationsService],
   exports: [ArtifactsService],
 })
 export class ArtifactsModule {}

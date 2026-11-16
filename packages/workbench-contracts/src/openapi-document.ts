@@ -313,6 +313,7 @@ const reviewedCheckSchemas: readonly ReviewedCheck[] = [
   { label: "SourcePrototype.build.bytes", schema: sourcePrototypeSchemas.sourcePrototypeBuildSchema.shape.html, description: "Compiled source prototype HTML remains within the bounded UTF-8 preview size." },
   { label: "SourcePrototype.document.integrity", schema: sourcePrototypeSchemas.sourcePrototypeDocumentSchema, description: "Persisted source prototype documents retain the same bounded project integrity as their input." },
   { label: "CreateSourcePrototypeArtifact.title", schema: artifactSchemas.createSourcePrototypeArtifactRequestSchema, description: "The source prototype artifact title must equal the immutable source document title." },
+  { label: "CreateArtifactLink.distinctVersions", schema: artifactSchemas.createArtifactLinkRequestSchema, description: "Source and target must identify two distinct ready versions of this project. The server validates artifact/version identity and permissions." },
   { label: "CreatePrototypeRevisionPlan.feedbackIds", schema: visualPrototypeSchemas.createPrototypeRevisionPlanRequestSchema, description: "Selected feedback ids are unique; transactional validation binds them to the exact source revision and editor permission." },
   { label: "PrototypeProgress.identity", schema: visualPrototypeSchemas.prototypeProgressSchema, description: "Snapshot Run and seed events must share project, request, thread and current attempt; seed cursors cannot exceed the authoritative Run cursor." },
   { label: "PrototypeRevision.pages", schema: visualPrototypeSchemas.prototypeRevisionSchema, description: "Visual Prototype revisions contain unique page ids and bounded per-page DOM fragments; the complete executable document is provided once as verified previewHtml." },
@@ -668,6 +669,7 @@ export function buildWorkbenchOpenApiDocument() {
     ["CommandId", canvasAgentSchemas.canvasAgentIdSchema, { name: "commandId", in: "path" }],
     ["VisualCapabilityId", canvasAgentSchemas.canvasAgentIdSchema, { name: "visualCapabilityId", in: "path" }],
     ["ReleaseId", commonSchemas.opaqueIdSchema, { name: "releaseId", in: "path" }],
+    ["ArtifactLinkId", commonSchemas.opaqueIdSchema, { name: "linkId", in: "path" }],
     ["ShareId", commonSchemas.opaqueIdSchema, { name: "shareId", in: "path" }],
     ["ExportId", commonSchemas.opaqueIdSchema, { name: "exportId", in: "path" }],
     ["PreviewId", commonSchemas.opaqueIdSchema, { name: "previewId", in: "path" }],
@@ -732,6 +734,7 @@ export function buildWorkbenchOpenApiDocument() {
     lastEventId: { $ref: "#/components/parameters/LastEventId" },
   };
   const pathParameterNames: Readonly<Record<string, string>> = {
+    linkId: "ArtifactLinkId",
     workspaceId: "WorkspaceId", projectId: "ProjectId", principalId: "PrincipalId", invitationId: "InvitationId",
     profileType: "KnowledgeProfileType", profileId: "KnowledgeProfileId",
     threadId: "ThreadId", intentId: "SubmissionIntentId", runId: "RunId",

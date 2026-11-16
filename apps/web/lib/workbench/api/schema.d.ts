@@ -1001,6 +1001,41 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/projects/{projectId}/artifact-links": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Fixed version relations in this project, with filter-bound cursor pagination */
+        get: operations["listArtifactLinks"];
+        put?: never;
+        /** Persisted relation between two ready versions in this project */
+        post: operations["createArtifactLink"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/projects/{projectId}/artifact-links/{linkId}/remove": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Removed relation; fixed endpoints and artifacts remain unchanged */
+        post: operations["removeArtifactLink"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/projects/{projectId}/artifacts": {
         parameters: {
             query?: never;
@@ -2483,6 +2518,50 @@ export interface components {
                 }[];
             } | null;
         } | null;
+        ArtifactLinkEndpoint: {
+            artifactId: string;
+            artifactVersionId: string;
+            version: number;
+            title: string;
+            kind: components["schemas"]["ArtifactKind"];
+            status: components["schemas"]["ArtifactVersionStatus"];
+        };
+        ArtifactLink: {
+            id: string;
+            projectId: string;
+            source: components["schemas"]["ArtifactLinkEndpoint"];
+            target: components["schemas"]["ArtifactLinkEndpoint"];
+            kind: string;
+            label: string | null;
+            /** @enum {string} */
+            origin: "manual" | "imported";
+            revision: number;
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            removedAt: string | null;
+        };
+        /** @enum {string} */
+        ArtifactLinkKind: "related" | "reference" | "derived" | "variant";
+        ArtifactLinkList: {
+            items: components["schemas"]["ArtifactLink"][];
+            nextCursor: string | null;
+        };
+        ArtifactLinksQuery: {
+            artifactVersionId?: string;
+            /**
+             * @default false
+             * @enum {string}
+             */
+            includeRemoved: "true" | "false";
+            cursor?: string;
+            /** @default 30 */
+            limit: number;
+        };
+        ArtifactLinkTarget: {
+            artifactId: string;
+            artifactVersionId: string;
+        };
         ArtifactList: {
             items: components["schemas"]["Artifact"][];
             nextCursor: string | null;
@@ -5407,10 +5486,19 @@ export interface components {
         ConfirmArtifactFinalizationRequest: {
             checksum: string;
         };
+        /** @description Source and target must identify two distinct ready versions of this project. The server validates artifact/version identity and permissions. */
+        CreateArtifactLinkRequest: {
+            source: components["schemas"]["ArtifactLinkTarget"];
+            target: components["schemas"]["ArtifactLinkTarget"];
+            kind: components["schemas"]["ArtifactLinkKind"];
+            /** @default null */
+            label: string | null;
+        };
         CreateImageArtifactRequest: {
             /** @enum {string} */
             kind: "image";
             title: string;
+            derivedFrom?: components["schemas"]["ArtifactLinkTarget"];
             source: {
                 /** @enum {string} */
                 kind: "file";
@@ -9007,6 +9095,7 @@ export interface components {
         /** @description Canvas entity ids are bounded opaque identifiers and cannot be URI schemes; enforced by the runtime Zod contract. */
         VisualCapabilityId: string;
         ReleaseId: string;
+        ArtifactLinkId: string;
         ShareId: string;
         ExportId: string;
         PreviewId: string;
@@ -9066,6 +9155,7 @@ export interface components {
         /** @description Canvas entity ids are bounded opaque identifiers and cannot be URI schemes; enforced by the runtime Zod contract. */
         VisualCapabilityId: components["schemas"]["VisualCapabilityId"];
         ReleaseId: components["schemas"]["ReleaseId"];
+        ArtifactLinkId: components["schemas"]["ArtifactLinkId"];
         ShareId: components["schemas"]["ShareId"];
         ExportId: components["schemas"]["ExportId"];
         PreviewId: components["schemas"]["PreviewId"];
@@ -11160,6 +11250,97 @@ export interface operations {
             400: components["responses"]["Problem"];
             404: components["responses"]["Problem"];
             409: components["responses"]["Problem"];
+        };
+    };
+    listArtifactLinks: {
+        parameters: {
+            query?: {
+                artifactVersionId?: string;
+                includeRemoved?: "true" | "false";
+                cursor?: string;
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                projectId: components["parameters"]["ProjectId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Fixed version relations in this project, with filter-bound cursor pagination */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ArtifactLinkList"];
+                };
+            };
+            400: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+        };
+    };
+    createArtifactLink: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                projectId: components["parameters"]["ProjectId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateArtifactLinkRequest"];
+            };
+        };
+        responses: {
+            /** @description Persisted relation between two ready versions in this project */
+            201: {
+                headers: {
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ArtifactLink"];
+                };
+            };
+            400: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            409: components["responses"]["Problem"];
+        };
+    };
+    removeArtifactLink: {
+        parameters: {
+            query?: never;
+            header: {
+                "If-Match": components["parameters"]["IfMatch"];
+            };
+            path: {
+                projectId: components["parameters"]["ProjectId"];
+                linkId: components["parameters"]["ArtifactLinkId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Removed relation; fixed endpoints and artifacts remain unchanged */
+            200: {
+                headers: {
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ArtifactLink"];
+                };
+            };
+            400: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            412: components["responses"]["Problem"];
+            428: components["responses"]["Problem"];
         };
     };
     listArtifacts: {

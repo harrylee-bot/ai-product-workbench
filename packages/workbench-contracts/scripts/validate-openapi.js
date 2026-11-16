@@ -63,11 +63,11 @@ function requiresPositiveInteger(schema) {
 
 if (contract.openapi !== "3.1.0") throw new Error("The Workbench contract must use OpenAPI 3.1.0");
 if (!contract.paths || Object.keys(contract.paths).length === 0) throw new Error("The Workbench contract has no paths");
-assert(Object.keys(contract.paths).length === 123, "Workbench v1 must expose exactly 123 resource paths including fixed PRD relations and per-artifact outputs");
+assert(Object.keys(contract.paths).length === 125, "Workbench v1 must expose exactly 125 resource paths including fixed artifact version links");
 const operationCount = Object.values(contract.paths).reduce((count, pathItem) => (
   count + ["get", "post", "put", "patch", "delete"].filter((method) => pathItem?.[method]).length
 ), 0);
-assert(operationCount === 149, "Workbench v1 must expose exactly 149 generated operations including fixed PRD relations and per-artifact outputs");
+assert(operationCount === 152, "Workbench v1 must expose exactly 152 generated operations including fixed artifact version links");
 const feedbackLocations = contract.paths["/projects/{projectId}/prototype-v2/revisions/{revisionId}/feedback-locations"]?.get;
 assert(feedbackLocations?.responses?.["200"]?.content?.["application/json"]?.schema?.$ref === "#/components/schemas/PrototypeFeedbackLocations", "Feedback locations must return the source-bound resolution contract");
 assert(feedbackLocations.parameters?.some((parameter) => parameter.name === "sourceRevisionId" && parameter.in === "query" && parameter.required), "Feedback locations must require an explicit source revision");

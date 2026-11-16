@@ -78,6 +78,36 @@ export const artifactRelationVersionSchema = artifactVersionReferenceSchema.exte
   status: artifactVersionStatusSchema, createdByRunId: opaqueIdSchema.nullable(),
   prototypeRevision: z.object({ id: opaqueIdSchema, planId: opaqueIdSchema, version: z.number().int().positive() }).strict().nullable(),
 }).strict();
+export const artifactLinkTargetSchema = z.object({artifactId: opaqueIdSchema, artifactVersionId: opaqueIdSchema}).strict();
+export const artifactLinkKindSchema = z.enum(["related", "reference", "derived", "variant"]);
+export const createArtifactLinkRequestSchema = z.object({
+  source: artifactLinkTargetSchema,
+  target: artifactLinkTargetSchema,
+  kind: artifactLinkKindSchema,
+  label: z.string().trim().min(1).max(240).nullable().default(null),
+}).strict().refine(value => value.source.artifactVersionId !== value.target.artifactVersionId, "A relation must connect two distinct versions");
+export const artifactLinkEndpointSchema = artifactVersionReferenceSchema.extend({
+  title: z.string().min(1).max(240), kind: artifactKindSchema, status: artifactVersionStatusSchema,
+}).strict();
+export const artifactLinkSchema = z.object({
+  id: opaqueIdSchema, projectId: opaqueIdSchema,
+  source: artifactLinkEndpointSchema, target: artifactLinkEndpointSchema,
+  kind: z.string().min(1).max(80), label: z.string().max(240).nullable(),
+  origin: z.enum(["manual", "imported"]),
+  revision: z.number().int().nonnegative(),
+  createdAt: isoDateTimeSchema, removedAt: isoDateTimeSchema.nullable(),
+}).strict();
+export const artifactLinksQuerySchema = z.object({
+  artifactVersionId: opaqueIdSchema.optional(),
+  includeRemoved: z.enum(["true", "false"]).default("false"),
+  cursor: z.string().min(1).max(2048).optional(),
+  limit: z.coerce.number().int().min(1).max(100).default(30),
+}).strict();
+export const artifactLinkListSchema = z.object({items: z.array(artifactLinkSchema).max(100), nextCursor: z.string().nullable()}).strict();
+export type ArtifactLink = z.infer<typeof artifactLinkSchema>;
+export type CreateArtifactLinkRequest = z.infer<typeof createArtifactLinkRequestSchema>;
+export type ArtifactLinkList = z.infer<typeof artifactLinkListSchema>;
+
 export const artifactRelationsQuerySchema = z.object({
   cursor: z.string().min(1).max(2048).optional(), limit: z.coerce.number().int().min(1).max(100).default(30),
 }).strict();
@@ -443,6 +473,7 @@ export const createArtifactVersionRequestSchema: z.ZodType<CreateArtifactVersion
 export const createImageArtifactRequestSchema = z.object({
   kind: z.literal("image"),
   title: z.string().trim().min(1).max(240),
+  derivedFrom: artifactLinkTargetSchema.optional(),
   source: z.object({
     kind: z.literal("file"),
     fileAssetId: opaqueIdSchema,

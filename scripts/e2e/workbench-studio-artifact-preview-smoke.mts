@@ -411,6 +411,8 @@ await context.route("**/api/**", (route) => {
       return json(route, share);
   }
   if (authenticated) {
+    if (path.endsWith("/artifact-links"))
+      return json(route, { items: [], nextCursor: null });
     if (path.endsWith("/identity/me"))
       return json(route, {
         id: "viewer-one",

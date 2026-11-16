@@ -10,6 +10,7 @@ import Cropper, { type Area } from "react-easy-crop";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   maximumUserUploadByteSize,
+  artifactLinkTargetSchema,
   type Artifact,
 } from "@workbench/workbench-contracts";
 import { useWorkbenchArtifactsApi } from "@/lib/studio/api";
@@ -29,7 +30,13 @@ const imageWriteRecordSchema = z
     key: z.string().min(1),
     fileAssetId: z.string().min(1),
     target: z.discriminatedUnion("kind", [
-      z.object({ kind: z.literal("new"), title: z.string().min(1) }).strict(),
+      z
+        .object({
+          kind: z.literal("new"),
+          title: z.string().min(1),
+          derivedFrom: artifactLinkTargetSchema.optional(),
+        })
+        .strict(),
       z
         .object({
           kind: z.literal("version"),
@@ -161,6 +168,9 @@ export function ImageEditor({
               {
                 kind: "image",
                 title: target.title,
+                ...(target.derivedFrom
+                  ? { derivedFrom: target.derivedFrom }
+                  : {}),
                 source: { kind: "file", fileAssetId: command.fileAssetId },
               },
               command.key,
@@ -178,6 +188,9 @@ export function ImageEditor({
     await Promise.all([
       client.invalidateQueries({
         queryKey: workbenchQueryKeys.artifacts(projectId),
+      }),
+      client.invalidateQueries({
+        queryKey: ["studio", "artifact-links", projectId],
       }),
       client.invalidateQueries({
         queryKey: workbenchQueryKeys.bootstraps(projectId),
@@ -290,7 +303,18 @@ export function ImageEditor({
                 baseVersionId: expected.current.versionId,
                 etag: `"${expected.current.revision}"`,
               }
-            : { kind: "new", title: title.trim() },
+            : {
+                kind: "new",
+                title: title.trim(),
+                ...(source
+                  ? {
+                      derivedFrom: {
+                        artifactId: source.artifact.id,
+                        artifactVersionId: source.versionId,
+                      },
+                    }
+                  : {}),
+              },
       };
       local.save(command);
       await write(command);

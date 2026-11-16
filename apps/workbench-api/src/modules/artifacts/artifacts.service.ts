@@ -1,4 +1,5 @@
 import { relationVersion, relationVersionSelect } from "./artifact-relations.js";
+import { createArtifactLinkInTransaction } from "./artifact-links.service.js";
 import { createHash } from "node:crypto";
 import { Inject, Injectable } from "@nestjs/common";
 import {
@@ -249,6 +250,10 @@ export class ArtifactsService {
         if (await tx.sourcePrototypeCreationReceipt.findUnique({ where: { projectId_idempotencyKey: { projectId, idempotencyKey } } })) throw idempotencyConflictProblem();
 
         const sourceFile = await requireReadyImageFile(tx, projectId, command.source.fileAssetId);
+        if (command.derivedFrom && !await tx.artifactVersion.findFirst({ where: {
+          id: command.derivedFrom.artifactVersionId, artifactId: command.derivedFrom.artifactId,
+          projectId, status: "ready", artifact: { kind: "image" },
+        }, select: { id: true } })) throw notFoundProblem("Source image version");
 
         const artifact = await tx.artifact.create({
           data: { projectId, kind: "image", title: command.title },
@@ -274,6 +279,11 @@ export class ArtifactsService {
           where: { id: artifact.id },
           data: { currentVersionId: readyVersion.id },
           select: artifactCreationArtifactSelect,
+        });
+        if (command.derivedFrom) await createArtifactLinkInTransaction(tx, principalId, projectId, `image-lineage:${readyVersion.id}`, {
+          source: command.derivedFrom,
+          target: {artifactId: readyArtifact.id, artifactVersionId: readyVersion.id},
+          kind: "derived", label: "图片另存",
         });
         await tx.artifactCreationReceipt.create({
           data: {

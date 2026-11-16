@@ -11,13 +11,19 @@ import {
   createFileUploadResponseSchema,
   signUploadPartResponseSchema,
   completeFileUploadResponseSchema,
+  createArtifactLinkRequestSchema,
+  artifactLinkSchema,
 } from "@workbench/workbench-contracts";
+import { runStudioLinkChecks } from "./workbench-studio-links-checks.mjs";
 const recovery = process.env.WORKBENCH_E2E_MEDIA_RECOVERY === "1";
+const linkChecks = process.env.WORKBENCH_E2E_ARTIFACT_LINKS === "1";
 const origin = process.env.WORKBENCH_E2E_WEB_ORIGIN ?? "http://127.0.0.1:18930",
   output = new URL(
-    recovery
-      ? "../../output/audit/1.0.0/studio-media-recovery/"
-      : "../../output/audit/1.0.0/studio-media/",
+    linkChecks
+      ? "../../output/audit/1.0.0/studio-links-browser/"
+      : recovery
+        ? "../../output/audit/1.0.0/studio-media-recovery/"
+        : "../../output/audit/1.0.0/studio-media/",
     import.meta.url,
   );
 await mkdir(output, { recursive: true });
@@ -54,6 +60,9 @@ const thread = {
   updatedAt: now,
 };
 const artifacts = [],
+  artifactLinks = [],
+  linkReceipts = new Map(),
+  linkWrites = [],
   versions = new Map(),
   files = new Map(),
   receipts = new Map(),
@@ -65,6 +74,37 @@ let uploadCount = 0,
   loseVersion = true,
   slowPart = false,
   role = "owner";
+let loseLink = false,
+  loseRemoval = false,
+  failLinkPage = false;
+function linkEndpoint(target) {
+  const a = artifacts.find((item) => item.id === target.artifactId),
+    v = versions.get(target.artifactVersionId);
+  assert(a && v && v.summary.artifactId === a.id);
+  return {
+    ...target,
+    version: v.summary.version,
+    title: a.title,
+    kind: a.kind,
+    status: v.summary.status,
+  };
+}
+function addLink(request, id = `link-${artifactLinks.length + 1}`) {
+  const link = artifactLinkSchema.parse({
+    id,
+    projectId,
+    source: linkEndpoint(request.source),
+    target: linkEndpoint(request.target),
+    kind: request.kind,
+    label: request.label ?? null,
+    origin: "manual",
+    revision: 0,
+    createdAt: now,
+    removedAt: null,
+  });
+  artifactLinks.unshift(link);
+  return link;
+}
 const results = {
   evidence:
     "Real new Studio, Uppy multipart upload and actual decoded/cropped PNG bytes, controlled API/storage responses; not production acceptance",
@@ -183,6 +223,78 @@ await context.route("**/api/**", async (route) => {
       updatedAt: null,
     });
   if (path.endsWith("/bootstrap")) return json(route, bootstrap());
+  if (path === `/api/v1/projects/${projectId}/artifact-links`) {
+    if (method === "GET") {
+      const cursor = Number(url.searchParams.get("cursor") ?? "0"),
+        limit = Number(url.searchParams.get("limit") ?? "30"),
+        versionId = url.searchParams.get("artifactVersionId");
+      if (cursor && failLinkPage) {
+        failLinkPage = false;
+        return json(
+          route,
+          { status: 503, title: "Link page unavailable", type: "about:blank" },
+          503,
+        );
+      }
+      const items = artifactLinks.filter(
+        (link) =>
+          (!versionId ||
+            [
+              link.source.artifactVersionId,
+              link.target.artifactVersionId,
+            ].includes(versionId)) &&
+          (url.searchParams.get("includeRemoved") === "true" ||
+            !link.removedAt),
+      );
+      return json(route, {
+        items: items.slice(cursor, cursor + limit),
+        nextCursor:
+          cursor + limit < items.length ? String(cursor + limit) : null,
+      });
+    }
+    const key = request.headers()["idempotency-key"],
+      body = createArtifactLinkRequestSchema.parse(request.postDataJSON());
+    linkWrites.push({ key, body });
+    if (linkReceipts.has(key)) {
+      const prior = linkReceipts.get(key);
+      assert.deepEqual(prior.body, body);
+      return json(route, prior.link, 201, `"${prior.link.revision}"`);
+    }
+    const link = addLink(body);
+    linkReceipts.set(key, { body, link });
+    if (loseLink) {
+      loseLink = false;
+      return json(
+        route,
+        { status: 503, title: "Link response lost", type: "about:blank" },
+        503,
+      );
+    }
+    return json(route, link, 201, '"0"');
+  }
+  if (
+    path.startsWith(`/api/v1/projects/${projectId}/artifact-links/`) &&
+    path.endsWith("/remove")
+  ) {
+    const link = artifactLinks.find((item) =>
+      path.endsWith(`/${item.id}/remove`),
+    );
+    assert(link);
+    if (!link.removedAt) {
+      assert.equal(request.headers()["if-match"], `"${link.revision}"`);
+      link.removedAt = now;
+      link.revision++;
+    }
+    if (loseRemoval) {
+      loseRemoval = false;
+      return json(
+        route,
+        { status: 503, title: "Remove response lost", type: "about:blank" },
+        503,
+      );
+    }
+    return json(route, link, 200, `"${link.revision}"`);
+  }
   if (path.endsWith("/runtime/models") || path.endsWith("/design-presets"))
     return json(route, { items: [] });
   if (path.endsWith("/submission-intents/current"))
@@ -307,8 +419,15 @@ await context.route("**/api/**", async (route) => {
     return json(route, f.upload, 200, `"${f.upload.revision}"`);
   }
   if (path === `/api/v1/projects/${projectId}/artifacts`) {
-    if (method === "GET")
-      return json(route, { items: artifacts, nextCursor: null });
+    if (method === "GET") {
+      const offset = Number(url.searchParams.get("cursor") ?? "0"),
+        limit = Number(url.searchParams.get("limit") ?? "30");
+      return json(route, {
+        items: artifacts.slice(offset, offset + limit),
+        nextCursor:
+          offset + limit < artifacts.length ? String(offset + limit) : null,
+      });
+    }
     const body = request.postDataJSON(),
       key = request.headers()["idempotency-key"];
     writeKeys.push({ kind: "create", key, body });
@@ -329,6 +448,16 @@ await context.route("**/api/**", async (route) => {
     const detail = createVersion(a, f, 1);
     artifactSchema.parse(a);
     artifacts.push(a);
+    if (body.derivedFrom)
+      addLink({
+        source: body.derivedFrom,
+        target: {
+          artifactId: a.id,
+          artifactVersionId: detail.artifactVersionId,
+        },
+        kind: "derived",
+        label: "图片另存",
+      });
     const response = artifactCreationSchema.parse({
       artifact: a,
       artifactVersion: detail,
@@ -356,13 +485,19 @@ await context.route("**/api/**", async (route) => {
   );
   if (a) {
     if (path.endsWith("/versions")) {
-      if (method === "GET")
+      if (method === "GET") {
+        const offset = Number(url.searchParams.get("cursor") ?? "0"),
+          limit = Number(url.searchParams.get("limit") ?? "30");
+        const all = [...versions.values()]
+          .filter((v) => v.summary.artifactId === a.id)
+          .map((v) => ({ ...v.summary, contentMode: "blob" }))
+          .sort((a, b) => b.version - a.version);
         return json(route, {
-          items: [...versions.values()]
-            .filter((v) => v.summary.artifactId === a.id)
-            .map((v) => ({ ...v.summary, contentMode: "blob" })),
-          nextCursor: null,
+          items: all.slice(offset, offset + limit),
+          nextCursor:
+            offset + limit < all.length ? String(offset + limit) : null,
         });
+      }
       const body = request.postDataJSON(),
         key = request.headers()["idempotency-key"];
       writeKeys.push({ kind: "version", key, body });
@@ -607,6 +742,46 @@ try {
   results.checks.push(
     "viewer sees verified media but has no upload or edit actions",
   );
+  if (linkChecks)
+    await runStudioLinkChecks({
+      page,
+      origin,
+      projectId,
+      output,
+      results,
+      artifacts,
+      versions,
+      files,
+      createVersion,
+      addLink,
+      artifactLinks,
+      linkWrites,
+      writeKeys,
+      controls: {
+        setRole: (value) => {
+          role = value;
+        },
+        loseCreation: () => {
+          loseCreation = true;
+        },
+        loseLink: () => {
+          loseLink = true;
+        },
+        loseRemoval: () => {
+          loseRemoval = true;
+        },
+        failLinkPage: () => {
+          failLinkPage = true;
+        },
+        allowUpload: () => {
+          slowPart = false;
+        },
+      },
+      counts: () => ({ uploadCount, artifactWrites, versionWrites }),
+      now,
+    });
+  assert.deepEqual(results.unknown, []);
+  assert.deepEqual(results.errors, []);
   results.status = "passed";
 } catch (error) {
   results.status = "failed";

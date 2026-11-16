@@ -1954,6 +1954,16 @@ textarea:focus-visible {
 
 @layer utilities {
 .studio-image-editor {margin:20px 0;padding:20px;background:var(--studio-paper);border:1px solid var(--studio-line);border-radius:12px;}
+.studio-artifact-links {margin:24px 0;padding:20px;border:1px solid var(--studio-line);border-radius:12px;background:var(--studio-paper);overflow-wrap:anywhere;}
+.studio-artifact-links h2 {font-size:17px;font-weight:650;margin-bottom:8px;}
+.studio-artifact-links p {margin:8px 0;}
+.studio-link-list {list-style:none;padding:0;margin:12px 0;max-height:400px;overflow:auto;}
+.studio-link-list li {padding:12px 0;border-top:1px solid var(--studio-line);}
+.studio-link-list a {color:var(--studio-accent);text-decoration:underline;text-underline-offset:3px;}
+.studio-link-form {display:grid;gap:12px;margin-top:16px;max-width:560px;}
+.studio-link-form>label {display:flex;flex-direction:column;gap:6px;}
+.studio-link-form :is(input,select) {width:100%;min-width:0;max-width:100%;}
+.studio-link-pending {padding:12px;border:1px solid #c8d7f5;border-radius:8px;background:#f2f6ff;}
 .studio-image-editor>label {display:flex;align-items:center;gap:12px;margin:12px 0;flex-wrap:wrap;}
 .studio-image-editor .studio-media {max-height:360px;object-fit:contain;}
 .studio-crop-area {position:relative;height:360px;max-width:100%;margin:16px 0;background:#e8ebf0;}

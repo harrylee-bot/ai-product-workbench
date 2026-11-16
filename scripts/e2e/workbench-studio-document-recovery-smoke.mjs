@@ -154,6 +154,8 @@ await context.route("**/api/**", async (route) => {
         updatedAt: now,
       },
     });
+  if (path.endsWith("/artifact-links"))
+    return json(route, { items: [], nextCursor: null });
   if (path.endsWith("/identity/me"))
     return json(route, {
       id: "owner-1",
