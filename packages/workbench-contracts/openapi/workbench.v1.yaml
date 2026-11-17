@@ -13521,6 +13521,7 @@ components:
       enum:
         - queued
         - running
+        - cancelling
         - succeeded
         - failed
         - cancelled

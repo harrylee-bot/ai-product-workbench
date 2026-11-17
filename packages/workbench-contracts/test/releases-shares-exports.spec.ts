@@ -315,6 +315,10 @@ const queuedExport = {
 };
 
 describe("export contracts", () => {
+  it("distinguishes accepted cancellation from executor cleanup",()=>{
+    for(const startedAt of [null,createdAt])expect(exportJobSchema.safeParse({...queuedExport,status:"cancelling",startedAt}).success).toBe(true);
+    for(const terminal of [{finishedAt:createdAt},{output:exportOutput},{failure:{code:"EXPORT_FAILED",detail:"Failure"}}])expect(exportJobSchema.safeParse({...queuedExport,status:"cancelling",...terminal}).success).toBe(false);
+  });
   it("publishes an exact capability catalog without server proof material", () => {
     const available = { available: true as const, reasonCode: null };
     const catalog = {
