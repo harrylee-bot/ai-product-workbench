@@ -141,6 +141,17 @@ export const runArtifactTargetsSchema = z.array(runArtifactTargetSchema)
     }
   });
 
+export const runArtifactOperationSchema=z.discriminatedUnion("kind",[
+  z.object({kind:z.literal("create")}).strict(),
+  z.object({kind:z.literal("revise"),target:runArtifactTargetSchema}).strict(),
+]);
+/** Server-resolved output actions. artifactTargets also contains read-only
+ * reference inputs; only these exact operations authorize publication. */
+export const runOutputOperationsSchema=z.array(z.object({
+  kind:runtimeRequestedArtifactKindSchema,operation:runArtifactOperationSchema,
+}).strict()).min(1).max(20);
+export type RunOutputOperation=z.infer<typeof runOutputOperationsSchema>[number];
+
 type RunWorkflowArtifactTargetInput = Readonly<{
   workflow: z.infer<typeof runWorkflowSchema>;
   generationIntent: z.infer<typeof runGenerationIntentSchema> | null;
@@ -396,6 +407,7 @@ export type RunOutputs = z.infer<typeof runOutputsSchema>;
 
 export const startRunRequestObjectSchema = z.object({
   requirementConfirmationId: opaqueIdSchema.optional(),
+  outputOperations:runOutputOperationsSchema.optional(),
   prompt: z.string().trim().min(1).max(50_000),
   modelId: z.string().min(1).max(128),
   workflow: runWorkflowSchema,
@@ -412,6 +424,17 @@ export const startRunRequestObjectSchema = z.object({
 }).strict();
 
 export const startRunRequestSchema = startRunRequestObjectSchema.superRefine((request, context) => {
+  if(request.requirementConfirmationId&&!request.outputOperations)context.addIssue({code:"custom",path:["outputOperations"],message:"Confirmed generation requires explicit output operations"});
+  if(request.outputOperations){
+    const seen=new Set<string>(),kinds=new Set(request.outputOperations.map(x=>x.kind));
+    if(request.requestedArtifactKinds.some(kind=>!kinds.has(kind))||[...kinds].some(kind=>!request.requestedArtifactKinds.includes(kind)))context.addIssue({code:"custom",path:["outputOperations"],message:"Output operations must cover every requested kind exactly"});
+    for(const [index,item] of request.outputOperations.entries()){
+      const op=item.operation,key=op.kind==='create'?`create:${item.kind}`:`revise:${op.target.artifactId}`;
+      if(seen.has(key))context.addIssue({code:"custom",path:["outputOperations",index],message:"Output operations cannot repeat a creation kind or revision target"});seen.add(key);
+      if(op.kind==='revise'&&(request.workflow!=='edit'||!request.artifactTargets.some(target=>JSON.stringify(target)===JSON.stringify(op.target))))context.addIssue({code:"custom",path:["outputOperations",index],message:"Revision output must exactly match an authorized Edit input target"});
+    }
+    if(kinds.has('prd')&&kinds.has('prototype')&&(request.outputOperations[0]?.kind!=='prd'||request.outputOperations.filter(x=>x.kind==='prd').length!==1))context.addIssue({code:"custom",path:["outputOperations"],message:"Linked output requires one PRD first"});
+  }
   if (hasMissingPrdRequirementSource(request)) {
     context.addIssue({
       code: z.ZodIssueCode.custom,

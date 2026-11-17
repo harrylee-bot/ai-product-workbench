@@ -18108,6 +18108,44 @@ components:
         - updatedAt
         - failure
       additionalProperties: false
+    RunArtifactOperation:
+      oneOf:
+        - type: object
+          properties:
+            kind:
+              type: string
+              enum:
+                - create
+          required:
+            - kind
+          additionalProperties: false
+        - type: object
+          properties:
+            kind:
+              type: string
+              enum:
+                - revise
+            target:
+              $ref: "#/components/schemas/RunArtifactTarget"
+          required:
+            - kind
+            - target
+          additionalProperties: false
+    RunOutputOperations:
+      type: array
+      items:
+        type: object
+        properties:
+          kind:
+            $ref: "#/components/schemas/RuntimeRequestedArtifactKind"
+          operation:
+            $ref: "#/components/schemas/RunArtifactOperation"
+        required:
+          - kind
+          - operation
+        additionalProperties: false
+      minItems: 1
+      maxItems: 20
     StartRunRequest:
       type: object
       properties:
@@ -18115,6 +18153,8 @@ components:
           type: string
           minLength: 1
           maxLength: 128
+        outputOperations:
+          $ref: "#/components/schemas/RunOutputOperations"
         prompt:
           type: string
           minLength: 1
@@ -23067,28 +23107,7 @@ components:
         content:
           $ref: "#/components/schemas/JsonValue"
         operation:
-          oneOf:
-            - type: object
-              properties:
-                kind:
-                  type: string
-                  enum:
-                    - create
-              required:
-                - kind
-              additionalProperties: false
-            - type: object
-              properties:
-                kind:
-                  type: string
-                  enum:
-                    - revise
-                target:
-                  $ref: "#/components/schemas/RunArtifactTarget"
-              required:
-                - kind
-                - target
-              additionalProperties: false
+          $ref: "#/components/schemas/RunArtifactOperation"
       required:
         - title
         - citations
@@ -23120,28 +23139,7 @@ components:
         content:
           $ref: "#/components/schemas/JsonValue"
         operation:
-          oneOf:
-            - type: object
-              properties:
-                kind:
-                  type: string
-                  enum:
-                    - create
-              required:
-                - kind
-              additionalProperties: false
-            - type: object
-              properties:
-                kind:
-                  type: string
-                  enum:
-                    - revise
-                target:
-                  $ref: "#/components/schemas/RunArtifactTarget"
-              required:
-                - kind
-                - target
-              additionalProperties: false
+          $ref: "#/components/schemas/RunArtifactOperation"
       required:
         - title
         - citations
@@ -23173,28 +23171,7 @@ components:
         content:
           $ref: "#/components/schemas/JsonValue"
         operation:
-          oneOf:
-            - type: object
-              properties:
-                kind:
-                  type: string
-                  enum:
-                    - create
-              required:
-                - kind
-              additionalProperties: false
-            - type: object
-              properties:
-                kind:
-                  type: string
-                  enum:
-                    - revise
-                target:
-                  $ref: "#/components/schemas/RunArtifactTarget"
-              required:
-                - kind
-                - target
-              additionalProperties: false
+          $ref: "#/components/schemas/RunArtifactOperation"
       required:
         - title
         - citations
@@ -23226,28 +23203,7 @@ components:
         content:
           $ref: "#/components/schemas/JsonValue"
         operation:
-          oneOf:
-            - type: object
-              properties:
-                kind:
-                  type: string
-                  enum:
-                    - create
-              required:
-                - kind
-              additionalProperties: false
-            - type: object
-              properties:
-                kind:
-                  type: string
-                  enum:
-                    - revise
-                target:
-                  $ref: "#/components/schemas/RunArtifactTarget"
-              required:
-                - kind
-                - target
-              additionalProperties: false
+          $ref: "#/components/schemas/RunArtifactOperation"
       required:
         - title
         - citations
@@ -23280,28 +23236,7 @@ components:
         content:
           $ref: "#/components/schemas/PrdDocument"
         operation:
-          oneOf:
-            - type: object
-              properties:
-                kind:
-                  type: string
-                  enum:
-                    - create
-              required:
-                - kind
-              additionalProperties: false
-            - type: object
-              properties:
-                kind:
-                  type: string
-                  enum:
-                    - revise
-                target:
-                  $ref: "#/components/schemas/RunArtifactTarget"
-              required:
-                - kind
-                - target
-              additionalProperties: false
+          $ref: "#/components/schemas/RunArtifactOperation"
       required:
         - title
         - citations
@@ -23334,28 +23269,7 @@ components:
         content:
           $ref: "#/components/schemas/PrototypeDocument"
         operation:
-          oneOf:
-            - type: object
-              properties:
-                kind:
-                  type: string
-                  enum:
-                    - create
-              required:
-                - kind
-              additionalProperties: false
-            - type: object
-              properties:
-                kind:
-                  type: string
-                  enum:
-                    - revise
-                target:
-                  $ref: "#/components/schemas/RunArtifactTarget"
-              required:
-                - kind
-                - target
-              additionalProperties: false
+          $ref: "#/components/schemas/RunArtifactOperation"
       required:
         - title
         - citations
@@ -23576,6 +23490,8 @@ components:
           type: string
           minLength: 1
           maxLength: 128
+        outputOperations:
+          $ref: "#/components/schemas/RunOutputOperations"
         prompt:
           type: string
           minLength: 1
