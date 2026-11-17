@@ -248,14 +248,15 @@ export class RunsService {
 
   async retry(principalId: string, sourceRunId: string, idempotencyKey: string): Promise<Run> {
     const source = await this.access.findRun(principalId, sourceRunId, "edit");
-    if(!startRunRequestSchema.parse(source.request).requirementConfirmationId)throw requirementProblem("REQUIREMENT_CONFIRMATION_REQUIRED");
+    const request = startRunRequestSchema.parse(source.request);
+    if(!request.requirementConfirmationId)throw requirementProblem("REQUIREMENT_CONFIRMATION_REQUIRED");
+    if(request.requestedArtifactKinds.includes("prototype"))throw new ProblemException({title:"Prototype plan retry required",status:409,code:"PROTOTYPE_PLAN_RETRY_REQUIRED",detail:"Retry this generation through its prototype plan to preserve version building and publication"});
     if (source.status !== "failed" || source.errorRetryable !== true) {
       throw runRetryConflictProblem("Only a failed Run explicitly marked retryable can be retried");
     }
     // A retry replays the immutable source request. Clearing the Canvas
     // snapshot here would make the application request diverge from the DB
     // retry invariant and could apply work to a different board revision.
-    const request = startRunRequestSchema.parse(source.request);
     assertRunWorkflowInputs(request);
     return this.create(principalId, source.threadId, idempotencyKey, request, source.id);
   }

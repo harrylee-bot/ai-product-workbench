@@ -155,6 +155,19 @@ suite('New generation flow over actual HTTP and PostgreSQL',()=>{
   expect((run.request as any).requestedArtifactKinds).toEqual(kinds);await expect(db.$transaction(tx=>confirmedRequirementBaseline(tx,run,startRunRequestSchema.parse(run.request)))).resolves.toMatchObject({confirmationId:started.value.confirmation.id});
   const id=started.value.confirmation.planId;
   if(id){const input=await http('GET',`/projects/${fixture.projectId}/prototype-v2/plans/${id}/input`);expect(input.value.request).toEqual(run.request);expect(input.value.snapshot.sources[0].checksum).toBe(sha(sourceBytes));}
+  // The runtime terminal state is a fixture; retry routing and immutable input
+  // checks below use actual HTTP, API, database and Worker validation.
+  await db.run.update({where:{id:run.id},data:{status:'failed',errorRetryable:true}});
+  let retryRunId:string;
+  if(id){
+   const plan=await db.prototypePlan.update({where:{id},data:{status:'failed',revision:{increment:1}}});const queued=queue.sendInTransaction.mock.calls.length;
+   const rejected=await http('POST',`/runs/${run.id}/retry`,{key:randomUUID(),status:409});expect(rejected.value.code).toBe('PROTOTYPE_PLAN_RETRY_REQUIRED');expect(queue.sendInTransaction).toHaveBeenCalledTimes(queued);expect(await db.run.count({where:{threadId:thread.id}})).toBe(1);
+   const key=randomUUID(),path=`/projects/${fixture.projectId}/prototype-v2/plans/${id}/retry`,options={body:{},key,etag:`"${plan.revision}"`,status:202};
+   const retry=await http('POST',path,options);expect((await http('POST',path,options)).value.id).toBe(retry.value.id);retryRunId=(await db.prototypePlan.findUniqueOrThrow({where:{id:retry.value.id}})).runtimeRunId!;
+   expect(await db.prototypeWorkflowCommand.count({where:{targetId:retry.value.id,kind:'plan_start'}})).toBe(1);
+  }else retryRunId=(await http('POST',`/runs/${run.id}/retry`,{key:randomUUID(),status:202})).value.id;
+  const retry=await db.run.findUniqueOrThrow({where:{id:retryRunId},include:{sourceSnapshots:true}});expect(retry.retryOfRunId).toBe(run.id);expect(retry.request).toEqual(run.request);expect(retry.knowledgeReleaseId).toBe(run.knowledgeReleaseId);expect(retry.sourceSnapshots.map(x=>x.snapshot)).toEqual(run.sourceSnapshots.map(x=>x.snapshot));
+  expect(await db.run.count({where:{threadId:thread.id}})).toBe(2);await expect(db.$transaction(tx=>confirmedRequirementBaseline(tx,retry,startRunRequestSchema.parse(retry.request)))).resolves.toMatchObject({confirmationId:started.value.confirmation.id});
  },90000);
  it('cancels and retries the same discussion turn across an API restart without duplicating the user entry',async()=>{
   const {thread,generationRequest,created,path}=await createDiscussion();

@@ -114,8 +114,9 @@ export class RequirementsService {
    const currentSnapshot=await this.runs.captureGenerationInput(tx,s.projectId,configuration);
    const analyzedContext=summary.contextSnapshot as {projectContext:{snapshot:unknown;source?:{feedback:unknown[]}};sourceContents:unknown};
    if(sourceRevisionId){
-    // The project lock also serializes feedback resolution. Check the exact
-    // selected feedback at the confirmation boundary, before freezing consent.
+    // A project SHARE lock does not exclude feedback resolution. Lock the
+    // selected rows in stable order through the commit that freezes consent.
+    if(feedbackIds.length)await tx.$queryRaw(Prisma.sql`SELECT id FROM prototype_feedback WHERE project_id=${s.projectId} AND revision_id=${sourceRevisionId} AND id IN (${Prisma.join([...feedbackIds].sort())}) ORDER BY id FOR UPDATE`);
     const feedback=await tx.prototypeFeedback.findMany({where:{id:{in:feedbackIds},projectId:s.projectId,revisionId:sourceRevisionId,status:'open'}});
     const identity=(rows:unknown[])=>rows.map(row=>{const x=row as {id:string;projectId:string;revisionId:string;createdById:string;body:string;anchor:unknown;status:string;revision:number};return {id:x.id,projectId:x.projectId,revisionId:x.revisionId,createdById:x.createdById,body:x.body,anchor:x.anchor,status:x.status,revision:x.revision};}).sort((a,b)=>a.id.localeCompare(b.id));
     const reviewed=analyzedContext.projectContext.source?.feedback;

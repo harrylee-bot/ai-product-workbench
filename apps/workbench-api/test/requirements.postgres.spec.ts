@@ -236,7 +236,7 @@ suite('Requirement discussions with actual PostgreSQL; fixture model and workflo
   const replay=await service.retryConfirmation(fixture.ownerId,s.id,fresh.confirmation!.id,'fresh-dispatch-retry',fresh.revision);expect(replay.confirmation?.runId).toBe(started.confirmation?.runId);expect(await db.run.count({where:{threadId:s.threadId}})).toBe(1);
  });
 
- it.each(['unchanged','resolved-before-confirm','resolved-after-start','joint-output'] as const)('source-bound confirmation fences selected feedback: %s',async feedbackChange=>{
+ it.each(['unchanged','resolved-before-confirm','resolved-after-start','joint-output','confirm-locks-first','resolve-locks-first'] as const)('source-bound confirmation fences selected feedback: %s',async feedbackChange=>{
   const initial=await ready(['prototype']);await service.confirm(fixture.ownerId,initial.id,'source-plan-confirm',initial.revision,accept(initial));await processor({...baseCard,outputKinds:['prototype']}).tick(initial.id);
   const started=await service.get(fixture.ownerId,initial.id),sourcePlan=await db.prototypePlan.findUniqueOrThrow({where:{id:started.confirmation!.planId!}});
   const document=prototypeDocumentFixture(),checksum=createHash('sha256').update(canonicalJson(document)).digest('hex');
@@ -258,6 +258,40 @@ suite('Requirement discussions with actual PostgreSQL; fixture model and workflo
   const real=processor({...baseCard,outputKinds:[...outputKinds]}) as any;
   real.contextReader={read:vi.fn().mockResolvedValue({readings:[],artifactTargets:[{id:version.id,checksum,content:document}]})};await real.tick(s.id);
   const reviewed=await service.get(fixture.ownerId,s.id);expect(reviewed.state).toBe('ready_to_confirm');
+  if(feedbackChange==='confirm-locks-first'||feedbackChange==='resolve-locks-first'){
+   let release!:()=>void,entered!:(pid:number)=>void,otherEntered!:(pid:number)=>void;
+   const hold=new Promise<void>(resolve=>{release=resolve;}),firstReady=new Promise<number>(resolve=>{entered=resolve;}),otherReady=new Promise<number>(resolve=>{otherEntered=resolve;});
+   const firstIsConfirm=feedbackChange==='confirm-locks-first';
+   const firstDb=transactionView(async tx=>{
+    const [{pid}]=await tx.$queryRaw<{pid:number}[]>`SELECT pg_backend_pid() AS pid`;
+    return new Proxy(tx,{get(target,key){
+     if(key==='prototypeFeedback')return new Proxy(target.prototypeFeedback,{get(delegate,method){
+      if(method===(firstIsConfirm?'findMany':'updateMany'))return async(args:never)=>{const result=await (delegate[method] as any)(args);entered(pid!);await hold;return result;};
+      const value=Reflect.get(delegate,method);return typeof value==='function'?value.bind(delegate):value;
+     }});const value=Reflect.get(target,key);return typeof value==='function'?value.bind(target):value;
+    }});
+   });
+   const otherDb=transactionView(async tx=>{const [{pid}]=await tx.$queryRaw<{pid:number}[]>`SELECT pg_backend_pid() AS pid`;otherEntered(pid!);return tx;});
+   const confirming=new RequirementsService((firstIsConfirm?firstDb:otherDb) as never,access,runs);
+   const resolving=new PrototypeV2Service((firstIsConfirm?otherDb:firstDb) as never,workflows as never,new ConfigService(),{} as never,runs);
+   const confirm=()=>confirming.confirm(fixture.ownerId,s.id,'racing-confirm',reviewed.revision,accept(reviewed));
+   const resolve=()=>resolving.resolveFeedback({id:fixture.ownerId} as never,s.projectId,feedback.id,'racing-resolve','"0"',{});
+   const first=firstIsConfirm?confirm():resolve();const firstPid=await firstReady;
+   const other=firstIsConfirm?resolve():confirm();const otherResult=other.then(value=>({value}),error=>({error}));
+   try{
+    const otherPid=await otherReady;
+    await vi.waitFor(async()=>{const [{pids}]=await db.$queryRaw<{pids:number[]}[]>`SELECT pg_blocking_pids(${otherPid}::int) AS pids`;expect(pids).toContain(firstPid);},{timeout:3000,interval:20});
+   }finally{release();}
+   await first;const outcome=await otherResult;resolving.onModuleDestroy();
+   expect((await db.prototypeFeedback.findUniqueOrThrow({where:{id:feedback.id}})).status).toBe('resolved');
+   if(firstIsConfirm){
+    expect(outcome).toHaveProperty('value');const frozen=await db.requirementConfirmation.findFirstOrThrow({where:{sessionId:s.id}});
+    expect((frozen.baseline as any).analysisContext.projectContext.source.feedback[0].status).toBe('open');
+   }else{
+    expect(outcome).toMatchObject({error:{status:409,response:{code:'REQUIREMENT_BASELINE_CHANGED'}}});expect(await db.requirementConfirmation.count({where:{sessionId:s.id}})).toBe(0);
+   }
+   expect(await db.run.count({where:{threadId:s.threadId}})).toBe(0);return;
+  }
   if(feedbackChange==='resolved-before-confirm'){
    await prototypes.resolveFeedback({id:fixture.ownerId} as never,s.projectId,feedback.id,'resolve-before-confirm','"0"',{});
    await expect(service.confirm(fixture.ownerId,s.id,'source-bound-confirm',reviewed.revision,accept(reviewed))).rejects.toMatchObject({status:409,response:{code:'REQUIREMENT_BASELINE_CHANGED'}});
@@ -312,10 +346,20 @@ suite('Requirement discussions with actual PostgreSQL; fixture model and workflo
   expect(await db.$transaction(tx=>confirmedRequirementBaseline(tx,retry,startRunRequestSchema.parse(retry.request)))).toMatchObject({confirmationId:started.confirmation!.id});
   expect((await db.requirementConfirmation.findUniqueOrThrow({where:{id:started.confirmation!.id}})).principalId).toBe(fixture.ownerId);
   await db.run.update({where:{id:retry.id},data:{status:'failed',errorRetryable:true}});
-  const second=await runs.retry(fixture.ownerId,retry.id,'owner-retry-chain');const secondRun=await db.run.findUniqueOrThrow({where:{id:second.id}});
+  let secondId:string;
+  if(kind==='prd')secondId=(await runs.retry(fixture.ownerId,retry.id,'owner-retry-chain')).id;
+  else{
+   const retryPlan=await db.prototypePlan.findFirstOrThrow({where:{runtimeRunId:retry.id}});await db.prototypePlan.update({where:{id:retryPlan.id},data:{status:'failed',revision:{increment:1}}});
+   await expect(runs.retry(fixture.ownerId,retry.id,'reject-generic-prototype-retry')).rejects.toMatchObject({status:409,response:{code:'PROTOTYPE_PLAN_RETRY_REQUIRED'}});
+   const next=await prototypes.retryPlan({id:fixture.ownerId} as never,s.projectId,retryPlan.id,'owner-plan-retry-chain',`"${retryPlan.revision+1}"`,{});secondId=(await db.prototypePlan.findUniqueOrThrow({where:{id:next.id}})).runtimeRunId!;
+  }
+  const secondRun=await db.run.findUniqueOrThrow({where:{id:secondId}});
   expect(await db.$transaction(tx=>confirmedRequirementBaseline(tx,secondRun,startRunRequestSchema.parse(secondRun.request)))).toMatchObject({confirmationId:started.confirmation!.id});
-  await db.run.update({where:{id:second.id},data:{status:'failed',errorRetryable:true}});await db.projectMember.update({where:{projectId_principalId:{projectId:s.projectId,principalId:fixture.outsiderId}},data:{role:'viewer'}});
-  await expect(runs.retry(fixture.outsiderId,second.id,'viewer-cannot-retry')).rejects.toMatchObject({status:404});
+  await db.run.update({where:{id:secondId},data:{status:'failed',errorRetryable:true}});await db.projectMember.update({where:{projectId_principalId:{projectId:s.projectId,principalId:fixture.outsiderId}},data:{role:'viewer'}});
+  await expect(runs.retry(fixture.outsiderId,secondId,'viewer-cannot-retry')).rejects.toMatchObject({status:404});
  });
 
+ function transactionView(decorate:(tx:Prisma.TransactionClient)=>Promise<Prisma.TransactionClient>){
+  return new Proxy(db,{get(target,key){if(key==='$transaction')return (operation:(tx:Prisma.TransactionClient)=>Promise<unknown>)=>db.$transaction(async tx=>operation(await decorate(tx)),{timeout:15000});const value=Reflect.get(target,key);return typeof value==='function'?value.bind(target):value;}});
+ }
 });
