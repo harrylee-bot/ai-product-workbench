@@ -9,21 +9,17 @@ import { ConfigService } from "@nestjs/config";
 import {
   canonicalJson,
   prototypeRevisionRelationsSchema,
-  prototypePlanInputSchema, prototypeRevisionInputSchema, prototypeInputSnapshotSchema, updatePrototypePlanRequestSchema, createPrototypeRevisionPlanRequestSchema,
-  type UpdatePrototypePlanRequest, type CreatePrototypeRevisionPlanRequest,
+  prototypePlanInputSchema, prototypeRevisionInputSchema, prototypeInputSnapshotSchema,
   prototypeProgressSchema, prototypeFeedbackLocationsSchema,
   runEventSchema,
   startRunRequestSchema,
-  revisePrototypeRevisionRequestSchema,
   prototypeRevisionDiffSchema,
   prototypePlanListSchema,
   prototypeFeedbackPageSchema, type PrototypeFeedbackQuery,
   prototypeShareListSchema,
   prototypeExportListSchema,
-  type RevisePrototypeRevisionRequest,
   createPrototypeExportRequestSchema,
   createPrototypeFeedbackRequestSchema,
-  createPrototypePlanRequestSchema,
   createPrototypeShareRequestSchema,
   exportPreviewTokenResponseSchema,
   prototypeExportSchema,
@@ -37,7 +33,6 @@ import {
   prototypeWorkflowActionRequestSchema,
   type CreatePrototypeExportRequest,
   type CreatePrototypeFeedbackRequest,
-  type CreatePrototypePlanRequest,
   type CreatePrototypeShareRequest,
   type PrototypeExport,
   type PrototypeFeedback,
@@ -53,9 +48,7 @@ import { forbiddenProblem, idempotencyConflictProblem, notFoundProblem, publicSh
 import { WorkbenchDbService } from "../../platform/database/workbench-db.service.js";
 import type { AuthenticatedPrincipal } from "../identity/identity.types.js";
 import { lockActiveProject } from "../projects/project-lock.js";
-import { readRequirementPlan } from "../requirements/requirement-plan-context.js";
 import { prototypeRevisionPageDifferences } from "./prototype-revision-diff.js";
-import { formatPrototypeReviewPrompt, prototypePlanDisplayPrompt } from "./prototype-plan-presentation.js";
 import { mapRun, orderedRunSourceSnapshots } from "../runs/run.mapper.js";
 import { RunsService } from "../runs/runs.service.js";
 import { enqueuePrototypeCommand, PrototypeWorkflowDispatcher } from "./prototype-workflow-dispatcher.js";
@@ -174,11 +167,10 @@ export class PrototypeV2Service implements OnModuleInit, OnModuleDestroy {
     const confirmation=await this.db.requirementConfirmation.findFirst({where:{id:confirmationId,projectId,principalId}});
     if(!confirmation)throw notFoundProblem("Requirement confirmation");
     const request=startRunRequestSchema.parse(confirmation.generationRequest);
-    const result=await this.createPlan({id:principalId} as AuthenticatedPrincipal,projectId,{title:"已确认的业务增量",prompt:request.prompt,generationRequest:request},`requirement:${confirmationId}`);
+    const result=await this.createConfirmedPlan({id:principalId} as AuthenticatedPrincipal,projectId,{title:"已确认的业务增量",prompt:request.prompt,generationRequest:request},`requirement:${confirmationId}`);
     await this.dispatchPendingCommands(projectId);return result;
   }
-  async createPlan(principal: AuthenticatedPrincipal, projectId: string, request: CreatePrototypePlanRequest, idempotencyKey: string): Promise<PrototypePlan> {
-    request = createPrototypePlanRequestSchema.parse(request);
+  private async createConfirmedPlan(principal: AuthenticatedPrincipal, projectId: string, request: {title:string;prompt:string;generationRequest:import("@workbench/workbench-contracts").StartRunRequest}, idempotencyKey: string): Promise<PrototypePlan> {
     await this.requireProjectMember(principal.id, projectId, "editor");
     return this.mutate(projectId, projectId, principal.id, "plan_create", idempotencyKey, request, async (tx, requestHash) => {
       const existing=await tx.prototypePlan.findFirst({where:{projectId,idempotencyKey}});
@@ -188,7 +180,7 @@ export class PrototypeV2Service implements OnModuleInit, OnModuleDestroy {
       const confirmation=await lockRequirementConfirmation(tx,principal.id,projectId,request.generationRequest);
       const card=(confirmation.baseline as {card:{goal:string;changes:string[]}}).card;
       const displayPrompt=[card.goal,...card.changes.filter(change=>change!==card.goal)].join('\n').slice(0,20_000);
-      const context=(confirmation.baseline as {context:{kind:string;revisionId?:string;feedbackIds?:string[];planId?:string;expectedRevision?:number}}).context;
+      const context=(confirmation.baseline as {context:{kind:string;revisionId?:string;feedbackIds?:string[]}}).context;
       let feedbackIds=context.feedbackIds??[];
       let rootPlanId:string|null=null,sourceRevisionId:string|null=null,contentVersion=1;
       if(context.kind==="revision"){
@@ -197,12 +189,6 @@ export class PrototypeV2Service implements OnModuleInit, OnModuleDestroy {
         sourceRevisionId=source.id;rootPlanId=source.planId;
         const latest=await tx.prototypePlan.aggregate({where:{projectId,OR:[{id:rootPlanId},{rootPlanId}]},_max:{contentVersion:true}});
         contentVersion=(latest._max.contentVersion??source.version)+1;
-      }
-      if(context.kind==="plan"){
-        const source=await readRequirementPlan(tx,projectId,{kind:'plan',planId:context.planId!,expectedRevision:context.expectedRevision!});
-        rootPlanId=source.rootPlanId??source.id;sourceRevisionId=source.sourceRevisionId;feedbackIds=source.feedbackIds;
-        const latest=await tx.prototypePlan.aggregate({where:{projectId,OR:[{id:rootPlanId},{rootPlanId}]},_max:{contentVersion:true}});
-        contentVersion=(latest._max.contentVersion??source.contentVersion)+1;
       }
       const row=await tx.prototypePlan.create({data:{id:`plan_${randomBytes(12).toString("hex")}`,projectId,createdById:principal.id,title:request.title,prompt:displayPrompt,generationRequest:request.generationRequest as Prisma.InputJsonValue,inputSnapshot:confirmation.inputSnapshot as Prisma.InputJsonValue,status:"approved",rootPlanId,sourceRevisionId,contentVersion,feedbackIds,revision:0,idempotencyKey,requestHash}});
       await this.prepareRun(tx,row);
@@ -219,7 +205,7 @@ export class PrototypeV2Service implements OnModuleInit, OnModuleDestroy {
   async getPlanInput(principal:AuthenticatedPrincipal,projectId:string,planId:string){
     await this.requireProjectMember(principal.id,projectId,"viewer");
     return this.db.$transaction(async tx=>{
-      const plan=await tx.prototypePlan.findFirst({where:{id:planId,projectId}});
+      const plan=await tx.prototypePlan.findFirst({where:{id:planId,projectId,status:{not:"draft"}}});
       if(!plan)throw notFoundProblem("Prototype plan");
       return this.readPlanInput(tx,plan);
     },{isolationLevel:Prisma.TransactionIsolationLevel.RepeatableRead});
@@ -237,24 +223,6 @@ export class PrototypeV2Service implements OnModuleInit, OnModuleDestroy {
     },{isolationLevel:Prisma.TransactionIsolationLevel.RepeatableRead});
   }
 
-  async updatePlan(principal:AuthenticatedPrincipal,projectId:string,planId:string,request:UpdatePrototypePlanRequest,key:string,ifMatch?:string):Promise<PrototypePlan>{
-    updatePrototypePlanRequestSchema.parse(request);
-    await this.requireProjectMember(principal.id,projectId,"editor");
-    throw requirementProblem("REQUIREMENT_CONFIRMATION_REQUIRED");
-  }
-
-  async createRevisionPlan(principal:AuthenticatedPrincipal,projectId:string,revisionId:string,request:CreatePrototypeRevisionPlanRequest,key:string,ifMatch?:string):Promise<PrototypePlan>{
-    createPrototypeRevisionPlanRequestSchema.parse(request);
-    await this.requireProjectMember(principal.id,projectId,"editor");
-    throw requirementProblem("REQUIREMENT_CONFIRMATION_REQUIRED");
-  }
-
-  private async withPlanFeedback(tx:Prisma.TransactionClient,projectId:string,revisionId:string|null,feedbackIds:Prisma.JsonValue,request:import("@workbench/workbench-contracts").StartRunRequest){
-    if(!revisionId||!Array.isArray(feedbackIds)||!feedbackIds.length)return request;
-    const feedback=await tx.prototypeFeedback.findMany({where:{id:{in:feedbackIds as string[]},projectId,revisionId},orderBy:[{createdAt:"asc"},{id:"asc"}]});
-    return startRunRequestSchema.parse({...request,prompt:[request.prompt,...feedback.map(item=>`Review ${item.id}: ${item.body} ${item.anchor?canonicalJson(item.anchor):""}`)].join("\n")});
-  }
-
   private async sourceGenerationPlan(tx:Prisma.TransactionClient,source:{projectId:string;planId:string;version:number}){
     const plan=await tx.prototypePlan.findFirst({where:{projectId:source.projectId,contentVersion:source.version,OR:[{id:source.planId},{rootPlanId:source.planId}]}});
     if(!plan)throw notFoundProblem("Source generation plan");
@@ -265,21 +233,20 @@ export class PrototypeV2Service implements OnModuleInit, OnModuleDestroy {
     if(!plan.generationRequest)throw new ProblemException({title:"Generation context unavailable",status:409,code:"PROTOTYPE_PLAN_CONTEXT_MISSING"});
     const runId=plan.runtimeRunId??plan.reusedRunId;
     const bound=runId&&this.runs?await this.runs.prototypeInputFromRun(tx,plan.projectId,runId):null;
-    const request=bound?.request??startRunRequestSchema.parse(plan.generationRequest);
-    const snapshot=bound?.snapshot??(plan.inputSnapshot?prototypeInputSnapshotSchema.parse(plan.inputSnapshot):null);
+    if(!bound)throw notFoundProblem("Confirmed generation input");
+    const {request,snapshot}=bound;
     return prototypePlanInputSchema.parse({plan:toPlan(plan),request,snapshot,sha256:hashRequest({request,snapshot})});
   }
 
   async getProgress(principal: AuthenticatedPrincipal, projectId: string, planId: string) {
     await this.requireProjectMember(principal.id, projectId, "viewer");
     return this.db.$transaction(async (tx) => {
-      const plan = await tx.prototypePlan.findFirst({ where: { id: planId, projectId } });
+      const plan = await tx.prototypePlan.findFirst({ where: { id: planId, projectId, status:{not:"draft"} } });
       if (!plan) throw notFoundProblem("Prototype plan");
-      const request = plan.generationRequest ? startRunRequestSchema.safeParse(plan.generationRequest) : null;
-      const input = request?.success ? request.data : null;
       const runId = plan.runtimeRunId ?? plan.reusedRunId;
       const row = runId ? await tx.run.findFirst({ where: { id: runId, projectId }, include: { sourceSnapshots: orderedRunSourceSnapshots } }) : null;
-      if (runId && !row) throw notFoundProblem("Prototype run");
+      if (!row) throw notFoundProblem("Confirmed prototype run");
+      const input=startRunRequestSchema.parse(row.request);
       const run = row ? mapRun(row) : null;
       const seeds = row ? await tx.$queryRaw<Array<{ id: string; sequence: number; type: string; payload: unknown; occurredAt: Date }>>(Prisma.sql`
         SELECT id, sequence, type, payload, occurred_at AS "occurredAt" FROM (
@@ -313,7 +280,7 @@ export class PrototypeV2Service implements OnModuleInit, OnModuleDestroy {
 
   async listPlans(principal: AuthenticatedPrincipal, projectId: string) {
     await this.requireProjectMember(principal.id, projectId, "viewer");
-    return prototypePlanListSchema.parse((await this.db.prototypePlan.findMany({ where: { projectId }, orderBy: [{ createdAt: "desc" }, { id: "desc" }], take: 100 })).map(toPlan));
+    return prototypePlanListSchema.parse((await this.db.prototypePlan.findMany({ where: { projectId, status: {not:"draft"} }, orderBy: [{ createdAt: "desc" }, { id: "desc" }], take: 100 })).map(toPlan));
   }
   async getRevision(principal: AuthenticatedPrincipal, projectId: string, revisionId: string) {
     await this.requireProjectMember(principal.id, projectId, "viewer");
@@ -362,30 +329,12 @@ export class PrototypeV2Service implements OnModuleInit, OnModuleDestroy {
     return prototypeExportListSchema.parse((await this.db.prototypeExport.findMany({ where: { projectId }, orderBy: [{ createdAt: "desc" }, { id: "desc" }], take: 100 })).map((row) => toExport(row, this.webOrigin())));
   }
 
-  async approvePlan(principal: AuthenticatedPrincipal, projectId: string, planId: string, idempotencyKey: string, ifMatch: string | undefined, request: PrototypeWorkflowActionRequest): Promise<PrototypePlan> {
-    prototypeWorkflowActionRequestSchema.parse(request);
-    await this.requireProjectMember(principal.id, projectId, "editor");
-    const result = await this.mutate(projectId, planId, principal.id, "plan_approve", idempotencyKey, request, async (tx) => {
-      if (!this.workflows.configured) throw temporalUnavailable();
-      const plan = await tx.prototypePlan.findFirst({ where: { id: planId, projectId } });
-      if (!plan) throw notFoundProblem("Prototype plan");
-      assertIfMatch(ifMatch, plan.revision);
-      const updated = await tx.prototypePlan.updateMany({ where: { id: planId, projectId, revision: plan.revision, status: "draft" }, data: { status: "approved", revision: { increment: 1 } } });
-      if (updated.count !== 1) throw revisionConflictProblem();
-      await this.prepareRun(tx, plan);
-      await enqueuePrototypeCommand(tx, projectId, planId, "plan_start", { principalId: principal.id });
-      return toPlan(await tx.prototypePlan.findUniqueOrThrow({ where: { id: planId } }));
-    });
-    await this.dispatchPendingCommands(projectId);
-    return prototypePlanSchema.parse(result);
-  }
-
   async cancelPlan(principal: AuthenticatedPrincipal, projectId: string, planId: string, idempotencyKey: string, ifMatch: string | undefined, request: PrototypeWorkflowActionRequest): Promise<PrototypePlan> {
     prototypeWorkflowActionRequestSchema.parse(request);
     await this.requireProjectMember(principal.id, projectId, "editor");
     const result = await this.mutate(projectId, planId, principal.id, "plan_cancel", idempotencyKey, request, async (tx) => {
       if (!this.workflows.configured) throw temporalUnavailable();
-      const plan = await tx.prototypePlan.findFirst({ where: { id: planId, projectId } });
+      const plan = await tx.prototypePlan.findFirst({ where: { id: planId, projectId, status:{not:"draft"} } });
       if (!plan) throw notFoundProblem("Prototype plan");
       assertIfMatch(ifMatch, plan.revision);
       if (!["approved", "generating", "cancelled"].includes(plan.status)) throw revisionConflictProblem();
@@ -403,11 +352,12 @@ export class PrototypeV2Service implements OnModuleInit, OnModuleDestroy {
     await this.requireProjectMember(principal.id, projectId, "editor");
     const result = await this.mutate(projectId, planId, principal.id, "plan_retry", idempotencyKey, request, async (tx, requestHash) => {
       if (!this.workflows.configured || !this.runs) throw temporalUnavailable();
-      const original = await tx.prototypePlan.findFirst({ where: { id: planId, projectId } });
+      const original = await tx.prototypePlan.findFirst({ where: { id: planId, projectId, status:{not:"draft"} } });
       if (!original) throw notFoundProblem("Prototype plan");
       assertIfMatch(ifMatch, original.revision);
       if (!["failed", "cancelled"].includes(original.status) || !(original.runtimeRunId ?? original.reusedRunId)) throw revisionConflictProblem();
       const pinnedRun = await tx.run.findUniqueOrThrow({ where: { id: (original.runtimeRunId ?? original.reusedRunId)! } });
+      if(!startRunRequestSchema.parse(pinnedRun.request).requirementConfirmationId)throw requirementProblem("REQUIREMENT_CONFIRMATION_REQUIRED");
       const reuse = pinnedRun.status === "succeeded";
       if (reuse && await tx.artifactVersion.count({ where: { projectId, createdByRunId: pinnedRun.id, status: "ready", schemaVersion: 1, artifact: { kind: "prototype" } } }) !== 1) throw revisionConflictProblem();
       const rootPlanId = original.rootPlanId ?? original.id;
@@ -415,7 +365,7 @@ export class PrototypeV2Service implements OnModuleInit, OnModuleDestroy {
       const lastPlan = await tx.prototypePlan.findFirst({ where: { projectId, OR: [{ id: rootPlanId }, { rootPlanId }] }, orderBy: { contentVersion: "desc" } });
       const lastRevision = await tx.prototypeRevision.findFirst({ where: { projectId, planId: rootPlanId }, orderBy: { version: "desc" } });
       const generationRequest = startRunRequestSchema.parse(pinnedRun.request);
-      const plan = await tx.prototypePlan.create({ data: { id: `plan_${randomBytes(12).toString("hex")}`, projectId, createdById: principal.id, rootPlanId, retryOfPlanId: original.id, reusedRunId: reuse ? pinnedRun.id : null, sourceRevisionId: original.sourceRevisionId, feedbackIds: original.feedbackIds as Prisma.InputJsonValue, contentVersion: Math.max(lastPlan?.contentVersion ?? 1, lastRevision?.version ?? 1) + 1, title: original.title, prompt: prototypePlanDisplayPrompt(original), generationRequest: generationRequest as Prisma.InputJsonValue, status: "approved", revision: 0, idempotencyKey: `retry:${hashRequest({ principalId: principal.id, planId, idempotencyKey }).slice(0, 48)}`, requestHash } });
+      const plan = await tx.prototypePlan.create({ data: { id: `plan_${randomBytes(12).toString("hex")}`, projectId, createdById: principal.id, rootPlanId, retryOfPlanId: original.id, reusedRunId: reuse ? pinnedRun.id : null, sourceRevisionId: original.sourceRevisionId, feedbackIds: original.feedbackIds as Prisma.InputJsonValue, contentVersion: Math.max(lastPlan?.contentVersion ?? 1, lastRevision?.version ?? 1) + 1, title: original.title, prompt: original.prompt, generationRequest: generationRequest as Prisma.InputJsonValue, status: "approved", revision: 0, idempotencyKey: `retry:${hashRequest({ principalId: principal.id, planId, idempotencyKey }).slice(0, 48)}`, requestHash } });
       if (!reuse) {
       const runId = await this.runs.preparePrototypeRun(tx, { projectId, principalId: principal.id, planId: plan.id, title: plan.title, request: generationRequest, sourceRevisionId: plan.sourceRevisionId, pinnedRunId: pinnedRun.id });
       await tx.prototypePlan.update({ where: { id: plan.id }, data: { runtimeRunId: runId } });
@@ -433,12 +383,6 @@ export class PrototypeV2Service implements OnModuleInit, OnModuleDestroy {
     if (!current) throw notFoundProblem("Prototype revision");
     const base = current.sourceRevisionId ? await this.db.prototypeRevision.findFirst({ where: { id: current.sourceRevisionId, projectId } }) : null;
     return prototypeRevisionDiffSchema.parse({ sourceRevisionId: current.sourceRevisionId, pages: prototypeRevisionPageDifferences(base ? { sourceDocument: base.sourceDocument, pages: toRevision(base).pages } : null, { sourceDocument: current.sourceDocument, pages: toRevision(current).pages }) });
-  }
-
-  async revise(principal: AuthenticatedPrincipal, projectId: string, revisionId: string, request: RevisePrototypeRevisionRequest, idempotencyKey: string, ifMatch?: string): Promise<PrototypePlan> {
-    revisePrototypeRevisionRequestSchema.parse(request);
-    await this.requireProjectMember(principal.id,projectId,"editor");
-    throw requirementProblem("REQUIREMENT_CONFIRMATION_REQUIRED");
   }
 
   async confirmRevision(principal: AuthenticatedPrincipal, projectId: string, revisionId: string, idempotencyKey: string, ifMatch: string | undefined, request: PrototypeWorkflowActionRequest): Promise<PrototypeRevision> {
@@ -725,7 +669,7 @@ export class PrototypeV2Service implements OnModuleInit, OnModuleDestroy {
     if (!member || (minimum === "editor" && !["owner", "editor"].includes(member.role))) throw forbiddenProblem();
   }
 
-  private async getPlan(projectId: string, planId: string) { const row = await this.db.prototypePlan.findFirst({ where: { id: planId, projectId } }); if (!row) throw notFoundProblem("Prototype plan"); return row; }
+  private async getPlan(projectId: string, planId: string) { const row = await this.db.prototypePlan.findFirst({ where: { id: planId, projectId, status:{not:"draft"} } }); if (!row) throw notFoundProblem("Prototype plan"); return row; }
   private async requireRevision(projectId: string, id: string) { const row = await this.db.prototypeRevision.findFirst({ where: { id, projectId } }); if (!row) throw notFoundProblem("Prototype revision"); const parsed = prototypeRevisionSchema.safeParse(toRevision(row)); if (!parsed.success) throw notFoundProblem("Prototype revision"); return parsed.data; }
   private async requireRevisionWithPreview(projectId: string, id: string): Promise<PrototypeRevision> {
     const row = await this.db.prototypeRevision.findFirst({ where: { id, projectId }, select: { ...revisionSummarySelect, ...frozenPreviewSelect, pages: true } });
@@ -787,7 +731,7 @@ function temporalUnavailable(): ProblemException { return new ProblemException({
 function requireReadyRevision(status: PrototypeRevision["status"]): void {
   if (status !== "ready" && status !== "confirmed") throw new ProblemException({ title: "Prototype revision is not ready", status: 409, detail: "Only ready or confirmed revisions can be shared or exported", code: "PROTOTYPE_REVISION_NOT_READY" });
 }
-function toPlan(row: any): PrototypePlan { return prototypePlanSchema.parse({ id: row.id, projectId: row.projectId, rootPlanId: row.rootPlanId ?? null, sourceRevisionId: row.sourceRevisionId ?? null, contentVersion: row.contentVersion ?? 1, status: row.status, prompt: prototypePlanDisplayPrompt(row), title: row.title, revision: row.revision, createdById: row.createdById, createdAt: row.createdAt.toISOString(), updatedAt: row.updatedAt.toISOString(), failure: row.failureCode ? { code: row.failureCode, detail: row.failureDetail || row.failureCode } : null }); }
+function toPlan(row: any): PrototypePlan { return prototypePlanSchema.parse({ id: row.id, projectId: row.projectId, rootPlanId: row.rootPlanId ?? null, sourceRevisionId: row.sourceRevisionId ?? null, contentVersion: row.contentVersion ?? 1, status: row.status, prompt: row.prompt, title: row.title, revision: row.revision, createdById: row.createdById, createdAt: row.createdAt.toISOString(), updatedAt: row.updatedAt.toISOString(), failure: row.failureCode ? { code: row.failureCode, detail: row.failureDetail || row.failureCode } : null }); }
 function toRevisionSummary(row: RevisionSummaryRow): PrototypeRevisionSummary { return prototypeRevisionSummarySchema.parse({ id: row.id, projectId: row.projectId, planId: row.planId, version: row.version ?? 1, sourceRevisionId: row.sourceRevisionId ?? null, revision: row.revision, status: row.status, title: row.title, documentSha256: row.documentSha256, createdById: row.createdById, createdAt: row.createdAt.toISOString(), updatedAt: row.updatedAt.toISOString(), failure: row.failureCode ? { code: row.failureCode, detail: row.failureDetail || row.failureCode } : null }); }
 function toRevision(row: RevisionSummaryRow & { pages: unknown }): PrototypeRevision { return prototypeRevisionSchema.parse({ ...toRevisionSummary(row), pages: row.pages, previewHtml: null }); }
 function toPublicRevision(value: PrototypeRevision) { return { id: value.id, projectId: value.projectId, planId: value.planId, version: value.version, sourceRevisionId: value.sourceRevisionId, revision: value.revision, status: value.status, title: value.title, pages: value.pages, previewHtml: value.previewHtml, documentSha256: value.documentSha256, createdAt: value.createdAt, updatedAt: value.updatedAt, failure: value.failure }; }

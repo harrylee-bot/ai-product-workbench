@@ -33,7 +33,7 @@ describePg("Prototype V2 durable PostgreSQL lifecycle (workflow transport simula
   const recreate = () => {runs=new RunsService(db as never,new AccessService(db as never),new RunEventStore(),{sendInTransaction:vi.fn()} as never,{assertAvailable:vi.fn()} as never,new DesignPresetsService());return new PrototypeV2Service(db as never,workflows,config as never,storage as never,runs);};
   // Existing saved plans seed history/feedback/share/export tests. New generation
   // below uses actual discussion and single confirmation, never old approval.
-  const makePlan = () => db.prototypePlan.create({data:{projectId,createdById:ownerId,title:'Historical review',prompt:'Historical saved input',generationRequest:generationRequest('Historical saved input') as never,idempotencyKey:randomUUID(),requestHash:hash('historical-fixture')}});
+  const makePlan = () => db.prototypePlan.create({data:{projectId,createdById:ownerId,status:'ready',title:'Saved generated version',prompt:'Confirmed business increment',generationRequest:generationRequest('Confirmed business increment') as never,idempotencyKey:randomUUID(),requestHash:hash('historical-fixture')}});
   const flow=()=>requirementFlow(db,runs,service,ownerId,projectId);
   const due = () => db.prototypeWorkflowCommand.updateMany({ where: { projectId, deliveredAt: null }, data: { availableAt: new Date(0), leaseUntil: null } });
   const makeRevision = (planId: string, version = 1, sourceRevisionId?: string, document?: PrototypeDocument) => db.prototypeRevision.create({ data: { id: `revision_${randomUUID()}`, projectId, planId, createdById: ownerId, version, sourceRevisionId, revision: 0, status: "ready", title: "Review", sourceDocument: document as never, pages: document ? document.screens.map((screen,index)=>({...page,id:screen.id,route:screen.route,order:index})) : [page], documentSha256: hash(JSON.stringify([page])), idempotencyKey: `seed-${randomUUID()}`, requestHash: hash("seed") } });
@@ -105,16 +105,13 @@ describePg("Prototype V2 durable PostgreSQL lifecycle (workflow transport simula
     expect(recovered.events.every(event => event.sequence <= recovered.run!.lastEventSequence)).toBe(true);
   });
 
-  it("serializes simultaneous creates, rejects changed hashes and replays the original snapshot", async () => {
+  it("serializes confirmed dispatch and replays the original result", async () => {
     const discussion=await flow().prepare(generationRequest('A prototype')),analysis=await discussion.analyze(),confirmed=await analysis.confirm();
-    const frozen=await db.requirementConfirmation.findUniqueOrThrow({where:{id:confirmed.confirmation!.id}}),generation=startRunRequestSchema.parse(frozen.generationRequest);
-    const request = { title: "Plan", prompt: generation.prompt, generationRequest: generation };
-    const results = await Promise.all(Array.from({ length: 6 }, () => service.createPlan(principal(), projectId, request, "create-concurrent")));
-    for (const result of results) expect(result).toEqual(results[0]);
-    expect(await db.prototypePlan.count({ where: { projectId } })).toBe(1);
-    await db.prototypePlan.update({ where: { id: results[0].id }, data: { status: "approved", revision: 1 } });
-    await expect(service.createPlan(principal(), projectId, request, "create-concurrent")).resolves.toEqual(results[0]);
-    await expect(service.createPlan(principal(), projectId, { ...request, prompt: "Changed" }, "create-concurrent")).rejects.toMatchObject({ status: 409 });
+    const results=await Promise.all(Array.from({length:6},()=>service.createConfirmedRequirementPlan(ownerId,projectId,confirmed.confirmation!.id)));
+    for(const result of results)expect(result).toEqual(results[0]);
+    expect(await db.prototypePlan.count({where:{projectId}})).toBe(1);
+    expect(await db.run.count({where:{projectId}})).toBe(1);
+    await expect(service.createConfirmedRequirementPlan(ownerId,projectId,confirmed.confirmation!.id)).resolves.toEqual(results[0]);
   });
 
   it("survives confirmed generation acknowledgement loss and API restart without a false failed state", async () => {

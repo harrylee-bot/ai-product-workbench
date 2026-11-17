@@ -41,7 +41,6 @@ import * as runtimeSchemas from "./runtime.js";
 import * as systemSchemas from "./system.js";
 import * as shareSchemas from "./shares.js";
 import * as sourcePrototypeSchemas from "./source-prototype.js";
-import * as submissionIntentSchemas from "./submission-intents.js";
 import * as requirementSchemas from "./requirements.js";
 import * as threadSchemas from "./threads.js";
 import * as visualPrototypeSchemas from "./visual-prototype.js";
@@ -107,7 +106,6 @@ function buildSchemaCatalog() {
     ...schemasFrom(systemSchemas),
     ...schemasFrom(shareSchemas),
     ...schemasFrom(sourcePrototypeSchemas),
-    ...schemasFrom(submissionIntentSchemas),
     ...schemasFrom(threadSchemas),
     ...schemasFrom(requirementSchemas),
     ...schemasFrom(workspaceSchemas),
@@ -238,7 +236,6 @@ const reviewedCheckSchemas: readonly ReviewedCheck[] = [
   { label: "RunSourceSnapshot.integrity", schema: importSourceSchemas.runSourceSnapshotSchema, description: "Run source snapshots preserve one source kind and immutable descriptor per position; enforced by the runtime Zod contract." },
   { label: "ImportSourceUrl.transport", schema: importSourceSchemas.importSourceUrlSchema, description: "Import source locators use HTTP(S); DNS, redirect and private-network checks are enforced by the Import Worker before fetching." },
   { label: "RunSourceIds.unique", schema: importSourceSchemas.runSourceIdsSchema, description: "A Run references each immutable Import Source at most once." },
-  { label: "SubmissionIntent.clientFingerprint", schema: fileSchemas.submissionIntentClientFingerprintSchema, description: "SubmissionIntent upload slot fingerprints are bounded opaque values without control characters; they are independent from multipart checkpoint fingerprints." },
   { label: "ExportCapability.state", schema: exportSchemas.exportCapabilitySchema, description: "Export capability availability, authentication state, and stable reason codes remain mutually consistent; enforced by the runtime Zod contract." },
   { label: "ExportJob.lifecycle", schema: exportSchemas.exportJobSchema, description: "Export timestamps, output, and failure fields match the durable lifecycle state; enforced by the runtime Zod contract." },
   { label: "CreateExportJobRequest.figmaOptions", schema: exportSchemas.createExportJobRequestSchema, description: "Figma Export uses the fixed versioned Workbench Importer contract and does not accept client-controlled converter options." },
@@ -266,7 +263,6 @@ const reviewedCheckSchemas: readonly ReviewedCheck[] = [
   { label: "PrototypeStateOverride.nonEmpty", schema: prototypeSchemas.prototypeStateOverrideSchema, description: "A state override changes at least one property in addition to nodeId; enforced by the runtime Zod contract." },
   { label: "PrototypeExpression.boundedTree", schema: prototypeSchemas.prototypeExpressionSchema, description: "Prototype expressions use only the declared operators, at most eight levels and 64 total nodes, and one to sixteen operands per and/or. A bounded pre-parse walk enforces tree limits before structural parsing; variable references and operand/result types are checked by the Prototype document contract." },
   { label: "PrototypeOpenUrl.safeScheme", schema: prototypeSchemas.prototypeOpenUrlSchema, description: "Prototype external navigation is restricted to canonical HTTP(S), mailto, and tel URLs; stricter mail recipient, query, and telephone syntax is enforced by the runtime Zod contract." },
-  { label: "RevisePrototypeRevision.feedbackIds", schema: visualPrototypeSchemas.revisePrototypeRevisionRequestSchema.shape.feedbackIds, description: "Feedback ids must be unique and all belong to the selected source revision. Uniqueness is enforced by Zod; ownership and open status are enforced in the transaction." },
   { label: "PrototypeDocument.semanticGraph", schema: prototypeSchemas.prototypeDocumentSchema, description: "Prototype screens, nodes, states, actions, bindings, assets, tokens, and motions form a valid semantic graph; enforced by the runtime Zod contract." },
   { label: "PublicPrototypeDocument.semanticGraph", schema: prototypeSchemas.publicPrototypeDocumentSchema, description: "Public Prototype projections preserve the same semantic graph after private Blob identities are removed." },
   { label: "PrototypePatchBatch.revision", schema: prototypePatchSchemas.prototypePatchBatchSchema, description: "Prototype patch transport revisions advance by exactly one and remain safe non-negative integers." },
@@ -284,9 +280,6 @@ const reviewedCheckSchemas: readonly ReviewedCheck[] = [
   { label: "RuntimeModelList.uniqueIds", schema: runtimeModelSchemas.runtimeModelListSchema, description: "Runtime model ids are unique; enforced by the runtime Zod contract." },
   { label: "RuntimeModel.supportedWorkflows", schema: runtimeModelSchemas.runtimeModelSupportedWorkflowsSchema, description: "Each runtime model declares a non-empty set of unique Workbench workflows; enforced by the runtime Zod contract and Run admission policy." },
   { label: "ShareGrant.lifecycle", schema: shareSchemas.shareGrantSchema, description: "Share status and revocation timestamps agree; enforced by the runtime Zod contract." },
-  { label: "SubmissionIntentRunRequest.workflowInputs", schema: submissionIntentSchemas.submissionIntentRunRequestSchema, description: "SubmissionIntent requests directly enforce the same workflow, Artifact target, requested output, and pre-submission Canvas scope semantics as StartRun." },
-  { label: "CreateSubmissionIntent.request", schema: submissionIntentSchemas.createSubmissionIntentRequestSchema, description: "SubmissionIntent attachment sources are unique, Redesign has a durable source slot, and workflow target semantics directly share the live Run refinement without duplicate validation issues." },
-  { label: "SubmissionIntent.lifecycle", schema: submissionIntentSchemas.submissionIntentSchema, description: "SubmissionIntent request target semantics, attachment positions, and submitted/cancelled lifecycle fields agree; enforced by runtime contracts and database constraints." },
   { label: "ThreadEntry.envelope", schema: threadSchemas.threadEntrySchema, description: "Entry role and kind match the versioned content variant; enforced by the runtime Zod contract." },
   { label: "RuntimeArtifactDraft.citations", schema: runtimeSchemas.runtimeArtifactDraftSchema, description: "A PRD draft uses protocol v3 and schemaVersion 3, and its title and top-level citations exactly match its content; enforced by the runtime Zod contract." },
   { label: "RuntimeResult.revisions", schema: runtimeSchemas.runtimeResultSchema, description: "A Runtime result revises each target Artifact at most once; enforced by the runtime Zod contract." },
@@ -317,7 +310,6 @@ const reviewedCheckSchemas: readonly ReviewedCheck[] = [
   { label: "SourcePrototype.document.integrity", schema: sourcePrototypeSchemas.sourcePrototypeDocumentSchema, description: "Persisted source prototype documents retain the same bounded project integrity as their input." },
   { label: "CreateSourcePrototypeArtifact.title", schema: artifactSchemas.createSourcePrototypeArtifactRequestSchema, description: "The source prototype artifact title must equal the immutable source document title." },
   { label: "CreateArtifactLink.distinctVersions", schema: artifactSchemas.createArtifactLinkRequestSchema, description: "Source and target must identify two distinct ready versions of this project. The server validates artifact/version identity and permissions." },
-  { label: "CreatePrototypeRevisionPlan.feedbackIds", schema: visualPrototypeSchemas.createPrototypeRevisionPlanRequestSchema, description: "Selected feedback ids are unique; transactional validation binds them to the exact source revision and editor permission." },
   { label: "PrototypeProgress.identity", schema: visualPrototypeSchemas.prototypeProgressSchema, description: "Snapshot Run and seed events must share project, request, thread and current attempt; seed cursors cannot exceed the authoritative Run cursor." },
   { label: "PrototypeRevision.pages", schema: visualPrototypeSchemas.prototypeRevisionSchema, description: "Visual Prototype revisions contain unique page ids and bounded per-page DOM fragments; the complete executable document is provided once as verified previewHtml." },
   { label: "PrototypeExport.lifecycle", schema: visualPrototypeSchemas.prototypeExportSchema, description: "Visual Prototype exports require an immutable artifact on success, failure details on failure, and no output on cancellation; enforced by the runtime V2 contract." },
@@ -328,7 +320,7 @@ function buildAuditRoots(catalog: readonly { name: string; schema: ZodTypeAny }[
     approvalSchemas, artifactSchemas, boardSchemas, bootstrapSchemas, citationSchemas,
     commonSchemas, designPresetSchemas, designSystemSchemas, exportSchemas, fileSchemas, identitySchemas, importSourceSchemas, invitationSchemas, knowledgeSchemas, prdSchemas, projectSchemas, prototypeSchemas, prototypePatchSchemas,
     queueSchemas, releaseSchemas, runSchemas, runtimeModelSchemas, runtimeSchemas,
-    shareSchemas, sourcePrototypeSchemas, submissionIntentSchemas, systemSchemas, threadSchemas, visualPrototypeSchemas,
+    shareSchemas, sourcePrototypeSchemas, systemSchemas, threadSchemas, visualPrototypeSchemas,
   ];
   const roots = [...catalog];
   for (const module of modules) roots.push(...schemasFrom(module));
@@ -663,7 +655,6 @@ export function buildWorkbenchOpenApiDocument() {
     ["RequirementSessionId", commonSchemas.opaqueIdSchema, { name: "sessionId", in: "path" }],
     ["RequirementConfirmationId", commonSchemas.opaqueIdSchema, { name: "confirmationId", in: "path" }],
     ["RequirementTurnId", commonSchemas.opaqueIdSchema, { name: "turnId", in: "path" }],
-    ["SubmissionIntentId", commonSchemas.opaqueIdSchema, { name: "intentId", in: "path" }],
     ["RunId", commonSchemas.opaqueIdSchema, { name: "runId", in: "path" }],
     ["ArtifactId", commonSchemas.opaqueIdSchema, { name: "artifactId", in: "path" }],
     ["ArtifactVersionId", commonSchemas.opaqueIdSchema, { name: "artifactVersionId", in: "path" }],
@@ -743,7 +734,7 @@ export function buildWorkbenchOpenApiDocument() {
     linkId: "ArtifactLinkId",
     workspaceId: "WorkspaceId", projectId: "ProjectId", principalId: "PrincipalId", invitationId: "InvitationId",
     profileType: "KnowledgeProfileType", profileId: "KnowledgeProfileId",
-    confirmationId:"RequirementConfirmationId",sessionId:"RequirementSessionId",turnId:"RequirementTurnId",threadId: "ThreadId", intentId: "SubmissionIntentId", runId: "RunId",
+    confirmationId:"RequirementConfirmationId",sessionId:"RequirementSessionId",turnId:"RequirementTurnId",threadId: "ThreadId", runId: "RunId",
     artifactId: "ArtifactId", artifactVersionId: "ArtifactVersionId", assetId: "AssetId", fileId: "FileId", sourceId: "ImportSourceId",
     uploadSessionId: "UploadSessionId", approvalId: "ApprovalId", partNumber: "PartNumber", commandId: "CommandId",
     releaseId: "ReleaseId", shareId: "ShareId", exportId: "ExportId", previewId: "PreviewId", visualCapabilityId: "VisualCapabilityId", shareToken: "ShareToken",

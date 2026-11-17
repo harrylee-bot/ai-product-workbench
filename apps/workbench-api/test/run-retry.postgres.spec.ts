@@ -10,7 +10,7 @@ const databaseUrl = process.env.WORKBENCH_TEST_DATABASE_URL;
 const describeWithPostgres = databaseUrl ? describe : describe.skip;
 
 describeWithPostgres("Run retry PostgreSQL request invariant", () => {
-  it("accepts an exact non-null Canvas snapshot replay and rejects request mutation", async () => {
+  it("accepts exact generation input replay and rejects request mutation", async () => {
     const db = new PrismaClient({ datasourceUrl: databaseUrl! });
     const fixture = await seedRetryFixture(db);
 
@@ -18,7 +18,7 @@ describeWithPostgres("Run retry PostgreSQL request invariant", () => {
       await expect(db.run.create({
         data: retryData(fixture, "mutated", {
           ...fixture.request,
-          canvasSnapshot: null,
+          prompt: "Changed requirement",
         }),
       })).rejects.toThrow(/RUN_RETRY_SOURCE_INVALID/);
 
@@ -51,7 +51,7 @@ describeWithPostgres("Run retry PostgreSQL request invariant", () => {
       for (const changed of [
         {...authorized,knowledgeReleaseId:otherKnowledgeReleaseId},
         {...authorized,designStyleSnapshotSha256:"f".repeat(64)},
-        {...authorized,request:{...fixture.request,canvasSnapshot:null} as Prisma.InputJsonValue},
+        {...authorized,request:{...fixture.request,prompt:"Changed requirement"} as Prisma.InputJsonValue},
       ]) await expect(db.run.create({data:changed})).rejects.toThrow(/RUN_RETRY_SOURCE_INVALID/);
       const retry = await db.run.create({data:authorized});
       expect(retry).toMatchObject({retryOfRunId:fixture.sourceRunId,request:fixture.request,knowledgeReleaseId:fixture.knowledgeReleaseId});
@@ -80,13 +80,6 @@ async function seedRetryFixture(db: PrismaClient, status: "failed" | "cancelled"
   const projectId = `project_${suffix}`;
   const threadId = `thread_${suffix}`;
   const sourceRunId = `run_source_${suffix}`;
-  const capturedAt = new Date();
-  const reference = {
-    boardNodeId: `board_node_${suffix}`,
-    artifactId: `artifact_${suffix}`,
-    artifactVersionId: `artifact_version_${suffix}`,
-    screenId: "screen-home",
-  };
   const request = startRunRequestSchema.parse({
     prompt: "Retry the exact Canvas request",
     modelId: "quality",
@@ -97,29 +90,7 @@ async function seedRetryFixture(db: PrismaClient, status: "failed" | "cancelled"
     sourceIds: [],
     artifactTargets: [],
     requestedArtifactKinds: ["prototype"],
-    canvasSnapshot: {
-      protocol: "workbench.canvas-snapshot.v1",
-      projectId,
-      threadId,
-      runId: null,
-      boardId: `board_${suffix}`,
-      clientSessionId: `canvas-session-${suffix}`,
-      projectSessionGeneration: 1,
-      boardRevision: 7,
-      canvasStateRevision: 3,
-      capturedAt: capturedAt.toISOString(),
-      expiresAt: new Date(capturedAt.getTime() + 60_000).toISOString(),
-      viewport: { x: 0, y: 0, zoom: 1 },
-      screens: [{
-        reference,
-        name: "Home",
-        route: "/",
-        phase: "complete",
-        viewport: { width: 390, height: 844 },
-      }],
-      visibleScreens: [reference],
-      selectedScreens: [reference],
-    },
+    canvasSnapshot: null,
   });
 
   const knowledgeReleaseId = await db.$transaction(async (tx) => {

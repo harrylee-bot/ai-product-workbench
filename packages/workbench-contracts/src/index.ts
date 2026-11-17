@@ -35,7 +35,6 @@ export * from "./runtime.js";
 export * from "./runtime-models.js";
 export * from "./system.js";
 export * from "./shares.js";
-export * from "./submission-intents.js";
 export * from "./threads.js";
 export * from "./workspaces.js";
 export * from "./prototype-geometry.js";

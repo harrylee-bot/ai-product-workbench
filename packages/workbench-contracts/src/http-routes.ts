@@ -142,13 +142,6 @@ import {
   importSourceSchema,
 } from "./import-sources.js";
 import {
-  createSubmissionIntentRequestSchema,
-  currentSubmissionIntentSchema,
-  submissionIntentSchema,
-  submitSubmissionIntentResponseSchema,
-} from "./submission-intents.js";
-import {
-  revisePrototypeRevisionRequestSchema,
   prototypeRevisionDiffSchema,
   prototypePlanListSchema,
   prototypeFeedbackPageSchema, prototypeFeedbackQuerySchema, prototypeFeedbackLocationsSchema, prototypeFeedbackLocationsQuerySchema,
@@ -156,13 +149,12 @@ import {
   prototypeExportListSchema,
   createPrototypeExportRequestSchema,
   createPrototypeFeedbackRequestSchema,
-  createPrototypePlanRequestSchema,
   createPrototypeShareRequestSchema,
   prototypeExportSchema,
   prototypeFeedbackSchema,
   prototypePlanSchema,
   prototypeProgressSchema,
-  prototypePlanInputSchema, prototypeRevisionInputSchema,updatePrototypePlanRequestSchema,createPrototypeRevisionPlanRequestSchema,
+  prototypePlanInputSchema, prototypeRevisionInputSchema,
   prototypePublicShareSchema,
   prototypeRevisionSchema,
   prototypeRevisionListSchema,
@@ -950,33 +942,6 @@ export const workbenchHttpRoutes = [
     problemStatuses: problems(400, 404, 409, 412, 428),
   },
   {
-    method: "post", path: "/threads/{threadId}/submission-intents", operationId: "createSubmissionIntent",
-    requestHeaders: ["idempotencyKey"], requestBody: named("CreateSubmissionIntentRequest", createSubmissionIntentRequestSchema),
-    response: response(201, "Durable SubmissionIntent and ordered attachment slots created", named("SubmissionIntent", submissionIntentSchema), ["etag", "location"]),
-    problemStatuses: problems(400, 404, 409, 502, 504),
-  },
-  {
-    method: "get", path: "/threads/{threadId}/submission-intents/current", operationId: "getCurrentSubmissionIntent",
-    response: response(200, "Current principal's unique active SubmissionIntent in the Thread or a strict null item", named("CurrentSubmissionIntent", currentSubmissionIntentSchema)),
-    problemStatuses: problems(404),
-  },
-  {
-    method: "get", path: "/submission-intents/{intentId}", operationId: "getSubmissionIntent",
-    response: response(200, "Creator-owned durable SubmissionIntent", named("SubmissionIntent", submissionIntentSchema), ["etag"]),
-    problemStatuses: problems(404),
-  },
-  {
-    method: "post", path: "/submission-intents/{intentId}/submit", operationId: "submitSubmissionIntent",
-    response: response(202, "SubmissionIntent submitted through its durable Run idempotency key", named("SubmitSubmissionIntentResponse", submitSubmissionIntentResponseSchema), ["etag", "location"]),
-    problemStatuses: problems(404, 409, 502, 504),
-  },
-  {
-    method: "delete", path: "/submission-intents/{intentId}", operationId: "cancelSubmissionIntent",
-    requestHeaders: ["ifMatch"],
-    response: response(204, "Pending SubmissionIntent cancelled with compare-and-swap"),
-    problemStatuses: problems(400, 404, 409, 412, 428),
-  },
-  {
     method: "get", path: "/threads/{threadId}/runs", operationId: "listRuns", query: cursorPageQuery,
     response: response(200, "Runs for the selected Thread ordered newest first", named("RunList", runListSchema)),
     problemStatuses: problems(404),
@@ -1082,38 +1047,12 @@ export const workbenchHttpRoutes = [
     problemStatuses: problems(403, 404, 409, 412, 428, 503),
   },
   {
-    method: "post", path: "/projects/{projectId}/prototype-v2/revisions/{revisionId}/revise", operationId: "revisePrototype",
-    requestHeaders: ["idempotencyKey", "ifMatch"], requestBody: named("RevisePrototypeRevisionRequest", revisePrototypeRevisionRequestSchema),
-    response: response(202, "Generate a new immutable version from anchored feedback", named("PrototypePlan", prototypePlanSchema), ["etag"]),
-    problemStatuses: problems(400, 403, 404, 409, 412, 428, 503),
-  },
-  {
-    method: "post", path: "/projects/{projectId}/prototype-v2/plans", operationId: "createPrototypePlan",
-    requestHeaders: ["idempotencyKey"], requestBody: named("CreatePrototypePlanRequest", createPrototypePlanRequestSchema),
-    response: response(201, "Create an idempotent visual prototype plan", named("PrototypePlan", prototypePlanSchema), ["etag", "location"]),
-    problemStatuses: problems(400, 403, 404, 409),
-  },
-  {
-    method: "post", path: "/projects/{projectId}/prototype-v2/plans/{planId}/approve", operationId: "approvePrototypePlan",
-    requestHeaders: ["idempotencyKey", "ifMatch"], requestBody: named("PrototypeWorkflowActionRequest", prototypeWorkflowActionRequestSchema),
-    response: response(202, "Approve a plan and enqueue the Temporal generation workflow", named("PrototypePlan", prototypePlanSchema), ["etag", "location"]),
-    problemStatuses: problems(403, 404, 409, 412, 428, 503),
-  },
-  {
     method:"get",path:"/projects/{projectId}/prototype-v2/plans/{planId}/input",operationId:"getPrototypePlanInput",
     response:response(200,"Read complete fixed plan input",named("PrototypePlanInput",prototypePlanInputSchema),["etag"]),problemStatuses:problems(403,404,409),
   },
   {
     method:"get",path:"/projects/{projectId}/prototype-v2/revisions/{revisionId}/input",operationId:"getPrototypeRevisionInput",
     response:response(200,"Read the selected revision's actual generation input",named("PrototypeRevisionInput",prototypeRevisionInputSchema)),problemStatuses:problems(403,404,409),
-  },
-  {
-    method:"post",path:"/projects/{projectId}/prototype-v2/plans/{planId}/input",operationId:"updatePrototypePlanInput",requestHeaders:["idempotencyKey","ifMatch"],requestBody:named("UpdatePrototypePlanRequest",updatePrototypePlanRequestSchema),
-    response:response(200,"Adjust draft input atomically and preserve fixed context",named("PrototypePlan",prototypePlanSchema),["etag"]),problemStatuses:problems(400,403,404,409,412,428,503),
-  },
-  {
-    method:"post",path:"/projects/{projectId}/prototype-v2/revisions/{revisionId}/plans",operationId:"createPrototypeRevisionPlan",requestHeaders:["idempotencyKey","ifMatch"],requestBody:named("CreatePrototypeRevisionPlanRequest",createPrototypeRevisionPlanRequestSchema),
-    response:response(201,"Create a reviewable modification plan in the source version family",named("PrototypePlan",prototypePlanSchema),["etag"]),problemStatuses:problems(400,403,404,409,412,428,503),
   },
   {
     method: "get", path: "/projects/{projectId}/prototype-v2/plans/{planId}/progress", operationId: "getPrototypeProgress",

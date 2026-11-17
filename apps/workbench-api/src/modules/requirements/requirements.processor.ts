@@ -11,7 +11,6 @@ import { RequirementContextReader } from './requirement-context-reader.js';
 import { RunsService } from '../runs/runs.service.js';
 import { PrototypeV2Service } from '../prototypes/prototype-v2.service.js';
 import { feedbackAnchorIndex } from '../prototypes/prototype-feedback-location.js';
-import { assertPlanBindings,readRequirementPlan } from './requirement-plan-context.js';
 const json=(x:unknown)=>x as Prisma.InputJsonValue;
 @Injectable()
 export class RequirementsProcessor implements OnModuleInit,OnModuleDestroy {
@@ -69,21 +68,19 @@ export class RequirementsProcessor implements OnModuleInit,OnModuleDestroy {
    const context=requirementContextSchema.parse(session.context);
    const projectContext=await this.sessions.transaction(turn.principalId,turn.sessionId,async(tx,s)=>{
     if(s.currentTurnId!==turn.id||s.revision!==turn.inputRevision)throw requirementProblem('REQUIREMENT_TURN_CHANGED');
-    const plan=context.kind==='plan'?await readRequirementPlan(tx,s.projectId,context):null;
-    if(plan)assertPlanBindings(plan.request,request);
-    const revisionContext=context.kind==='revision'?context:plan?.sourceRevisionId?{revisionId:plan.sourceRevisionId,feedbackIds:plan.feedbackIds,anchor:null}:null;
+    const revisionContext=context.kind==='revision'?context:null;
     let source=null;
     if(revisionContext){
-     request=await this.runs.resolvePrototypeRevisionRequest(tx,s.projectId,revisionContext.revisionId,request,true);
+     request=requirementDiscussionRequestSchema.parse(await this.runs.resolvePrototypeRevisionRequest(tx,s.projectId,revisionContext.revisionId,request,true));
      const revision=await tx.prototypeRevision.findFirst({where:{id:revisionContext.revisionId,projectId:s.projectId}});if(!revision)throw requirementProblem('REQUIREMENT_SOURCE_CHANGED');
      const feedback=await tx.prototypeFeedback.findMany({where:{id:{in:revisionContext.feedbackIds},projectId:s.projectId,revisionId:revisionContext.revisionId,status:'open'}});
      if(feedback.length!==revisionContext.feedbackIds.length)throw requirementProblem('REQUIREMENT_SOURCE_CHANGED');
      if(revisionContext.anchor){const index=feedbackAnchorIndex(revision);const anchor=revisionContext.anchor;if(anchor.sourceRevisionId!==revision.id||anchor.scope==='unresolved'||!index.pages.has(anchor.pageId)||anchor.scope==='node'&&index.nodes?.get(anchor.nodeId)!==anchor.pageId)throw requirementProblem('REQUIREMENT_SOURCE_CHANGED');}
      source={revisionId:revision.id,documentSha256:revision.documentSha256,document:revision.sourceDocument,feedback,anchor:revisionContext.anchor};
     }
-    const snapshot=await this.runs.captureGenerationInput(tx,s.projectId,{...request,prompt:"Discussion context authorization check only"},plan?{request:plan.request,snapshot:plan.snapshot}:undefined);
+    const snapshot=await this.runs.captureGenerationInput(tx,s.projectId,{...request,prompt:"Discussion context authorization check only"});
     const project=await tx.project.findUniqueOrThrow({where:{id:s.projectId},select:{id:true,title:true}});
-    return {project,snapshot,source,plan};
+    return {project,snapshot,source};
    });
    const sourceContents=this.contextReader?await this.contextReader.read(turn.projectId,projectContext.snapshot,request,controller.signal):{readings:[],artifactTargets:[]};
    if(!this.contextReader&&(request.sourceIds.length||request.artifactTargets.length))throw requirementProblem('REQUIREMENT_SOURCE_TEXT_UNAVAILABLE');

@@ -1,3 +1,4 @@
+import { requirementProblem } from "../requirements/requirement-policy.js";
 import { lockRequirementConfirmation,consumeRequirementConfirmation } from "../requirements/requirement-generation-gate.js";
 import { createHash, randomUUID } from "node:crypto";
 import { relationVersion, relationVersionSelect } from "../artifacts/artifact-relations.js";
@@ -143,24 +144,16 @@ export class RunsService {
     return {request,snapshot};
   }
 
-  async capturePrototypeInput(tx: Prisma.TransactionClient, projectId: string, request: StartRunRequest, inherited?: {request:StartRunRequest;snapshot:PrototypeInputSnapshot|null}) {
-    if(!request.requestedArtifactKinds.includes("prototype"))throw validationProblem("Prototype plans must include a prototype artifact");
-    return this.captureGenerationInput(tx,projectId,request,inherited);
-  }
-  async captureGenerationInput(tx:Prisma.TransactionClient,projectId:string,request:StartRunRequest,inherited?:{request:StartRunRequest;snapshot:PrototypeInputSnapshot|null}){
+  async captureGenerationInput(tx:Prisma.TransactionClient,projectId:string,request:StartRunRequest){
     assertRunWorkflowInputs(request);
     await this.runtimeModels.assertAvailable(request.modelId,request.workflow);
     await this.validatePrototypePlanCanvas(tx,projectId,request);
     await this.assertReadyArtifactTargets(tx,projectId,request);
-    const previous=new Map((inherited?.snapshot?.sources??[]).map(source=>[source.sourceId,source]));
-    const fresh=await this.resolveSourceSnapshots(tx,projectId,request.sourceIds.filter(id=>!previous.has(id)));
-    const sources=request.sourceIds.map(id=>previous.get(id)??fresh.find(source=>source.sourceId===id)!);
+    const sources=await this.resolveSourceSnapshots(tx,projectId,request.sourceIds);
     this.assertSourceBlobLimit(sources);
-    const designStyle=inherited?.snapshot&&canonicalJson(inherited.request.designStyle)===canonicalJson(request.designStyle)
-      ? inherited.snapshot.designStyle : await this.resolveDesignStyle(tx,projectId,request.designStyle);
+    const designStyle=await this.resolveDesignStyle(tx,projectId,request.designStyle);
     const project=await tx.project.findUniqueOrThrow({where:{id:projectId},select:{workspaceId:true}});
-    const knowledge=inherited?.snapshot?.knowledgeReleaseId?await tx.knowledgeRelease.findFirst({where:{id:inherited.snapshot.knowledgeReleaseId,status:"ready"}})
-      :(await tx.knowledgeRelease.findFirst({where:{status:"ready",projectId},orderBy:{version:"desc"}})??await tx.knowledgeRelease.findFirst({where:{status:"ready",projectId:null,OR:[{workspaceId:project.workspaceId},{workspaceId:null}]},orderBy:[{version:"desc"},{createdAt:"desc"}]}));
+    const knowledge=(await tx.knowledgeRelease.findFirst({where:{status:"ready",projectId},orderBy:{version:"desc"}})??await tx.knowledgeRelease.findFirst({where:{status:"ready",projectId:null,OR:[{workspaceId:project.workspaceId},{workspaceId:null}]},orderBy:[{version:"desc"},{createdAt:"desc"}]}));
     return prototypeInputSnapshotSchema.parse({sources,designStyle:{...designStyle,snapshot:designStyle.snapshot??null},knowledgeReleaseId:knowledge?.id??null});
   }
 
@@ -183,6 +176,7 @@ export class RunsService {
       request=await this.resolvePrototypeRevisionRequest(tx,input.projectId,input.sourceRevisionId,request,!!request.requirementConfirmationId);
     }
 
+    if(pinned&&!request.requirementConfirmationId)throw requirementProblem("REQUIREMENT_CONFIRMATION_REQUIRED");
     if (pinned && request.workflow === "edit") {
       for (const target of request.artifactTargets) {
         const artifact = await tx.artifact.findFirst({ where: { id: target.artifactId, projectId: input.projectId }, select: { currentVersionId: true } });
@@ -205,19 +199,7 @@ export class RunsService {
       if (!thread) throw notFoundProblem("Thread");
     } else if(requirement){
       const session=await tx.requirementSession.findUniqueOrThrow({where:{id:requirement.sessionId}});threadId=session.threadId;
-    } else if (request.canvasSnapshot) {
-      threadId = request.canvasSnapshot.threadId;
-      const rows = await tx.$queryRaw<Array<{ status: string }>>(Prisma.sql`
-        SELECT "status"::text AS "status" FROM "threads"
-        WHERE "id" = ${threadId} AND "project_id" = ${input.projectId} FOR UPDATE
-      `);
-      if (rows[0]?.status !== "active") throw notFoundProblem("Thread");
-      const active = await tx.run.findFirst({ where: { threadId, status: { in: [...activeStatuses] } }, select: { id: true } });
-      if (active) throw activeRunConflictProblem(active.id);
-    } else {
-      const thread = await tx.thread.create({ data: { projectId: input.projectId, createdById: input.principalId, title: input.title } });
-      threadId = thread.id;
-    }
+    } else throw requirementProblem("REQUIREMENT_CONFIRMATION_REQUIRED");
     await tx.$queryRaw(Prisma.sql`SELECT "id" FROM "threads" WHERE "id" = ${threadId} FOR UPDATE`);
     if(!await tx.thread.findFirst({where:{id:threadId,projectId:input.projectId,status:"active"}}))throw notFoundProblem("Thread");
     const activeRun = await tx.run.findFirst({ where: { threadId, status: { in: [...activeStatuses] } }, select: { id: true } });
@@ -266,6 +248,7 @@ export class RunsService {
 
   async retry(principalId: string, sourceRunId: string, idempotencyKey: string): Promise<Run> {
     const source = await this.access.findRun(principalId, sourceRunId, "edit");
+    if(!startRunRequestSchema.parse(source.request).requirementConfirmationId)throw requirementProblem("REQUIREMENT_CONFIRMATION_REQUIRED");
     if (source.status !== "failed" || source.errorRetryable !== true) {
       throw runRetryConflictProblem("Only a failed Run explicitly marked retryable can be retried");
     }

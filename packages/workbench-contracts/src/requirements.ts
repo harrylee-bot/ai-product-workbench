@@ -29,11 +29,10 @@ export const requirementDiscussionCardSchema = requirementCardSchema.partial().e
  modules:z.array(text(240)).max(30).optional(),roles:z.array(text(240)).max(30).optional(),
  changes:z.array(text(2000)).max(50).optional(),outputKinds:z.array(z.enum(["prd","prototype"])).max(2).optional(),
 });
-export const requirementDiscussionRequestSchema=startRunRequestObjectSchema.omit({requirementConfirmationId:true}).strict();
+export const requirementDiscussionRequestSchema=startRunRequestObjectSchema.omit({requirementConfirmationId:true}).extend({canvasSnapshot:z.null().default(null)}).strict();
 export const requirementContextSchema = z.discriminatedUnion("kind",[
  z.object({kind:z.literal("new")}).strict(),
  z.object({kind:z.literal("revision"),revisionId:opaqueIdSchema,feedbackIds:z.array(opaqueIdSchema).max(100),anchor:prototypeFeedbackAnchorSchema.nullable()}).strict(),
- z.object({kind:z.literal("plan"),planId:opaqueIdSchema,expectedRevision:revisionSchema}).strict(),
 ]);
 export const requirementAnalysisSchema = z.object({reply:text(12000),card:requirementDiscussionCardSchema.nullable()}).strict();
 export const requirementTurnSchema = z.object({

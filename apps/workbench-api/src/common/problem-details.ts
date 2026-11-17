@@ -153,14 +153,6 @@ export function runDesignStyleStateConflictProblem() {
   });
 }
 
-export function submissionIntentStateConflictProblem(detail: string, code = "SUBMISSION_INTENT_STATE_CONFLICT") {
-  return new ProblemException({
-    title: "Submission intent conflict",
-    status: HttpStatus.CONFLICT,
-    detail,
-    code,
-  });
-}
 
 export function designPresetSelectionProblem(
   code: string,

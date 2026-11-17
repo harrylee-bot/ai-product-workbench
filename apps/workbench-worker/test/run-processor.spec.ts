@@ -1,3 +1,9 @@
+// Runtime orchestration uses a verified confirmation collaborator. Its integrity
+// boundary is tested in confirmed-requirement-baseline.spec.ts and real PG tests.
+vi.mock("../src/runs/confirmed-requirement-baseline.js", () => ({
+  confirmedRequirementBaseline: vi.fn(async () => ({confirmationId:"fixture-confirmation",summaryVersion:1,checksum:"a".repeat(64),baseline:{sourceContents:{readings:[]}}})),
+  freezeConfirmedSources: vi.fn(async (_tx, _confirmed, sources) => sources),
+}));
 import { persistArtifactDraft, persistDelta } from "./run-persistence.fixture.js";
 import {
   boardNodeProtocol,

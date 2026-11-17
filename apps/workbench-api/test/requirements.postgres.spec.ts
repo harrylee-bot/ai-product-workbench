@@ -52,7 +52,7 @@ suite('Requirement discussions with actual PostgreSQL; fixture model and workflo
   for(const item of result.evidence)expect(item.checksum).toBe(createHash('sha256').update(item.quote).digest('hex'));
   await expect(knowledge.retrieve(fixture.outsiderId,fixture.projectId,'产品 规则',signal)).rejects.toMatchObject({status:404});
  });
- async function draft(kinds:('prd'|'prototype')[]=['prototype'],withSource=false){
+ async function discussionWithSource(kinds:('prd'|'prototype')[]=['prototype'],withSource=false){
   const initial=await create(kinds);let request=initial.generationRequest;const bytes=Buffer.from('Existing draft source rules '+randomUUID()),sha256=createHash('sha256').update(bytes).digest('hex');
   if(withSource){
    const verifiedAt=new Date(),blob=await db.blob.create({data:{sha256,generation:1,storageKey:`blobs/${sha256.slice(0,2)}/${sha256.slice(2,4)}/${sha256}/g1`,mediaType:'text/markdown',byteSize:BigInt(bytes.length),status:'ready',verifiedAt}});
@@ -63,45 +63,37 @@ suite('Requirement discussions with actual PostgreSQL; fixture model and workflo
    request=startRunRequestSchema.parse({...request,sourceIds:[source.id],designStyle:{kind:'preset',presetId:preset.presetId,version:preset.version,checksum:preset.checksum}});
   }
   const snapshot=await db.$transaction(tx=>runs.captureGenerationInput(tx,initial.projectId,request));
-  const plan=await db.prototypePlan.create({data:{projectId:initial.projectId,createdById:fixture.ownerId,title:'Existing draft',prompt:request.prompt,generationRequest:request as never,inputSnapshot:snapshot as never,idempotencyKey:randomUUID(),requestHash:sha256}});
-  const context={kind:'plan' as const,planId:plan.id,expectedRevision:plan.revision};
-  const s=await service.create(fixture.ownerId,initial.threadId,randomUUID(),request,context);
+  const s=await service.create(fixture.ownerId,initial.threadId,randomUUID(),request);
   const job=processor({...baseCard,outputKinds:kinds}) as any;
   job.contextReader=new RequirementContextReader(db as never,{getObject:async()=>({body:Readable.from([bytes]),byteSize:bytes.length,mediaType:'text/markdown',contentRange:null})});
-  return {s,plan,request,snapshot,context,job,bytes};
+  return {s,request,snapshot,job,bytes};
  }
- it.each([['prototype'],['prd','prototype'],['prd']] as ('prd'|'prototype')[][])('derives one confirmed execution from a fixed draft with outputs %j',async(...selected)=>{
+ it.each([['prototype'],['prd','prototype'],['prd']] as ('prd'|'prototype')[][])('confirms one execution from a discussion with fixed sources and outputs %j',async(...selected)=>{
   const kinds=selected.filter(x=>x==='prd'||x==='prototype') as ('prd'|'prototype')[];
-  const {s,plan,request,snapshot,job,bytes}=await draft(kinds,true);
+  const {s,request,snapshot,job,bytes}=await discussionWithSource(kinds,true);
   await service.message(fixture.ownerId,s.id,'draft-message',0,{text:'保留草稿来源和设计，仅增加渠道筛选',intent:'discuss'});await job.tick(s.id);
   const reviewed=await service.get(fixture.ownerId,s.id);expect(reviewed.state).toBe('ready_to_confirm');
   await Promise.all([service.confirm(fixture.ownerId,s.id,'draft-confirm',reviewed.revision,accept(reviewed)),service.confirm(fixture.ownerId,s.id,'draft-confirm',reviewed.revision,accept(reviewed))]);await job.tick(s.id);await job.tick(s.id);
   const done=await service.get(fixture.ownerId,s.id),run=await db.run.findUniqueOrThrow({where:{id:done.confirmation!.runId!},include:{sourceSnapshots:true}});
   expect(done.confirmation?.status).toBe('started');expect(await db.run.count({where:{threadId:s.threadId}})).toBe(1);expect((run.request as any).sourceIds).toEqual(request.sourceIds);expect((run.request as any).designStyle).toEqual(request.designStyle);expect(run.sourceSnapshots[0]?.snapshot).toEqual(snapshot.sources[0]?.snapshot);expect(run.designStyleSnapshot).toEqual(snapshot.designStyle.snapshot);
-  const old=await db.prototypePlan.findUniqueOrThrow({where:{id:plan.id}});expect(old.status).toBe('cancelled');expect(old.revision).toBe(plan.revision+1);expect(old.generationRequest).toEqual(plan.generationRequest);expect(old.inputSnapshot).toEqual(plan.inputSnapshot);
   const confirmation=await db.requirementConfirmation.findUniqueOrThrow({where:{id:done.confirmation!.id}});expect((confirmation.baseline as any).analysisContext.sourceContents.readings[0].text).toBe(bytes.toString());
-  if(kinds.includes('prototype')){const derived=await db.prototypePlan.findUniqueOrThrow({where:{id:done.confirmation!.planId!}});expect(derived.rootPlanId).toBe(plan.id);expect(derived.contentVersion).toBe(2);expect(derived.status).toBe('approved');}else expect(done.confirmation?.planId).toBeNull();
+  if(kinds.includes('prototype')){const derived=await db.prototypePlan.findUniqueOrThrow({where:{id:done.confirmation!.planId!}});expect(derived.rootPlanId).toBeNull();expect(derived.contentVersion).toBe(1);expect(derived.status).toBe('approved');}else expect(done.confirmation?.planId).toBeNull();
   expect((await service.confirm(fixture.ownerId,s.id,'draft-confirm',reviewed.revision,accept(reviewed))).confirmation?.runId).toBe(run.id);
  });
- it('checks draft ownership scope, initial input, CAS and fixed artifact bindings',async()=>{
-  const {s,plan,request,context}=await draft();
-  await expect(service.create(fixture.ownerId,s.threadId,randomUUID(),request,{...context,expectedRevision:99})).rejects.toMatchObject({status:409});
-  await expect(service.create(fixture.ownerId,s.threadId,randomUUID(),{...request,prompt:'Unrelated input'},context)).rejects.toMatchObject({status:409});
-  await expect(service.create(fixture.outsiderId,s.threadId,randomUUID(),request,context)).rejects.toMatchObject({status:404});
-  const otherThread=await db.thread.create({data:{projectId:fixture.outsiderProjectId,createdById:fixture.outsiderId,title:'Other project'}});
-  await expect(service.create(fixture.outsiderId,otherThread.id,randomUUID(),request,context)).rejects.toMatchObject({status:409});
-  await expect(service.message(fixture.ownerId,s.id,'draft-rebind-attempt',0,{text:'改变来源',intent:'discuss',generationRequest:{...request,workflow:'edit'}})).rejects.toMatchObject({status:409});
-  expect((await db.prototypePlan.findUniqueOrThrow({where:{id:plan.id}})).status).toBe('draft');
+ it('preserves stored unconfirmed input but refuses runtime execution or retry',async()=>{
+  const s=await create(['prd']);
+  const row=await db.run.create({data:{projectId:s.projectId,threadId:s.threadId,createdById:fixture.ownerId,knowledgeReleaseId:fixture.releaseId,idempotencyKey:randomUUID(),requestHash:'a'.repeat(64),requestId:randomUUID(),traceId:randomUUID(),modelId:s.generationRequest.modelId,request:s.generationRequest as never}});
+  const stored=await db.run.update({where:{id:row.id},data:{status:'failed',startedAt:new Date(),finishedAt:new Date(),errorCode:'RUNTIME_UNAVAILABLE',errorDetail:'Stored previous execution',errorRetryable:true}});
+  await expect(db.$transaction(tx=>confirmedRequirementBaseline(tx,stored,startRunRequestSchema.parse(stored.request)))).rejects.toThrow('REQUIREMENT_CONFIRMATION_REQUIRED');
+  await expect(runs.retry(fixture.ownerId,stored.id,'unconfirmed-retry')).rejects.toMatchObject({status:409,response:{code:'REQUIREMENT_CONFIRMATION_REQUIRED'}});
+  expect(await db.run.findUniqueOrThrow({where:{id:stored.id}})).toEqual(stored);expect(await db.run.count({where:{threadId:s.threadId}})).toBe(1);
  });
- it.each(['before-analysis','before-confirm','after-confirm'] as const)('rejects a changed draft %s without starting a Run',async phase=>{
-  const {s,plan,job}=await draft();await service.message(fixture.ownerId,s.id,'stale-draft-message',0,{text:'在原草稿增加渠道筛选',intent:'discuss'});
-  const change=()=>db.prototypePlan.update({where:{id:plan.id},data:{status:'cancelled',revision:{increment:1}}});
-  if(phase==='before-analysis')await change();await job.tick(s.id);
-  const reviewed=await service.get(fixture.ownerId,s.id);
-  if(phase==='before-analysis'){expect(reviewed.activeTurn?.failureCode).toBe('REQUIREMENT_BASELINE_CHANGED');return;}
-  if(phase==='before-confirm'){await change();await expect(service.confirm(fixture.ownerId,s.id,'stale-draft-confirm',reviewed.revision,accept(reviewed))).rejects.toMatchObject({status:409});}
-  else {await service.confirm(fixture.ownerId,s.id,'stale-draft-confirm',reviewed.revision,accept(reviewed));await change();await job.tick(s.id);expect((await service.get(fixture.ownerId,s.id)).confirmation?.failureCode).toBe('REQUIREMENT_BASELINE_CHANGED');}
-  expect(await db.run.count({where:{threadId:s.threadId}})).toBe(0);
+ it('preserves retired draft rows without exposing them as generation plans',async()=>{
+  const s=await create();const draft=await db.prototypePlan.create({data:{projectId:s.projectId,createdById:fixture.ownerId,title:'Stored draft',prompt:'Preserved data',generationRequest:s.generationRequest as never,idempotencyKey:randomUUID(),requestHash:'a'.repeat(64)}});
+  await expect(service.create(fixture.ownerId,s.threadId,'retired-plan-context',s.generationRequest,{kind:'plan',planId:draft.id,expectedRevision:0} as never)).rejects.toThrow();
+  const plans=await prototypes.listPlans({id:fixture.ownerId} as never,s.projectId);expect(plans.some(x=>x.id===draft.id)).toBe(false);
+  await expect(prototypes.getPlanSnapshot({id:fixture.ownerId} as never,s.projectId,draft.id)).rejects.toMatchObject({status:404});
+  expect(await db.prototypePlan.findUniqueOrThrow({where:{id:draft.id}})).toEqual(draft);
  });
  it('saves a short request, permits partial clarification, and creates no generation Run',async()=>{
   const s=await create();const before=await db.run.count({where:{projectId:fixture.projectId}});
@@ -170,8 +162,6 @@ suite('Requirement discussions with actual PostgreSQL; fixture model and workflo
   const s=await create();const request=startRunRequestSchema.parse(s.generationRequest);
   await expect(runs.start(fixture.ownerId,s.threadId,'bypass-run',request)).rejects.toMatchObject({status:409});
   const principal={id:fixture.ownerId} as never;
-  await expect(prototypes.createPlan(principal,s.projectId,{prompt:request.prompt,title:'直接生成',generationRequest:request},'bypass-plan')).rejects.toMatchObject({status:409});
-  await expect(prototypes.revise(principal,s.projectId,'arbitrary-revision',{feedbackIds:['arbitrary-feedback']},'bypass-edit','"0"')).rejects.toMatchObject({status:409});
   expect(await db.run.count({where:{threadId:s.threadId}})).toBe(0);
  });
  it('does not generate when critical permission uncertainty is marked nonblocking by the model',async()=>{
@@ -246,7 +236,7 @@ suite('Requirement discussions with actual PostgreSQL; fixture model and workflo
   const replay=await service.retryConfirmation(fixture.ownerId,s.id,fresh.confirmation!.id,'fresh-dispatch-retry',fresh.revision);expect(replay.confirmation?.runId).toBe(started.confirmation?.runId);expect(await db.run.count({where:{threadId:s.threadId}})).toBe(1);
  });
 
- it.each(['unchanged','resolved-before-confirm','resolved-after-start','draft-plan-source','draft-plan-joint-output'] as const)('source-bound confirmation fences selected feedback: %s',async feedbackChange=>{
+ it.each(['unchanged','resolved-before-confirm','resolved-after-start','joint-output'] as const)('source-bound confirmation fences selected feedback: %s',async feedbackChange=>{
   const initial=await ready(['prototype']);await service.confirm(fixture.ownerId,initial.id,'source-plan-confirm',initial.revision,accept(initial));await processor({...baseCard,outputKinds:['prototype']}).tick(initial.id);
   const started=await service.get(fixture.ownerId,initial.id),sourcePlan=await db.prototypePlan.findUniqueOrThrow({where:{id:started.confirmation!.planId!}});
   const document=prototypeDocumentFixture(),checksum=createHash('sha256').update(canonicalJson(document)).digest('hex');
@@ -260,11 +250,10 @@ suite('Requirement discussions with actual PostgreSQL; fixture model and workflo
   const feedback=await db.prototypeFeedback.create({data:{id:randomUUID(),projectId:initial.projectId,revisionId:source.id,createdById:fixture.ownerId,body:'仅调整选中节点的渠道提示',anchor,idempotencyKey:randomUUID(),requestHash:checksum}});
   const thread=await db.thread.create({data:{projectId:initial.projectId,createdById:fixture.ownerId,title:'Source-bound change'}});
   const request=startRunRequestSchema.parse({...initial.generationRequest,workflow:'edit',artifactTargets:[{artifactId:artifact.id,artifactVersionId:version.id,screenIds:[]}],requestedArtifactKinds:['prototype']});
-  const sourceDraft=feedbackChange.startsWith('draft-plan')?await db.prototypePlan.create({data:{projectId:initial.projectId,createdById:fixture.ownerId,title:'Draft source-bound change',prompt:request.prompt,generationRequest:request as never,inputSnapshot:await db.$transaction(tx=>runs.captureGenerationInput(tx,initial.projectId,request)) as never,rootPlanId:sourcePlan.id,sourceRevisionId:source.id,contentVersion:2,feedbackIds:[feedback.id],idempotencyKey:randomUUID(),requestHash:checksum}}):null;
-  const context=sourceDraft?{kind:'plan' as const,planId:sourceDraft.id,expectedRevision:sourceDraft.revision}:{kind:'revision' as const,revisionId:source.id,feedbackIds:[feedback.id],anchor};
+  const context={kind:'revision' as const,revisionId:source.id,feedbackIds:[feedback.id],anchor};
   const s=await service.create(fixture.ownerId,thread.id,'source-bound-session',request,context);
   await service.message(fixture.ownerId,s.id,'source-bound-message',0,{text:'仅调整选中节点的渠道提示，其余页面与流程不变',intent:'discuss'});
-  const outputKinds=feedbackChange==='draft-plan-joint-output'?['prd','prototype'] as const:['prototype'] as const;
+  const outputKinds=feedbackChange==='joint-output'?['prd','prototype'] as const:['prototype'] as const;
   if(outputKinds.length===2){const current=await service.get(fixture.ownerId,s.id);await service.message(fixture.ownerId,s.id,'source-bound-joint',current.revision,{text:'需要文档与原型一起输出',intent:'discuss',generationRequest:{...request,requestedArtifactKinds:[...outputKinds]}});}
   const real=processor({...baseCard,outputKinds:[...outputKinds]}) as any;
   real.contextReader={read:vi.fn().mockResolvedValue({readings:[],artifactTargets:[{id:version.id,checksum,content:document}]})};await real.tick(s.id);
@@ -278,7 +267,7 @@ suite('Requirement discussions with actual PostgreSQL; fixture model and workflo
   await service.confirm(fixture.ownerId,s.id,'source-bound-confirm',reviewed.revision,accept(reviewed));await real.tick(s.id);
   const done=await service.get(fixture.ownerId,s.id);expect(done.confirmation?.status).toBe('started');const plan=await db.prototypePlan.findUniqueOrThrow({where:{id:done.confirmation!.planId!}});
   expect(plan.sourceRevisionId).toBe(source.id);expect(plan.feedbackIds).toEqual([feedback.id]);const run=await db.run.findUniqueOrThrow({where:{id:done.confirmation!.runId!}});expect((run.request as any).artifactTargets).toEqual([{artifactId:artifact.id,artifactVersionId:version.id,screenIds:[]}]);
-  const confirmation=await db.requirementConfirmation.findUniqueOrThrow({where:{id:done.confirmation!.id}});if(sourceDraft){expect((confirmation.baseline as any).context.planId).toBe(sourceDraft.id);expect((await db.prototypePlan.findUniqueOrThrow({where:{id:sourceDraft.id}})).status).toBe('cancelled');}else expect((confirmation.baseline as any).context.anchor).toEqual(anchor);expect((await db.prototypeRevision.findUniqueOrThrow({where:{id:source.id}})).sourceDocument).toEqual(document);
+  const confirmation=await db.requirementConfirmation.findUniqueOrThrow({where:{id:done.confirmation!.id}});expect((confirmation.baseline as any).context.anchor).toEqual(anchor);expect((await db.prototypeRevision.findUniqueOrThrow({where:{id:source.id}})).sourceDocument).toEqual(document);
   expect((run.request as any).requestedArtifactKinds).toEqual([...outputKinds]);
   if(feedbackChange==='resolved-after-start'){
    await prototypes.resolveFeedback({id:fixture.ownerId} as never,s.projectId,feedback.id,'resolve-after-start','"0"',{});
@@ -308,7 +297,7 @@ suite('Requirement discussions with actual PostgreSQL; fixture model and workflo
  it.each(['prd','prototype'] as const)('preserves confirmed %s inputs and author across editor retry chains after a new knowledge release',async kind=>{
   await db.workspaceMember.createMany({data:[{workspaceId:fixture.workspaceId,principalId:fixture.outsiderId,role:'member'}],skipDuplicates:true});
   await db.projectMember.upsert({where:{projectId_principalId:{projectId:fixture.projectId,principalId:fixture.outsiderId}},create:{projectId:fixture.projectId,workspaceId:fixture.workspaceId,principalId:fixture.outsiderId,role:'editor'},update:{role:'editor'}});
-  const {s,job}=await draft([kind],true);await service.message(fixture.ownerId,s.id,'retry-source-message',0,{text:'保留原规则和设计，增加渠道筛选',intent:'discuss'});await job.tick(s.id);
+  const {s,job}=await discussionWithSource([kind],true);await service.message(fixture.ownerId,s.id,'retry-source-message',0,{text:'保留原规则和设计，增加渠道筛选',intent:'discuss'});await job.tick(s.id);
   const reviewed=await service.get(fixture.ownerId,s.id);await service.confirm(fixture.ownerId,s.id,'retry-source-confirm',reviewed.revision,accept(reviewed));await job.tick(s.id);
   const started=await service.get(fixture.ownerId,s.id),original=await db.run.findUniqueOrThrow({where:{id:started.confirmation!.runId!},include:{sourceSnapshots:true}});
   await db.run.update({where:{id:original.id},data:{status:'failed',errorRetryable:true}});

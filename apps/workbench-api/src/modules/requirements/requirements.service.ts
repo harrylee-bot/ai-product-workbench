@@ -10,7 +10,6 @@ import { AccessService } from '../access/access.service.js';
 import { lockActiveProject } from '../projects/project-lock.js';
 import { RunsService } from '../runs/runs.service.js';
 import { assertConfirmed, requirementProblem } from './requirement-policy.js';
-import { assertPlanBindings,readRequirementPlan } from './requirement-plan-context.js';
 const id=()=>`requirement_${randomUUID()}`;
 const json=(x:unknown)=>x as Prisma.InputJsonValue;
 @Injectable()
@@ -32,16 +31,12 @@ export class RequirementsService {
   await this.access.findThread(principalId,session.threadId,'read');return session;
  }
  async create(principalId:string,threadId:string,key:string,request:StartRunRequest,context:RequirementContext={kind:"new"}){
-  validateIdempotencyKey(key);request=requirementDiscussionRequestSchema.parse(request);this.allowed(request);
+  validateIdempotencyKey(key);context=requirementContextSchema.parse(context);request=requirementDiscussionRequestSchema.parse(request);this.allowed(request);
   const thread=await this.access.findThread(principalId,threadId,'edit');
   const session=await this.db.$transaction(async tx=>{
    await lockActiveProject(tx,thread.projectId,principalId,'edit');
    const old=await tx.requirementSession.findUnique({where:{threadId_principalId_idempotencyKey:{threadId,principalId,idempotencyKey:key}}});
    if(old){if(old.requestHash!==hashRequest({request,context}))throw idempotencyConflictProblem();return old;}
-   if(context.kind==='plan'){
-    const source=await readRequirementPlan(tx,thread.projectId,context);
-    if(hashRequest(source.request)!==hashRequest(request))throw requirementProblem('REQUIREMENT_BASELINE_CHANGED');
-   }
    return tx.requirementSession.create({data:{id:id(),threadId,principalId,projectId:thread.projectId,idempotencyKey:key,requestHash:hashRequest({request,context}),context:json(context),generationRequest:json(request)}});
   });return this.snapshot(session);
  }
@@ -65,8 +60,6 @@ export class RequirementsService {
    if(previous){if(previous.requestHash!==hashRequest(input))throw idempotencyConflictProblem();return;}
    if(s.revision!==revision)throw revisionConflictProblem();
    const request=requirementDiscussionRequestSchema.parse(input.generationRequest??s.generationRequest);this.allowed(request);
-   const context=requirementContextSchema.parse(s.context);
-   if(context.kind==='plan')assertPlanBindings((await readRequirementPlan(tx,s.projectId,context)).request,request);
    await tx.$executeRaw(Prisma.sql`SELECT pg_advisory_xact_lock(hashtextextended(${`requirements-quota:${principalId}`},0))`);
    const count=await tx.requirementTurn.count({where:{sessionId}});
    const daily=await tx.requirementTurn.count({where:{principalId,createdAt:{gte:new Date(Date.now()-86400000)}}});
@@ -114,15 +107,12 @@ export class RequirementsService {
    assertConfirmed(card,evidence,input.acceptedAssumptionIds,input.acceptedPlatformChanges);
    let configuration=requirementDiscussionRequestSchema.parse(s.generationRequest);
    const context=requirementContextSchema.parse(s.context);
-   const sourcePlan=context.kind==='plan'?await readRequirementPlan(tx,s.projectId,context):null;
-   if(sourcePlan)assertPlanBindings(sourcePlan.request,configuration);
-   const sourceRevisionId=context.kind==='revision'?context.revisionId:sourcePlan?.sourceRevisionId;
-   const feedbackIds=context.kind==='revision'?context.feedbackIds:sourcePlan?.feedbackIds??[];
-   if(sourceRevisionId)configuration=await this.runs.resolvePrototypeRevisionRequest(tx,s.projectId,sourceRevisionId,configuration,true);
+   const sourceRevisionId=context.kind==='revision'?context.revisionId:null;
+   const feedbackIds=context.kind==='revision'?context.feedbackIds:[];
+   if(sourceRevisionId)configuration=requirementDiscussionRequestSchema.parse(await this.runs.resolvePrototypeRevisionRequest(tx,s.projectId,sourceRevisionId,configuration,true));
    configuration={...configuration,prompt:[card.goal,...card.changes].join("\n")};
-   const currentSnapshot=await this.runs.captureGenerationInput(tx,s.projectId,configuration,sourcePlan?{request:sourcePlan.request,snapshot:sourcePlan.snapshot}:undefined);
-   const analyzedContext=summary.contextSnapshot as {projectContext:{snapshot:unknown;source?:{feedback:unknown[]};plan?:unknown};sourceContents:unknown};
-   if(sourcePlan&&hashRequest(sourcePlan)!==hashRequest(analyzedContext.projectContext.plan))throw requirementProblem('REQUIREMENT_BASELINE_CHANGED');
+   const currentSnapshot=await this.runs.captureGenerationInput(tx,s.projectId,configuration);
+   const analyzedContext=summary.contextSnapshot as {projectContext:{snapshot:unknown;source?:{feedback:unknown[]}};sourceContents:unknown};
    if(sourceRevisionId){
     // The project lock also serializes feedback resolution. Check the exact
     // selected feedback at the confirmation boundary, before freezing consent.

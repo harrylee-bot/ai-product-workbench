@@ -1,7 +1,7 @@
 import { canonicalJson, prototypeInputSnapshotSchema, startRunRequestSchema, type StartRunRequest } from '@workbench/workbench-contracts';
 import type { Prisma } from '@workbench/workbench-db';
 export async function confirmedRequirementBaseline(tx:Prisma.TransactionClient,run:{id:string;projectId:string;createdById:string;knowledgeReleaseId:string|null;retryOfRunId:string|null},request:StartRunRequest){
- if(!request.requirementConfirmationId)return null; // Published historical Runs retain their original input.
+ if(!request.requirementConfirmationId)throw Error('REQUIREMENT_CONFIRMATION_REQUIRED');
  const confirmation=await tx.requirementConfirmation.findFirst({where:{id:request.requirementConfirmationId,projectId:run.projectId,status:'started'}});
  if(!confirmation||canonicalJson(startRunRequestSchema.parse(confirmation.generationRequest))!==canonicalJson(request))throw Error('REQUIREMENT_BASELINE_CHANGED');
  const snapshot=prototypeInputSnapshotSchema.parse(confirmation.inputSnapshot);
@@ -20,8 +20,7 @@ export async function confirmedRequirementBaseline(tx:Prisma.TransactionClient,r
  return {confirmationId:confirmation.id,summaryVersion:summary.version,checksum:summary.checksum,baseline:confirmation.baseline};
 }
 
-export async function freezeConfirmedSources(tx:Prisma.TransactionClient,confirmed:{baseline:unknown}|null,sources:import('../runtime/runtime.port.js').RuntimeSource[]){
- if(!confirmed)return sources;
+export async function freezeConfirmedSources(tx:Prisma.TransactionClient,confirmed:{baseline:unknown},sources:import('../runtime/runtime.port.js').RuntimeSource[]){
  const readings=(confirmed.baseline as {sourceContents?:{readings?:{sourceId:string;originalBlobId:string;blobId:string;sha256:string;extraction:null|{id:string;kind:string;position:number;content:{storageKey:string;sha256:string;byteSize:number;mediaType:string}}}[]}}).sourceContents?.readings;
  if(!readings||readings.length!==sources.length)throw Error('REQUIREMENT_SOURCE_BASELINE_CHANGED');
  const result=[];

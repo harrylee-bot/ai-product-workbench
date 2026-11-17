@@ -97,6 +97,7 @@ const targetPrototypeContent = {
   motions: [],
 };
 const request = {
+  requirementConfirmationId:"confirmed-source-fixture",
   prompt: "Use both sources",
   modelId: "quality",
   workflow: "generate" as const,
@@ -108,39 +109,6 @@ const request = {
   requestedArtifactKinds: ["prd" as const],
   canvasSnapshot: null,
 };
-
-function canvasSnapshot() {
-  const capturedAt = new Date();
-  const reference = {
-    boardNodeId: "board-node-home",
-    artifactId: "artifact-prototype-1",
-    artifactVersionId: "version-prototype-1",
-    screenId: "screen-home",
-  };
-  return {
-    protocol: "workbench.canvas-snapshot.v1" as const,
-    projectId: "project_1",
-    threadId: "thread_1",
-    runId: null,
-    boardId: "board_1",
-    clientSessionId: "canvas-session-1",
-    projectSessionGeneration: 1,
-    boardRevision: 7,
-    canvasStateRevision: 3,
-    capturedAt: capturedAt.toISOString(),
-    expiresAt: new Date(capturedAt.getTime() + 60_000).toISOString(),
-    viewport: { x: 120, y: 80, zoom: 1.25 },
-    screens: [{
-      reference,
-      name: "Home",
-      route: "/",
-      phase: "complete" as const,
-      viewport: { width: 390, height: 844 },
-    }],
-    visibleScreens: [reference],
-    selectedScreens: [reference],
-  };
-}
 
 function persistedRun(overrides: Record<string, unknown> = {}) {
   return {
@@ -543,65 +511,6 @@ describe("Run immutable Import Source snapshots", () => {
       }),
     });
     expect(retry.retryOfRunId).toBe("run_1");
-  });
-
-  it("preserves the immutable Canvas snapshot when creating a retry", async () => {
-    const snapshot = canvasSnapshot();
-    const sourceRequest = { ...request, canvasSnapshot: snapshot };
-    const harness = createHarness();
-    harness.access.findRun = vi.fn().mockResolvedValue(persistedRun({
-      request: sourceRequest,
-      status: "failed",
-      errorCode: "RUNTIME_UNAVAILABLE",
-      errorDetail: "Runtime temporarily unavailable",
-      errorRetryable: true,
-      finishedAt: now,
-    }));
-
-    await harness.service.retry(
-      "principal_1",
-      "run_1",
-      "retry:canvas-snapshot:12345678",
-    );
-
-    expect(harness.tx.board.findUnique).toHaveBeenCalledWith({
-      where: { projectId: "project_1" },
-      include: { nodes: true },
-    });
-    expect(harness.tx.run.create).toHaveBeenCalledWith({
-      data: expect.objectContaining({
-        retryOfRunId: "run_1",
-        request: sourceRequest,
-      }),
-    });
-  });
-
-  it("rejects replaying a Canvas snapshot over a newer Board revision", async () => {
-    const snapshot = canvasSnapshot();
-    const harness = createHarness();
-    harness.access.findRun = vi.fn().mockResolvedValue(persistedRun({
-      request: { ...request, canvasSnapshot: snapshot },
-      status: "failed",
-      errorCode: "RUNTIME_UNAVAILABLE",
-      errorDetail: "Runtime temporarily unavailable",
-      errorRetryable: true,
-      finishedAt: now,
-    }));
-    harness.tx.board.findUnique = vi.fn().mockResolvedValue({
-      id: "board_1",
-      revision: snapshot.boardRevision + 1,
-      nodes: [],
-    });
-
-    await expect(harness.service.retry(
-      "principal_1",
-      "run_1",
-      "retry:canvas-revision:12345678",
-    )).rejects.toMatchObject({
-      status: 412,
-      response: expect.objectContaining({ code: "REVISION_MISMATCH" }),
-    });
-    expect(harness.tx.run.create).not.toHaveBeenCalled();
   });
 
   it.each([

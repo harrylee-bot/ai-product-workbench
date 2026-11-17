@@ -63,11 +63,11 @@ function requiresPositiveInteger(schema) {
 
 if (contract.openapi !== "3.1.0") throw new Error("The Workbench contract must use OpenAPI 3.1.0");
 if (!contract.paths || Object.keys(contract.paths).length === 0) throw new Error("The Workbench contract has no paths");
-assert(Object.keys(contract.paths).length === 132, "Workbench v1 must expose exactly 132 resource paths including requirement discussions");
+assert(Object.keys(contract.paths).length === 125, "Workbench v1 must expose exactly 125 resource paths for the unified confirmation flow");
 const operationCount = Object.values(contract.paths).reduce((count, pathItem) => (
   count + ["get", "post", "put", "patch", "delete"].filter((method) => pathItem?.[method]).length
 ), 0);
-assert(operationCount === 160, "Workbench v1 must expose exactly 160 generated operations including requirement discussions");
+assert(operationCount === 150, "Workbench v1 must expose exactly 150 generated operations for the unified confirmation flow");
 const feedbackLocations = contract.paths["/projects/{projectId}/prototype-v2/revisions/{revisionId}/feedback-locations"]?.get;
 assert(feedbackLocations?.responses?.["200"]?.content?.["application/json"]?.schema?.$ref === "#/components/schemas/PrototypeFeedbackLocations", "Feedback locations must return the source-bound resolution contract");
 assert(feedbackLocations.parameters?.some((parameter) => parameter.name === "sourceRevisionId" && parameter.in === "query" && parameter.required), "Feedback locations must require an explicit source revision");
@@ -92,7 +92,7 @@ for (const operation of [sourcePrototypePreview, publicSourcePrototypePreview]) 
   assert(operation.responses?.["200"]?.content?.["application/json"]?.schema?.$ref === "#/components/schemas/ExportPreviewTokenResponse", "Source prototype previews must return the shared short-lived preview capability contract");
 }
 if (!contract.components?.schemas?.ProblemDetails) throw new Error("ProblemDetails is required");
-if (contract.paths["/threads/{threadId}/runs"]?.post) throw new Error("Direct Run creation must remain behind SubmissionIntent submission");
+if (contract.paths["/threads/{threadId}/runs"]?.post) throw new Error("Generation must start through requirement confirmation");
 if (!contract.paths["/threads/{threadId}/runs"]?.get) throw new Error("Thread Run discovery is required");
 const projectImportSources = contract.paths["/projects/{projectId}/import-sources"];
 const importSource = contract.paths["/import-sources/{sourceId}"];

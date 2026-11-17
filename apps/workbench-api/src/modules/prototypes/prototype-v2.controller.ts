@@ -2,11 +2,9 @@ import { Controller, Get, Query, HttpCode, Headers, Param, Post, Body, Res, Stre
 import type { Response } from "express";
 import { z } from "zod";
 import {
-  revisePrototypeRevisionRequestSchema, prototypeFeedbackLocationsQuerySchema, prototypeFeedbackQuerySchema,
-  updatePrototypePlanRequestSchema,createPrototypeRevisionPlanRequestSchema,
+  prototypeFeedbackLocationsQuerySchema, prototypeFeedbackQuerySchema,
   createPrototypeExportRequestSchema,
   createPrototypeFeedbackRequestSchema,
-  createPrototypePlanRequestSchema,
   createPrototypeShareRequestSchema,
   prototypeWorkflowActionRequestSchema,
 } from "@workbench/workbench-contracts";
@@ -76,21 +74,6 @@ export class PrototypeV2Controller {
     return result;
   }
 
-  @Post("revisions/:revisionId/revise")
-  @HttpCode(202)
-  async revise(@CurrentPrincipal() principal: AuthenticatedPrincipal, @Param("projectId") projectId: string, @Param("revisionId") revisionId: string, @Headers("idempotency-key") key: string | undefined, @Headers("if-match") ifMatch: string | undefined, @Body(body(revisePrototypeRevisionRequestSchema)) request: z.infer<typeof revisePrototypeRevisionRequestSchema>, @Res({ passthrough: true }) response: Response) {
-    const result = await this.service.revise(principal, projectId, revisionId, request, requireHeader(key, "Idempotency-Key"), ifMatch);
-    response.setHeader("ETag", revisionEtag(result.revision));
-    return result;
-  }
-
-  @Post("plans")
-  async createPlan(@CurrentPrincipal() principal: AuthenticatedPrincipal, @Param("projectId") projectId: string, @Headers("idempotency-key") key: string | undefined, @Body(body(createPrototypePlanRequestSchema)) request: z.infer<typeof createPrototypePlanRequestSchema>, @Res({ passthrough: true }) response: Response) {
-    const result = await this.service.createPlan(principal, projectId, request, requireHeader(key, "Idempotency-Key"));
-    response.setHeader("ETag", revisionEtag(result.revision));
-    return result;
-  }
-
   @Get("plans/:planId")
   async getPlan(@CurrentPrincipal() principal: AuthenticatedPrincipal, @Param("projectId") projectId: string, @Param("planId") planId: string, @Res({ passthrough: true }) response: Response) {
     const result = await this.service.getPlanSnapshot(principal, projectId, planId);
@@ -106,17 +89,6 @@ export class PrototypeV2Controller {
   async getRevisionInput(@CurrentPrincipal() principal:AuthenticatedPrincipal,@Param("projectId") projectId:string,@Param("revisionId") revisionId:string,@Res({passthrough:true}) response:Response){
     response.setHeader("Cache-Control","private, no-store");return this.service.getRevisionInput(principal,projectId,revisionId);
   }
-  @Post("plans/:planId/input")
-  @HttpCode(200)
-  async updatePlan(@CurrentPrincipal() principal:AuthenticatedPrincipal,@Param("projectId") projectId:string,@Param("planId") planId:string,@Headers("idempotency-key") key:string|undefined,@Headers("if-match") ifMatch:string|undefined,@Body(body(updatePrototypePlanRequestSchema)) request:z.infer<typeof updatePrototypePlanRequestSchema>,@Res({passthrough:true}) response:Response){
-    const value=await this.service.updatePlan(principal,projectId,planId,request,requireHeader(key,"Idempotency-Key"),ifMatch);response.setHeader("ETag",revisionEtag(value.revision));return value;
-  }
-  @Post("revisions/:revisionId/plans")
-  @HttpCode(201)
-  async createRevisionPlan(@CurrentPrincipal() principal:AuthenticatedPrincipal,@Param("projectId") projectId:string,@Param("revisionId") revisionId:string,@Headers("idempotency-key") key:string|undefined,@Headers("if-match") ifMatch:string|undefined,@Body(body(createPrototypeRevisionPlanRequestSchema)) request:z.infer<typeof createPrototypeRevisionPlanRequestSchema>,@Res({passthrough:true}) response:Response){
-    const value=await this.service.createRevisionPlan(principal,projectId,revisionId,request,requireHeader(key,"Idempotency-Key"),ifMatch);response.setHeader("ETag",revisionEtag(value.revision));return value;
-  }
-
   @Get("plans/:planId/progress")
   getProgress(@CurrentPrincipal() principal: AuthenticatedPrincipal, @Param("projectId") projectId: string, @Param("planId") planId: string, @Res({ passthrough: true }) response: Response) {
     response.setHeader("Cache-Control", "private, no-store");
@@ -126,14 +98,6 @@ export class PrototypeV2Controller {
   @Get("plans/:planId/revisions")
   listRevisions(@CurrentPrincipal() principal: AuthenticatedPrincipal, @Param("projectId") projectId: string, @Param("planId") planId: string) {
     return this.service.listRevisions(principal, projectId, planId);
-  }
-
-  @Post("plans/:planId/approve")
-  @HttpCode(202)
-  async approvePlan(@CurrentPrincipal() principal: AuthenticatedPrincipal, @Param("projectId") projectId: string, @Param("planId") planId: string, @Headers("idempotency-key") key: string | undefined, @Headers("if-match") ifMatch: string | undefined, @Body(body(prototypeWorkflowActionRequestSchema)) request: z.infer<typeof prototypeWorkflowActionRequestSchema>, @Res({ passthrough: true }) response: Response) {
-    const result = await this.service.approvePlan(principal, projectId, planId, requireHeader(key, "Idempotency-Key"), ifMatch, request);
-    response.setHeader("ETag", revisionEtag(result.revision));
-    return result;
   }
 
   @Post("plans/:planId/cancel")
