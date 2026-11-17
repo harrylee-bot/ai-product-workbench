@@ -68,7 +68,9 @@ export function useStudioProjectAccess(projectId: string) {
       if (event.action.type === "success") checkedFailures.current.delete(failureKey);
       if (event.action.type !== "error") return;
       const error = event.query.state.error;
-      if (belongsToProject(event.query, projectId) && isWorkbenchApiError(error) && [401, 403].includes(error.status)) {
+      const bootstrapKey = workbenchQueryKeys.bootstraps(projectId);
+      const isBootstrap = bootstrapKey.every((part, index) => event.query.queryKey[index] === part);
+      if (belongsToProject(event.query, projectId) && isWorkbenchApiError(error) && ([401, 403].includes(error.status) || error.status === 404 && isBootstrap)) {
         void verifyRef.current(failureKey);
       }
     });
@@ -76,7 +78,7 @@ export function useStudioProjectAccess(projectId: string) {
       const detail = (event as CustomEvent<{ path: string; status: number }>).detail;
       const projectPath = `/api/v1/projects/${encodeURIComponent(projectId)}`;
       const failureKey = `http:${detail?.path}`;
-      if (detail?.status === 401 || detail?.status === 403 && (detail.path === projectPath || detail.path.startsWith(projectPath + "/"))) {
+      if (detail?.status === 401 || detail?.status === 403 && (detail.path === projectPath || detail.path.startsWith(projectPath + "/")) || detail?.status === 404 && (detail.path === projectPath || detail.path === projectPath + "/bootstrap")) {
         void verifyRef.current(failureKey);
       }
     };

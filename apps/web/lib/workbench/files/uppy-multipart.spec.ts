@@ -963,3 +963,30 @@ describe("Workbench Uppy multipart adapter", () => {
     upload.destroy();
   }, 20_000);
 });
+
+describe('transient digest recovery before creating an upload command',()=>{
+ it.each([1,3])('recovers after %i temporary Worker failures and coalesces retry clicks',async(failures)=>{
+  let workers=0;
+  class RecoveringWorker implements WorkbenchDigestWorker {
+   onmessage:WorkbenchDigestWorker['onmessage']=null;onerror:WorkbenchDigestWorker['onerror']=null;readonly attempt=++workers;delegate:DigestWorker|null=null;
+   postMessage(message:Parameters<WorkbenchDigestWorker['postMessage']>[0]){if(this.attempt<=failures)queueMicrotask(()=>this.onerror?.({message:'temporary Worker failure',preventDefault(){}} as ErrorEvent));else{this.delegate=new DigestWorker();this.delegate.onmessage=e=>this.onmessage?.(e);this.delegate.onerror=e=>this.onerror?.(e);this.delegate.postMessage(message);}}
+   terminate(){this.delegate?.terminate();}
+  }
+  vi.stubGlobal('Worker',RecoveringWorker);
+  const service=createService();service.createFileUpload.mockRejectedValueOnce(new Error('create receipt lost'));
+  const upload=await createWorkbenchMultipartUpload({projectId:'project-1',file:testFile(),service,requestExtraction:false,checkpointStore:undefined,partTransport:successfulPartTransport([]),retryDelays:[],pollIntervalMs:100,sleep:async()=>{}});
+  try{
+   expect(await upload.start()).toMatchObject({phase:'failed',hashPercent:0,error:{retryable:true}});
+   for(let n=1;n<failures;n++)expect(await upload.retry()).toMatchObject({phase:'failed',hashPercent:0});
+   const [first,duplicate]=await Promise.all([upload.retry(),upload.retry()]);expect(first.phase).toBe('failed');expect(duplicate.phase).toBe('failed');expect(workers).toBe(failures+1);expect(service.createFileUpload).toHaveBeenCalledOnce();
+   const digest=upload.getSnapshot().clientSha256Hint;expect(digest).toMatch(/^[a-f0-9]{64}$/);
+   expect((await upload.retry()).phase).toBe('ready');expect(workers).toBe(failures+1);expect(service.createFileUpload.mock.calls[1]).toEqual(service.createFileUpload.mock.calls[0]);expect(upload.getSnapshot().clientSha256Hint).toBe(digest);
+  }finally{upload.destroy();}
+ },20000);
+ it('cancels the replacement Worker without creating a server command or allowing another retry',async()=>{
+  let workers=0;const terminated=vi.fn();
+  class PendingWorker{onmessage:any=null;onerror:any=null;readonly attempt=++workers;postMessage(){if(this.attempt===1)queueMicrotask(()=>this.onerror?.({message:'temporary Worker failure',preventDefault(){}}));}terminate(){terminated(this.attempt);}}
+  vi.stubGlobal('Worker',PendingWorker);const service=createService();const upload=await createWorkbenchMultipartUpload({projectId:'project-1',file:testFile(),service,retryDelays:[]});
+  try{expect((await upload.start()).phase).toBe('failed');const retry=upload.retry();await upload.cancel();expect((await retry).phase).toBe('cancelled');expect(workers).toBe(2);expect(terminated).toHaveBeenCalledWith(2);expect(service.createFileUpload).not.toHaveBeenCalled();await expect(upload.retry()).rejects.toThrow('after cancellation');}finally{upload.destroy();}
+ });
+});

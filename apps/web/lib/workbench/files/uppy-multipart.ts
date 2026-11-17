@@ -276,6 +276,7 @@ export class WorkbenchMultipartUpload {
   private checkpoint: WorkbenchUploadCheckpoint;
   private uploadStatus: FileUploadSession["status"] | null = null;
   private hashPromise: Promise<string>;
+  private hashFailed = false;
   private activePromise: Promise<WorkbenchUploadSnapshot> | null = null;
   private cancellationPromise: Promise<void> | null = null;
   private sessionPreparationPromise: Promise<void> | null = null;
@@ -404,13 +405,18 @@ export class WorkbenchMultipartUpload {
         "Upload retry is unavailable after cancellation; retry the cancel command instead",
       );
     }
+    if (this.activePromise) return this.activePromise;
     if (this.snapshot.phase !== "failed") {
       throw new WorkbenchUploadStateError("Only a failed upload can be retried");
     }
     if (this.snapshot.error?.retryable === false) {
       throw new WorkbenchUploadStateError("This File failure is terminal and cannot be retried as an upload");
     }
-    if (this.activePromise) return this.activePromise;
+    if (this.hashFailed && !this.createRequest && !this.createCommandStarted) {
+      this.hashFailed = false;
+      this.hashPromise = this.computeClientDigest();
+      void this.hashPromise.catch(() => undefined);
+    }
     const operation = this.runUpload(true);
     const tracked = operation.finally(() => {
       if (this.activePromise === tracked) this.activePromise = null;
@@ -956,6 +962,7 @@ export class WorkbenchMultipartUpload {
       return digest;
     } catch (error) {
       if (!isAbortError(error)) {
+        this.hashFailed = true;
         this.patchSnapshot({ bytesHashed: 0, hashPercent: 0, clientSha256Hint: null });
       }
       throw error;

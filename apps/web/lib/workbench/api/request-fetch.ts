@@ -28,9 +28,11 @@ export function createWorkbenchFetch({
     const decorated = await decorateRequest(request);
     assertSameOriginBffRequest(decorated);
     const response = await fetchImplementation(new Request(decorated, { credentials: "same-origin" }));
-    if (typeof window !== "undefined" && [401, 403].includes(response.status)) {
+    const path = new URL(decorated.url).pathname;
+    const missingProject = response.status === 404 && /^\/api\/v1\/projects\/[^/]+(?:\/bootstrap)?$/u.test(path);
+    if (typeof window !== "undefined" && ([401, 403].includes(response.status) || missingProject)) {
       window.dispatchEvent(new CustomEvent("workbench:access-denied", {
-        detail: { path: new URL(decorated.url).pathname, status: response.status },
+        detail: { path, status: response.status },
       }));
     }
     return response;

@@ -83,4 +83,14 @@ describe("Workbench same-origin request fetch", () => {
       .rejects.toThrow(/same-origin \/api\/v1 BFF/);
     expect(fetch).not.toHaveBeenCalled();
   });
+
+  it("signals concealed project404 responses without treating individual resource404 as project revocation", async () => {
+    const dispatchEvent = vi.fn();
+    vi.stubGlobal("window", { location: { origin: "http://workbench.test" }, dispatchEvent });
+    const request = createWorkbenchFetch({ fetch: async () => new Response(null, { status: 404 }) });
+    for (const path of ["/api/v1/projects/project-one", "/api/v1/projects/project-one/bootstrap", "/api/v1/projects/project-one/prototype-v2/revisions/missing", "/api/v1/import-sources/missing"])
+      await request(new Request(`http://workbench.test${path}`));
+    expect(dispatchEvent).toHaveBeenCalledTimes(2);
+    expect(dispatchEvent.mock.calls.map(([event]) => event.detail.path)).toEqual(["/api/v1/projects/project-one", "/api/v1/projects/project-one/bootstrap"]);
+  });
 });
