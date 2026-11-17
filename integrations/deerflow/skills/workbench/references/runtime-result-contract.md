@@ -103,7 +103,7 @@ Before declaring an interactive filter complete, verify a matching value, a diff
 
 ## Revise An Artifact
 
-An `edit` Run always has non-empty `artifactTargets` and must revise every exact target item once. Copy the complete target object without changing any identifier or `screenIds` order. The operation fragment is:
+`outputOperations` declares every authorized output in its required order. Match each kind and operation exactly. `artifactTargets` can also contain read-only references, so never infer an output from their presence. An `edit` Run can create a missing PRD and revise its existing Prototype. For a declared revision, copy the complete operation target without changing any identifier or `screenIds` order. The operation fragment is:
 
 ```json
 {
@@ -128,8 +128,8 @@ The authoritative machine-readable schema is `runtime-result.schema.json`. Valid
 - Do not emit `workbench_runtime_result`; the trusted submit tool is the only result transport.
 - Do not return paths or HTML in place of a typed PRD/Prototype document.
 - Do not revise an Artifact during any non-edit workflow, including a generate Run with source targets.
-- Do not create a replacement Artifact during an edit workflow.
-- Do not omit, invent, reorder, or broaden edit targets.
+- Create an Artifact during edit only when its exact outputOperations entry declares create.
+- Do not omit, invent, reorder, or broaden output operations. Joint PRD and Prototype delivery requires both, with the PRD first and the Prototype linked by the server to that exact new PRD version.
 - Do not use generate targets unless a Prototype is requested; every generate target must have non-empty `screenIds`. Redesign and ideate must not have targets.
 - Do not treat a generate target as mutable, guess a target asset `storageKey`, or disguise its binary asset as an attachment.
 - Do not include raw candidate JSON in the human-readable `message`.

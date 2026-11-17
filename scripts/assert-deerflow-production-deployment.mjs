@@ -311,7 +311,7 @@ const prdReferencePins = [
   ],
   [
     "/mnt/skills/public/workbench/references/prd-runtime-result.schema.json",
-    "25d95c16c5577408807a70cf8371cbafb857f648f649555f8e2abe46b4a2593f",
+    "c4354f95efa0eac1bc0cefc54a161498a09b336dd497cad954018b1d619281f1",
   ],
 ];
 const canonicalPrdReferenceReader = {

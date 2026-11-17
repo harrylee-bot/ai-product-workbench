@@ -1433,6 +1433,7 @@ export class DeerFlowRuntimeAdapter implements RuntimePort {
         extraction: source.extraction,
       })),
       artifactTargets: execution.artifactTargets.map(serializeArtifact),
+      outputOperations: execution.request.outputOperations,
       prototypePatchBaselines,
       requestedArtifactKinds: execution.request.requestedArtifactKinds,
       outputContract: "workbench.runtime.result.v1",
@@ -1440,6 +1441,7 @@ export class DeerFlowRuntimeAdapter implements RuntimePort {
     const resultGuidance = runtimePrdResultGuidance(
       execution.request.requestedArtifactKinds,
       execution.request.workflow,
+      execution.request.outputOperations?.find(item=>item.kind==='prd')?.operation.kind,
     );
     return {
       input: execution.resume ? null : {
@@ -1475,6 +1477,7 @@ export class DeerFlowRuntimeAdapter implements RuntimePort {
           runId: execution.runId,
           runtimeAttemptId: execution.runtimeAttemptId,
           requestedArtifactKinds: [...execution.request.requestedArtifactKinds],
+          outputOperations: execution.request.outputOperations,
           ...(knowledgeToolCapability ? { knowledgeEnabled: true } : {}),
           canvasTools: canvasToolCapability?.reference ?? null,
           prototypePatchBaselines,

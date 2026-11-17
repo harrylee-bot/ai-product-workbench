@@ -1,6 +1,7 @@
 export function runtimePrdResultGuidance(
   requestedArtifactKinds: readonly string[],
   workflow: "generate" | "redesign" | "ideate" | "edit" = "generate",
+  prdOperation: "create" | "revise" = workflow === "edit" ? "revise" : "create",
 ): string | null {
   if (!requestedArtifactKinds.includes("prd")) return null;
   const linkedPrototype = requestedArtifactKinds.includes("prototype");
@@ -19,7 +20,7 @@ export function runtimePrdResultGuidance(
     "Every requirement.acceptanceCriterionIds entry must be the ID of a typed acceptanceCriterion block, never an acceptance-table row ID. Each PrdTextInline.text is limited to 10,000 characters; split long prose into meaningful blocks and never paste Runtime JSON into a text field during repair.",
   ];
   const requiredReferenceReads = "Immediately after collecting-prd-context succeeds and before structuring-prd, use the PRD-only read_file capability to read each required reference exactly once in this order: /mnt/skills/public/requirement-doc-template/SKILL.md, /mnt/skills/public/requirement-doc-template/references/structure.md, /mnt/skills/public/requirement-doc-template/references/quality-standards.md, and /mnt/skills/public/workbench/references/prd-runtime-result.schema.json. Read the complete files without ranges; a summary, prompt quotation, cached memory, another path, or arbitrary filesystem access is not evidence.";
-  if (workflow === "edit") {
+  if (prdOperation === "revise") {
     return [
       "<workbench_prd_result_contract>",
       requiredReferenceReads,

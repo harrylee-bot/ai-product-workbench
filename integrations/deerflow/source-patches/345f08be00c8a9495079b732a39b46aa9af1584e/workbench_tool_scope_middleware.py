@@ -85,7 +85,7 @@ PRD_REFERENCE_FILES = (
     ),
     (
         "/mnt/skills/public/workbench/references/prd-runtime-result.schema.json",
-        "25d95c16c5577408807a70cf8371cbafb857f648f649555f8e2abe46b4a2593f",
+        "c4354f95efa0eac1bc0cefc54a161498a09b336dd497cad954018b1d619281f1",
     ),
 )
 PROTOTYPE_REFERENCE_FILES = (
@@ -95,7 +95,7 @@ PROTOTYPE_REFERENCE_FILES = (
     ),
     (
         "/mnt/skills/public/workbench/references/runtime-result-contract.md",
-        "99271dfe4f6c3e632505c0c03407687b3d5f4a70fa89b3b9dd36570a1d57dc44",
+        "9950bc701434eae09802be62ba968d381d3cce8ec9a9ea73d966fac0c021ea50",
     ),
 )
 _PROTOTYPE_REFERENCE_DIRECTORY = Path("/app/skills/public/workbench/references")

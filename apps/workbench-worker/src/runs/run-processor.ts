@@ -1485,7 +1485,7 @@ export class RunProcessor {
       }
       const request = startRunRequestSchema.parse(run.request);
       const checksum = sha256Canonical(event.draft.content);
-      validateRuntimeArtifactDraftOperation(request, event.draft);
+      validateRuntimeArtifactDraftOperation(request, event.draft, event.artifactIndex);
       const sourcePrd = event.draft.kind === "prototype" && request.requestedArtifactKinds.includes("prd")
         ? await tx.artifactVersion.findFirst({
             where: { createdByRunId: runId, projectId: run.projectId, runtimeDraftIndex: 0, artifact: { kind: "prd" } },
@@ -2906,37 +2906,11 @@ export function validateRuntimeArtifactOperations(
     if (result.artifacts.length !== 1) throw new Error("RUNTIME_PRD_PROTOTYPE_COUNT_MISMATCH");
     validatePrdPrototypeScreenPlan(request, result.artifacts[0]!);
   }
-  if (request.workflow !== "edit") {
-    const missing = [...requestedKinds].filter((kind) => !result.artifacts.some((draft) => draft.kind === kind));
-    if (missing.length) throw new Error(`RUNTIME_ARTIFACTS_INCOMPLETE:${missing.join(",")}`);
-    if (requestedKinds.has("prd") && requestedKinds.has("prototype")
-      && (result.artifacts[0]?.kind !== "prd"
-        || result.artifacts.filter((draft) => draft.kind === "prd").length !== 1)) {
-      throw new Error("RUNTIME_LINKED_PRD_REQUIRED_FIRST");
-    }
-  }
-  const revisions = result.artifacts.filter((draft) => draft.operation.kind === "revise");
-  if (request.workflow !== "edit") {
-    if (revisions.length > 0) throw new Error("RUNTIME_ARTIFACT_REVISION_NOT_ALLOWED");
-    return;
-  }
-  if (revisions.length !== result.artifacts.length) {
-    throw new Error("RUNTIME_ARTIFACT_EDIT_MUST_REVISE");
-  }
-  const requestedByVersion = new Map(
-    request.artifactTargets.map((target) => [target.artifactVersionId, target]),
-  );
-  if (revisions.length !== requestedByVersion.size) {
-    throw new Error("RUNTIME_ARTIFACT_REVISION_TARGETS_INCOMPLETE");
-  }
-  for (const draft of revisions) {
-    const operation = draft.operation;
-    if (operation.kind !== "revise") continue;
-    const requested = requestedByVersion.get(operation.target.artifactVersionId);
-    if (!requested || canonicalJson(requested) !== canonicalJson(operation.target)) {
-      throw new Error("RUNTIME_ARTIFACT_REVISION_TARGET_INVALID");
-    }
-  }
+  const missing = [...requestedKinds].filter(kind => !result.artifacts.some(draft => draft.kind === kind));
+  if (missing.length) throw new Error(`RUNTIME_ARTIFACTS_INCOMPLETE:${missing.join(",")}`);
+  if (!request.outputOperations) throw new Error("RUNTIME_OUTPUT_OPERATIONS_REQUIRED");
+  if (result.artifacts.length !== request.outputOperations.length) throw new Error("RUNTIME_OUTPUT_OPERATIONS_INCOMPLETE");
+  for (const [index,draft] of result.artifacts.entries()) validateRuntimeArtifactDraftOperation(request,draft,index);
 }
 
 function validatePrdPrototypeScreenPlan(
@@ -2954,27 +2928,18 @@ function validatePrdPrototypeScreenPlan(
 function validateRuntimeArtifactDraftOperation(
   request: StartRunRequest,
   draft: RuntimeArtifactDraft,
+  artifactIndex: number,
 ) {
   validatePrdPrototypeScreenPlan(request, draft);
-  if (!request.requestedArtifactKinds.includes(draft.kind)) {
-    throw new Error("RUNTIME_ARTIFACT_KIND_NOT_REQUESTED");
+  if (!request.requestedArtifactKinds.includes(draft.kind)) throw new Error("RUNTIME_ARTIFACT_KIND_NOT_REQUESTED");
+  if (!request.outputOperations) throw new Error("RUNTIME_OUTPUT_OPERATIONS_REQUIRED");
+  if(draft.operation.kind==='revise'&&request.workflow!=='edit')throw new Error("RUNTIME_ARTIFACT_REVISION_NOT_ALLOWED");
+  const expected=request.outputOperations[artifactIndex];
+  if (!expected || expected.kind!==draft.kind || canonicalJson(expected.operation)!==canonicalJson(draft.operation)) {
+    throw new Error("RUNTIME_OUTPUT_OPERATION_MISMATCH");
   }
-  if (request.workflow !== "edit") {
-    if (draft.operation.kind !== "create") {
-      throw new Error("RUNTIME_ARTIFACT_REVISION_NOT_ALLOWED");
-    }
-    return;
-  }
-  if (draft.operation.kind !== "revise") {
-    throw new Error("RUNTIME_ARTIFACT_EDIT_MUST_REVISE");
-  }
-  const target = draft.operation.target;
-  const requested = request.artifactTargets.find(
-    (candidate) => candidate.artifactVersionId === target.artifactVersionId,
-  );
-  if (!requested || canonicalJson(requested) !== canonicalJson(target)) {
-    throw new Error("RUNTIME_ARTIFACT_REVISION_TARGET_INVALID");
-  }
+  const operation=draft.operation;
+  if(operation.kind==='revise'&&!request.artifactTargets.some(target=>canonicalJson(target)===canonicalJson(operation.target)))throw new Error("RUNTIME_ARTIFACT_REVISION_NOT_ALLOWED");
 }
 
 async function lockRuntimeArtifactDraftTarget(

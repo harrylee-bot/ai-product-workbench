@@ -1,7 +1,7 @@
 import { describe,it,expect,vi } from 'vitest';
 import { confirmedRequirementBaseline,freezeConfirmedSources } from '../src/runs/confirmed-requirement-baseline.js';
 import { startRunRequestSchema } from '@workbench/workbench-contracts';
-const request=startRunRequestSchema.parse({prompt:'固定的业务增量',modelId:'deepseek-flash',workflow:'generate',targetSurface:'web',designStyle:{kind:'automatic'},sourceIds:[],requestedArtifactKinds:['prd'],requirementConfirmationId:'confirmation-1'});
+const request=startRunRequestSchema.parse({prompt:'固定的业务增量',modelId:'deepseek-flash',workflow:'generate',targetSurface:'web',designStyle:{kind:'automatic'},sourceIds:[],requestedArtifactKinds:['prd'],requirementConfirmationId:'confirmation-1',outputOperations:[{kind:'prd',operation:{kind:'create'}}]});
 const baseline={analysisContext:{request:{prompt:'fixed'}},summaryChecksum:'a'.repeat(64),card:{goal:'原目标'},evidence:[],entries:[],sourceContents:{readings:[]}};
 const confirmation={id:'confirmation-1',principalId:'owner',sessionId:'session-1',summaryVersion:1,runId:'run-original',generationRequest:request,inputSnapshot:{sources:[],designStyle:{artifactVersionId:null,snapshot:null,snapshotSha256:null},knowledgeReleaseId:'release-1'},baseline};
 const run={id:'run-original',projectId:'project-1',createdById:'owner',knowledgeReleaseId:'release-1',retryOfRunId:null};
@@ -9,6 +9,7 @@ function db(){return {requirementConfirmation:{findFirst:vi.fn().mockResolvedVal
 describe('Worker confirmed baseline integrity',()=>{
  it('validates frozen request, summary and actual knowledge pin before runtime',async()=>expect(await confirmedRequirementBaseline(db() as never,run,request)).toMatchObject({confirmationId:'confirmation-1',checksum:'a'.repeat(64)}));
  it('rejects a changed prompt or configuration',async()=>expect(confirmedRequirementBaseline(db() as never,run,{...request,prompt:'隐含新增整个平台'})).rejects.toThrow('REQUIREMENT_BASELINE_CHANGED'));
+ it('rejects changing a frozen create into a revision even with the same confirmation',async()=>expect(confirmedRequirementBaseline(db() as never,run,{...request,outputOperations:[{kind:'prd',operation:{kind:'revise',target:{artifactId:'other-prd',artifactVersionId:'other-version',screenIds:[]}}}]})).rejects.toThrow('REQUIREMENT_BASELINE_CHANGED'));
  it('rejects a different knowledge release',async()=>expect(confirmedRequirementBaseline(db() as never,{...run,knowledgeReleaseId:'new-release'},request)).rejects.toThrow('REQUIREMENT_KNOWLEDGE_BASELINE_CHANGED'));
  it('permits original-input retries but checks their exact lineage',async()=>expect(await confirmedRequirementBaseline(db() as never,{...run,id:'retry-run',retryOfRunId:'run-original'},request)).toMatchObject({confirmationId:'confirmation-1'}));
  it('does not attach confirmation to an unrelated Run',async()=>{const store=db();store.run.findFirst.mockResolvedValue(null as never);await expect(confirmedRequirementBaseline(store as never,{...run,id:'unrelated'},request)).rejects.toThrow('REQUIREMENT_BASELINE_RUN_MISMATCH');});

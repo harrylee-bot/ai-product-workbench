@@ -57,6 +57,7 @@ const url = process.env.WORKBENCH_TEST_DATABASE_URL;
     const modification=await api.getRevisionInput(principal,projectId,result.revision.id);
     expect(modification.modificationRequest).toMatchObject({workflow:"edit",generationIntent:null});expect(modification.modificationRequest.prdScreenPlan).toBeUndefined();
     expect(modification.request.requirementConfirmationId).toBeTruthy();expect(modification.modificationRequest.requirementConfirmationId).toBeUndefined();
+    expect(modification.request.outputOperations).toBeDefined();expect(modification.modificationRequest.outputOperations).toBeUndefined();
     const bound=await tx.prototypePlan.findUniqueOrThrow({where:{id:plan.id}});
     expect((await f.runs.outputs(f.input.principalId,bound.runtimeRunId!)).items).toMatchObject([{kind:"prototype",state:"ready",version:{artifactVersionId:result.versionId}}]);
     await tx.$executeRawUnsafe("SAVEPOINT fixed_prd_guard");

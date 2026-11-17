@@ -105,35 +105,145 @@ export class RunsService {
     await this.assertPrototypeCanvasReferences(tx, projectId, snapshot.threadId, snapshot);
   }
 
-  async resolvePrototypeRevisionRequest(tx:Prisma.TransactionClient,projectId:string,revisionId:string,request:StartRunRequest,preserveOutputKinds=false):Promise<StartRunRequest>{
-      const source = await tx.prototypeRevision.findFirst({ where: {
-        id: revisionId, projectId: projectId,
+  async resolvePrototypeRevisionRequest(
+    tx: Prisma.TransactionClient,
+    projectId: string,
+    revisionId: string,
+    request: StartRunRequest,
+    preserveOutputKinds = false,
+  ): Promise<StartRunRequest> {
+    const source = await tx.prototypeRevision.findFirst({
+      where: {
+        id: revisionId,
+        projectId: projectId,
         status: { in: ["ready", "confirmed", "rejected"] },
-      } });
-      if (!source?.sourceDocument) throw validationProblem("The selected revision has no editable source document");
-      const generation = await tx.prototypePlan.findFirst({ where: {
-        projectId: projectId, contentVersion: source.version,
+      },
+    });
+    if (!source?.sourceDocument)
+      throw validationProblem("The selected revision has no editable source document");
+    const generation = await tx.prototypePlan.findFirst({
+      where: {
+        projectId: projectId,
+        contentVersion: source.version,
         OR: [{ id: source.planId }, { rootPlanId: source.planId }],
-      } });
-      const generationRunId = generation?.runtimeRunId ?? generation?.reusedRunId;
-      if (!generationRunId) throw validationProblem("The selected revision has no generation Run");
-      const versions = await tx.artifactVersion.findMany({ where: {
-        projectId: projectId, createdByRunId: generationRunId,
-        status: "ready", schemaVersion: 1, artifact: { kind: "prototype" },
-      }, select: { id: true, artifactId: true, content: true, artifact: { select: { currentVersionId: true } } } });
-      if (versions.length !== 1 || canonicalJson(versions[0]!.content) !== canonicalJson(source.sourceDocument)) {
-        throw validationProblem("The selected revision does not match its immutable generation source");
-      }
-      if (versions[0]!.artifact.currentVersionId !== versions[0]!.id) throw new ProblemException({ title: "Prototype base version changed", status: 409, detail: "Select the current prototype version before requesting a revision", code: "PROTOTYPE_BASE_VERSION_CONFLICT" });
-      const editingRequest = { ...request }; delete editingRequest.prdScreenPlan;
-      // Public modification input is a fresh requirement intent. Only the
-      // internal confirmed preparation path retains its own authorization ID.
-      if(!preserveOutputKinds)delete editingRequest.requirementConfirmationId;
-      return startRunRequestSchema.parse({ ...editingRequest, workflow: "edit", generationIntent: null,
-        requestedArtifactKinds: preserveOutputKinds?request.requestedArtifactKinds:["prototype"], canvasSnapshot: null,
-        artifactTargets: [{ artifactId: versions[0]!.artifactId, artifactVersionId: versions[0]!.id, screenIds: [] }],
+      },
+    });
+    const generationRunId = generation?.runtimeRunId ?? generation?.reusedRunId;
+    if (!generationRunId) throw validationProblem("The selected revision has no generation Run");
+    const versions = await tx.artifactVersion.findMany({
+      where: {
+        projectId: projectId,
+        createdByRunId: generationRunId,
+        status: "ready",
+        schemaVersion: 1,
+        artifact: { kind: "prototype" },
+      },
+      select: {
+        id: true,
+        artifactId: true,
+        content: true,
+        sourcePrdVersionId: true,
+        artifact: { select: { currentVersionId: true } },
+      },
+    });
+    if (
+      versions.length !== 1 ||
+      canonicalJson(versions[0]!.content) !== canonicalJson(source.sourceDocument)
+    ) {
+      throw validationProblem("The selected revision does not match its immutable generation source");
+    }
+    if (versions[0]!.artifact.currentVersionId !== versions[0]!.id)
+      throw new ProblemException({
+        title: "Prototype base version changed",
+        status: 409,
+        detail: "Select the current prototype version before requesting a revision",
+        code: "PROTOTYPE_BASE_VERSION_CONFLICT",
       });
+    const editingRequest = { ...request };
+    delete editingRequest.prdScreenPlan;
+    // Public modification input is a fresh requirement intent. Only the
+    // internal confirmed preparation path retains its own authorization ID.
+    if (!preserveOutputKinds) {
+      delete editingRequest.requirementConfirmationId;
+      delete editingRequest.outputOperations;
+    }
+    const artifactTargets = [
+      { artifactId: versions[0]!.artifactId, artifactVersionId: versions[0]!.id, screenIds: [] as string[] },
+    ];
+    if (
+      preserveOutputKinds &&
+      request.requestedArtifactKinds.includes("prd") &&
+      versions[0]!.sourcePrdVersionId
+    ) {
+      const prd = await tx.artifactVersion.findFirst({
+        where: {
+          id: versions[0]!.sourcePrdVersionId,
+          projectId,
+          status: "ready",
+          schemaVersion: 3,
+          artifact: { kind: "prd" },
+        },
+        select: { id: true, artifactId: true, artifact: { select: { currentVersionId: true } } },
+      });
+      if (!prd || prd.artifact.currentVersionId !== prd.id)
+        throw requirementProblem("REQUIREMENT_SOURCE_CHANGED");
+      artifactTargets.push({ artifactId: prd.artifactId, artifactVersionId: prd.id, screenIds: [] });
+    }
+    return startRunRequestSchema.parse({
+      ...editingRequest,
+      workflow: "edit",
+      generationIntent: null,
+      requestedArtifactKinds: preserveOutputKinds ? request.requestedArtifactKinds : ["prototype"],
+      canvasSnapshot: null,
+      artifactTargets,
+    });
+  }
 
+  /** Resolve publication authority separately from read-only source targets.
+   * Called at analysis and confirmation; the frozen plan must agree at both. */
+  async resolveOutputOperations(
+    tx: Prisma.TransactionClient,
+    projectId: string,
+    request: StartRunRequest,
+  ): Promise<StartRunRequest> {
+    const targets = await tx.artifactVersion.findMany({
+      where: {
+        projectId,
+        id: { in: request.artifactTargets.map((target) => target.artifactVersionId) },
+        status: "ready",
+      },
+      select: { id: true, artifactId: true, artifact: { select: { kind: true, currentVersionId: true } } },
+    });
+    if (targets.length !== request.artifactTargets.length)
+      throw requirementProblem("REQUIREMENT_SOURCE_CHANGED");
+    const kinds = [...new Set(request.requestedArtifactKinds)];
+    if (kinds.includes("prd") && kinds.includes("prototype"))
+      kinds.sort((a, b) => (a === "prd" ? -1 : b === "prd" ? 1 : 0));
+    const outputOperations: NonNullable<StartRunRequest["outputOperations"]> = [];
+    for (const kind of kinds) {
+      const revisions =
+        request.workflow === "edit"
+          ? request.artifactTargets.filter((target) =>
+              targets.some(
+                (row) =>
+                  row.id === target.artifactVersionId &&
+                  row.artifactId === target.artifactId &&
+                  row.artifact.kind === kind,
+              ),
+            )
+          : [];
+      if (revisions.length) {
+        for (const target of revisions) {
+          if (
+            targets.find((row) => row.id === target.artifactVersionId)?.artifact.currentVersionId !==
+            target.artifactVersionId
+          )
+            throw requirementProblem("REQUIREMENT_SOURCE_CHANGED");
+          outputOperations.push({ kind, operation: { kind: "revise", target } });
+        }
+      } else outputOperations.push({ kind, operation: { kind: "create" } });
+    }
+    return { ...request, outputOperations };
   }
 
   async prototypeInputFromRun(tx: Prisma.TransactionClient, projectId: string, runId: string) {
@@ -178,7 +288,9 @@ export class RunsService {
 
     if(pinned&&!request.requirementConfirmationId)throw requirementProblem("REQUIREMENT_CONFIRMATION_REQUIRED");
     if (pinned && request.workflow === "edit") {
-      for (const target of request.artifactTargets) {
+      for (const {operation} of request.outputOperations??[]) {
+        if(operation.kind!=='revise')continue;
+        const target=operation.target;
         const artifact = await tx.artifact.findFirst({ where: { id: target.artifactId, projectId: input.projectId }, select: { currentVersionId: true } });
         if (artifact?.currentVersionId !== target.artifactVersionId) throw new ProblemException({ title: "Prototype base version changed", status: 409, detail: "Select the current prototype version before retrying this edit", code: "PROTOTYPE_BASE_VERSION_CONFLICT" });
       }
@@ -583,6 +695,7 @@ export class RunsService {
       id: string;
       kind: string;
       schemaVersion: number;
+      currentVersionId: string | null;
     }>>(Prisma.sql`
       SELECT
         version."id",
@@ -590,7 +703,8 @@ export class RunsService {
         version."schema_version" AS "schemaVersion",
         version."content",
         version."content_blob_id" AS "contentBlobId",
-        artifact."kind"::TEXT AS "kind"
+        artifact."kind"::TEXT AS "kind",
+        artifact."current_version_id" AS "currentVersionId"
       FROM "artifact_versions" AS version
       JOIN "artifacts" AS artifact
         ON artifact."id" = version."artifact_id"
@@ -607,6 +721,7 @@ export class RunsService {
       if (!version || version.artifactId !== target.artifactId) {
         throw notFoundProblem("Artifact version");
       }
+      if(request.outputOperations?.some(item=>item.operation.kind==='revise'&&item.operation.target.artifactVersionId===target.artifactVersionId)&&version.currentVersionId!==target.artifactVersionId)throw requirementProblem('REQUIREMENT_SOURCE_CHANGED');
       if (isPrdPrototypeIntent(request.generationIntent)) {
         if (version.kind !== "prd" || version.schemaVersion !== 3 || version.contentBlobId !== null || !prdDocumentSchema.safeParse(version.content).success) {
           throw validationProblem("PRD generation requires a ready validated inline PRD version from this Project");

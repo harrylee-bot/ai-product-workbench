@@ -1,7 +1,7 @@
 import { Optional,Logger,Injectable, type OnModuleInit, type OnModuleDestroy } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import { Prisma } from '@workbench/workbench-db';
-import { requirementDiscussionRequestSchema,startRunRequestSchema, requirementContextSchema, requirementCardSchema, prototypeInputSnapshotSchema, type PostRequirementMessageRequest } from '@workbench/workbench-contracts';
+import { requirementDiscussionRequestSchema,startRunRequestSchema, requirementContextSchema, requirementCardSchema, prototypeInputSnapshotSchema, type StartRunRequest, type PostRequirementMessageRequest } from '@workbench/workbench-contracts';
 import { hashRequest } from '../../common/idempotency.js';
 import { RequirementsService } from './requirements.service.js';
 import { RequirementModel } from './requirement-model.js';
@@ -64,20 +64,21 @@ export class RequirementsProcessor implements OnModuleInit,OnModuleDestroy {
    const session=await this.sessions.authorize(turn.principalId,turn.sessionId);
    if(session.currentTurnId!==turn.id||session.revision!==turn.inputRevision)throw requirementProblem('REQUIREMENT_TURN_CHANGED');
    const input=turn.input as {message:PostRequirementMessageRequest;request:unknown;entries:{content:{text?:string};role:string}[]};
-   let request=requirementDiscussionRequestSchema.parse(input.request);
+   let request:StartRunRequest=requirementDiscussionRequestSchema.parse(input.request);
    const context=requirementContextSchema.parse(session.context);
    const projectContext=await this.sessions.transaction(turn.principalId,turn.sessionId,async(tx,s)=>{
     if(s.currentTurnId!==turn.id||s.revision!==turn.inputRevision)throw requirementProblem('REQUIREMENT_TURN_CHANGED');
     const revisionContext=context.kind==='revision'?context:null;
     let source=null;
     if(revisionContext){
-     request=requirementDiscussionRequestSchema.parse(await this.runs.resolvePrototypeRevisionRequest(tx,s.projectId,revisionContext.revisionId,request,true));
+     request=await this.runs.resolvePrototypeRevisionRequest(tx,s.projectId,revisionContext.revisionId,request,true);
      const revision=await tx.prototypeRevision.findFirst({where:{id:revisionContext.revisionId,projectId:s.projectId}});if(!revision)throw requirementProblem('REQUIREMENT_SOURCE_CHANGED');
      const feedback=await tx.prototypeFeedback.findMany({where:{id:{in:revisionContext.feedbackIds},projectId:s.projectId,revisionId:revisionContext.revisionId,status:'open'}});
      if(feedback.length!==revisionContext.feedbackIds.length)throw requirementProblem('REQUIREMENT_SOURCE_CHANGED');
      if(revisionContext.anchor){const index=feedbackAnchorIndex(revision);const anchor=revisionContext.anchor;if(anchor.sourceRevisionId!==revision.id||anchor.scope==='unresolved'||!index.pages.has(anchor.pageId)||anchor.scope==='node'&&index.nodes?.get(anchor.nodeId)!==anchor.pageId)throw requirementProblem('REQUIREMENT_SOURCE_CHANGED');}
      source={revisionId:revision.id,documentSha256:revision.documentSha256,document:revision.sourceDocument,feedback,anchor:revisionContext.anchor};
     }
+    request=await this.runs.resolveOutputOperations(tx,s.projectId,request);
     const snapshot=await this.runs.captureGenerationInput(tx,s.projectId,{...request,prompt:"Discussion context authorization check only"});
     const project=await tx.project.findUniqueOrThrow({where:{id:s.projectId},select:{id:true,title:true}});
     return {project,snapshot,source};

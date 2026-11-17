@@ -97,7 +97,7 @@ const targetPrototypeContent = {
   motions: [],
 };
 const request = {
-  requirementConfirmationId:"confirmed-source-fixture",
+  requirementConfirmationId:"confirmed-source-fixture",outputOperations:[{kind:'prd',operation:{kind:'create'}}],
   prompt: "Use both sources",
   modelId: "quality",
   workflow: "generate" as const,
@@ -815,6 +815,7 @@ describe("Run immutable Import Source snapshots", () => {
     };
     const generatePrototypeRequest = {
       ...request,
+      outputOperations:[{kind:'prototype' as const,operation:{kind:'create' as const}}],
       workflow: "generate" as const,
       generationIntent: "interactive-prototype" as const,
       artifactTargets: [{

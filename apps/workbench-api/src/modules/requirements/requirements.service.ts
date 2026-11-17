@@ -105,14 +105,16 @@ export class RequirementsService {
    if(!summary||summary.version!==input.summaryVersion||summary.checksum!==input.summaryChecksum)throw requirementProblem('REQUIREMENT_BASELINE_CHANGED');
    const card=requirementCardSchema.parse(summary.card),evidence=requirementEvidenceSchema.array().parse(summary.evidence);
    assertConfirmed(card,evidence,input.acceptedAssumptionIds,input.acceptedPlatformChanges);
-   let configuration=requirementDiscussionRequestSchema.parse(s.generationRequest);
+   let configuration:StartRunRequest=requirementDiscussionRequestSchema.parse(s.generationRequest);
    const context=requirementContextSchema.parse(s.context);
    const sourceRevisionId=context.kind==='revision'?context.revisionId:null;
    const feedbackIds=context.kind==='revision'?context.feedbackIds:[];
-   if(sourceRevisionId)configuration=requirementDiscussionRequestSchema.parse(await this.runs.resolvePrototypeRevisionRequest(tx,s.projectId,sourceRevisionId,configuration,true));
+   if(sourceRevisionId)configuration=await this.runs.resolvePrototypeRevisionRequest(tx,s.projectId,sourceRevisionId,configuration,true);
+   configuration=await this.runs.resolveOutputOperations(tx,s.projectId,configuration);
    configuration={...configuration,prompt:[card.goal,...card.changes].join("\n")};
    const currentSnapshot=await this.runs.captureGenerationInput(tx,s.projectId,configuration);
-   const analyzedContext=summary.contextSnapshot as {projectContext:{snapshot:unknown;source?:{feedback:unknown[]}};sourceContents:unknown};
+   const analyzedContext=summary.contextSnapshot as {request:StartRunRequest;projectContext:{snapshot:unknown;source?:{feedback:unknown[]}};sourceContents:unknown};
+   if(hashRequest(configuration.outputOperations)!==hashRequest(analyzedContext.request.outputOperations))throw requirementProblem('REQUIREMENT_BASELINE_CHANGED');
    if(sourceRevisionId){
     // A project SHARE lock does not exclude feedback resolution. Lock the
     // selected rows in stable order through the commit that freezes consent.

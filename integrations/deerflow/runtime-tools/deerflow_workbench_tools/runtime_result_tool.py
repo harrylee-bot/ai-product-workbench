@@ -38,8 +38,9 @@ def workbench_runtime_result_submit(
     one verified citation; never submit an empty array or invent source values.
 
     schemaVersion is a JSON number, not a quoted string. operation is an object,
-    never the string "create". For an edit, use {"kind":"revise","target":<the exact
-    supplied target>} instead. PRD and Prototype require their own complete content
+    never the string "create". Follow each server-confirmed outputOperations entry exactly.
+    An edit may create a missing PRD and revise its Prototype; revise uses
+    {"kind":"revise","target":<the exact supplied target>}. PRD and Prototype require their own complete content
     schemas; the document example does not replace those schemas.
     New and edited Prototypes must first complete this run's four real stages:
     design-system, mapping-components, creating-flows, generating-ui. Record each
@@ -127,7 +128,7 @@ def _validation_feedback(
         ),
         "operation": (
             'For a new artifact, operation is {"kind":"create"}, not "create". '
-            'For an edit, use {"kind":"revise","target":<the exact supplied target>}.'
+            'Match the exact outputOperations entry: create remains valid in an edit when declared; revise uses {"kind":"revise","target":<the exact supplied target>}.'
         ),
         "citations": (
             "citations must be a nonempty JSON array copied exactly from a successful "

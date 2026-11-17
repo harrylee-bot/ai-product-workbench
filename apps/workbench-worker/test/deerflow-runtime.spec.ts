@@ -2286,10 +2286,14 @@ describe("DeerFlow runtime adapter", () => {
       request: {
         ...baseExecution.request,
         requestedArtifactKinds: ["prd"],
+        outputOperations: [{kind:"prd",operation:{kind:"create"}}],
       },
     }), observer());
 
     const content = submittedBody?.input.messages[0]?.content ?? "";
+    const frozenOperations=[{kind:"prd",operation:{kind:"create"}}];
+    expect(JSON.parse(content.match(/<workbench_context>\n([\s\S]*?)\n<\/workbench_context>/u)![1]).outputOperations).toEqual(frozenOperations);
+    expect(submittedBody?.context.workbench.outputOperations).toEqual(frozenOperations);
     expect(content).toContain("each required reference exactly once");
     expect(content).toContain(
       "/mnt/skills/public/requirement-doc-template/SKILL.md",
