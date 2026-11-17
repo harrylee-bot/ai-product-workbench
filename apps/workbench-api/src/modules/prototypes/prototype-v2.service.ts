@@ -603,7 +603,8 @@ export class PrototypeV2Service implements OnModuleInit, OnModuleDestroy {
       if (!row) throw notFoundProblem("Prototype export");
       assertIfMatch(ifMatch, row.revision);
       if (!row.activeCommandId) throw new ProblemException({ title: "Export execution unavailable", status: 409, detail: "This export has no durable workflow command", code: "PROTOTYPE_EXPORT_EXECUTION_MISSING" });
-      const update = await tx.prototypeExport.updateMany({ where: { id: exportId, projectId, activeCommandId: row.activeCommandId, revision: row.revision, status: { in: ["queued", "building"] } }, data: { status: "cancelled", artifactKey: null, artifactSha256: null, byteSize: null, mediaType: null, failureCode: null, failureDetail: null, finishedAt: new Date(), revision: { increment: 1 } } });
+      if(row.status === "cancelling" || row.status === "cancelled")return toExport(row,this.webOrigin());
+      const update = await tx.prototypeExport.updateMany({ where: { id: exportId, projectId, activeCommandId: row.activeCommandId, revision: row.revision, status: { in: ["queued", "building"] } }, data: { status: "cancelling", artifactKey: null, artifactSha256: null, byteSize: null, mediaType: null, failureCode: null, failureDetail: null, finishedAt: null, revision: { increment: 1 } } });
       if (update.count !== 1) throw revisionConflictProblem();
       await enqueuePrototypeCommand(tx, projectId, exportId, "export_cancel", { commandId: row.activeCommandId });
       return toExport(await tx.prototypeExport.findUniqueOrThrow({ where: { id: exportId } }), this.webOrigin());

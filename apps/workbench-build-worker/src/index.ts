@@ -17,6 +17,7 @@ export type PrototypeBuildWorkerOptions = {
   onProgress?: (details: string) => void;
   sourceDocument?: unknown;
   assets?: ExportBinaryAsset[];
+  signal?: AbortSignal;
 };
 
 export async function buildFrozenPrototypeHtml(
@@ -32,6 +33,7 @@ export async function buildFrozenPrototypeHtml(
       executablePath: options.chromiumExecutablePath,
       timeoutMs: options.browserTimeoutMs,
       onProgress: options.onProgress,
+      signal: options.signal,
     });
   }
   return { document: { revisionId, title, pages: parsed }, html, htmlSha256: sha256(html), byteSize: Buffer.byteLength(html, "utf8") };

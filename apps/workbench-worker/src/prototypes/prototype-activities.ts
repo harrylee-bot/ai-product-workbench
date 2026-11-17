@@ -84,7 +84,7 @@ export function createPrototypeActivities(db: PrismaClient, config: PrototypeAct
         return recordPrototypeBuild(db, input, draft.builtArtifact);
       }
       const assets = draft.sourceDocument ? await loadPrototypeAssets(db, draft.sourceDocument, input.projectId, sourceReader, signal) : undefined;
-      const built = await buildFrozenPrototypeHtml(input.revisionId, draft.title, draft.pages, { chromiumExecutablePath: config.chromiumExecutablePath, onProgress: heartbeat, sourceDocument: draft.sourceDocument, assets });
+      const built = await buildFrozenPrototypeHtml(input.revisionId, draft.title, draft.pages, { chromiumExecutablePath: config.chromiumExecutablePath, onProgress: heartbeat, sourceDocument: draft.sourceDocument, assets, signal });
       signal?.throwIfAborted();
       heartbeat("storage:freeze");
       const artifact = await storage.putImmutable({ key: `${input.projectId}/${input.revisionId}/preview.html`, sha256: built.htmlSha256, byteSize: built.byteSize, mediaType: "text/html; charset=utf-8" }, Buffer.from(built.html, "utf8"), signal);
@@ -170,7 +170,7 @@ async function persistExport(db: PrismaClient, storage: PrototypeArtifactStorage
     if (!revision.sourceDocument) throw new Error("PROTOTYPE_REACT_SOURCE_UNAVAILABLE");
     const react = await prototypeDocumentReactOutput(revision.sourceDocument, { revisionId: input.revisionId, assets: await loadPrototypeAssets(db, prototypeDocumentSchema.parse(revision.sourceDocument), input.projectId, sourceReader, signal) });
     heartbeat("react:validate");
-    await checkFrozenPrototypeHtml(Buffer.from(react.validationBytes).toString("utf8"), { executablePath: chromiumExecutablePath, onProgress: heartbeat });
+    await checkFrozenPrototypeHtml(Buffer.from(react.validationBytes).toString("utf8"), { executablePath: chromiumExecutablePath, onProgress: heartbeat, signal });
     body = react.bytes;
   } else {
     body = frozen;

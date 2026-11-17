@@ -48,7 +48,7 @@ const activities = proxyActivities<PrototypeTemporalSdkActivities>({
 // Provider cancellation is a durable obligation. Retry compensation until the
 // provider acknowledges it; a transient outage must not abandon a live run or
 // fabricate a cancelled plan after an arbitrary three attempts.
-const compensation = proxyActivities<Pick<PrototypeTemporalSdkActivities, "markPlanFailedV2">>({
+const compensation = proxyActivities<Pick<PrototypeTemporalSdkActivities, "markPlanFailedV2" | "markExportCancelledV3">>({
   startToCloseTimeout: "5 minutes",
   heartbeatTimeout: "30 seconds",
   retry: { maximumAttempts: 0, maximumInterval: "1 minute" },
@@ -79,7 +79,7 @@ export async function visualPrototypeExportV3(input: PrototypeExportInput): Prom
   } catch (error) {
     await CancellationScope.nonCancellable(async () => {
       if (isCancellation(error)) {
-        await activities.markExportCancelledV3({ projectId: input.projectId, exportId: input.exportId, commandId: input.commandId, detail: "Prototype export was cancelled" });
+        await compensation.markExportCancelledV3({ projectId: input.projectId, exportId: input.exportId, commandId: input.commandId, detail: "Prototype export was cancelled" });
       } else {
         await activities.markExportFailedV3({ projectId: input.projectId, exportId: input.exportId, commandId: input.commandId, code: "PROTOTYPE_EXPORT_FAILED", detail: error instanceof Error ? error.message : "Prototype export failed" });
       }

@@ -283,7 +283,8 @@ describePg("Prototype V2 durable PostgreSQL lifecycle (workflow transport simula
     expect(retried).toMatchObject({ status: "queued", revision: 2 });
     expect(workflows.startExport.mock.calls[2][0].commandId).not.toBe(workflows.startExport.mock.calls[0][0].commandId);
     const cancelled = await service.cancelExport(principal(), projectId, exported.id, "export-cancel", '"2"', {});
-    expect(cancelled.status).toBe("cancelled");
+    expect(cancelled.status).toBe("cancelling");
+    expect(cancelled.finishedAt).toBeNull();
     expect(workflows.cancelExport.mock.calls[0][0].commandId).toBe(workflows.startExport.mock.calls[2][0].commandId);
     expect(await service.listExports(principal(), projectId)).toEqual([cancelled]);
   });

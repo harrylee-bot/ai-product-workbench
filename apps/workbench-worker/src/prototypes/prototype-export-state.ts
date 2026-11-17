@@ -9,7 +9,7 @@ export class PrototypeExportCancelledError extends Error {
 
 async function throwInactiveExecution(db: Store, input: PrototypeExportExecution): Promise<never> {
   const cancelled = await db.prototypeExport.findFirst({
-    where: { id: input.exportId, projectId: input.projectId, activeCommandId: input.commandId, status: "cancelled" },
+    where: { id: input.exportId, projectId: input.projectId, activeCommandId: input.commandId, status: { in: ["cancelling", "cancelled"] } },
     select: { id: true },
   });
   if (cancelled) throw new PrototypeExportCancelledError();
@@ -27,7 +27,7 @@ export async function startPrototypeExport(db: Store, input: PrototypeExportInpu
   requirePrototypeExportCommand(input);
   const row = await db.prototypeExport.findFirst({ where: { id: input.exportId, projectId: input.projectId, revisionId: input.revisionId, format: input.format, activeCommandId: input.commandId } });
   if (!row) throw new Error("PROTOTYPE_EXPORT_EXECUTION_CHANGED");
-  if (row.status === "cancelled") throw new PrototypeExportCancelledError();
+  if (row.status === "cancelling" || row.status === "cancelled") throw new PrototypeExportCancelledError();
   if (row.status === "succeeded") {
     if (!row.artifactKey || !row.artifactSha256 || !row.byteSize || !row.mediaType) throw new Error("PROTOTYPE_EXPORT_MANIFEST_MISSING");
     return { key: row.artifactKey, sha256: row.artifactSha256, byteSize: row.byteSize, mediaType: row.mediaType };
@@ -68,7 +68,7 @@ export async function failPrototypeExport(db: Store, input: PrototypeExportExecu
 export async function cancelPrototypeExport(db: Store, input: PrototypeExportExecution & { detail: string }): Promise<void> {
   requirePrototypeExportCommand(input);
   await db.prototypeExport.updateMany({
-    where: { id: input.exportId, projectId: input.projectId, activeCommandId: input.commandId, status: { in: ["queued", "building"] } },
+    where: { id: input.exportId, projectId: input.projectId, activeCommandId: input.commandId, status: { in: ["queued", "building", "cancelling"] } },
     data: { status: "cancelled", artifactKey: null, artifactSha256: null, byteSize: null, mediaType: null, failureCode: null, failureDetail: null, finishedAt: new Date(), revision: { increment: 1 } },
   });
 }

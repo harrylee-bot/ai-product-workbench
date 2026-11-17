@@ -20,9 +20,10 @@ export function createTemporalSdkActivities(base: PrototypeWorkflowActivities): 
         return await base.persistPrototypeExport(input, (details) => heartbeat(details), cancellationSignal());
       } catch (error) {
         if (!(error instanceof PrototypeExportCancelledError)) throw error;
-        // The API commits cancellation and its outbox command atomically. It can
+        // The API commits cancellation intent and its outbox atomically. It can
         // win before the start activity or before Temporal receives the command.
-        // Keep heartbeating until that durable cancellation arrives: throwing an
+        // Keep the export cancelling until that durable cancellation arrives:
+        // only workflow cleanup acknowledges cancelled. Throwing an
         // unsolicited CancelledFailure would still make the SDK fail the workflow.
         heartbeat("export:awaiting-cancellation");
         return await cancelled();

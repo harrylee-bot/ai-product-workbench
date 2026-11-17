@@ -115,10 +115,11 @@ test("derives the typecheck inventory from npm workspace package manifests", asy
 
 test("the repository inventory includes every current typecheck workspace", async () => {
   const inventory = await discoverWorkspaceInventory(repoRoot);
-  assert.equal(inventory.workspaces.length, 17);
-  assert.equal(inventory.typecheckWorkspaces.length, 15);
+  assert.equal(inventory.workspaces.length, 18);
+  assert.equal(inventory.typecheckWorkspaces.length, 16);
   assert(inventory.typecheckWorkspaces.some(({ name }) => name === "@workbench/workbench-contracts"));
   assert(inventory.typecheckWorkspaces.some(({ name }) => name === "@workbench/workbench-canvas-tools"));
+  assert(inventory.typecheckWorkspaces.some(({ name }) => name === "@workbench/workbench-build-worker"));
   assert.deepEqual(
     inventory.workspaces.filter(({ typecheckCommand }) => typecheckCommand === null).map(({ name }) => name),
     ["@workbench/grist-auth-gateway", "@workbench/workbench-db"],
