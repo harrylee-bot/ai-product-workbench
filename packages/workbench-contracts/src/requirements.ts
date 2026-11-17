@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { isoDateTimeSchema, opaqueIdSchema, revisionSchema } from "./common.js";
-import { startRunRequestSchema } from "./runs.js";
+import { startRunRequestSchema,startRunRequestObjectSchema } from "./runs.js";
+import { prototypeFeedbackAnchorSchema } from "./visual-prototype.js";
 const text = (max=4000) => z.string().trim().min(1).max(max);
 export const requirementEvidenceSchema = z.object({
   id: opaqueIdSchema, releaseId: opaqueIdSchema, releaseVersion: z.number().int().positive(),
@@ -23,7 +24,17 @@ export const requirementCardSchema = z.object({
   assumptions:z.array(requirementAssumptionSchema).max(30),issues:z.array(requirementIssueSchema).max(20),
   platformChanges:z.array(text(2000)).max(20), preserved:z.array(text(2000)).max(50),
 }).strict();
-export const requirementAnalysisSchema = z.object({reply:text(12000),card:requirementCardSchema}).strict();
+export const requirementDiscussionCardSchema = requirementCardSchema.partial().extend({
+ goal:text().nullable().optional(),platform:text(240).nullable().optional(),
+ modules:z.array(text(240)).max(30).optional(),roles:z.array(text(240)).max(30).optional(),
+ changes:z.array(text(2000)).max(50).optional(),outputKinds:z.array(z.enum(["prd","prototype"])).max(2).optional(),
+});
+export const requirementDiscussionRequestSchema=startRunRequestObjectSchema.omit({requirementConfirmationId:true}).strict();
+export const requirementContextSchema = z.discriminatedUnion("kind",[
+ z.object({kind:z.literal("new")}).strict(),
+ z.object({kind:z.literal("revision"),revisionId:opaqueIdSchema,feedbackIds:z.array(opaqueIdSchema).max(100),anchor:prototypeFeedbackAnchorSchema.nullable()}).strict(),
+]);
+export const requirementAnalysisSchema = z.object({reply:text(12000),card:requirementDiscussionCardSchema.nullable()}).strict();
 export const requirementTurnSchema = z.object({
   id:opaqueIdSchema,sessionId:opaqueIdSchema,inputRevision:revisionSchema,
   status:z.enum(["queued","running","succeeded","failed","cancelled","superseded"]),
@@ -39,16 +50,17 @@ export const requirementConfirmationSchema = z.object({
 export const requirementSessionSchema = z.object({
   id:opaqueIdSchema,projectId:opaqueIdSchema,threadId:opaqueIdSchema,revision:revisionSchema,
   state:z.enum(["discussing","analyzing","needs_clarification","ready_to_confirm","confirmed","generating"]),
-  generationRequest:startRunRequestSchema,summaryVersion:z.number().int().nonnegative(),summaryChecksum:z.string().regex(/^[a-f0-9]{64}$/).nullable(),
-  card:requirementCardSchema.nullable(),evidence:z.array(requirementEvidenceSchema).max(30),
+  context:requirementContextSchema,generationRequest:requirementDiscussionRequestSchema,summaryVersion:z.number().int().nonnegative(),summaryChecksum:z.string().regex(/^[a-f0-9]{64}$/).nullable(),
+  card:requirementDiscussionCardSchema.nullable(),evidence:z.array(requirementEvidenceSchema).max(30),
   activeTurn:requirementTurnSchema.nullable(),confirmation:requirementConfirmationSchema.nullable(),
   createdAt:isoDateTimeSchema,updatedAt:isoDateTimeSchema,
 }).strict();
-export const createRequirementSessionRequestSchema=z.object({generationRequest:startRunRequestSchema}).strict();
-export const postRequirementMessageRequestSchema=z.object({text:text(12000),generationRequest:startRunRequestSchema.optional(),intent:z.enum(["discuss","confirm_suggestion"]).default("discuss")}).strict();
+export const createRequirementSessionRequestSchema=z.object({generationRequest:requirementDiscussionRequestSchema,context:requirementContextSchema.default({kind:"new"})}).strict();
+export const postRequirementMessageRequestSchema=z.object({text:text(12000),generationRequest:requirementDiscussionRequestSchema.optional(),intent:z.enum(["discuss","confirm_suggestion"]).default("discuss")}).strict();
 export const confirmRequirementRequestSchema=z.object({summaryVersion:z.number().int().positive(),summaryChecksum:z.string().regex(/^[a-f0-9]{64}$/),acceptedAssumptionIds:z.array(text(80)).max(30),acceptedPlatformChanges:z.boolean()}).strict();
 export const requirementSessionsSchema=z.object({items:z.array(requirementSessionSchema).max(100)}).strict();
 export type RequirementCard=z.infer<typeof requirementCardSchema>;
+export type RequirementContext=z.infer<typeof requirementContextSchema>;
 export type RequirementEvidence=z.infer<typeof requirementEvidenceSchema>;
 export type RequirementAnalysis=z.infer<typeof requirementAnalysisSchema>;
 export type RequirementSession=z.infer<typeof requirementSessionSchema>;
