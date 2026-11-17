@@ -3,7 +3,7 @@ import { canonicalSha256,parseEmbeddingProfileV1,parseRetrievalProfileV1,type Em
 import { JiebaQuerySegmenterAdapter } from '../../src/modules/knowledge/jieba-query-segmenter.adapter.js';
 export const integrationSegmenter=new JiebaQuerySegmenterAdapter();
 export const segmenterIdentity=integrationSegmenter.identity;
-export async function seedFixture(tx: Prisma.TransactionClient,releaseScope?:{workspaceId:string;version:number}) {
+export async function seedFixture(tx: Prisma.TransactionClient,releaseScope?:{workspaceId:string;version:number},productionDocument?:{path:string;content:string}) {
   const suffix =
     `${Date.now()}_${Math.random().toString(36).slice(2)}`.toLowerCase();
   const owner = await tx.principal.create({
@@ -173,7 +173,7 @@ export async function seedFixture(tx: Prisma.TransactionClient,releaseScope?:{wo
   const documents = [
     {
       id: `kdoc_production_${suffix}`,
-      path: "00-rules/product.md",
+      path: productionDocument?.path??"00-rules/product.md",
       title: "产品规则",
       route: "production" as const,
     },
@@ -208,7 +208,7 @@ export async function seedFixture(tx: Prisma.TransactionClient,releaseScope?:{wo
     {
       id: `kchunk_production_${suffix}`,
       documentId: documents[0]!.id,
-      content: "产品 工作台 用户 规则",
+      content: productionDocument?.content??"产品 工作台 用户 规则",
       vector: "[1,0,0]",
     },
     {
