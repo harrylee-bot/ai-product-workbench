@@ -42,6 +42,7 @@ import * as systemSchemas from "./system.js";
 import * as shareSchemas from "./shares.js";
 import * as sourcePrototypeSchemas from "./source-prototype.js";
 import * as submissionIntentSchemas from "./submission-intents.js";
+import * as requirementSchemas from "./requirements.js";
 import * as threadSchemas from "./threads.js";
 import * as visualPrototypeSchemas from "./visual-prototype.js";
 import * as workspaceSchemas from "./workspaces.js";
@@ -108,6 +109,7 @@ function buildSchemaCatalog() {
     ...schemasFrom(sourcePrototypeSchemas),
     ...schemasFrom(submissionIntentSchemas),
     ...schemasFrom(threadSchemas),
+    ...schemasFrom(requirementSchemas),
     ...schemasFrom(workspaceSchemas),
     ...schemasFrom(visualPrototypeSchemas),
   ];
@@ -216,6 +218,7 @@ type ReviewedCheck = Readonly<{
 }>;
 
 const reviewedCheckSchemas: readonly ReviewedCheck[] = [
+  {label:"RequirementCard.uniqueOutputKinds",schema:requirementSchemas.requirementCardSchema.shape.outputKinds,description:"Requirement output kinds are unique."},
   { label: "BusinessDocument.body", schema: documentSchemas.businessDocumentSchema, description: "A business document contains exactly one nonempty text or Markdown body; enforced by the runtime Zod contract." },
   { label: "ApprovalOptions.uniqueIds", schema: approvalSchemas.approvalOptionsSchema, description: "Approval option ids are unique; enforced by the runtime Zod contract." },
   { label: "ArtifactVersionBlobDetail.schemaVersion", schema: artifactSchemas.artifactVersionBlobDetailSchema, description: "PRD blob details require schemaVersion 3 and prototype blob details require schemaVersion 1; enforced by the runtime Zod contract." },
@@ -657,6 +660,8 @@ export function buildWorkbenchOpenApiDocument() {
     ["KnowledgeProfileType", z.enum(["embedding", "retrieval"]), { name: "profileType", in: "path" }],
     ["KnowledgeProfileId", z.string().min(1).max(128).regex(/^[a-z0-9][a-z0-9._-]*$/u), { name: "profileId", in: "path" }],
     ["ThreadId", commonSchemas.opaqueIdSchema, { name: "threadId", in: "path" }],
+    ["RequirementSessionId", commonSchemas.opaqueIdSchema, { name: "sessionId", in: "path" }],
+    ["RequirementTurnId", commonSchemas.opaqueIdSchema, { name: "turnId", in: "path" }],
     ["SubmissionIntentId", commonSchemas.opaqueIdSchema, { name: "intentId", in: "path" }],
     ["RunId", commonSchemas.opaqueIdSchema, { name: "runId", in: "path" }],
     ["ArtifactId", commonSchemas.opaqueIdSchema, { name: "artifactId", in: "path" }],
@@ -737,7 +742,7 @@ export function buildWorkbenchOpenApiDocument() {
     linkId: "ArtifactLinkId",
     workspaceId: "WorkspaceId", projectId: "ProjectId", principalId: "PrincipalId", invitationId: "InvitationId",
     profileType: "KnowledgeProfileType", profileId: "KnowledgeProfileId",
-    threadId: "ThreadId", intentId: "SubmissionIntentId", runId: "RunId",
+    sessionId:"RequirementSessionId",turnId:"RequirementTurnId",threadId: "ThreadId", intentId: "SubmissionIntentId", runId: "RunId",
     artifactId: "ArtifactId", artifactVersionId: "ArtifactVersionId", assetId: "AssetId", fileId: "FileId", sourceId: "ImportSourceId",
     uploadSessionId: "UploadSessionId", approvalId: "ApprovalId", partNumber: "PartNumber", commandId: "CommandId",
     releaseId: "ReleaseId", shareId: "ShareId", exportId: "ExportId", previewId: "PreviewId", visualCapabilityId: "VisualCapabilityId", shareToken: "ShareToken",

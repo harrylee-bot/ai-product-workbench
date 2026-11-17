@@ -395,6 +395,7 @@ export const runOutputsSchema = z.object({
 export type RunOutputs = z.infer<typeof runOutputsSchema>;
 
 export const startRunRequestObjectSchema = z.object({
+  requirementConfirmationId: opaqueIdSchema.optional(),
   prompt: z.string().trim().min(1).max(50_000),
   modelId: z.string().min(1).max(128),
   workflow: runWorkflowSchema,

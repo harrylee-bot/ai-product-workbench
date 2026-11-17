@@ -11738,6 +11738,30 @@ components:
       required:
         - checksum
       additionalProperties: false
+    ConfirmRequirementRequest:
+      type: object
+      properties:
+        summaryVersion:
+          type: integer
+          exclusiveMinimum: 0
+        summaryChecksum:
+          type: string
+          pattern: ^[a-f0-9]{64}$
+        acceptedAssumptionIds:
+          type: array
+          items:
+            type: string
+            minLength: 1
+            maxLength: 80
+          maxItems: 30
+        acceptedPlatformChanges:
+          type: boolean
+      required:
+        - summaryVersion
+        - summaryChecksum
+        - acceptedAssumptionIds
+        - acceptedPlatformChanges
+      additionalProperties: false
     CreateArtifactLinkRequest:
       type: object
       properties:
@@ -12644,6 +12668,10 @@ components:
     StartRunRequest:
       type: object
       properties:
+        requirementConfirmationId:
+          type: string
+          minLength: 1
+          maxLength: 128
         prompt:
           type: string
           minLength: 1
@@ -12843,6 +12871,14 @@ components:
       required:
         - revisionId
       additionalProperties: false
+    CreateRequirementSessionRequest:
+      type: object
+      properties:
+        generationRequest:
+          $ref: "#/components/schemas/StartRunRequest"
+      required:
+        - generationRequest
+      additionalProperties: false
     SubmissionIntentAttachmentRequest:
       oneOf:
         - type: object
@@ -12889,6 +12925,10 @@ components:
     SubmissionIntentRunRequest:
       type: object
       properties:
+        requirementConfirmationId:
+          type: string
+          minLength: 1
+          maxLength: 128
         prompt:
           type: string
           minLength: 1
@@ -15249,6 +15289,24 @@ components:
         - parts
       additionalProperties: false
       description: Multipart part numbers are unique and strictly ascending; enforced by the runtime Zod contract.
+    PostRequirementMessageRequest:
+      type: object
+      properties:
+        text:
+          type: string
+          minLength: 1
+          maxLength: 12000
+        generationRequest:
+          $ref: "#/components/schemas/StartRunRequest"
+        intent:
+          type: string
+          enum:
+            - discuss
+            - confirm_suggestion
+          default: discuss
+      required:
+        - text
+      additionalProperties: false
     PrdDocumentV3:
       type: object
       properties:
@@ -22105,6 +22163,911 @@ components:
         - nodes
         - edges
       additionalProperties: false
+    RequirementAssumption:
+      type: object
+      properties:
+        id:
+          type: string
+          minLength: 1
+          maxLength: 80
+        text:
+          type: string
+          minLength: 1
+          maxLength: 2000
+        evidenceIds:
+          type: array
+          items:
+            type: string
+            minLength: 1
+            maxLength: 128
+          maxItems: 20
+      required:
+        - id
+        - text
+        - evidenceIds
+      additionalProperties: false
+    RequirementIssue:
+      type: object
+      properties:
+        id:
+          type: string
+          minLength: 1
+          maxLength: 80
+        kind:
+          type: string
+          enum:
+            - missing
+            - conflict
+            - knowledge_missing
+            - scope_expansion
+        question:
+          type: string
+          minLength: 1
+          maxLength: 1000
+        impact:
+          type: string
+          enum:
+            - scope
+            - workflow
+            - permission
+            - financial
+            - external_dependency
+            - platform
+            - presentation
+        blocking:
+          type: boolean
+        evidenceIds:
+          type: array
+          items:
+            type: string
+            minLength: 1
+            maxLength: 128
+          maxItems: 20
+      required:
+        - id
+        - kind
+        - question
+        - impact
+        - blocking
+        - evidenceIds
+      additionalProperties: false
+    RequirementCard:
+      type: object
+      properties:
+        goal:
+          type: string
+          minLength: 1
+          maxLength: 4000
+        platform:
+          type: string
+          minLength: 1
+          maxLength: 240
+        modules:
+          type: array
+          items:
+            type: string
+            minLength: 1
+            maxLength: 240
+          minItems: 1
+          maxItems: 30
+        roles:
+          type: array
+          items:
+            type: string
+            minLength: 1
+            maxLength: 240
+          minItems: 1
+          maxItems: 30
+        existingCapabilities:
+          type: array
+          items:
+            type: object
+            properties:
+              description:
+                type: string
+                minLength: 1
+                maxLength: 2000
+              evidenceIds:
+                type: array
+                items:
+                  type: string
+                  minLength: 1
+                  maxLength: 128
+                minItems: 1
+                maxItems: 20
+              scope:
+                type: string
+                enum:
+                  - platform
+                  - template
+                  - regional
+                  - prototype
+                  - uncertain
+            required:
+              - description
+              - evidenceIds
+              - scope
+            additionalProperties: false
+          maxItems: 50
+        reuse:
+          type: array
+          items:
+            type: string
+            minLength: 1
+            maxLength: 2000
+          maxItems: 50
+        changes:
+          type: array
+          items:
+            type: string
+            minLength: 1
+            maxLength: 2000
+          minItems: 1
+          maxItems: 50
+        affectedPages:
+          type: array
+          items:
+            type: string
+            minLength: 1
+            maxLength: 500
+          maxItems: 50
+        affectedFlows:
+          type: array
+          items:
+            type: string
+            minLength: 1
+            maxLength: 2000
+          maxItems: 30
+        targetSurface:
+          type: string
+          enum:
+            - app
+            - web
+        designConstraints:
+          type: array
+          items:
+            type: string
+            minLength: 1
+            maxLength: 2000
+          maxItems: 30
+        outputKinds:
+          type: array
+          items:
+            type: string
+            enum:
+              - prd
+              - prototype
+          minItems: 1
+          maxItems: 2
+          description: Requirement output kinds are unique.
+        assumptions:
+          type: array
+          items:
+            $ref: "#/components/schemas/RequirementAssumption"
+          maxItems: 30
+        issues:
+          type: array
+          items:
+            $ref: "#/components/schemas/RequirementIssue"
+          maxItems: 20
+        platformChanges:
+          type: array
+          items:
+            type: string
+            minLength: 1
+            maxLength: 2000
+          maxItems: 20
+        preserved:
+          type: array
+          items:
+            type: string
+            minLength: 1
+            maxLength: 2000
+          maxItems: 50
+      required:
+        - goal
+        - platform
+        - modules
+        - roles
+        - existingCapabilities
+        - reuse
+        - changes
+        - affectedPages
+        - affectedFlows
+        - targetSurface
+        - designConstraints
+        - outputKinds
+        - assumptions
+        - issues
+        - platformChanges
+        - preserved
+      additionalProperties: false
+    RequirementAnalysis:
+      type: object
+      properties:
+        reply:
+          type: string
+          minLength: 1
+          maxLength: 12000
+        card:
+          type: object
+          properties:
+            goal:
+              type: string
+              minLength: 1
+              maxLength: 4000
+            platform:
+              type: string
+              minLength: 1
+              maxLength: 240
+            modules:
+              type: array
+              items:
+                type: string
+                minLength: 1
+                maxLength: 240
+              minItems: 1
+              maxItems: 30
+            roles:
+              type: array
+              items:
+                type: string
+                minLength: 1
+                maxLength: 240
+              minItems: 1
+              maxItems: 30
+            existingCapabilities:
+              type: array
+              items:
+                type: object
+                properties:
+                  description:
+                    type: string
+                    minLength: 1
+                    maxLength: 2000
+                  evidenceIds:
+                    type: array
+                    items:
+                      type: string
+                      minLength: 1
+                      maxLength: 128
+                    minItems: 1
+                    maxItems: 20
+                  scope:
+                    type: string
+                    enum:
+                      - platform
+                      - template
+                      - regional
+                      - prototype
+                      - uncertain
+                required:
+                  - description
+                  - evidenceIds
+                  - scope
+                additionalProperties: false
+              maxItems: 50
+            reuse:
+              type: array
+              items:
+                type: string
+                minLength: 1
+                maxLength: 2000
+              maxItems: 50
+            changes:
+              type: array
+              items:
+                type: string
+                minLength: 1
+                maxLength: 2000
+              minItems: 1
+              maxItems: 50
+            affectedPages:
+              type: array
+              items:
+                type: string
+                minLength: 1
+                maxLength: 500
+              maxItems: 50
+            affectedFlows:
+              type: array
+              items:
+                type: string
+                minLength: 1
+                maxLength: 2000
+              maxItems: 30
+            targetSurface:
+              type: string
+              enum:
+                - app
+                - web
+            designConstraints:
+              type: array
+              items:
+                type: string
+                minLength: 1
+                maxLength: 2000
+              maxItems: 30
+            outputKinds:
+              type: array
+              items:
+                type: string
+                enum:
+                  - prd
+                  - prototype
+              minItems: 1
+              maxItems: 2
+              description: Requirement output kinds are unique.
+            assumptions:
+              type: array
+              items:
+                $ref: "#/components/schemas/RequirementAssumption"
+              maxItems: 30
+            issues:
+              type: array
+              items:
+                $ref: "#/components/schemas/RequirementIssue"
+              maxItems: 20
+            platformChanges:
+              type: array
+              items:
+                type: string
+                minLength: 1
+                maxLength: 2000
+              maxItems: 20
+            preserved:
+              type: array
+              items:
+                type: string
+                minLength: 1
+                maxLength: 2000
+              maxItems: 50
+          required:
+            - goal
+            - platform
+            - modules
+            - roles
+            - existingCapabilities
+            - reuse
+            - changes
+            - affectedPages
+            - affectedFlows
+            - targetSurface
+            - designConstraints
+            - outputKinds
+            - assumptions
+            - issues
+            - platformChanges
+            - preserved
+          additionalProperties: false
+      required:
+        - reply
+        - card
+      additionalProperties: false
+    RequirementConfirmation:
+      type: object
+      properties:
+        id:
+          type: string
+          minLength: 1
+          maxLength: 128
+        summaryVersion:
+          type: integer
+          exclusiveMinimum: 0
+        summaryChecksum:
+          type: string
+          pattern: ^[a-f0-9]{64}$
+        status:
+          type: string
+          enum:
+            - pending
+            - started
+            - invalidated
+        acceptedAssumptionIds:
+          type: array
+          items:
+            type: string
+            minLength: 1
+            maxLength: 80
+          maxItems: 30
+        acceptedPlatformChanges:
+          type: boolean
+        confirmedAt:
+          type: string
+          format: date-time
+        planId:
+          type:
+            - string
+            - "null"
+          minLength: 1
+          maxLength: 128
+        runId:
+          type:
+            - string
+            - "null"
+          minLength: 1
+          maxLength: 128
+      required:
+        - id
+        - summaryVersion
+        - summaryChecksum
+        - status
+        - acceptedAssumptionIds
+        - acceptedPlatformChanges
+        - confirmedAt
+        - planId
+        - runId
+      additionalProperties: false
+    RequirementEvidence:
+      type: object
+      properties:
+        id:
+          type: string
+          minLength: 1
+          maxLength: 128
+        releaseId:
+          type: string
+          minLength: 1
+          maxLength: 128
+        releaseVersion:
+          type: integer
+          exclusiveMinimum: 0
+        documentId:
+          type: string
+          minLength: 1
+          maxLength: 128
+        chunkId:
+          type: string
+          minLength: 1
+          maxLength: 128
+        sourcePath:
+          type: string
+          minLength: 1
+          maxLength: 2048
+        title:
+          type: string
+          minLength: 1
+          maxLength: 240
+        quote:
+          type: string
+          minLength: 1
+          maxLength: 12000
+        scope:
+          type: string
+          enum:
+            - platform
+            - template
+            - regional
+            - prototype
+            - uncertain
+        checksum:
+          type: string
+          pattern: ^[a-f0-9]{64}$
+      required:
+        - id
+        - releaseId
+        - releaseVersion
+        - documentId
+        - chunkId
+        - sourcePath
+        - title
+        - quote
+        - scope
+        - checksum
+      additionalProperties: false
+    RequirementTurn:
+      type: object
+      properties:
+        id:
+          type: string
+          minLength: 1
+          maxLength: 128
+        sessionId:
+          type: string
+          minLength: 1
+          maxLength: 128
+        inputRevision:
+          $ref: "#/components/schemas/Revision"
+        status:
+          type: string
+          enum:
+            - queued
+            - running
+            - succeeded
+            - failed
+            - cancelled
+            - superseded
+        modelId:
+          type: string
+          enum:
+            - deepseek-flash
+        attempt:
+          type: integer
+          minimum: 0
+        failureCode:
+          type:
+            - string
+            - "null"
+        inputTokens:
+          type:
+            - integer
+            - "null"
+          minimum: 0
+        outputTokens:
+          type:
+            - integer
+            - "null"
+          minimum: 0
+        createdAt:
+          type: string
+          format: date-time
+        finishedAt:
+          type:
+            - string
+            - "null"
+          format: date-time
+      required:
+        - id
+        - sessionId
+        - inputRevision
+        - status
+        - modelId
+        - attempt
+        - failureCode
+        - inputTokens
+        - outputTokens
+        - createdAt
+        - finishedAt
+      additionalProperties: false
+    RequirementSession:
+      type: object
+      properties:
+        id:
+          type: string
+          minLength: 1
+          maxLength: 128
+        projectId:
+          type: string
+          minLength: 1
+          maxLength: 128
+        threadId:
+          type: string
+          minLength: 1
+          maxLength: 128
+        revision:
+          $ref: "#/components/schemas/Revision"
+        state:
+          type: string
+          enum:
+            - discussing
+            - analyzing
+            - needs_clarification
+            - ready_to_confirm
+            - confirmed
+            - generating
+        generationRequest:
+          $ref: "#/components/schemas/StartRunRequest"
+        summaryVersion:
+          type: integer
+          minimum: 0
+        summaryChecksum:
+          type:
+            - string
+            - "null"
+          pattern: ^[a-f0-9]{64}$
+        card:
+          type:
+            - object
+            - "null"
+          properties:
+            goal:
+              type: string
+              minLength: 1
+              maxLength: 4000
+            platform:
+              type: string
+              minLength: 1
+              maxLength: 240
+            modules:
+              type: array
+              items:
+                type: string
+                minLength: 1
+                maxLength: 240
+              minItems: 1
+              maxItems: 30
+            roles:
+              type: array
+              items:
+                type: string
+                minLength: 1
+                maxLength: 240
+              minItems: 1
+              maxItems: 30
+            existingCapabilities:
+              type: array
+              items:
+                type: object
+                properties:
+                  description:
+                    type: string
+                    minLength: 1
+                    maxLength: 2000
+                  evidenceIds:
+                    type: array
+                    items:
+                      type: string
+                      minLength: 1
+                      maxLength: 128
+                    minItems: 1
+                    maxItems: 20
+                  scope:
+                    type: string
+                    enum:
+                      - platform
+                      - template
+                      - regional
+                      - prototype
+                      - uncertain
+                required:
+                  - description
+                  - evidenceIds
+                  - scope
+                additionalProperties: false
+              maxItems: 50
+            reuse:
+              type: array
+              items:
+                type: string
+                minLength: 1
+                maxLength: 2000
+              maxItems: 50
+            changes:
+              type: array
+              items:
+                type: string
+                minLength: 1
+                maxLength: 2000
+              minItems: 1
+              maxItems: 50
+            affectedPages:
+              type: array
+              items:
+                type: string
+                minLength: 1
+                maxLength: 500
+              maxItems: 50
+            affectedFlows:
+              type: array
+              items:
+                type: string
+                minLength: 1
+                maxLength: 2000
+              maxItems: 30
+            targetSurface:
+              type: string
+              enum:
+                - app
+                - web
+            designConstraints:
+              type: array
+              items:
+                type: string
+                minLength: 1
+                maxLength: 2000
+              maxItems: 30
+            outputKinds:
+              type: array
+              items:
+                type: string
+                enum:
+                  - prd
+                  - prototype
+              minItems: 1
+              maxItems: 2
+              description: Requirement output kinds are unique.
+            assumptions:
+              type: array
+              items:
+                $ref: "#/components/schemas/RequirementAssumption"
+              maxItems: 30
+            issues:
+              type: array
+              items:
+                $ref: "#/components/schemas/RequirementIssue"
+              maxItems: 20
+            platformChanges:
+              type: array
+              items:
+                type: string
+                minLength: 1
+                maxLength: 2000
+              maxItems: 20
+            preserved:
+              type: array
+              items:
+                type: string
+                minLength: 1
+                maxLength: 2000
+              maxItems: 50
+          required:
+            - goal
+            - platform
+            - modules
+            - roles
+            - existingCapabilities
+            - reuse
+            - changes
+            - affectedPages
+            - affectedFlows
+            - targetSurface
+            - designConstraints
+            - outputKinds
+            - assumptions
+            - issues
+            - platformChanges
+            - preserved
+          additionalProperties: false
+        evidence:
+          type: array
+          items:
+            $ref: "#/components/schemas/RequirementEvidence"
+          maxItems: 30
+        activeTurn:
+          type:
+            - object
+            - "null"
+          properties:
+            id:
+              type: string
+              minLength: 1
+              maxLength: 128
+            sessionId:
+              type: string
+              minLength: 1
+              maxLength: 128
+            inputRevision:
+              $ref: "#/components/schemas/Revision"
+            status:
+              type: string
+              enum:
+                - queued
+                - running
+                - succeeded
+                - failed
+                - cancelled
+                - superseded
+            modelId:
+              type: string
+              enum:
+                - deepseek-flash
+            attempt:
+              type: integer
+              minimum: 0
+            failureCode:
+              type:
+                - string
+                - "null"
+            inputTokens:
+              type:
+                - integer
+                - "null"
+              minimum: 0
+            outputTokens:
+              type:
+                - integer
+                - "null"
+              minimum: 0
+            createdAt:
+              type: string
+              format: date-time
+            finishedAt:
+              type:
+                - string
+                - "null"
+              format: date-time
+          required:
+            - id
+            - sessionId
+            - inputRevision
+            - status
+            - modelId
+            - attempt
+            - failureCode
+            - inputTokens
+            - outputTokens
+            - createdAt
+            - finishedAt
+          additionalProperties: false
+        confirmation:
+          type:
+            - object
+            - "null"
+          properties:
+            id:
+              type: string
+              minLength: 1
+              maxLength: 128
+            summaryVersion:
+              type: integer
+              exclusiveMinimum: 0
+            summaryChecksum:
+              type: string
+              pattern: ^[a-f0-9]{64}$
+            status:
+              type: string
+              enum:
+                - pending
+                - started
+                - invalidated
+            acceptedAssumptionIds:
+              type: array
+              items:
+                type: string
+                minLength: 1
+                maxLength: 80
+              maxItems: 30
+            acceptedPlatformChanges:
+              type: boolean
+            confirmedAt:
+              type: string
+              format: date-time
+            planId:
+              type:
+                - string
+                - "null"
+              minLength: 1
+              maxLength: 128
+            runId:
+              type:
+                - string
+                - "null"
+              minLength: 1
+              maxLength: 128
+          required:
+            - id
+            - summaryVersion
+            - summaryChecksum
+            - status
+            - acceptedAssumptionIds
+            - acceptedPlatformChanges
+            - confirmedAt
+            - planId
+            - runId
+          additionalProperties: false
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - projectId
+        - threadId
+        - revision
+        - state
+        - generationRequest
+        - summaryVersion
+        - summaryChecksum
+        - card
+        - evidence
+        - activeTurn
+        - confirmation
+        - createdAt
+        - updatedAt
+      additionalProperties: false
+    RequirementSessions:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/RequirementSession"
+          maxItems: 100
+      required:
+        - items
+      additionalProperties: false
     RetireKnowledgeProfileRequest:
       type: object
       properties:
@@ -23253,6 +24216,10 @@ components:
     StartRunRequestObject:
       type: object
       properties:
+        requirementConfirmationId:
+          type: string
+          minLength: 1
+          maxLength: 128
         prompt:
           type: string
           minLength: 1
@@ -24036,6 +25003,14 @@ components:
       type: string
       minLength: 1
       maxLength: 128
+    RequirementSessionId:
+      type: string
+      minLength: 1
+      maxLength: 128
+    RequirementTurnId:
+      type: string
+      minLength: 1
+      maxLength: 128
     SubmissionIntentId:
       type: string
       minLength: 1
@@ -24204,6 +25179,18 @@ components:
       required: true
       name: threadId
       in: path
+    RequirementSessionId:
+      schema:
+        $ref: "#/components/schemas/RequirementSessionId"
+      required: true
+      name: sessionId
+      in: path
+    RequirementTurnId:
+      schema:
+        $ref: "#/components/schemas/RequirementTurnId"
+      required: true
+      name: turnId
+      in: path
     SubmissionIntentId:
       schema:
         $ref: "#/components/schemas/SubmissionIntentId"
@@ -24346,6 +25333,209 @@ components:
       name: Last-Event-ID
       in: header
 paths:
+  /threads/{threadId}/requirement-sessions:
+    get:
+      operationId: listRequirementSessions
+      summary: Current principal's sessions
+      parameters:
+        - $ref: "#/components/parameters/ThreadId"
+      responses:
+        "200":
+          description: Current principal's sessions
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RequirementSessions"
+        "404":
+          $ref: "#/components/responses/Problem"
+    post:
+      operationId: createRequirementSession
+      summary: Discussion session; no generation Run
+      parameters:
+        - $ref: "#/components/parameters/ThreadId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateRequirementSessionRequest"
+      responses:
+        "201":
+          description: Discussion session; no generation Run
+          headers:
+            ETag:
+              $ref: "#/components/headers/ETag"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RequirementSession"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+        "409":
+          $ref: "#/components/responses/Problem"
+  /requirement-sessions/{sessionId}:
+    get:
+      operationId: getRequirementSession
+      summary: Recoverable requirement snapshot
+      parameters:
+        - $ref: "#/components/parameters/RequirementSessionId"
+      responses:
+        "200":
+          description: Recoverable requirement snapshot
+          headers:
+            ETag:
+              $ref: "#/components/headers/ETag"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RequirementSession"
+        "404":
+          $ref: "#/components/responses/Problem"
+  /requirement-sessions/{sessionId}/messages:
+    post:
+      operationId: postRequirementMessage
+      summary: Requirement snapshot
+      parameters:
+        - $ref: "#/components/parameters/RequirementSessionId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/IfMatch"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PostRequirementMessageRequest"
+      responses:
+        "202":
+          description: Requirement snapshot
+          headers:
+            ETag:
+              $ref: "#/components/headers/ETag"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RequirementSession"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+        "409":
+          $ref: "#/components/responses/Problem"
+        "412":
+          $ref: "#/components/responses/Problem"
+        "428":
+          $ref: "#/components/responses/Problem"
+        "429":
+          $ref: "#/components/responses/Problem"
+        "503":
+          $ref: "#/components/responses/Problem"
+  /requirement-sessions/{sessionId}/confirm:
+    post:
+      operationId: confirmRequirement
+      summary: Requirement snapshot
+      parameters:
+        - $ref: "#/components/parameters/RequirementSessionId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/IfMatch"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ConfirmRequirementRequest"
+      responses:
+        "202":
+          description: Requirement snapshot
+          headers:
+            ETag:
+              $ref: "#/components/headers/ETag"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RequirementSession"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+        "409":
+          $ref: "#/components/responses/Problem"
+        "412":
+          $ref: "#/components/responses/Problem"
+        "428":
+          $ref: "#/components/responses/Problem"
+        "429":
+          $ref: "#/components/responses/Problem"
+        "503":
+          $ref: "#/components/responses/Problem"
+  /requirement-sessions/{sessionId}/turns/{turnId}/cancel:
+    post:
+      operationId: cancelRequirementTurn
+      summary: Requirement snapshot
+      parameters:
+        - $ref: "#/components/parameters/RequirementSessionId"
+        - $ref: "#/components/parameters/RequirementTurnId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/IfMatch"
+      responses:
+        "200":
+          description: Requirement snapshot
+          headers:
+            ETag:
+              $ref: "#/components/headers/ETag"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RequirementSession"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+        "409":
+          $ref: "#/components/responses/Problem"
+        "412":
+          $ref: "#/components/responses/Problem"
+        "428":
+          $ref: "#/components/responses/Problem"
+        "429":
+          $ref: "#/components/responses/Problem"
+        "503":
+          $ref: "#/components/responses/Problem"
+  /requirement-sessions/{sessionId}/turns/{turnId}/retry:
+    post:
+      operationId: retryRequirementTurn
+      summary: Requirement snapshot
+      parameters:
+        - $ref: "#/components/parameters/RequirementSessionId"
+        - $ref: "#/components/parameters/RequirementTurnId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/IfMatch"
+      responses:
+        "202":
+          description: Requirement snapshot
+          headers:
+            ETag:
+              $ref: "#/components/headers/ETag"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RequirementSession"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+        "409":
+          $ref: "#/components/responses/Problem"
+        "412":
+          $ref: "#/components/responses/Problem"
+        "428":
+          $ref: "#/components/responses/Problem"
+        "429":
+          $ref: "#/components/responses/Problem"
+        "503":
+          $ref: "#/components/responses/Problem"
   /system/live:
     get:
       operationId: getLiveness

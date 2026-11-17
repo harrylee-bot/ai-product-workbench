@@ -1,3 +1,4 @@
+import { createRequirementSessionRequestSchema,postRequirementMessageRequestSchema,confirmRequirementRequestSchema,requirementSessionSchema,requirementSessionsSchema } from "./requirements.js";
 import { z, type ZodTypeAny } from "zod";
 import { artifactFinalizationStateSchema, confirmArtifactFinalizationRequestSchema } from "./finalizations.js";
 import {
@@ -266,6 +267,15 @@ const canvasClientCommandPageQuery = z.object({
 }).strict();
 
 export const workbenchHttpRoutes = [
+
+  {method:"get",path:"/threads/{threadId}/requirement-sessions",operationId:"listRequirementSessions",response:response(200,"Current principal's sessions",named("RequirementSessions",requirementSessionsSchema)),problemStatuses:problems(404)},
+  {method:"post",path:"/threads/{threadId}/requirement-sessions",operationId:"createRequirementSession",requestHeaders:["idempotencyKey"],requestBody:named("CreateRequirementSessionRequest",createRequirementSessionRequestSchema),response:response(201,"Discussion session; no generation Run",named("RequirementSession",requirementSessionSchema),["etag"]),problemStatuses:problems(400,404,409)},
+  {method:"get",path:"/requirement-sessions/{sessionId}",operationId:"getRequirementSession",response:response(200,"Recoverable requirement snapshot",named("RequirementSession",requirementSessionSchema),["etag"]),problemStatuses:problems(404)},
+  {method:"post",path:"/requirement-sessions/{sessionId}/messages",operationId:"postRequirementMessage",requestHeaders:["idempotencyKey","ifMatch"],requestBody:named("PostRequirementMessageRequest",postRequirementMessageRequestSchema),response:response(202,"Requirement snapshot",named("RequirementSession",requirementSessionSchema),["etag"]),problemStatuses:problems(400,404,409,412,428,429,503)},
+  {method:"post",path:"/requirement-sessions/{sessionId}/confirm",operationId:"confirmRequirement",requestHeaders:["idempotencyKey","ifMatch"],requestBody:named("ConfirmRequirementRequest",confirmRequirementRequestSchema),response:response(202,"Requirement snapshot",named("RequirementSession",requirementSessionSchema),["etag"]),problemStatuses:problems(400,404,409,412,428,429,503)},
+  {method:"post",path:"/requirement-sessions/{sessionId}/turns/{turnId}/cancel",operationId:"cancelRequirementTurn",requestHeaders:["idempotencyKey","ifMatch"],response:response(200,"Requirement snapshot",named("RequirementSession",requirementSessionSchema),["etag"]),problemStatuses:problems(400,404,409,412,428,429,503)},
+  {method:"post",path:"/requirement-sessions/{sessionId}/turns/{turnId}/retry",operationId:"retryRequirementTurn",requestHeaders:["idempotencyKey","ifMatch"],response:response(202,"Requirement snapshot",named("RequirementSession",requirementSessionSchema),["etag"]),problemStatuses:problems(400,404,409,412,428,429,503)},
+
   {
     method: "get", path: "/system/live", operationId: "getLiveness", public: true,
     response: response(200, "Process is alive", named("Health", healthSchema)),
