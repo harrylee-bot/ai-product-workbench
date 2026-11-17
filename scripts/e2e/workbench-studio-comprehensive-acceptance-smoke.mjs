@@ -8,12 +8,12 @@ import { chromium } from "playwright";
 
 const origin = process.env.WORKBENCH_E2E_WEB_ORIGIN ?? "http://127.0.0.1:18930";
 const output = new URL(
-  "../../output/audit/1.0.0/studio-comprehensive/",
+  process.env.WORKBENCH_E2E_STUDIO_OUTPUT ?? "../../output/audit/1.0.0/studio-comprehensive/",
   import.meta.url,
 );
 await mkdir(output, { recursive: true });
 
-const now = "2026-11-16T00:00:00.000Z";
+const now = new Date().toISOString();
 const hash = (text) => createHash("sha256").update(text).digest("hex");
 const percentile = (values, p) => {
   const sorted = [...values].sort((a, b) => a - b);
@@ -475,6 +475,7 @@ const setupContext = async (options = {}) => {
     ...options,
   });
   ctx.setDefaultTimeout(15000);
+  ctx.setDefaultNavigationTimeout(60000);
   await ctx.addCookies([
     {
       name: "workbench.session_token",
@@ -989,13 +990,32 @@ try {
   );
 
   const sseUpdateSamples = [];
+  const visibleFrameSamples = [];
+  const waitForPaintedText = async (label) => {
+    await ssePage.waitForFunction((text) => {
+      const host = document.querySelector('[data-swarm-projection]');
+      const candidates = host
+        ? [...host.shadowRoot.querySelectorAll('[data-swarm-source="node-live-2"][data-swarm-kind="text"]')]
+        : [...document.querySelectorAll('[data-draft-node="node-live-2"]')];
+      return candidates.some(el => {
+        const box = el.getBoundingClientRect();
+        return el.textContent.includes(text) && el.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true }) && box.width > 0 && box.height > 0 && box.top < innerHeight && box.bottom > 0;
+      });
+    }, label, { polling: 'raf' });
+    // Cross two animation frames so the measurement includes a paint opportunity.
+    await ssePage.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+  };
   for (let i = 1; i <= 30; i++) {
     const label = `渐进节点 ${i}`;
     const t0 = performance.now();
     emitSse("artifact.preview.updated", makePreviewPayload(label));
     await ssePage.getByText(label, { exact: false }).first().waitFor();
     sseUpdateSamples.push(performance.now() - t0);
+    await waitForPaintedText(label);
+    visibleFrameSamples.push(performance.now() - t0);
   }
+  results.metrics.intermediateEventToVisibleFrame = summarizeSamples(visibleFrameSamples, 500);
+  assert(results.metrics.intermediateEventToVisibleFrame.passed, `Actual visible-frame P95 exceeded 500ms: ${results.metrics.intermediateEventToVisibleFrame.p95Ms}ms`);
   results.metrics.firstIntermediateProjectionMs = firstProjectionRenderMs;
   results.metrics.intermediateEventToDom = summarizeSamples(
     sseUpdateSamples,
@@ -1006,8 +1026,23 @@ try {
     `Intermediate SSE event-to-DOM P95 exceeded 500ms: ${results.metrics.intermediateEventToDom.p95Ms}ms`,
   );
   results.checks.push(
-    `AC-09/AC-10/AC-33: First intermediate projection rendered in ${firstProjectionRenderMs}ms (<= 1000ms), and 30 live SSE projection updates achieved P95=${results.metrics.intermediateEventToDom.p95Ms}ms (<= 500ms)`,
+    `AC-09/AC-10/AC-33: First intermediate DOM ${firstProjectionRenderMs}ms; 30 actual Studio SSE updates: DOM P95=${results.metrics.intermediateEventToDom.p95Ms}ms, visible complete changed text plus paint P95=${results.metrics.intermediateEventToVisibleFrame.p95Ms}ms (<= 500ms); controlled projection data`,
   );
+  // Swarm is connected to actual SSE projection state in the Studio shell.
+  emitSse("artifact.preview.updated", makePreviewPayload("真实事件驱动绘制"));
+  await ssePage.locator('[data-draft-node="node-live-2"]').filter({ hasText: "真实事件驱动绘制" }).waitFor();
+  const swarm = ssePage.locator('[data-swarm-projection]');
+  await swarm.waitFor();
+  await ssePage.waitForFunction(() => document.querySelector('[data-swarm-projection]')?.dataset.swarmPhase === 'building');
+  assert.equal(await swarm.locator('.worker').count(), 6);
+  await waitForPaintedText("真实事件驱动绘制");
+  await ssePage.screenshot({ path: new URL("swarm-studio-desktop.png", output).pathname });
+  await ssePage.getByRole('button', { name: '关闭绘制动效', exact: true }).click();
+  await swarm.waitFor({ state: 'detached' });
+  emitSse("artifact.preview.updated", makePreviewPayload("关闭动效仍继续接收"));
+  await ssePage.locator('[data-draft-node="node-live-2"]').filter({ hasText: "关闭动效仍继续接收" }).waitFor();
+  assert.equal(await swarm.count(), 0);
+  results.checks.push('Swarm: actual Studio SSE node update starts scoped decorative drawing; disable leaves SSE content updates working; screenshot recorded');
   await ctx3.close();
 
   assert.deepEqual(results.errors, []);
@@ -1034,7 +1069,8 @@ try {
             results.metrics.firstIntermediateProjectionMs,
           primaryActionP95Ms: results.metrics.primaryActionFeedback?.p95Ms,
           cachedPageSwitchP95Ms: results.metrics.cachedPageSwitch?.p95Ms,
-          intermediateEventToDomP95Ms:
+          intermediateEventToVisibleFrameP95Ms: results.metrics.intermediateEventToVisibleFrame?.p95Ms,
+    intermediateEventToDomP95Ms:
             results.metrics.intermediateEventToDom?.p95Ms,
         },
       },

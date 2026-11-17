@@ -1,0 +1,76 @@
+{
+  "name": "react-swarm-rebuild",
+  "version": "0.3.1",
+  "description": "A swarm of multiplayer-style cursors rebuilds your React UI with drawing, typing, guides and flocking animations.",
+  "author": "Nguyễn Quốc Cường",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/nqcuongcnq/react-swarm-rebuild.git"
+  },
+  "homepage": "https://github.com/nqcuongcnq/react-swarm-rebuild#readme",
+  "bugs": {
+    "url": "https://github.com/nqcuongcnq/react-swarm-rebuild/issues"
+  },
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      },
+      "require": {
+        "types": "./dist/index.d.cts",
+        "default": "./dist/index.cjs"
+      }
+    }
+  },
+  "files": [
+    "dist",
+    "src",
+    "scripts/build.cjs",
+    "tsconfig.json",
+    "README.md",
+    "LICENSE",
+    "NOTICE.md"
+  ],
+  "sideEffects": false,
+  "scripts": {
+    "build": "node scripts/build.cjs",
+    "typecheck": "tsc --noEmit",
+    "test:browser": "node tests/browser.cjs",
+    "prepack": "npm run typecheck && npm run build"
+  },
+  "peerDependencies": {
+    "react": ">=18.0.0 <20.0.0",
+    "react-dom": ">=18.0.0 <20.0.0"
+  },
+  "devDependencies": {
+    "esbuild": "^0.28.2",
+    "typescript": "^4.9.5",
+    "@types/react": "^19.3.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "playwright-core": "^1.56.1"
+  },
+  "keywords": [
+    "react",
+    "cursor",
+    "swarm",
+    "animation",
+    "rebuild",
+    "multiplayer",
+    "typescript",
+    "nextjs"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  }
+}

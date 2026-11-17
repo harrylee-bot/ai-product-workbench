@@ -53,6 +53,7 @@ function VariantSource({
   target: RunArtifactTarget;
 }) {
   const api = useWorkbenchArtifactsApi();
+  const protoApi = useWorkbenchPrototypeV2Api();
   const query = useQuery({
     queryKey: [
       "studio",
@@ -76,6 +77,16 @@ function VariantSource({
     },
   });
   const version = query.data;
+  const revisionId = version?.prototypeRevision?.id ?? "";
+  const revisionQuery = useQuery({
+    queryKey: ["studio", "variant-source-revision", projectId, revisionId],
+    queryFn: () => protoApi.getRevision(projectId, revisionId),
+    enabled: Boolean(projectId && revisionId),
+    retry: false,
+  });
+  const pageTitleById = new Map(
+    (revisionQuery.data?.value.pages ?? []).map((p) => [p.id, p.title]),
+  );
   return (
     <li>
       {version ? (
@@ -97,15 +108,19 @@ function VariantSource({
       <span> · 已选 {target.screenIds.length} 个页面</span>
       {version?.prototypeRevision ? (
         <ul>
-          {target.screenIds.map((id) => (
-            <li key={id}>
-              <a
-                href={`/studio/${encodeURIComponent(projectId)}?${new URLSearchParams({ view: "pages", plan: version.prototypeRevision!.planId, revision: version.prototypeRevision!.id, page: id })}`}
-              >
-                页面 {id}
-              </a>
-            </li>
-          ))}
+          {target.screenIds.map((id) => {
+            const pageTitle = pageTitleById.get(id);
+            return (
+              <li key={id}>
+                <a
+                  href={`/studio/${encodeURIComponent(projectId)}?${new URLSearchParams({ view: "pages", plan: version.prototypeRevision!.planId, revision: version.prototypeRevision!.id, page: id })}`}
+                >
+                  页面 {id}
+                </a>
+                {pageTitle ? <span> · {pageTitle}</span> : null}
+              </li>
+            );
+          })}
         </ul>
       ) : (
         <p>页面标识：{target.screenIds.join("、")}</p>

@@ -95,12 +95,14 @@ export function StudioComposer({
         artifactContext?.workflow ?? initialInput?.workflow ?? "generate",
       ),
     ) ?? [];
+  const defaultModel =
+    available.find((m) => m.id.includes("flash")) ?? available[0];
   useEffect(() => {
-    if (!model && available[0])
+    if (!model && defaultModel)
       updateDraft((current) =>
-        current.modelId ? current : { ...current, modelId: available[0]!.id },
+        current.modelId ? current : { ...current, modelId: defaultModel.id },
       );
-  }, [model, available, updateDraft]);
+  }, [model, defaultModel, updateDraft]);
   const designArtifacts = bootstrap.artifacts.filter(
     (artifact) =>
       artifact.kind === "design_system" &&
@@ -108,7 +110,7 @@ export function StudioComposer({
   );
   const modelId = model
     ? (available.find((m) => m.id === model)?.id ?? "")
-    : (available[0]?.id ?? "");
+    : (defaultModel?.id ?? "");
   const addFiles = (incoming: File[]) => {
     if (locked) {
       setError("修改版本沿用源资料。选择“新建计划”后可添加附件。");

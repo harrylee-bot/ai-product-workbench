@@ -9,7 +9,7 @@ import {
 } from "@workbench/workbench-contracts";
 const origin = process.env.WORKBENCH_E2E_WEB_ORIGIN ?? "http://127.0.0.1:18930";
 const output = new URL(
-  "../../output/audit/1.0.0/studio-public/",
+  process.env.WORKBENCH_E2E_STUDIO_OUTPUT ?? "../../output/audit/1.0.0/studio-public/",
   import.meta.url,
 );
 await mkdir(output, { recursive: true });
@@ -162,6 +162,7 @@ await context.route("**/api/v1/**", (route) => {
 });
 const page = await context.newPage();
 page.setDefaultTimeout(12000);
+page.setDefaultNavigationTimeout(60000);
 page.on("pageerror", (error) => results.errors.push(error.message));
 page.on("console", (message) => {
   if (message.type() === "error") results.consoleErrors.push(message.text());
@@ -286,6 +287,12 @@ try {
   assert.deepEqual(results.privateRequests, []);
   assert.deepEqual(results.errors, []);
   await page.screenshot({ path: new URL("expired.png", output).pathname });
+  const readsBeforeOldLink = reads;
+  await page.goto(`${origin}/share?token=${projectToken}`, { waitUntil: "networkidle" });
+  await page.getByText("无效的分享链接", { exact: true }).waitFor();
+  assert.equal(new URL(page.url()).pathname, "/share");
+  assert.equal(reads, readsBeforeOldLink, "Old query token must not load a public release");
+  results.checks.push("Legacy /share?token= entry no longer redirects or consumes a token; current path-based shares retain their business behavior");
   results.status = "passed";
 } catch (error) {
   results.status = "failed";

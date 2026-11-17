@@ -1,7 +1,6 @@
 "use client";
 import type {
   GenerationPreview,
-  GenerationPreviewNode,
   PrototypeGeometryNode,
   PrototypePage,
 } from "@workbench/workbench-contracts";
@@ -10,9 +9,9 @@ import {
   useMemo,
   useRef,
   useState,
-  type CSSProperties,
 } from "react";
 import { Streamdown } from "streamdown";
+import { DraftProjection } from "./draft-projection";
 import { acceptPrototypeGeometry } from "./geometry-bridge";
 import {
   createPrototypeSandboxDocument,
@@ -484,19 +483,13 @@ export function PageStage({
                     ))}
                   </div>
                   {draftPage && (
-                    <div className="visual-draft-scroll">
-                      <div
-                        className="visual-draft-paper"
-                        data-updated={updatedPage === draftPage.id}
-                        style={{
-                          width: draftPage.width,
-                          minHeight: draftPage.height,
-                          zoom: Math.min(1, (available - 48) / draftPage.width),
-                        }}
-                      >
-                        <DraftNodes nodes={draftPage.nodes} />
-                      </div>
-                    </div>
+                    <DraftProjection
+                      key={`${draftIdentity}:${draftPage.id}`}
+                      page={draftPage}
+                      available={available}
+                      running={running}
+                      updated={updatedPage === draftPage.id}
+                    />
                   )}
                   {!draftPage && (
                     <p className="studio-empty-copy">
@@ -606,48 +599,6 @@ export function PageStage({
   );
 }
 
-function DraftNodes({ nodes }: { nodes: GenerationPreviewNode[] }) {
-  const unique = new Map(nodes.map((node) => [node.id, node]));
-  const render = (
-    node: GenerationPreviewNode,
-    ancestors: Set<string>,
-  ): React.ReactNode => {
-    if (ancestors.has(node.id)) return null;
-    const next = new Set(ancestors).add(node.id);
-    const style: CSSProperties = {
-      position: node.absolute ? "absolute" : "relative",
-      left: node.absolute ? node.x : undefined,
-      top: node.absolute ? node.y : undefined,
-      width: node.width ?? undefined,
-      minHeight: node.height ?? undefined,
-      display: "flex",
-      flexDirection: node.direction,
-      gap: node.gap,
-      padding: node.padding,
-      background: node.fill ?? undefined,
-      color: node.color ?? undefined,
-      borderRadius: node.radius,
-      fontSize: node.fontSize ?? 14,
-      flexShrink: 0,
-      whiteSpace: "pre-wrap",
-    };
-    return (
-      <div key={node.id} data-draft-node={node.id} style={style}>
-        {node.text}
-        {[...unique.values()]
-          .filter((child) => child.parentId === node.id)
-          .map((child) => render(child, next))}
-      </div>
-    );
-  };
-  return (
-    <>
-      {[...unique.values()]
-        .filter((node) => !node.parentId || !unique.has(node.parentId))
-        .map((node) => render(node, new Set()))}
-    </>
-  );
-}
 function PageThumbnail({ page, html }: { page: PrototypePage; html: string }) {
   const ref = useRef<HTMLSpanElement>(null);
   const [visible, setVisible] = useState(false),

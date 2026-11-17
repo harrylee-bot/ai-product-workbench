@@ -1998,3 +1998,6 @@ textarea:focus-visible {
 .studio-prd-edge text {fill:#435a77;font-size:12px;}
 .studio-prd-diagram details {margin-top:12px;}
 .studio-prd-diagram summary {cursor:pointer;}
+
+.visual-draft-motion { display:flex;align-items:center;justify-content:space-between;gap:12px;margin:10px 0;color:#667085;font-size:12px; }
+.visual-draft-motion button { border:1px solid #d5dce7;border-radius:7px;padding:5px 10px;min-height:44px;background:white;color:#344054;cursor:pointer; }

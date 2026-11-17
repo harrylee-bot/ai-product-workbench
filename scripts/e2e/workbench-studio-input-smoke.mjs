@@ -10,13 +10,13 @@ const recovery = process.env.WORKBENCH_E2E_SUBMISSION_RECOVERY === "1";
 const splitModels = process.env.WORKBENCH_E2E_SPLIT_MODEL_CAPABILITIES === "1";
 const origin = process.env.WORKBENCH_E2E_WEB_ORIGIN ?? "http://127.0.0.1:18930";
 const output = new URL(
-  variants
+  process.env.WORKBENCH_E2E_STUDIO_OUTPUT ?? (variants
     ? "../../output/audit/1.0.0/studio-variants/"
     : recovery
       ? "../../output/audit/1.0.0/studio-submission-recovery/"
       : splitModels
         ? "../../output/audit/1.0.0/studio-revision-models/"
-        : "../../output/audit/1.0.0/studio-input/",
+        : "../../output/audit/1.0.0/studio-input/"),
   import.meta.url,
 );
 await mkdir(output, { recursive: true });
@@ -714,6 +714,7 @@ try {
     await fixedSources
       .getByRole("link", { name: "页面 detail", exact: true })
       .waitFor();
+    await fixedSources.getByText("· 订单详情", { exact: true }).waitFor();
     assert.match(
       await fixedSources
         .getByRole("link", { name: "页面 detail", exact: true })

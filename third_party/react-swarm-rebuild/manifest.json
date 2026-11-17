@@ -1,0 +1,86 @@
+{
+  "repository": "https://github.com/nqcuongcnq/react-swarm-rebuild",
+  "commit": "0d3e04eba408ea7ad4fd47aecbd0b1a7c634a233",
+  "license": "MIT",
+  "version": "0.3.1",
+  "files": [
+    {
+      "path": "src/audio.ts",
+      "sha256": "0f0bf210046a8743ee61e6cbf5a330b836933efc1aafa17b713640ae1fcc873f"
+    },
+    {
+      "path": "src/bounds.ts",
+      "sha256": "e5404e495074fd54c5e14902a6104c4aef018949ea07a6512aff13c2b6e1baba"
+    },
+    {
+      "path": "src/engine.ts",
+      "sha256": "b8852d4d7279a0eff9ead14d17f5f1a5edacb8d015157642716c6329131cd683"
+    },
+    {
+      "path": "src/index.tsx",
+      "sha256": "ce50b1d2f7bcb34fd29e341814b5847c0a89cb9cb39a44b4d7c191771f4997db"
+    },
+    {
+      "path": "src/math.ts",
+      "sha256": "a5d665cd0621f4b6a45226b70ff652553f12f1d26ce72cd91d37207496670bc4"
+    },
+    {
+      "path": "src/presentation.ts",
+      "sha256": "392126f37ab17e444a5c7478a1cbd7e6f8be0affcea6b3195289675d0c53a660"
+    },
+    {
+      "path": "src/snapshot.ts",
+      "sha256": "4af5751e18bec4b5bd63aa928036bfd7c80bbf670d9d3594b5df0208f3390c18"
+    },
+    {
+      "path": "src/types.ts",
+      "sha256": "cd105f4087cd0cc15055c8bd29e7da100389e90e563608202a81dcc23f236539"
+    },
+    {
+      "path": "LICENSE",
+      "sha256": "e18625e96f354c337a480cdbf0b851143e21c3d120f28df1deaccbc98248b6cb"
+    },
+    {
+      "path": "NOTICE.md",
+      "sha256": "dd6c0314ee02019187655ada0ff37885d2a8379fbaa6c3631a651f7b5381db8a"
+    },
+    {
+      "path": "README.md",
+      "sha256": "425c63db8a3a6697ae2f533ad83f1697d80070e89a984edf566c99f7e8f97651"
+    },
+    {
+      "path": "package.json",
+      "sha256": "c785d0ababc71033f4de8b8f6858897aacf9df046e25395a73522b0e467377ee"
+    }
+  ],
+  "derivatives": [
+    {
+      "source": "src/audio.ts",
+      "target": "apps/web/components/studio/swarm/audio.ts"
+    },
+    {
+      "source": "src/bounds.ts",
+      "target": "apps/web/components/studio/swarm/bounds.ts"
+    },
+    {
+      "source": "src/engine.ts",
+      "target": "apps/web/components/studio/swarm/engine.ts"
+    },
+    {
+      "source": "src/math.ts",
+      "target": "apps/web/components/studio/swarm/math.ts"
+    },
+    {
+      "source": "src/presentation.ts",
+      "target": "apps/web/components/studio/swarm/presentation.ts"
+    },
+    {
+      "source": "src/snapshot.ts",
+      "target": "apps/web/components/studio/swarm/snapshot.ts"
+    },
+    {
+      "source": "src/types.ts",
+      "target": "apps/web/components/studio/swarm/types.ts"
+    }
+  ]
+}
