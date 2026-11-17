@@ -3,7 +3,6 @@
 import {
   createPrototypeExportRequestSchema,
   createPrototypeFeedbackRequestSchema,
-  createPrototypePlanRequestSchema,
   createPrototypeShareRequestSchema,
   prototypeExportSchema,
   exportPreviewTokenResponseSchema,
@@ -11,13 +10,11 @@ import {
   prototypeFeedbackSchema,
   prototypePlanSchema,
   prototypeProgressSchema,
-  prototypePlanInputSchema,prototypeRevisionInputSchema,updatePrototypePlanRequestSchema,createPrototypeRevisionPlanRequestSchema,
-  type UpdatePrototypePlanRequest,type CreatePrototypeRevisionPlanRequest,
+  prototypePlanInputSchema,prototypeRevisionInputSchema,
   prototypePlanListSchema,
   prototypeFeedbackPageSchema, type PrototypeFeedbackQuery, prototypeFeedbackLocationsSchema,
   prototypeShareListSchema,
   prototypeExportListSchema,
-  revisePrototypeRevisionRequestSchema,
   prototypeRevisionSchema,
   prototypeRevisionDiffSchema,
   prototypeRevisionListSchema,
@@ -25,7 +22,6 @@ import {
   prototypeWorkflowActionRequestSchema,
   type CreatePrototypeExportRequest,
   type CreatePrototypeFeedbackRequest,
-  type CreatePrototypePlanRequest,
   type CreatePrototypeShareRequest,
   type PrototypeExport,
   type ExportPreviewTokenResponse,
@@ -35,7 +31,6 @@ import {
   type PrototypeRevisionList,
   type PrototypeShare,
   type PrototypeWorkflowActionRequest,
-  type RevisePrototypeRevisionRequest,
 } from "@workbench/workbench-contracts";
 import { useMemo } from "react";
 
@@ -96,21 +91,7 @@ export class WorkbenchPrototypeV2Api {
     return parseContract(prototypeExportListSchema, result.data, "list prototype exports");
   }
 
-  async reviseRevision(projectId: string, revisionId: string, ifMatch: string, request: RevisePrototypeRevisionRequest, idempotencyKey = createIdempotencyKey("prototype-revise")): Promise<Versioned<PrototypePlan>> {
-    const result = await this.api.POST("/projects/{projectId}/prototype-v2/revisions/{revisionId}/revise", {
-      params: { path: { projectId, revisionId }, header: { "Idempotency-Key": normalizeIdempotencyKey(idempotencyKey), "If-Match": normalizeEtag(ifMatch) } },
-      body: revisePrototypeRevisionRequestSchema.parse(request),
-    });
-    return versioned(prototypePlanSchema, result.data, result.response, "revise prototype revision");
-  }
 
-  async createPlan(projectId: string, request: CreatePrototypePlanRequest, idempotencyKey = createIdempotencyKey("prototype-plan")): Promise<Versioned<PrototypePlan>> {
-    const result = await this.api.POST("/projects/{projectId}/prototype-v2/plans", {
-      params: { path: { projectId }, header: { "Idempotency-Key": normalizeIdempotencyKey(idempotencyKey) } },
-      body: createPrototypePlanRequestSchema.parse(request),
-    });
-    return versioned(prototypePlanSchema, result.data, result.response, "create prototype plan");
-  }
 
   async getPlan(projectId: string, planId: string): Promise<Versioned<PrototypePlan>> {
     const result = await this.api.GET("/projects/{projectId}/prototype-v2/plans/{planId}", { params: { path: { projectId, planId } } });
@@ -125,14 +106,7 @@ export class WorkbenchPrototypeV2Api {
     const result=await this.api.GET("/projects/{projectId}/prototype-v2/revisions/{revisionId}/input",{params:{path:{projectId,revisionId}}});
     return parseContract(prototypeRevisionInputSchema,result.data,"read source revision input");
   }
-  async updatePlanInput(projectId:string,planId:string,ifMatch:string,request:UpdatePrototypePlanRequest,idempotencyKey=createIdempotencyKey("studio-input")){
-    const result=await this.api.POST("/projects/{projectId}/prototype-v2/plans/{planId}/input",{params:{path:{projectId,planId},header:{"If-Match":normalizeEtag(ifMatch),"Idempotency-Key":normalizeIdempotencyKey(idempotencyKey)}},body:updatePrototypePlanRequestSchema.parse(request)});
-    return versioned(prototypePlanSchema,result.data,result.response,"adjust draft plan input");
-  }
-  async createRevisionPlan(projectId:string,revisionId:string,ifMatch:string,request:CreatePrototypeRevisionPlanRequest,idempotencyKey=createIdempotencyKey("studio-revision-plan")){
-    const result=await this.api.POST("/projects/{projectId}/prototype-v2/revisions/{revisionId}/plans",{params:{path:{projectId,revisionId},header:{"If-Match":normalizeEtag(ifMatch),"Idempotency-Key":normalizeIdempotencyKey(idempotencyKey)}},body:createPrototypeRevisionPlanRequestSchema.parse(request)});
-    return versioned(prototypePlanSchema,result.data,result.response,"create modification plan");
-  }
+
 
   async getProgress(projectId: string, planId: string) {
     const result = await this.api.GET("/projects/{projectId}/prototype-v2/plans/{planId}/progress", { params: { path: { projectId, planId } } });
@@ -157,9 +131,6 @@ export class WorkbenchPrototypeV2Api {
     return this.reviewRevision("reject", projectId, revisionId, ifMatch, request, idempotencyKey);
   }
 
-  async approvePlan(projectId: string, planId: string, ifMatch: string, request: PrototypeWorkflowActionRequest = {}, idempotencyKey = createIdempotencyKey("prototype-approve")): Promise<Versioned<PrototypePlan>> {
-    return this.actionPlan("approve", projectId, planId, ifMatch, request, idempotencyKey);
-  }
 
   async retryPlan(projectId: string, planId: string, ifMatch: string, request: PrototypeWorkflowActionRequest = {}, idempotencyKey = createIdempotencyKey("prototype-plan-retry")): Promise<Versioned<PrototypePlan>> {
     const result = await this.api.POST("/projects/{projectId}/prototype-v2/plans/{planId}/retry", {
@@ -170,7 +141,11 @@ export class WorkbenchPrototypeV2Api {
   }
 
   async cancelPlan(projectId: string, planId: string, ifMatch: string, request: PrototypeWorkflowActionRequest = {}, idempotencyKey = createIdempotencyKey("prototype-cancel")): Promise<Versioned<PrototypePlan>> {
-    return this.actionPlan("cancel", projectId, planId, ifMatch, request, idempotencyKey);
+    const result = await this.api.POST("/projects/{projectId}/prototype-v2/plans/{planId}/cancel", {
+      params: { path: { projectId, planId }, header: { "Idempotency-Key": normalizeIdempotencyKey(idempotencyKey), "If-Match": normalizeEtag(ifMatch) } },
+      body: prototypeWorkflowActionRequestSchema.parse(request),
+    });
+    return versioned(prototypePlanSchema, result.data, result.response, "cancel prototype plan");
   }
 
   async createFeedback(projectId: string, revisionId: string, request: CreatePrototypeFeedbackRequest, idempotencyKey = createIdempotencyKey("prototype-feedback")): Promise<Versioned<PrototypeFeedback>> {
@@ -255,13 +230,7 @@ export class WorkbenchPrototypeV2Api {
     return versioned(prototypeRevisionSchema, result.data, result.response, `${kind} prototype revision`);
   }
 
-  private async actionPlan(kind: "approve" | "cancel", projectId: string, planId: string, ifMatch: string, request: PrototypeWorkflowActionRequest, idempotencyKey: string): Promise<Versioned<PrototypePlan>> {
-    const body = prototypeWorkflowActionRequestSchema.parse(request);
-    const result = kind === "approve"
-      ? await this.api.POST("/projects/{projectId}/prototype-v2/plans/{planId}/approve", { params: { path: { projectId, planId }, header: { "Idempotency-Key": normalizeIdempotencyKey(idempotencyKey), "If-Match": normalizeEtag(ifMatch) } }, body })
-      : await this.api.POST("/projects/{projectId}/prototype-v2/plans/{planId}/cancel", { params: { path: { projectId, planId }, header: { "Idempotency-Key": normalizeIdempotencyKey(idempotencyKey), "If-Match": normalizeEtag(ifMatch) } }, body });
-    return versioned(prototypePlanSchema, result.data, result.response, `${kind} prototype plan`);
-  }
+
 }
 
 export function useWorkbenchPrototypeV2Api(): WorkbenchPrototypeV2Api {

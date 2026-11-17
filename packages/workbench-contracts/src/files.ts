@@ -202,25 +202,11 @@ export const fileUploadSessionSchema = z.object({
   expiresAt: isoDateTimeSchema,
 }).strict();
 
-export const submissionIntentClientFingerprintSchema = z.string()
-  .min(1)
-  .max(256)
-  .refine((value) => /\S/u.test(value) && !/[\u0000-\u001f\u007f-\u009f]/u.test(value), {
-    message: "SubmissionIntent client fingerprints cannot be blank or contain control characters",
-  });
-
-export const submissionIntentUploadBindingSchema = z.object({
-  submissionIntentId: opaqueIdSchema,
-  attachmentPosition: z.number().int().nonnegative().max(49),
-  clientFingerprint: submissionIntentClientFingerprintSchema,
-}).strict();
-
 export const createFileUploadRequestSchema = z.object({
   fileName: fileNameSchema,
   declaredMediaType: mediaTypeSchema,
   byteSize: uploadObjectByteSizeSchema,
   sha256: sha256Schema.optional(),
-  submissionIntent: submissionIntentUploadBindingSchema.optional(),
 }).strict();
 
 export const createFileUploadResponseSchema = z.object({
@@ -327,7 +313,6 @@ export type FileFailure = z.infer<typeof fileFailureSchema>;
 export type FileExtraction = z.infer<typeof fileExtractionSchema>;
 export type FileAsset = z.infer<typeof fileAssetSchema>;
 export type FileUploadSession = z.infer<typeof fileUploadSessionSchema>;
-export type SubmissionIntentUploadBinding = z.infer<typeof submissionIntentUploadBindingSchema>;
 export type CreateFileUploadRequest = z.infer<typeof createFileUploadRequestSchema>;
 export type CreateFileUploadResponse = z.infer<typeof createFileUploadResponseSchema>;
 export type SignUploadPartRequest = z.infer<typeof signUploadPartRequestSchema>;

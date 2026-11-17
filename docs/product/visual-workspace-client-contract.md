@@ -8,11 +8,11 @@
 
 项目首页由 StudioHome 承载；项目路径为 `/studio/:projectId`。URL 使用 `plan`、`revision`、`page`、`view`，不识别旧 query。底部对话框、中央舞台、互斥工具面板均属于新组件树。业务服务从 `lib/studio/api.ts` 接入已有授权 API；不挂载旧 WorkbenchRuntime、React Flow 画布或旧产物组件。依赖检查禁止它们进入新应用模块图。
 
-页面、文档、资料、知识、运行、发布和项目设置使用新导航。视口尺寸按用户／项目保存在 sessionStorage。Composer 的可见意图、固定提交目标、文字、模型、终端、输出、设计与资料引用按账户／项目保存在 IndexedDB，并分别保留新建、调整计划、修改源版本、完善产物的草稿；退出账户清理两种私有缓存。未上传附件仅持久化文件元数据，文件字节只在当前页面内存中；刷新后须重新选择或移除，未恢复前禁止提交。上传准备成功后替换为授权 sourceId。生成版本和上传文件仍由服务端管理，临时对象 URL 不作持久引用。预览尺寸不改变生成目标终端。
+页面、文档、资料、知识、运行、发布和项目设置使用新导航。视口尺寸按用户／项目保存在 sessionStorage。Composer 的可见意图、固定提交目标、文字、模型、终端、输出、设计与资料引用按账户／项目保存在 IndexedDB，并分别保留新建、修改源版本、完善产物的讨论输入；退出账户清理两种私有缓存。未上传附件仅持久化文件元数据，文件字节只在当前页面内存中；刷新后须重新选择或移除，未恢复前禁止提交。上传准备成功后替换为授权 sourceId。生成版本和上传文件仍由服务端管理，临时对象 URL 不作持久引用。预览尺寸不改变生成目标终端。
 
 ## 授权进度
 
-`GET projects/:projectId/prototype-v2/plans/:planId/progress` 沿用项目 viewer 权限与 Run SSE。响应包含项目、计划、输入摘要、显式绑定的 Run、快照游标、有界事件投影和最终 revisionId。未绑定 Run 时返回 null，客户端不猜测。事务隔离为 RepeatableRead；事件不得超过快照序列，只选择当前 attempt 的最新页面投影、草稿元数据、阶段及活动，最多 64 条。
+`GET projects/:projectId/prototype-v2/plans/:planId/progress` 沿用项目 viewer 权限与 Run SSE。响应包含项目、计划、输入摘要、显式绑定的 Run、快照游标、有界事件投影和最终 revisionId。只有已确认并绑定 Run 的计划才可查询进度；缺失绑定返回404。事务隔离为 RepeatableRead；事件不得超过快照序列，只选择当前 attempt 的最新页面投影、草稿元数据、阶段及活动，最多 64 条。
 
 重连或缺口先读取权威快照，再从其游标接续 `runs/:runId/events`。重复序列丢弃，旧 attempt 不覆盖当前内容；项目／计划／运行身份同时校验，401/403 清理投影。窗口快照是状态种子，不按完整历史事件重放。
 
@@ -44,13 +44,12 @@
 
 ## 完整输入与有来源的修改计划
 
-令 `P = projects/:projectId/prototype-v2`。`GET P/plans/:planId/input` 返回授权的完整固定请求、资料/设计/知识快照及摘要 SHA；已绑定运行时读取该 Run 的权威输入。旧记录缺少快照时明确返回 null，不声称已经固定。
+令 `P = projects/:projectId/prototype-v2`。`GET P/plans/:planId/input` 返回授权的完整固定请求、资料/设计/知识快照及摘要 SHA；请求与快照均从绑定 Run 读取，缺失绑定时返回404，不从旧草稿重建。
 
-待审批计划调整进入下述 `context.kind=plan` 的需求交流，以原 planId/expectedRevision 和固定输入为起点。需求、模型、终端、输出、资料与设计可在讨论消息中明确调整；artifactTargets、generationIntent、workflow、prdScreenPlan 与来源身份保持绑定。旧 `POST P/plans/:planId/input` 不接受新增调整，返回 REQUIREMENT_CONFIRMATION_REQUIRED；原计划审批不能绕过需求确认。412/409 后保留本地调整，读取最新输入并由用户重新核对。
 
 `GET P/revisions/:revisionId/input` 读取生成所选内容版本的实际计划/Run，而非始终取根计划。历史 `request` 原样保留；另返回服务归一化的 `modificationRequest`，明确 edit 操作与精确源产物目标，并移除旧 `requirementConfirmationId`；新意图须重新讨论确认。Composer 按该操作筛选模型，不改写历史输入，也不自动替换原模型；不兼容时保留并提示用户选择支持编辑的模型。刷新恢复保留操作上下文，旧缓存缺少操作上下文时须重新载入源版本。
 
-针对固定修订提出新改动，使用 `context.kind=revision` 进入需求交流，固定 sourceRevisionId、选定反馈及页面/节点锚点。明确确认后创建已审批的派生计划，不再进行第二次审批。旧 `POST P/revisions/:revisionId/plans` 和 revise 返回 REQUIREMENT_CONFIRMATION_REQUIRED。新增资料须就绪且属于当前项目；已固定的资料/设计及源产物版本不会换成最新版本。服务将修改绑定为 edit，保持用户明确选择的 PRD/原型输出；基准变化时返回冲突。
+针对固定修订提出新改动，使用 `context.kind=revision` 进入需求交流，固定 sourceRevisionId、选定反馈及页面/节点锚点。明确确认后创建已审批的派生计划，不再进行第二次审批。新增资料须就绪且属于当前项目；已固定的资料/设计及源产物版本不会换成最新版本。服务将修改绑定为 edit，保持用户明确选择的 PRD/原型输出；基准变化时返回冲突。
 
 浏览计划、版本或前后导航不改变正在编辑的提交目标，输入区始终显示固定来源。显式切换新计划或文档操作会暂存先前完整草稿，并提供恢复入口。提交分支直接来自同一上下文状态；异步加载来源期间输入的文字保留，已放弃上下文的迟到响应不抢回输入区。设计预设选择固定 id/version/checksum；失效设计或模型要求明确替换，只有确有服务端快照的原设计可以继续沿用。
 
@@ -76,7 +75,7 @@ API 验证源 PRD 属于当前项目、已就绪且为有效内联 PRD v3。Work
 
 文档导出按发布/产物版本创建，失败或取消后重新导出仍使用原请求；创建请求响应丢失时复用幂等键。取消接受与最终状态分别表达。下载必须通过服务元数据中的字节数与 SHA-256 校验，已离开的发布视图不触发迟到下载。普通 blob 产物原文件下载也校验这两个字段。真实 Word/PDF 内容验收另行记录。
 
-媒体与关系/变体入口、上传/提交意图中断后的完整恢复等继续按业务能力清单验收，不挂载旧前端作为备用路径。
+媒体与关系/变体入口、上传/需求确认中断后的完整恢复等继续按业务能力清单验收，不挂载旧前端作为备用路径。
 
 ## 匿名分享状态与缓存
 
@@ -151,7 +150,7 @@ schemaVersion 1 使用服务端共享导出渲染器生成完整交互 HTML，�
 
 `intent=confirm_suggestion` 表示用户在这一条消息中明确授权按建议生成。服务端仍需分析并通过关键缺口、证据和边界检查，只有 ready_to_confirm 才走同一确认实现；不能从模型答复中推导这一意图。它不允许消除关键问题、扩大已批准边界或自动接受尚有争议的平台改造。
 
-新的初始 PRD/原型生成请求必须携带服务端出具的 `requirementConfirmationId`，且与冻结请求完全相符。直接 Plan/Run/SubmissionIntent API 不能绕过确认。历史版本读取、分享、导出及同一次固定输入的原样重试保留原记录。针对现有版本提出新功能改动是新意图，必须进入需求对话并明确确认。context 为 {kind:"new"}、{kind:"revision",revisionId,feedbackIds,anchor} 或 {kind:"plan",planId,expectedRevision}；保持精确来源，不得从提示词猜测。旧 revise、revision-plan、plan-update 等新增改动入口同样受服务端门槛约束。服务端错误：REQUIREMENT_CONFIRMATION_REQUIRED、REQUIREMENT_BASELINE_CHANGED、REQUIREMENT_PLAN_CONTEXT_UNAVAILABLE、REQUIREMENT_NOT_READY、REQUIREMENT_ASSUMPTIONS_UNACCEPTED、REQUIREMENT_PLATFORM_CHANGE_UNACCEPTED、REQUIREMENT_ALREADY_STARTED、REQUIREMENT_TURN_LIMIT、REQUIREMENT_MODEL_UNAVAILABLE、REQUIREMENT_MODEL_OUTPUT_INVALID、REQUIREMENT_KNOWLEDGE_UNAVAILABLE。409 表示状态或基线冲突，412 表示 CAS 过期，429 表示限额，503 表示当前服务不可用；同一动作重放先核对原回执，不能因 ETag 变旧而重新生成。
+新的初始 PRD/原型生成请求必须携带服务端出具的 `requirementConfirmationId`，且与冻结请求完全相符。公开生成入口只有需求会话确认；无直接 Plan 创建、独立审批或 SubmissionIntent 提交流程。历史版本读取、分享、导出及同一次固定输入的原样重试保留原记录。针对现有版本提出新功能改动是新意图，必须进入需求对话并明确确认。context 仅为 {kind:"new"} 或 {kind:"revision",revisionId,feedbackIds,anchor}；保持精确来源，不得从提示词猜测。服务端错误：REQUIREMENT_CONFIRMATION_REQUIRED、REQUIREMENT_BASELINE_CHANGED、REQUIREMENT_NOT_READY、REQUIREMENT_ASSUMPTIONS_UNACCEPTED、REQUIREMENT_PLATFORM_CHANGE_UNACCEPTED、REQUIREMENT_ALREADY_STARTED、REQUIREMENT_TURN_LIMIT、REQUIREMENT_MODEL_UNAVAILABLE、REQUIREMENT_MODEL_OUTPUT_INVALID、REQUIREMENT_KNOWLEDGE_UNAVAILABLE。409 表示状态或基线冲突，412 表示 CAS 过期，429 表示限额，503 表示当前服务不可用；同一动作重放先核对原回执，不能因 ETag 变旧而重新生成。
 
 接入需要共享 schema/OpenAPI、API、迁移、Worker 的固定需求基线读取一起集成。本文不声明新服务已上线或真实模型验收完成。知识维护源文件不等于当前授权 release 已索引；发布阶段必须按既有知识发布流程检查版本覆盖。
 
@@ -164,12 +163,6 @@ Flash 测试映射以现有授权 Provider 配置及实时模型目录为准：�
 roles 字段同样区分未知与明确不涉及：讨论可省略；完整的纯文档/后台增量可明确提供空数组，表示不新增或改变角色，保留现有调用方/权限边界。若涉及新权限或调用方差异，必须在 issues 中解决；原型输出仍需要明确角色与页面范围，不能为了满足卡片数量而发明人类角色。
 
 来源修改在确认事务中再次核对所选批注的项目、源修订、正文、锚点和状态/修订号，与分析时的固定记录一致。就绪后批注被解决等变化返回 REQUIREMENT_BASELINE_CHANGED（409），保留讨论供用户重新核对；不能沿用旧卡片发起修改。生成已经开始后，解决批注不会改写其冻结输入；同一确认重放仍返回原任务。
-
-### 待审批计划进入讨论
-
-从 `GET P/plans/:planId/input` 取得原 draft 的 request 和计划 revision，再创建 `{generationRequest:原request,context:{kind:"plan",planId,expectedRevision:revision}}`。创建不改变原计划，也不启动 Run；初始 request 必须与原计划相符，调整通过后续 messages 明确提交。原固定资料/设计快照沿用，新增或替换项重新校验。没有可恢复固定输入的历史记录返回 REQUIREMENT_PLAN_CONTEXT_UNAVAILABLE，不能冒充无来源的新建。
-
-创建、分析、确认和消费确认均校验同项目 draft、期望修订及未绑定 Run；变化返回 REQUIREMENT_BASELINE_CHANGED。确认冻结原计划身份、原输入和调整后的配置。消费确认时在同一事务把原 draft 标为 cancelled、修订加1、原因 REQUIREMENT_PLAN_REPLACED，并创建一个 approved 派生计划与Run；rootPlanId 沿用原家族，contentVersion 递增，原 sourceRevisionId/feedbackIds 保留。仅PRD输出创建Run并保留基线中的原计划关联，confirmation.planId 为 null。重复确认/派发返回同一结果；原输入不会被改写。
 
 原样重试保持确认作者、request、知识发布、设计快照、资料及完整重试来源链。实际重试操作者依当前项目编辑权限授权，可与原确认作者不同；Worker验证同项目链最终归属于原确认Run，不将重试操作者当作新的确认作者。后来发布知识或切换设计不会改变重试输入。
 
@@ -184,3 +177,12 @@ roles 字段同样区分未知与明确不涉及：讨论可省略；完整的�
 原型计划的公开 `prompt` 展示已确认卡片的目标与本次改动；完整生成指令、批注身份、证据及机器上下文留在不可变 `generationRequest`/Run 请求中。重试沿用该展示文本和原冻结请求，不把机器 JSON 当正文显示。
 
 第95迁移 `20261117020000_prototype_retry_run_lineage` 衔接第94迁移，保留旧迁移和历史行。原型计划重试可使用其已失败或已取消的 Run，包括未标为普通可重试的失败；必须存在同项目、同请求、准确源计划/Run 关联的 approved 派生计划，并保留知识与设计快照，Run 记录 `retryOfRunId`。普通 Run 重试仍仅接受 failed 且 `errorRetryable=true`。成功生成后仅构建失败继续复用原成功 Run，不再请求模型。
+
+
+## 统一新产品模型
+
+新建、按版本修改、按批注修改均在需求会话讨论和调整输入；通过就绪校验后确认一次。包含原型时确认事务直接生成approved计划与绑定Run，approved表示已确认、等待执行，不存在draft审批阶段。公开计划状态为approved、generating、ready、failed、cancelled。取消、原样重试、版本确认/驳回、分享和导出沿用各自业务状态。
+
+公开合同删除 `POST P/plans`、`POST P/plans/:planId/approve`、`POST P/plans/:planId/input`、`POST P/revisions/:revisionId/plans`、`POST P/revisions/:revisionId/revise` 及全部SubmissionIntent接口/上传绑定；这些路径不存在。资料通过独立文件上传和ImportSource形成sourceId，再纳入讨论；分片上传、断点续传及幂等回执保留。讨论配置canvasSnapshot只能为null，版本与节点来源以revision、反馈锚点和artifactTargets绑定。
+
+`GET P/plans/:planId/input` 与进度只读取明确绑定的Run，snapshot为必填对象，不从旧草稿或后来的资料重建。修改输入须重新讨论确认；原样重试仍使用原确认链。API拒绝重试无确认的旧Run，Worker拒绝无确认的执行与原型构建准备。旧表、行与迁移保留，旧draft不进入公开计划列表、不恢复旧审批；已有冻结版本、资料和导出数据不删除。此为产品流程替换，不提供双写、旧入口别名、历史JSON展示修复或执行豁免。

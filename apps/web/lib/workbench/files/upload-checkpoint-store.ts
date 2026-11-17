@@ -10,7 +10,7 @@ import type {
  * The server upload session and its listParts response remain the source of
  * truth for the bytes that have reached object storage.
  */
-const WORKBENCH_UPLOAD_CHECKPOINT_DB_NAME = "workbench-upload-checkpoints";
+const WORKBENCH_UPLOAD_CHECKPOINT_DB_NAME = "studio-upload-checkpoints-v1";
 const WORKBENCH_UPLOAD_CHECKPOINT_DB_VERSION = 1;
 const WORKBENCH_UPLOAD_CHECKPOINT_STORE_NAME = "checkpoints";
 

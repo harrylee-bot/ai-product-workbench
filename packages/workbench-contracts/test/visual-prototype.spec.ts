@@ -1,7 +1,5 @@
 import { describe, expect, it } from "vitest";
 import {
-  createPrototypePlanRequestSchema,
-  revisePrototypeRevisionRequestSchema,
   prototypeExportSchema,
   prototypePageSchema,
   prototypeRevisionSchema,
@@ -20,12 +18,6 @@ describe("visual prototype v2 contract", () => {
       pages: [page, { ...page, order: 1 }], documentSha256: "b".repeat(64), createdById: "user_1",
       createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), failure: null,
     }).success).toBe(false);
-  });
-
-  it("requires explicit generation context and rejects duplicate feedback selections", () => {
-    expect(createPrototypePlanRequestSchema.safeParse({ title: "Plan", prompt: "Make a prototype" }).success).toBe(false);
-    expect(revisePrototypeRevisionRequestSchema.safeParse({ feedbackIds: ["feedback_1", "feedback_1"] }).success).toBe(false);
-    expect(revisePrototypeRevisionRequestSchema.parse({ feedbackIds: ["feedback_1"] })).toEqual({ feedbackIds: ["feedback_1"] });
   });
 
   it("keeps history summaries free of executable content", () => {

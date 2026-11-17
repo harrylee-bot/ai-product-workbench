@@ -25,7 +25,6 @@ const layeredWorkbenchFeatures = Object.freeze([
   "runtime-models",
   "runs",
   "shares",
-  "submission-intents",
 ]);
 
 // New features use a directory index as their only public entry. Existing
@@ -43,7 +42,6 @@ const directoryEntryWorkbenchFeatures = Object.freeze([
   "prototype-patches",
   "runtime-models",
   "runs",
-  "submission-intents",
 ]);
 
 module.exports = Object.freeze({

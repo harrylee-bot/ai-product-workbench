@@ -2,7 +2,7 @@
 
 import { WorkbenchQueryProvider } from "@/lib/workbench/query";
 import { WorkbenchTransportProvider } from "@/lib/workbench/transport";
-import { useWorkbenchPublicShare } from "@/lib/workbench/features";
+import { useWorkbenchPublicShare } from "@/lib/workbench/features/public-shares";
 import { PublicShareStatus } from "@/components/studio/public-share-status";
 import { PublicRelease } from "@/components/studio/public-release";
 

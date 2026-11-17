@@ -2,11 +2,9 @@
 
 import type {
   CreatePrototypeFeedbackRequest,
-  CreatePrototypePlanRequest,
   CreatePrototypeShareRequest,
   CreatePrototypeExportRequest,
   PrototypeWorkflowActionRequest,
-  RevisePrototypeRevisionRequest,
 } from "@workbench/workbench-contracts";
 import { useMutation, useQuery, useQueryClient, type UseMutationOptions } from "@tanstack/react-query";
 import { useEffect, useRef } from "react";
@@ -46,27 +44,17 @@ export function useWorkbenchPrototypeV2Revisions(projectId: string, planId: stri
   });
 }
 
-export function useCreateWorkbenchPrototypeV2Plan(projectId: string) {
-  const api = useWorkbenchPrototypeV2Api();
-  const queryClient = useQueryClient();
-  return usePrototypeMutation(projectId, {
-    mutationFn: ({ request, idempotencyKey }: { request: CreatePrototypePlanRequest; idempotencyKey?: string }) => api.createPlan(projectId, request, idempotencyKey ?? createIdempotencyKey("prototype-plan")),
-    onSuccess: (result) => { queryClient.setQueryData(workbenchQueryKeys.prototypeV2Plan(projectId, result.value.id), result); },
-  });
-}
 
 export function useCreateWorkbenchPrototypeV2PreviewToken(projectId: string, revisionId: string) {
   const api = useWorkbenchPrototypeV2Api();
   return useMutation({ mutationFn: () => api.createPreviewToken(projectId, revisionId) });
 }
 
-export function usePrototypeV2PlanAction(projectId: string, planId: string, action: "approve" | "cancel") {
+export function useCancelWorkbenchPrototypeV2Plan(projectId: string, planId: string) {
   const api = useWorkbenchPrototypeV2Api();
   const queryClient = useQueryClient();
-  return usePrototypeMutation(`${projectId}:${planId}:${action}`, {
-    mutationFn: ({ ifMatch, request, idempotencyKey }: { ifMatch: string; request?: PrototypeWorkflowActionRequest; idempotencyKey?: string }) => action === "approve"
-      ? api.approvePlan(projectId, planId, ifMatch, request, idempotencyKey ?? createIdempotencyKey("prototype-approve"))
-      : api.cancelPlan(projectId, planId, ifMatch, request, idempotencyKey ?? createIdempotencyKey("prototype-cancel")),
+  return usePrototypeMutation(`${projectId}:${planId}:cancel`, {
+    mutationFn: ({ ifMatch, request, idempotencyKey }: { ifMatch: string; request?: PrototypeWorkflowActionRequest; idempotencyKey?: string }) => api.cancelPlan(projectId, planId, ifMatch, request, idempotencyKey ?? createIdempotencyKey("prototype-cancel")),
     onSuccess: (result) => { queryClient.setQueryData(workbenchQueryKeys.prototypeV2Plan(projectId, planId), result); queryClient.invalidateQueries({ queryKey: workbenchQueryKeys.prototypeV2(projectId) }); },
   });
 }
@@ -172,14 +160,6 @@ export function useWorkbenchPrototypeV2Exports(projectId: string) {
   return useQuery({ queryKey: [...workbenchQueryKeys.prototypeV2(projectId), "exports"], queryFn: () => api.listExports(projectId), enabled: Boolean(projectId), refetchInterval: 3_000 });
 }
 
-export function useReviseWorkbenchPrototypeV2Revision(projectId: string, revisionId: string) {
-  const api = useWorkbenchPrototypeV2Api();
-  const client = useQueryClient();
-  return usePrototypeMutation(`${projectId}:${revisionId}`, {
-    mutationFn: ({ ifMatch, request, idempotencyKey }: { ifMatch: string; request: RevisePrototypeRevisionRequest; idempotencyKey?: string }) => api.reviseRevision(projectId, revisionId, ifMatch, request, idempotencyKey),
-    onSuccess: (result) => { client.setQueryData(workbenchQueryKeys.prototypeV2Plan(projectId, result.value.id), result); client.invalidateQueries({ queryKey: workbenchQueryKeys.prototypeV2(projectId) }); },
-  });
-}
 
 export function useRetryWorkbenchPrototypeV2Plan(projectId: string, planId: string) {
   const api = useWorkbenchPrototypeV2Api();

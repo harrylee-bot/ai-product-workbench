@@ -12,6 +12,7 @@ import {
 afterEach(async () => {
   cleanup();
   await clearStudioComposerSessions();
+  sessionStorage.clear();
 });
 const artifact: ComposerContext = {
   kind: "artifact",
@@ -32,6 +33,34 @@ const artifact: ComposerContext = {
 };
 
 describe("Studio composer context and recovery", () => {
+  it("ignores old prompt storage while restoring inputs written by the new composer", async () => {
+    const legacyKey = "workbench:studio:account-one:project-one:prompt";
+    sessionStorage.setItem(legacyKey, "old system prompt");
+    const first = renderHook(() =>
+      useStudioComposerSession("account-one", "project-one"),
+    );
+    await waitFor(() => expect(first.result.current.ready).toBe(true));
+    expect(first.result.current.entry.draft.prompt).toBe("");
+    act(() =>
+      first.result.current.updateDraft((draft) => ({
+        ...draft,
+        prompt: "new system draft",
+      })),
+    );
+    await waitFor(async () =>
+      expect(
+        (await readComposerSession("account-one:project-one"))?.entries.new
+          .draft.prompt,
+      ).toBe("new system draft"),
+    );
+    first.unmount();
+    const restored = renderHook(() =>
+      useStudioComposerSession("account-one", "project-one"),
+    );
+    await waitFor(() => expect(restored.result.current.ready).toBe(true));
+    expect(restored.result.current.entry.draft.prompt).toBe("new system draft");
+    expect(sessionStorage.getItem(legacyKey)).toBe("old system prompt");
+  });
   it("persists only attachment state, replacing a prepared file with its authorized source reference", async () => {
     const { result } = renderHook(() =>
       useStudioComposerSession("account-one", "project-one"),
@@ -189,7 +218,9 @@ describe("Studio composer context and recovery", () => {
 });
 
 it("keeps a fixed artifact discussion active after accepted text without erasing later edits", async () => {
-  const { result } = renderHook(() => useStudioComposerSession("account-one", "project-one"));
+  const { result } = renderHook(() =>
+    useStudioComposerSession("account-one", "project-one"),
+  );
   await waitFor(() => expect(result.current.ready).toBe(true));
   act(() => result.current.switchTo(artifact, "本次需求"));
   const submitted = result.current.entry.draft;

@@ -10,7 +10,7 @@ const mocks = vi.hoisted(() => ({
   publicShare: vi.fn(),
 }));
 
-vi.mock("@/lib/workbench/features", () => ({
+vi.mock("@/lib/workbench/features/public-shares", () => ({
   useWorkbenchPublicShare: mocks.publicShare,
 }));
 

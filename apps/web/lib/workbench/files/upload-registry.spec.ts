@@ -100,36 +100,6 @@ describe("WorkbenchUploadRegistry", () => {
     expect(upload.cancel).toHaveBeenCalledOnce();
   });
 
-  it("keeps SubmissionIntent-bound files under whole-submission cancellation", async () => {
-    const upload = new FakeUpload("local-a", "brief.pdf", "file-a");
-    upload.onStart = async () => upload.transition("uploading", {
-      submissionIntent: {
-        submissionIntentId: "intent-1",
-        attachmentPosition: 0,
-        clientFingerprint: "submission-file:one",
-      },
-      uploadPercent: 30,
-    });
-    const registry = createRegistry([upload]);
-    const batch = registry.uploadFiles("project-1", [{
-      file: testFile("brief.pdf"),
-      submissionIntent: {
-        submissionIntentId: "intent-1",
-        attachmentPosition: 0,
-        clientFingerprint: "submission-file:one",
-      },
-    }]);
-
-    await eventually(() => registry.getSnapshot().uploads[0]?.phase === "uploading");
-
-    expect(registry.getSnapshot().uploads[0]).toMatchObject({
-      canCancel: false,
-      submissionIntentId: "intent-1",
-    });
-    registry.releaseProject("project-1");
-    await expect(batch).rejects.toBeInstanceOf(WorkbenchUploadBatchDisposedError);
-  });
-
   it("destroys local controllers on Project release without aborting the server upload", async () => {
     const upload = new FakeUpload("local-a", "brief.pdf", "file-a");
     upload.onStart = () => new Promise(() => undefined);
@@ -294,7 +264,6 @@ function uploadSnapshot(
     bytesHashed: 0,
     hashPercent: 0,
     clientSha256Hint: null,
-    submissionIntent: null,
     file: null,
     extraction: null,
     error: null,

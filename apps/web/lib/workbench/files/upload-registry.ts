@@ -36,7 +36,6 @@ export type WorkbenchUploadItemViewModel = {
   hashPercent: number;
   uploadPercent: number;
   error: WorkbenchUploadError | null;
-  submissionIntentId: string | null;
   actionPending: WorkbenchUploadAction | null;
   canPause: boolean;
   canResume: boolean;
@@ -55,7 +54,7 @@ export type WorkbenchUploadBatchResult = {
 
 export type WorkbenchUploadInput = Pick<
   WorkbenchMultipartUploadOptions,
-  "file" | "submissionIntent"
+  "file"
 >;
 
 export class WorkbenchUploadBatchDisposedError extends Error {
@@ -133,13 +132,12 @@ export class WorkbenchUploadRegistry {
 
     try {
       for (const [index, input] of inputs.entries()) {
-        const { file, submissionIntent } = input;
+        const { file } = input;
         const controller = await this.createUpload({
           projectId,
           file,
           service: this.service,
           requestExtraction: shouldExtractFile(file),
-          submissionIntent,
         });
         if (this.disposed || this.batchProjects.get(batchId) !== projectId) {
           controller.destroy();
@@ -379,7 +377,7 @@ export function useWorkbenchUploadRegistry(service: WorkbenchFileTransferService
 
 function toViewModel(record: UploadRecord): WorkbenchUploadItemViewModel {
   const snapshot = record.snapshot;
-  const canCancel = snapshot.submissionIntent === null && (
+  const canCancel = (
     ["queued", "preparing", "uploading", "paused"].includes(snapshot.phase)
       || (snapshot.phase === "failed" && snapshot.file === null)
   );
@@ -396,7 +394,6 @@ function toViewModel(record: UploadRecord): WorkbenchUploadItemViewModel {
     hashPercent: snapshot.hashPercent,
     uploadPercent: snapshot.uploadPercent,
     error: snapshot.error ? { ...snapshot.error } : null,
-    submissionIntentId: snapshot.submissionIntent?.submissionIntentId ?? null,
     actionPending: record.actionPending,
     canPause: snapshot.phase === "uploading" && record.actionPending === null,
     canResume: snapshot.phase === "paused" && record.actionPending === null,

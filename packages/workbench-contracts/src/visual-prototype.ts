@@ -9,7 +9,7 @@ import { isoDateTimeSchema, opaqueIdSchema, revisionSchema } from "./common.js";
 const idempotencyKeySchema = z.string().min(8).max(128).regex(/^[A-Za-z0-9._:-]+$/u);
 const shortText = (max: number) => z.string().trim().min(1).max(max);
 
-export const prototypePlanStatusSchema = z.enum(["draft", "approved", "generating", "ready", "failed", "cancelled"]);
+export const prototypePlanStatusSchema = z.enum(["approved", "generating", "ready", "failed", "cancelled"]);
 export const prototypeRevisionStatusSchema = z.enum(["queued", "generating", "ready", "confirmed", "rejected", "failed", "cancelled"]);
 export const prototypeFeedbackStatusSchema = z.enum(["open", "resolved"]);
 export const prototypeShareStatusSchema = z.enum(["active", "revoked", "expired"]);
@@ -166,8 +166,6 @@ export const prototypeExportSchema = z.object({
 });
 
 export const prototypeWorkflowActionRequestSchema = z.object({ reason: z.string().trim().max(2_000).optional() }).strict();
-export const createPrototypePlanRequestSchema = z.object({ prompt: shortText(20_000), title: shortText(240), generationRequest: startRunRequestSchema }).strict();
-export const revisePrototypeRevisionRequestSchema = z.object({ feedbackIds: z.array(opaqueIdSchema).min(1).max(100).refine((ids) => new Set(ids).size === ids.length, "Feedback ids must be unique"), prompt: shortText(4_000).optional() }).strict();
 export const createPrototypeFeedbackRequestSchema = z.object({ body: shortText(4_000), anchor: createPrototypeFeedbackAnchorSchema.nullable().optional() }).strict();
 export const createPrototypeShareRequestSchema = z.object({ revisionId: opaqueIdSchema, expiresAt: isoDateTimeSchema.nullable().optional() }).strict();
 export const createPrototypeExportRequestSchema = z.object({ revisionId: opaqueIdSchema, format: prototypeExportFormatSchema }).strict();
@@ -190,7 +188,6 @@ export type PrototypeShare = z.infer<typeof prototypeShareSchema>;
 export type PrototypePublicShare = z.infer<typeof prototypePublicShareSchema>;
 export type PrototypeExportArtifact = z.infer<typeof prototypeExportArtifactSchema>;
 export type PrototypeExport = z.infer<typeof prototypeExportSchema>;
-export type CreatePrototypePlanRequest = z.infer<typeof createPrototypePlanRequestSchema>;
 export type CreatePrototypeFeedbackRequest = z.infer<typeof createPrototypeFeedbackRequestSchema>;
 export type CreatePrototypeShareRequest = z.infer<typeof createPrototypeShareRequestSchema>;
 export type CreatePrototypeExportRequest = z.infer<typeof createPrototypeExportRequestSchema>;
@@ -200,7 +197,6 @@ export const prototypePlanListSchema = z.array(prototypePlanSchema).max(100);
 export const prototypeFeedbackListSchema = z.array(prototypeFeedbackSchema).max(100);
 export const prototypeShareListSchema = z.array(prototypeShareSchema).max(100);
 export const prototypeExportListSchema = z.array(prototypeExportSchema).max(100);
-export type RevisePrototypeRevisionRequest = z.infer<typeof revisePrototypeRevisionRequestSchema>;
 
 export const prototypeRevisionDiffSchema = z.object({ sourceRevisionId: opaqueIdSchema.nullable(), pages: z.array(z.object({ pageId: opaqueIdSchema, change: z.enum(["added", "removed", "changed", "unchanged"]) }).strict()).max(100) }).strict();
 export type PrototypeRevisionDiff = z.infer<typeof prototypeRevisionDiffSchema>;
@@ -230,19 +226,15 @@ export const prototypeProgressSchema = z.object({
 });
 export type PrototypeProgress = z.infer<typeof prototypeProgressSchema>;
 
-/** Immutable context captured when a draft is created or explicitly adjusted. */
+/** Immutable generation context captured at requirement confirmation. */
 export const prototypeInputSnapshotSchema = z.object({
   sources: z.array(z.object({sourceId:opaqueIdSchema,kind:importSourceKindSchema,label:shortText(240),checksum:sha256Schema,descriptor:importSourceDescriptorSchema,snapshot:runSourceSnapshotManifestSchema}).strict()).max(50),
   designStyle: z.object({artifactVersionId:opaqueIdSchema.nullable(),snapshot:runtimeMaterializedDesignStyleSnapshotSchema.nullable(),snapshotSha256:sha256Schema.nullable()}).strict(),
   knowledgeReleaseId:opaqueIdSchema.nullable(),
 }).strict();
-export const prototypePlanInputSchema = z.object({plan:prototypePlanSchema,request:startRunRequestSchema,snapshot:prototypeInputSnapshotSchema.nullable(),sha256:sha256Schema}).strict();
-export const updatePrototypePlanRequestSchema=createPrototypePlanRequestSchema;
-export const createPrototypeRevisionPlanRequestSchema=createPrototypePlanRequestSchema.extend({feedbackIds:z.array(opaqueIdSchema).max(100).default([])}).refine(value=>new Set(value.feedbackIds).size===value.feedbackIds.length,"Feedback ids must be unique");
+export const prototypePlanInputSchema = z.object({plan:prototypePlanSchema,request:startRunRequestSchema,snapshot:prototypeInputSnapshotSchema,sha256:sha256Schema}).strict();
 export type PrototypeInputSnapshot=z.infer<typeof prototypeInputSnapshotSchema>;
 export type PrototypePlanInput=z.infer<typeof prototypePlanInputSchema>;
-export type UpdatePrototypePlanRequest=z.infer<typeof updatePrototypePlanRequestSchema>;
-export type CreatePrototypeRevisionPlanRequest=z.infer<typeof createPrototypeRevisionPlanRequestSchema>;
 
 /** Source input remains historical; modificationRequest is the effective edit input for this operation. */
 export const prototypeRevisionInputSchema = prototypePlanInputSchema.extend({ modificationRequest: startRunRequestSchema });

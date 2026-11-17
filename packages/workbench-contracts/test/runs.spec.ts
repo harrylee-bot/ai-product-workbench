@@ -271,17 +271,17 @@ describe("Run target ArtifactVersion contracts", () => {
 });
 
 describe("Run creation route ownership", () => {
-  it("creates Runs only through durable SubmissionIntent submission", () => {
+  it("creates generation only through requirement confirmation", () => {
     const routes = workbenchHttpRoutes.map((route) => (
       `${route.method} ${route.path} ${route.operationId}`
     ));
 
     expect(routes).not.toContain("post /threads/{threadId}/runs startRun");
     expect(routes).toContain(
-      "post /threads/{threadId}/submission-intents createSubmissionIntent",
+      "post /threads/{threadId}/requirement-sessions createRequirementSession",
     );
     expect(routes).toContain(
-      "post /submission-intents/{intentId}/submit submitSubmissionIntent",
+      "post /requirement-sessions/{sessionId}/confirm confirmRequirement",
     );
   });
 });

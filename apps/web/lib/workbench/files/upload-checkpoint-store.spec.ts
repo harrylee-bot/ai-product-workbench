@@ -21,7 +21,6 @@ function checkpoint(projectId: string, fingerprint = `workbench-file-v1:${projec
     createIdempotencyKey: `create-${projectId}`,
     completionIdempotencyKey: `complete-${projectId}`,
     extractionIdempotencyKey: `extract-${projectId}`,
-    submissionIntent: null,
     clientSha256Hint: "a".repeat(64),
     session: {
       fileAssetId: `file-${projectId}`,

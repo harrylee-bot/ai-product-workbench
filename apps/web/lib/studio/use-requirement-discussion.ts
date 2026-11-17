@@ -117,7 +117,7 @@ export function useRequirementDiscussion({
 }: {
   projectId: string;
   threadId: string;
-  context: Exclude<RequirementContext, { kind: "plan" }>;
+  context: RequirementContext;
   contextKey: string;
   canEdit: boolean;
   enabled?: boolean;

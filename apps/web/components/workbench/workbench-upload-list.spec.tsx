@@ -145,7 +145,6 @@ function uploadViewModel(
     hashPercent: 100,
     uploadPercent: 50,
     error: null,
-    submissionIntentId: null,
     actionPending: null,
     canPause: false,
     canResume: false,

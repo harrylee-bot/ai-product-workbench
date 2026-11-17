@@ -17,7 +17,6 @@ import {
   opaqueIdSchema,
   safeIntegerSchema,
   sha256Schema,
-  submissionIntentUploadBindingSchema,
   uploadPartSizeSchema,
   type CompleteFileUploadRequest,
   type CompleteFileUploadResponse,
@@ -29,7 +28,6 @@ import {
   type ListUploadPartsResponse,
   type SignUploadPartRequest,
   type SignUploadPartResponse,
-  type SubmissionIntentUploadBinding,
 } from "@workbench/workbench-contracts";
 import { z } from "zod";
 
@@ -102,7 +100,6 @@ export type WorkbenchUploadCheckpoint = {
   createIdempotencyKey: string;
   completionIdempotencyKey: string;
   extractionIdempotencyKey: string;
-  submissionIntent: SubmissionIntentUploadBinding | null;
   clientSha256Hint: string | null;
   session: {
     fileAssetId: string;
@@ -138,7 +135,6 @@ export type WorkbenchUploadSnapshot = {
   bytesHashed: number;
   hashPercent: number;
   clientSha256Hint: string | null;
-  submissionIntent: SubmissionIntentUploadBinding | null;
   file: FileAsset | null;
   extraction: FileExtraction | null;
   error: WorkbenchUploadError | null;
@@ -163,7 +159,6 @@ export type WorkbenchMultipartUploadOptions = {
   service: WorkbenchFileTransferService;
   checkpoint?: WorkbenchUploadCheckpoint | null;
   checkpointStore?: WorkbenchUploadCheckpointStore;
-  submissionIntent?: SubmissionIntentUploadBinding;
   requestExtraction?: boolean;
   retryDelays?: readonly number[];
   concurrency?: number;
@@ -186,7 +181,6 @@ const checkpointSchema = z.object({
   createIdempotencyKey: z.string(),
   completionIdempotencyKey: z.string(),
   extractionIdempotencyKey: z.string(),
-  submissionIntent: submissionIntentUploadBindingSchema.nullable(),
   clientSha256Hint: sha256Schema.nullable(),
   session: z.object({
     fileAssetId: opaqueIdSchema,
@@ -226,19 +220,11 @@ export async function createWorkbenchMultipartUpload(
     fileName: options.file.name,
     declaredMediaType,
     byteSize: options.file.size,
-    submissionIntent: options.submissionIntent,
   });
   validateControllerOptions(options);
 
   const checkpointStore = options.checkpointStore ?? getDefaultWorkbenchUploadCheckpointStore();
-  const submissionIntent = options.submissionIntent
-    ? submissionIntentUploadBindingSchema.parse(options.submissionIntent)
-    : null;
-  const fingerprint = createWorkbenchCheckpointFingerprint(
-    options.projectId,
-    options.file,
-    submissionIntent,
-  );
+  const fingerprint = createWorkbenchFileFingerprint(options.projectId, options.file);
   const candidate = options.checkpoint
     ?? await checkpointStore?.load(options.projectId, fingerprint)
     ?? null;
@@ -249,14 +235,12 @@ export async function createWorkbenchMultipartUpload(
         options.file,
         fingerprint,
         declaredMediaType,
-        submissionIntent,
       )
     : createCheckpoint(
         options.projectId,
         options.file,
         fingerprint,
         declaredMediaType,
-        submissionIntent,
       );
 
   return new WorkbenchMultipartUpload(options, checkpoint, candidate !== null, checkpointStore);
@@ -270,21 +254,6 @@ function createWorkbenchFileFingerprint(projectId: string, file: File): string {
     String(file.lastModified),
     encodeURIComponent(normalizeDeclaredMediaType(file.type)),
     encodeURIComponent(file.name),
-  ].join(":");
-}
-
-function createWorkbenchCheckpointFingerprint(
-  projectId: string,
-  file: File,
-  submissionIntent: SubmissionIntentUploadBinding | null,
-): string {
-  if (!submissionIntent) return createWorkbenchFileFingerprint(projectId, file);
-  return [
-    "workbench-submission-file-v1",
-    encodeURIComponent(projectId),
-    encodeURIComponent(submissionIntent.submissionIntentId),
-    String(submissionIntent.attachmentPosition),
-    encodeURIComponent(submissionIntent.clientFingerprint),
   ].join(":");
 }
 
@@ -352,9 +321,6 @@ export class WorkbenchMultipartUpload {
       bytesHashed: 0,
       hashPercent: 0,
       clientSha256Hint: checkpoint.clientSha256Hint,
-      submissionIntent: checkpoint.submissionIntent
-        ? { ...checkpoint.submissionIntent }
-        : null,
       file: null,
       extraction: null,
       error: null,
@@ -742,11 +708,6 @@ export class WorkbenchMultipartUpload {
   }
 
   private async resetForFreshSession(): Promise<void> {
-    if (this.checkpoint.submissionIntent) {
-      throw new WorkbenchUploadStateError(
-        "The durable submission upload session can no longer be resumed; cancel and retry the submission",
-      );
-    }
     await this.removeCheckpoint();
     this.checkpoint = {
       ...this.checkpoint,
@@ -1007,7 +968,6 @@ export class WorkbenchMultipartUpload {
       declaredMediaType: this.checkpoint.declaredMediaType,
       byteSize: this.checkpoint.byteSize,
       sha256: digest,
-      submissionIntent: this.checkpoint.submissionIntent ?? undefined,
     });
     if (this.createRequest) {
       if (this.createRequest.sha256 !== request.sha256) {
@@ -1068,10 +1028,7 @@ function createCheckpoint(
   file: File,
   fingerprint: string,
   declaredMediaType: string,
-  submissionIntent: SubmissionIntentUploadBinding | null,
 ): WorkbenchUploadCheckpoint {
-  const position = submissionIntent?.attachmentPosition;
-  const intentId = submissionIntent?.submissionIntentId;
   return {
     schemaVersion: 1,
     localUploadId: createIdempotencyKey("local"),
@@ -1081,16 +1038,9 @@ function createCheckpoint(
     declaredMediaType,
     byteSize: file.size,
     lastModified: file.lastModified,
-    createIdempotencyKey: intentId === undefined
-      ? createIdempotencyKey("upload")
-      : `submission-upload:${intentId}:${position}`,
-    completionIdempotencyKey: intentId === undefined
-      ? createIdempotencyKey("complete")
-      : `submission-complete:${intentId}:${position}`,
-    extractionIdempotencyKey: intentId === undefined
-      ? createIdempotencyKey("extract")
-      : `submission-extract:${intentId}:${position}`,
-    submissionIntent,
+    createIdempotencyKey: createIdempotencyKey("upload"),
+    completionIdempotencyKey: createIdempotencyKey("complete"),
+    extractionIdempotencyKey: createIdempotencyKey("extract"),
     clientSha256Hint: null,
     session: null,
   };
@@ -1102,7 +1052,6 @@ function parseCheckpoint(
   file: File,
   fingerprint: string,
   declaredMediaType: string,
-  submissionIntent: SubmissionIntentUploadBinding | null,
 ) {
   const parsed = checkpointSchema.safeParse(checkpoint);
   if (!parsed.success) {
@@ -1120,8 +1069,7 @@ function parseCheckpoint(
     || parsed.data.fileName !== file.name
     || parsed.data.declaredMediaType !== declaredMediaType
     || parsed.data.byteSize !== file.size
-    || parsed.data.lastModified !== file.lastModified
-    || !sameSubmissionIntentBinding(parsed.data.submissionIntent, submissionIntent)) {
+    || parsed.data.lastModified !== file.lastModified) {
     throw new WorkbenchUploadCheckpointError("Stored upload checkpoint belongs to a different File");
   }
   if (parsed.data.session) normalizeEtagForCheckpoint(parsed.data.session.uploadEtag);
@@ -1131,20 +1079,8 @@ function parseCheckpoint(
 function copyCheckpoint(checkpoint: WorkbenchUploadCheckpoint): WorkbenchUploadCheckpoint {
   return {
     ...checkpoint,
-    submissionIntent: checkpoint.submissionIntent
-      ? { ...checkpoint.submissionIntent }
-      : null,
     session: checkpoint.session ? { ...checkpoint.session } : null,
   };
-}
-
-function sameSubmissionIntentBinding(
-  left: SubmissionIntentUploadBinding | null,
-  right: SubmissionIntentUploadBinding | null,
-): boolean {
-  return left?.submissionIntentId === right?.submissionIntentId
-    && left?.attachmentPosition === right?.attachmentPosition
-    && left?.clientFingerprint === right?.clientFingerprint;
 }
 
 function copySnapshot(snapshot: WorkbenchUploadSnapshot): WorkbenchUploadSnapshot {

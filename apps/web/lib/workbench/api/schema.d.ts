@@ -1555,75 +1555,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/threads/{threadId}/submission-intents": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Durable SubmissionIntent and ordered attachment slots created */
-        post: operations["createSubmissionIntent"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/threads/{threadId}/submission-intents/current": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Current principal's unique active SubmissionIntent in the Thread or a strict null item */
-        get: operations["getCurrentSubmissionIntent"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/submission-intents/{intentId}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Creator-owned durable SubmissionIntent */
-        get: operations["getSubmissionIntent"];
-        put?: never;
-        post?: never;
-        /** Pending SubmissionIntent cancelled with compare-and-swap */
-        delete: operations["cancelSubmissionIntent"];
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/submission-intents/{intentId}/submit": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** SubmissionIntent submitted through its durable Run idempotency key */
-        post: operations["submitSubmissionIntent"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/threads/{threadId}/runs": {
         parameters: {
             query?: never;
@@ -1788,8 +1719,7 @@ export interface paths {
         /** Read persisted prototype history */
         get: operations["listPrototypePlans"];
         put?: never;
-        /** Create an idempotent visual prototype plan */
-        post: operations["createPrototypePlan"];
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -1935,40 +1865,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/projects/{projectId}/prototype-v2/revisions/{revisionId}/revise": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Generate a new immutable version from anchored feedback */
-        post: operations["revisePrototype"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/projects/{projectId}/prototype-v2/plans/{planId}/approve": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Approve a plan and enqueue the Temporal generation workflow */
-        post: operations["approvePrototypePlan"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/projects/{projectId}/prototype-v2/plans/{planId}/input": {
         parameters: {
             query?: never;
@@ -1979,8 +1875,7 @@ export interface paths {
         /** Read complete fixed plan input */
         get: operations["getPrototypePlanInput"];
         put?: never;
-        /** Adjust draft input atomically and preserve fixed context */
-        post: operations["updatePrototypePlanInput"];
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -1998,23 +1893,6 @@ export interface paths {
         get: operations["getPrototypeRevisionInput"];
         put?: never;
         post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/projects/{projectId}/prototype-v2/revisions/{revisionId}/plans": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Create a reviewable modification plan in the source version family */
-        post: operations["createPrototypeRevisionPlan"];
         delete?: never;
         options?: never;
         head?: never;
@@ -5526,8 +5404,7 @@ export interface components {
             declaredMediaType: string;
             detectedMediaType: string | null;
             byteSize: components["schemas"]["SafeInteger"];
-            /** @enum {string} */
-            status: "uploading" | "verifying" | "ready" | "failed" | "quarantined" | "deleted";
+            status: components["schemas"]["FileStatus"];
             revision: components["schemas"]["Revision"];
             sha256: string | null;
             failure: {
@@ -5718,20 +5595,12 @@ export interface components {
             selection: components["schemas"]["ExportSelection"];
             options?: components["schemas"]["ExportOptions"];
         };
-        /** @description SubmissionIntent upload slot fingerprints are bounded opaque values without control characters; they are independent from multipart checkpoint fingerprints. */
-        SubmissionIntentClientFingerprint: string;
-        SubmissionIntentUploadBinding: {
-            submissionIntentId: string;
-            attachmentPosition: number;
-            clientFingerprint: components["schemas"]["SubmissionIntentClientFingerprint"];
-        };
         UploadObjectByteSize: number;
         CreateFileUploadRequest: {
             fileName: components["schemas"]["FileName"];
             declaredMediaType: string;
             byteSize: components["schemas"]["UploadObjectByteSize"];
             sha256?: string;
-            submissionIntent?: components["schemas"]["SubmissionIntentUploadBinding"];
         };
         CreateFileUploadResponse: {
             file: components["schemas"]["FileAsset"];
@@ -5849,6 +5718,60 @@ export interface components {
                 nodeId: string;
             } | null;
         };
+        CreatePrototypeShareRequest: {
+            revisionId: string;
+            /** Format: date-time */
+            expiresAt?: string | null;
+        };
+        PrototypeFeedbackAnchor: {
+            sourceRevisionId: string;
+            pageId: string;
+            quote?: string;
+            /** @enum {string} */
+            scope: "page";
+        } | {
+            sourceRevisionId: string;
+            pageId: string;
+            quote?: string;
+            /** @enum {string} */
+            scope: "node";
+            nodeId: string;
+        } | {
+            sourceRevisionId: string;
+            pageId: string;
+            quote?: string;
+            /** @enum {string} */
+            scope: "unresolved";
+        };
+        RequirementContext: {
+            /** @enum {string} */
+            kind: "new";
+        } | {
+            /** @enum {string} */
+            kind: "revision";
+            revisionId: string;
+            feedbackIds: string[];
+            anchor: {
+                sourceRevisionId: string;
+                pageId: string;
+                quote?: string;
+                /** @enum {string} */
+                scope: "page";
+            } | {
+                sourceRevisionId: string;
+                pageId: string;
+                quote?: string;
+                /** @enum {string} */
+                scope: "node";
+                nodeId: string;
+            } | {
+                sourceRevisionId: string;
+                pageId: string;
+                quote?: string;
+                /** @enum {string} */
+                scope: "unresolved";
+            } | null;
+        };
         RunArtifactTarget: {
             artifactId: string;
             artifactVersionId: string;
@@ -5903,130 +5826,6 @@ export interface components {
         RuntimeRequestedArtifactKind: "prd" | "prototype" | "image" | "code" | "document" | "data";
         /** @enum {string} */
         RunWorkflow: "generate" | "redesign" | "ideate" | "edit";
-        /** @description Redesign requires a ready Import Source; Edit requires an Artifact target; Generate accepts explicit source screen targets or one fixed PRD with prdScreenPlan when prototype is requested; Redesign and Ideate forbid targets. Enforced by the runtime Zod contract. */
-        StartRunRequest: {
-            requirementConfirmationId?: string;
-            prompt: string;
-            modelId: string;
-            workflow: components["schemas"]["RunWorkflow"];
-            /**
-             * @default null
-             * @enum {string|null}
-             */
-            generationIntent: "followup-design" | "interactive-prototype" | "prd-prototype" | "prd-flow" | null;
-            prdScreenPlan?: components["schemas"]["RunPrdScreenPlan"];
-            targetSurface: components["schemas"]["RunTargetSurface"];
-            designStyle: components["schemas"]["RunDesignStyle"];
-            sourceIds?: components["schemas"]["RunSourceIds"];
-            /**
-             * @description Immutable ready ArtifactVersion selections in runtime target order; Generate Prototype requires one or more explicit screen ids on every source target
-             * @default []
-             */
-            artifactTargets: components["schemas"]["RunArtifactTarget"][];
-            /** @default [] */
-            requestedArtifactKinds: components["schemas"]["RuntimeRequestedArtifactKind"][];
-            /**
-             * @description Canvas snapshots use unique screen references and only expose references declared by the snapshot; enforced by the runtime Zod contract.
-             * @default null
-             */
-            canvasSnapshot: {
-                /** @enum {string} */
-                protocol: "workbench.canvas-snapshot.v1";
-                /** @description Canvas entity ids are bounded opaque identifiers and cannot be URI schemes; enforced by the runtime Zod contract. */
-                projectId: string;
-                /** @description Canvas entity ids are bounded opaque identifiers and cannot be URI schemes; enforced by the runtime Zod contract. */
-                threadId: string;
-                /** @description Canvas entity ids are bounded opaque identifiers and cannot be URI schemes; enforced by the runtime Zod contract. */
-                runId: string | null;
-                /** @description Canvas entity ids are bounded opaque identifiers and cannot be URI schemes; enforced by the runtime Zod contract. */
-                boardId: string;
-                /** @description Canvas browser session ids are bounded opaque identifiers and cannot be URI schemes; enforced by the runtime Zod contract. */
-                clientSessionId: string;
-                projectSessionGeneration: components["schemas"]["Revision"];
-                boardRevision: components["schemas"]["Revision"];
-                canvasStateRevision: components["schemas"]["Revision"];
-                /** Format: date-time */
-                capturedAt: string;
-                /** Format: date-time */
-                expiresAt: string;
-                viewport: components["schemas"]["CanvasViewport"];
-                screens: components["schemas"]["CanvasScreenSummary"][];
-                visibleScreens: components["schemas"]["CanvasAgentScreenReference"][];
-                selectedScreens: components["schemas"]["CanvasAgentScreenReference"][];
-            } | null;
-        };
-        CreatePrototypePlanRequest: {
-            prompt: string;
-            title: string;
-            generationRequest: components["schemas"]["StartRunRequest"];
-        };
-        /** @description Selected feedback ids are unique; transactional validation binds them to the exact source revision and editor permission. */
-        CreatePrototypeRevisionPlanRequest: {
-            prompt: string;
-            title: string;
-            generationRequest: components["schemas"]["StartRunRequest"];
-            /** @default [] */
-            feedbackIds: string[];
-        };
-        CreatePrototypeShareRequest: {
-            revisionId: string;
-            /** Format: date-time */
-            expiresAt?: string | null;
-        };
-        PrototypeFeedbackAnchor: {
-            sourceRevisionId: string;
-            pageId: string;
-            quote?: string;
-            /** @enum {string} */
-            scope: "page";
-        } | {
-            sourceRevisionId: string;
-            pageId: string;
-            quote?: string;
-            /** @enum {string} */
-            scope: "node";
-            nodeId: string;
-        } | {
-            sourceRevisionId: string;
-            pageId: string;
-            quote?: string;
-            /** @enum {string} */
-            scope: "unresolved";
-        };
-        RequirementContext: {
-            /** @enum {string} */
-            kind: "new";
-        } | {
-            /** @enum {string} */
-            kind: "revision";
-            revisionId: string;
-            feedbackIds: string[];
-            anchor: {
-                sourceRevisionId: string;
-                pageId: string;
-                quote?: string;
-                /** @enum {string} */
-                scope: "page";
-            } | {
-                sourceRevisionId: string;
-                pageId: string;
-                quote?: string;
-                /** @enum {string} */
-                scope: "node";
-                nodeId: string;
-            } | {
-                sourceRevisionId: string;
-                pageId: string;
-                quote?: string;
-                /** @enum {string} */
-                scope: "unresolved";
-            } | null;
-        } | {
-            /** @enum {string} */
-            kind: "plan";
-            planId: string;
-            expectedRevision: components["schemas"]["Revision"];
-        };
         RequirementDiscussionRequest: {
             prompt: string;
             modelId: string;
@@ -6047,189 +5846,14 @@ export interface components {
             artifactTargets: components["schemas"]["RunArtifactTarget"][];
             /** @default [] */
             requestedArtifactKinds: components["schemas"]["RuntimeRequestedArtifactKind"][];
-            /**
-             * @description Canvas snapshots use unique screen references and only expose references declared by the snapshot; enforced by the runtime Zod contract.
-             * @default null
-             */
-            canvasSnapshot: {
-                /** @enum {string} */
-                protocol: "workbench.canvas-snapshot.v1";
-                /** @description Canvas entity ids are bounded opaque identifiers and cannot be URI schemes; enforced by the runtime Zod contract. */
-                projectId: string;
-                /** @description Canvas entity ids are bounded opaque identifiers and cannot be URI schemes; enforced by the runtime Zod contract. */
-                threadId: string;
-                /** @description Canvas entity ids are bounded opaque identifiers and cannot be URI schemes; enforced by the runtime Zod contract. */
-                runId: string | null;
-                /** @description Canvas entity ids are bounded opaque identifiers and cannot be URI schemes; enforced by the runtime Zod contract. */
-                boardId: string;
-                /** @description Canvas browser session ids are bounded opaque identifiers and cannot be URI schemes; enforced by the runtime Zod contract. */
-                clientSessionId: string;
-                projectSessionGeneration: components["schemas"]["Revision"];
-                boardRevision: components["schemas"]["Revision"];
-                canvasStateRevision: components["schemas"]["Revision"];
-                /** Format: date-time */
-                capturedAt: string;
-                /** Format: date-time */
-                expiresAt: string;
-                viewport: components["schemas"]["CanvasViewport"];
-                screens: components["schemas"]["CanvasScreenSummary"][];
-                visibleScreens: components["schemas"]["CanvasAgentScreenReference"][];
-                selectedScreens: components["schemas"]["CanvasAgentScreenReference"][];
-            } | null;
+            canvasSnapshot?: null;
         };
         CreateRequirementSessionRequest: {
             generationRequest: components["schemas"]["RequirementDiscussionRequest"];
             context?: components["schemas"]["RequirementContext"];
         };
-        SubmissionIntentAttachmentRequest: {
-            /** @enum {string} */
-            kind: "existing";
-            fileAssetId: string;
-        } | {
-            /** @enum {string} */
-            kind: "upload";
-            clientFingerprint: components["schemas"]["SubmissionIntentClientFingerprint"];
-            fileName: components["schemas"]["FileName"];
-            declaredMediaType: string;
-            byteSize: components["schemas"]["UploadObjectByteSize"];
-            lastModified: components["schemas"]["SafeInteger"];
-        };
-        /** @description SubmissionIntent requests directly enforce the same workflow, Artifact target, requested output, and pre-submission Canvas scope semantics as StartRun. */
-        SubmissionIntentRunRequest: {
-            requirementConfirmationId?: string;
-            prompt: string;
-            modelId: string;
-            workflow: components["schemas"]["RunWorkflow"];
-            /**
-             * @default null
-             * @enum {string|null}
-             */
-            generationIntent: "followup-design" | "interactive-prototype" | "prd-prototype" | "prd-flow" | null;
-            prdScreenPlan?: components["schemas"]["RunPrdScreenPlan"];
-            targetSurface: components["schemas"]["RunTargetSurface"];
-            designStyle: components["schemas"]["RunDesignStyle"];
-            sourceIds?: components["schemas"]["RunSourceIds"];
-            /**
-             * @description Immutable ready ArtifactVersion selections in runtime target order; Generate Prototype requires one or more explicit screen ids on every source target
-             * @default []
-             */
-            artifactTargets: components["schemas"]["RunArtifactTarget"][];
-            /** @default [] */
-            requestedArtifactKinds: components["schemas"]["RuntimeRequestedArtifactKind"][];
-            /**
-             * @description Canvas snapshots use unique screen references and only expose references declared by the snapshot; enforced by the runtime Zod contract.
-             * @default null
-             */
-            canvasSnapshot: {
-                /** @enum {string} */
-                protocol: "workbench.canvas-snapshot.v1";
-                /** @description Canvas entity ids are bounded opaque identifiers and cannot be URI schemes; enforced by the runtime Zod contract. */
-                projectId: string;
-                /** @description Canvas entity ids are bounded opaque identifiers and cannot be URI schemes; enforced by the runtime Zod contract. */
-                threadId: string;
-                /** @description Canvas entity ids are bounded opaque identifiers and cannot be URI schemes; enforced by the runtime Zod contract. */
-                runId: string | null;
-                /** @description Canvas entity ids are bounded opaque identifiers and cannot be URI schemes; enforced by the runtime Zod contract. */
-                boardId: string;
-                /** @description Canvas browser session ids are bounded opaque identifiers and cannot be URI schemes; enforced by the runtime Zod contract. */
-                clientSessionId: string;
-                projectSessionGeneration: components["schemas"]["Revision"];
-                boardRevision: components["schemas"]["Revision"];
-                canvasStateRevision: components["schemas"]["Revision"];
-                /** Format: date-time */
-                capturedAt: string;
-                /** Format: date-time */
-                expiresAt: string;
-                viewport: components["schemas"]["CanvasViewport"];
-                screens: components["schemas"]["CanvasScreenSummary"][];
-                visibleScreens: components["schemas"]["CanvasAgentScreenReference"][];
-                selectedScreens: components["schemas"]["CanvasAgentScreenReference"][];
-            } | null;
-        };
-        /** @description SubmissionIntent attachment sources are unique, Redesign has a durable source slot, and workflow target semantics directly share the live Run refinement without duplicate validation issues. */
-        CreateSubmissionIntentRequest: {
-            request: components["schemas"]["SubmissionIntentRunRequest"];
-            attachments: components["schemas"]["SubmissionIntentAttachmentRequest"][];
-        };
         CreateThreadRequest: {
             title: string;
-        };
-        RunFailure: {
-            code: string;
-            message: string;
-            retryable: boolean;
-        };
-        SubmissionIntentAttachment: {
-            position: number;
-            /** @enum {string|null} */
-            fileStatus: "uploading" | "verifying" | "ready" | "failed" | "quarantined" | "deleted" | null;
-            /** @enum {string} */
-            kind: "existing";
-            fileAssetId: string;
-        } | {
-            position: number;
-            /** @enum {string|null} */
-            fileStatus: "uploading" | "verifying" | "ready" | "failed" | "quarantined" | "deleted" | null;
-            /** @enum {string} */
-            kind: "upload";
-            fileAssetId: string | null;
-            clientFingerprint: components["schemas"]["SubmissionIntentClientFingerprint"];
-            fileName: components["schemas"]["FileName"];
-            declaredMediaType: string;
-            byteSize: components["schemas"]["UploadObjectByteSize"];
-            lastModified: components["schemas"]["SafeInteger"];
-        };
-        /** @enum {string} */
-        SubmissionIntentStatus: "pending" | "submitting" | "submitted" | "cancelled";
-        /** @description SubmissionIntent request target semantics, attachment positions, and submitted/cancelled lifecycle fields agree; enforced by runtime contracts and database constraints. */
-        SubmissionIntent: {
-            id: string;
-            projectId: string;
-            threadId: string;
-            status: components["schemas"]["SubmissionIntentStatus"];
-            request: components["schemas"]["SubmissionIntentRunRequest"];
-            attachments: components["schemas"]["SubmissionIntentAttachment"][];
-            runId: string | null;
-            lastFailure: {
-                code: string;
-                message: string;
-                retryable: boolean;
-            } | null;
-            revision: components["schemas"]["Revision"];
-            /** Format: date-time */
-            submittedAt: string | null;
-            /** Format: date-time */
-            cancelledAt: string | null;
-            /** Format: date-time */
-            createdAt: string;
-            /** Format: date-time */
-            updatedAt: string;
-        };
-        CurrentSubmissionIntent: {
-            /** @description SubmissionIntent request target semantics, attachment positions, and submitted/cancelled lifecycle fields agree; enforced by runtime contracts and database constraints. */
-            item: {
-                id: string;
-                projectId: string;
-                threadId: string;
-                status: components["schemas"]["SubmissionIntentStatus"];
-                request: components["schemas"]["SubmissionIntentRunRequest"];
-                attachments: components["schemas"]["SubmissionIntentAttachment"][];
-                runId: string | null;
-                lastFailure: {
-                    code: string;
-                    message: string;
-                    retryable: boolean;
-                } | null;
-                revision: components["schemas"]["Revision"];
-                /** Format: date-time */
-                submittedAt: string | null;
-                /** Format: date-time */
-                cancelledAt: string | null;
-                /** Format: date-time */
-                createdAt: string;
-                /** Format: date-time */
-                updatedAt: string;
-            } | null;
         };
         DesignPresetDirectives: {
             composition: string;
@@ -6945,6 +6569,11 @@ export interface components {
             createdAt: string;
             /** Format: date-time */
             updatedAt: string;
+        };
+        RunFailure: {
+            code: string;
+            message: string;
+            retryable: boolean;
         };
         /** @enum {string} */
         RunPhase: "understanding" | "retrieving_knowledge" | "planning" | "generating" | "validating" | "publishing";
@@ -7768,7 +7397,7 @@ export interface components {
             resultingChecksum: components["schemas"]["PrototypePatchChecksum"];
         };
         /** @enum {string} */
-        PrototypePlanStatus: "draft" | "approved" | "generating" | "ready" | "failed" | "cancelled";
+        PrototypePlanStatus: "approved" | "generating" | "ready" | "failed" | "cancelled";
         PrototypePlan: {
             id: string;
             projectId: string;
@@ -7792,60 +7421,62 @@ export interface components {
                 detail: string;
             } | null;
         };
+        /** @description Redesign requires a ready Import Source; Edit requires an Artifact target; Generate accepts explicit source screen targets or one fixed PRD with prdScreenPlan when prototype is requested; Redesign and Ideate forbid targets. Enforced by the runtime Zod contract. */
+        StartRunRequest: {
+            requirementConfirmationId?: string;
+            prompt: string;
+            modelId: string;
+            workflow: components["schemas"]["RunWorkflow"];
+            /**
+             * @default null
+             * @enum {string|null}
+             */
+            generationIntent: "followup-design" | "interactive-prototype" | "prd-prototype" | "prd-flow" | null;
+            prdScreenPlan?: components["schemas"]["RunPrdScreenPlan"];
+            targetSurface: components["schemas"]["RunTargetSurface"];
+            designStyle: components["schemas"]["RunDesignStyle"];
+            sourceIds?: components["schemas"]["RunSourceIds"];
+            /**
+             * @description Immutable ready ArtifactVersion selections in runtime target order; Generate Prototype requires one or more explicit screen ids on every source target
+             * @default []
+             */
+            artifactTargets: components["schemas"]["RunArtifactTarget"][];
+            /** @default [] */
+            requestedArtifactKinds: components["schemas"]["RuntimeRequestedArtifactKind"][];
+            /**
+             * @description Canvas snapshots use unique screen references and only expose references declared by the snapshot; enforced by the runtime Zod contract.
+             * @default null
+             */
+            canvasSnapshot: {
+                /** @enum {string} */
+                protocol: "workbench.canvas-snapshot.v1";
+                /** @description Canvas entity ids are bounded opaque identifiers and cannot be URI schemes; enforced by the runtime Zod contract. */
+                projectId: string;
+                /** @description Canvas entity ids are bounded opaque identifiers and cannot be URI schemes; enforced by the runtime Zod contract. */
+                threadId: string;
+                /** @description Canvas entity ids are bounded opaque identifiers and cannot be URI schemes; enforced by the runtime Zod contract. */
+                runId: string | null;
+                /** @description Canvas entity ids are bounded opaque identifiers and cannot be URI schemes; enforced by the runtime Zod contract. */
+                boardId: string;
+                /** @description Canvas browser session ids are bounded opaque identifiers and cannot be URI schemes; enforced by the runtime Zod contract. */
+                clientSessionId: string;
+                projectSessionGeneration: components["schemas"]["Revision"];
+                boardRevision: components["schemas"]["Revision"];
+                canvasStateRevision: components["schemas"]["Revision"];
+                /** Format: date-time */
+                capturedAt: string;
+                /** Format: date-time */
+                expiresAt: string;
+                viewport: components["schemas"]["CanvasViewport"];
+                screens: components["schemas"]["CanvasScreenSummary"][];
+                visibleScreens: components["schemas"]["CanvasAgentScreenReference"][];
+                selectedScreens: components["schemas"]["CanvasAgentScreenReference"][];
+            } | null;
+        };
         PrototypePlanInput: {
             plan: components["schemas"]["PrototypePlan"];
             request: components["schemas"]["StartRunRequest"];
-            snapshot: {
-                sources: {
-                    sourceId: string;
-                    kind: components["schemas"]["ImportSourceKind"];
-                    label: string;
-                    checksum: string;
-                    descriptor: {
-                        /** @enum {string} */
-                        kind: "file";
-                        fileAssetId: string;
-                        originalName: components["schemas"]["FileName"];
-                        mediaType: string;
-                    } | {
-                        /** @enum {string} */
-                        kind: "design_md";
-                        fileAssetId: string;
-                        originalName: components["schemas"]["FileName"];
-                        mediaType: string;
-                    } | {
-                        /** @enum {string} */
-                        kind: "url_snapshot";
-                        /**
-                         * Format: uri
-                         * @description Import source locators use HTTP(S); DNS, redirect and private-network checks are enforced by the Import Worker before fetching.
-                         */
-                        sourceUrl: string;
-                        /**
-                         * Format: uri
-                         * @description Import source locators use HTTP(S); DNS, redirect and private-network checks are enforced by the Import Worker before fetching.
-                         */
-                        resolvedUrl: string | null;
-                    } | {
-                        /** @enum {string} */
-                        kind: "github_snapshot";
-                        repository: string;
-                        commitSha: string;
-                    } | {
-                        /** @enum {string} */
-                        kind: "figma_snapshot";
-                        fileKey: string;
-                        versionId: string;
-                    };
-                    snapshot: components["schemas"]["RunSourceSnapshotManifest"];
-                }[];
-                designStyle: {
-                    artifactVersionId: string | null;
-                    snapshot: components["schemas"]["RuntimeDesignStyleSnapshot"] | components["schemas"]["RuntimePresetDesignStyleSnapshot"] | null;
-                    snapshotSha256: string | null;
-                };
-                knowledgeReleaseId: string | null;
-            } | null;
+            snapshot: components["schemas"]["PrototypeInputSnapshot"];
             sha256: string;
         };
         PrototypePlanList: components["schemas"]["PrototypePlan"][];
@@ -8372,57 +8003,7 @@ export interface components {
         PrototypeRevisionInput: {
             plan: components["schemas"]["PrototypePlan"];
             request: components["schemas"]["StartRunRequest"];
-            snapshot: {
-                sources: {
-                    sourceId: string;
-                    kind: components["schemas"]["ImportSourceKind"];
-                    label: string;
-                    checksum: string;
-                    descriptor: {
-                        /** @enum {string} */
-                        kind: "file";
-                        fileAssetId: string;
-                        originalName: components["schemas"]["FileName"];
-                        mediaType: string;
-                    } | {
-                        /** @enum {string} */
-                        kind: "design_md";
-                        fileAssetId: string;
-                        originalName: components["schemas"]["FileName"];
-                        mediaType: string;
-                    } | {
-                        /** @enum {string} */
-                        kind: "url_snapshot";
-                        /**
-                         * Format: uri
-                         * @description Import source locators use HTTP(S); DNS, redirect and private-network checks are enforced by the Import Worker before fetching.
-                         */
-                        sourceUrl: string;
-                        /**
-                         * Format: uri
-                         * @description Import source locators use HTTP(S); DNS, redirect and private-network checks are enforced by the Import Worker before fetching.
-                         */
-                        resolvedUrl: string | null;
-                    } | {
-                        /** @enum {string} */
-                        kind: "github_snapshot";
-                        repository: string;
-                        commitSha: string;
-                    } | {
-                        /** @enum {string} */
-                        kind: "figma_snapshot";
-                        fileKey: string;
-                        versionId: string;
-                    };
-                    snapshot: components["schemas"]["RunSourceSnapshotManifest"];
-                }[];
-                designStyle: {
-                    artifactVersionId: string | null;
-                    snapshot: components["schemas"]["RuntimeDesignStyleSnapshot"] | components["schemas"]["RuntimePresetDesignStyleSnapshot"] | null;
-                    snapshotSha256: string | null;
-                };
-                knowledgeReleaseId: string | null;
-            } | null;
+            snapshot: components["schemas"]["PrototypeInputSnapshot"];
             sha256: string;
             modificationRequest: components["schemas"]["StartRunRequest"];
         };
@@ -8964,11 +8545,6 @@ export interface components {
             /** @enum {string} */
             expectedStatus: "candidate" | "poc" | "adopted";
         };
-        RevisePrototypeRevisionRequest: {
-            /** @description Feedback ids must be unique and all belong to the selected source revision. Uniqueness is enforced by Zod; ownership and open status are enforced in the transaction. */
-            feedbackIds: string[];
-            prompt?: string;
-        };
         RevokeProjectShareGrantsResponse: {
             projectId: string;
             /** @enum {number} */
@@ -9395,73 +8971,6 @@ export interface components {
                 finishedAt: string | null;
             };
         };
-        SubmitSubmissionIntentResponse: {
-            /** @description SubmissionIntent request target semantics, attachment positions, and submitted/cancelled lifecycle fields agree; enforced by runtime contracts and database constraints. */
-            intent: {
-                id: string;
-                projectId: string;
-                threadId: string;
-                status: components["schemas"]["SubmissionIntentStatus"];
-                request: components["schemas"]["SubmissionIntentRunRequest"];
-                attachments: components["schemas"]["SubmissionIntentAttachment"][];
-                runId: string | null;
-                lastFailure: {
-                    code: string;
-                    message: string;
-                    retryable: boolean;
-                } | null;
-                revision: components["schemas"]["Revision"];
-                /** Format: date-time */
-                submittedAt: string | null;
-                /** Format: date-time */
-                cancelledAt: string | null;
-                /** Format: date-time */
-                createdAt: string;
-                /** Format: date-time */
-                updatedAt: string;
-            };
-            /** @description Run Import Source snapshots belong to the Run and Project, preserve immutable manifests, and use contiguous request positions; enforced by the runtime Zod contract. */
-            run: {
-                id: string;
-                requestId: string;
-                projectId: string;
-                threadId: string;
-                retryOfRunId: string | null;
-                status: components["schemas"]["RunStatus"];
-                modelId: string;
-                workflow: components["schemas"]["RunWorkflow"];
-                /** @enum {string|null} */
-                generationIntent: "followup-design" | "interactive-prototype" | "prd-prototype" | "prd-flow" | null;
-                prdScreenPlan?: components["schemas"]["RunPrdScreenPlan"];
-                targetSurface: components["schemas"]["RunTargetSurface"];
-                designStyle: components["schemas"]["RunDesignStyle"];
-                artifactTargets: components["schemas"]["RunArtifactTargets"];
-                requestedArtifactKinds: components["schemas"]["RuntimeRequestedArtifactKind"][];
-                /** @description Immutable Import Source snapshots ordered by contiguous zero-based position */
-                sources: components["schemas"]["RunSourceSnapshot"][];
-                knowledgeReleaseId: string | null;
-                /** @enum {string|null} */
-                phase: "understanding" | "retrieving_knowledge" | "planning" | "generating" | "validating" | "publishing" | null;
-                phaseLabel: string | null;
-                progress: number | null;
-                attempt: number;
-                lastEventSequence: number;
-                /** Format: date-time */
-                cancelRequestedAt: string | null;
-                failure: {
-                    code: string;
-                    message: string;
-                    retryable: boolean;
-                } | null;
-                cancellationReason: string | null;
-                /** Format: date-time */
-                createdAt: string;
-                /** Format: date-time */
-                startedAt: string | null;
-                /** Format: date-time */
-                finishedAt: string | null;
-            };
-        };
         ThreadEntryList: {
             items: components["schemas"]["ThreadEntry"][];
             nextAfterSequence: number | null;
@@ -9483,11 +8992,6 @@ export interface components {
         UpdateProjectRequest: {
             title?: string;
             summary?: string;
-        };
-        UpdatePrototypePlanRequest: {
-            prompt: string;
-            title: string;
-            generationRequest: components["schemas"]["StartRunRequest"];
         };
         UpdateThreadRequest: {
             title: string;
@@ -9521,7 +9025,6 @@ export interface components {
         RequirementSessionId: string;
         RequirementConfirmationId: string;
         RequirementTurnId: string;
-        SubmissionIntentId: string;
         RunId: string;
         ArtifactId: string;
         ArtifactVersionId: string;
@@ -9584,7 +9087,6 @@ export interface components {
         RequirementSessionId: components["schemas"]["RequirementSessionId"];
         RequirementConfirmationId: components["schemas"]["RequirementConfirmationId"];
         RequirementTurnId: components["schemas"]["RequirementTurnId"];
-        SubmissionIntentId: components["schemas"]["SubmissionIntentId"];
         RunId: components["schemas"]["RunId"];
         ArtifactId: components["schemas"]["ArtifactId"];
         ArtifactVersionId: components["schemas"]["ArtifactVersionId"];
@@ -13038,143 +12540,6 @@ export interface operations {
             428: components["responses"]["Problem"];
         };
     };
-    createSubmissionIntent: {
-        parameters: {
-            query?: never;
-            header: {
-                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
-            };
-            path: {
-                threadId: components["parameters"]["ThreadId"];
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["CreateSubmissionIntentRequest"];
-            };
-        };
-        responses: {
-            /** @description Durable SubmissionIntent and ordered attachment slots created */
-            201: {
-                headers: {
-                    ETag: components["headers"]["ETag"];
-                    Location?: string;
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["SubmissionIntent"];
-                };
-            };
-            400: components["responses"]["Problem"];
-            404: components["responses"]["Problem"];
-            409: components["responses"]["Problem"];
-            502: components["responses"]["Problem"];
-            504: components["responses"]["Problem"];
-        };
-    };
-    getCurrentSubmissionIntent: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                threadId: components["parameters"]["ThreadId"];
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Current principal's unique active SubmissionIntent in the Thread or a strict null item */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["CurrentSubmissionIntent"];
-                };
-            };
-            404: components["responses"]["Problem"];
-        };
-    };
-    getSubmissionIntent: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                intentId: components["parameters"]["SubmissionIntentId"];
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Creator-owned durable SubmissionIntent */
-            200: {
-                headers: {
-                    ETag: components["headers"]["ETag"];
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["SubmissionIntent"];
-                };
-            };
-            404: components["responses"]["Problem"];
-        };
-    };
-    cancelSubmissionIntent: {
-        parameters: {
-            query?: never;
-            header: {
-                "If-Match": components["parameters"]["IfMatch"];
-            };
-            path: {
-                intentId: components["parameters"]["SubmissionIntentId"];
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Pending SubmissionIntent cancelled with compare-and-swap */
-            204: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            400: components["responses"]["Problem"];
-            404: components["responses"]["Problem"];
-            409: components["responses"]["Problem"];
-            412: components["responses"]["Problem"];
-            428: components["responses"]["Problem"];
-        };
-    };
-    submitSubmissionIntent: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                intentId: components["parameters"]["SubmissionIntentId"];
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description SubmissionIntent submitted through its durable Run idempotency key */
-            202: {
-                headers: {
-                    ETag: components["headers"]["ETag"];
-                    Location?: string;
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["SubmitSubmissionIntentResponse"];
-                };
-            };
-            404: components["responses"]["Problem"];
-            409: components["responses"]["Problem"];
-            502: components["responses"]["Problem"];
-            504: components["responses"]["Problem"];
-        };
-    };
     listRuns: {
         parameters: {
             query?: {
@@ -13458,40 +12823,6 @@ export interface operations {
             };
             403: components["responses"]["Problem"];
             404: components["responses"]["Problem"];
-        };
-    };
-    createPrototypePlan: {
-        parameters: {
-            query?: never;
-            header: {
-                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
-            };
-            path: {
-                projectId: components["parameters"]["ProjectId"];
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["CreatePrototypePlanRequest"];
-            };
-        };
-        responses: {
-            /** @description Create an idempotent visual prototype plan */
-            201: {
-                headers: {
-                    ETag: components["headers"]["ETag"];
-                    Location?: string;
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["PrototypePlan"];
-                };
-            };
-            400: components["responses"]["Problem"];
-            403: components["responses"]["Problem"];
-            404: components["responses"]["Problem"];
-            409: components["responses"]["Problem"];
         };
     };
     getPrototypeRevision: {
@@ -13823,82 +13154,6 @@ export interface operations {
             503: components["responses"]["Problem"];
         };
     };
-    revisePrototype: {
-        parameters: {
-            query?: never;
-            header: {
-                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
-                "If-Match": components["parameters"]["IfMatch"];
-            };
-            path: {
-                projectId: components["parameters"]["ProjectId"];
-                revisionId: components["parameters"]["PrototypeRevisionId"];
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["RevisePrototypeRevisionRequest"];
-            };
-        };
-        responses: {
-            /** @description Generate a new immutable version from anchored feedback */
-            202: {
-                headers: {
-                    ETag: components["headers"]["ETag"];
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["PrototypePlan"];
-                };
-            };
-            400: components["responses"]["Problem"];
-            403: components["responses"]["Problem"];
-            404: components["responses"]["Problem"];
-            409: components["responses"]["Problem"];
-            412: components["responses"]["Problem"];
-            428: components["responses"]["Problem"];
-            503: components["responses"]["Problem"];
-        };
-    };
-    approvePrototypePlan: {
-        parameters: {
-            query?: never;
-            header: {
-                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
-                "If-Match": components["parameters"]["IfMatch"];
-            };
-            path: {
-                projectId: components["parameters"]["ProjectId"];
-                planId: components["parameters"]["PlanId"];
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["PrototypeWorkflowActionRequest"];
-            };
-        };
-        responses: {
-            /** @description Approve a plan and enqueue the Temporal generation workflow */
-            202: {
-                headers: {
-                    ETag: components["headers"]["ETag"];
-                    Location?: string;
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["PrototypePlan"];
-                };
-            };
-            403: components["responses"]["Problem"];
-            404: components["responses"]["Problem"];
-            409: components["responses"]["Problem"];
-            412: components["responses"]["Problem"];
-            428: components["responses"]["Problem"];
-            503: components["responses"]["Problem"];
-        };
-    };
     getPrototypePlanInput: {
         parameters: {
             query?: never;
@@ -13926,44 +13181,6 @@ export interface operations {
             409: components["responses"]["Problem"];
         };
     };
-    updatePrototypePlanInput: {
-        parameters: {
-            query?: never;
-            header: {
-                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
-                "If-Match": components["parameters"]["IfMatch"];
-            };
-            path: {
-                projectId: components["parameters"]["ProjectId"];
-                planId: components["parameters"]["PlanId"];
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["UpdatePrototypePlanRequest"];
-            };
-        };
-        responses: {
-            /** @description Adjust draft input atomically and preserve fixed context */
-            200: {
-                headers: {
-                    ETag: components["headers"]["ETag"];
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["PrototypePlan"];
-                };
-            };
-            400: components["responses"]["Problem"];
-            403: components["responses"]["Problem"];
-            404: components["responses"]["Problem"];
-            409: components["responses"]["Problem"];
-            412: components["responses"]["Problem"];
-            428: components["responses"]["Problem"];
-            503: components["responses"]["Problem"];
-        };
-    };
     getPrototypeRevisionInput: {
         parameters: {
             query?: never;
@@ -13988,44 +13205,6 @@ export interface operations {
             403: components["responses"]["Problem"];
             404: components["responses"]["Problem"];
             409: components["responses"]["Problem"];
-        };
-    };
-    createPrototypeRevisionPlan: {
-        parameters: {
-            query?: never;
-            header: {
-                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
-                "If-Match": components["parameters"]["IfMatch"];
-            };
-            path: {
-                projectId: components["parameters"]["ProjectId"];
-                revisionId: components["parameters"]["PrototypeRevisionId"];
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["CreatePrototypeRevisionPlanRequest"];
-            };
-        };
-        responses: {
-            /** @description Create a reviewable modification plan in the source version family */
-            201: {
-                headers: {
-                    ETag: components["headers"]["ETag"];
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["PrototypePlan"];
-                };
-            };
-            400: components["responses"]["Problem"];
-            403: components["responses"]["Problem"];
-            404: components["responses"]["Problem"];
-            409: components["responses"]["Problem"];
-            412: components["responses"]["Problem"];
-            428: components["responses"]["Problem"];
-            503: components["responses"]["Problem"];
         };
     };
     getPrototypeProgress: {

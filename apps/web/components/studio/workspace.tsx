@@ -11,7 +11,7 @@ import {
   useRevokeWorkbenchPrototypeV2Share,
   useReviewWorkbenchPrototypeV2Revision,
   useRetryWorkbenchPrototypeV2Export,
-  usePrototypeV2PlanAction,
+  useCancelWorkbenchPrototypeV2Plan,
   useWorkbenchPrototypeV2Plan,
   useWorkbenchPrototypeV2Plans,
   useWorkbenchPrototypeV2Revision,
@@ -402,7 +402,7 @@ export function StudioWorkspace({
     projectId,
     selectedRevision?.id ?? "",
   );
-  const cancelPlan = usePrototypeV2PlanAction(projectId, planId, "cancel");
+  const cancelPlan = useCancelWorkbenchPrototypeV2Plan(projectId, planId);
   const retryPlan = useRetryWorkbenchPrototypeV2Plan(projectId, planId);
   const createFeedback = useCreateWorkbenchPrototypeV2Feedback(
     projectId,

@@ -221,19 +221,10 @@ export function useStudioComposerSession(userId: string, projectId: string) {
       try {
         await writes.get(key)?.catch(() => {});
         const saved = await readComposerSession(key);
-        let legacy = "";
-        try {
-          legacy =
-            sessionStorage.getItem(
-              `workbench:studio:${userId}:${projectId}:prompt`,
-            ) ?? "";
-        } catch {
-          /* Optional legacy text. */
-        }
         if (active) {
           setState({
             key,
-            value: saved ?? emptySession(legacy),
+            value: saved ?? emptySession(),
             ready: true,
             persist: true,
           });

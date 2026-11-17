@@ -370,56 +370,6 @@ describe("Workbench Uppy multipart adapter", () => {
     upload.destroy();
   }, 20_000);
 
-  it("binds a durable SubmissionIntent slot with deterministic upload command keys", async () => {
-    const service = createService({
-      lifecycle: [
-        fileAsset("ready"),
-        fileAsset("ready", readyExtraction),
-      ],
-    });
-    const submissionIntent = {
-      submissionIntentId: "intent-1",
-      attachmentPosition: 3,
-      clientFingerprint: "submission-file:slot-1",
-    };
-    const upload = await createWorkbenchMultipartUpload({
-      projectId: "project-1",
-      file: testFile(),
-      service,
-      submissionIntent,
-      requestExtraction: true,
-      partTransport: successfulPartTransport([]),
-      pollIntervalMs: 100,
-      sleep: async () => undefined,
-    });
-
-    expect(upload.getCheckpoint()).toMatchObject({
-      fingerprint: expect.stringContaining("workbench-submission-file-v1"),
-      createIdempotencyKey: "submission-upload:intent-1:3",
-      completionIdempotencyKey: "submission-complete:intent-1:3",
-      extractionIdempotencyKey: "submission-extract:intent-1:3",
-      submissionIntent,
-    });
-
-    const result = await upload.start();
-
-    expect(result.phase).toBe("ready");
-    expect(service.createFileUpload).toHaveBeenCalledWith(
-      "project-1",
-      expect.objectContaining({ submissionIntent }),
-      "submission-upload:intent-1:3",
-    );
-    expect(service.completeFileUpload.mock.calls[0][3])
-      .toBe("submission-complete:intent-1:3");
-    expect(service.createFileExtraction).toHaveBeenCalledWith(
-      "file-1",
-      '"1"',
-      "submission-extract:intent-1:3",
-    );
-
-    upload.destroy();
-  }, 20_000);
-
   it("replays a lost create response with the identical digest-bound command", async () => {
     const service = createService();
     const created = {
@@ -458,7 +408,7 @@ describe("Workbench Uppy multipart adapter", () => {
     upload.destroy();
   }, 20_000);
 
-  it.each(["savedAt", "missingSubmissionIntent"])("rejects a retired %s checkpoint before making API calls", async (retiredField) => {
+  it.each(["savedAt", "submissionIntent"])("rejects a retired %s checkpoint before making API calls", async (retiredField) => {
     const file = testFile();
     const service = createService();
     const seed = await createWorkbenchMultipartUpload({ projectId: "project-1", file, service });
@@ -466,7 +416,7 @@ describe("Workbench Uppy multipart adapter", () => {
     seed.destroy();
     const retired = retiredField === "savedAt"
       ? { ...checkpoint, savedAt: 123 }
-      : { ...checkpoint, submissionIntent: undefined };
+      : { ...checkpoint, submissionIntent: { submissionIntentId: "retired" } };
     const databaseName = `retired-upload-${crypto.randomUUID()}`;
     const store = createWorkbenchUploadCheckpointStore({ databaseName, indexedDB });
     if (!store) throw new Error("fake IndexedDB was not available");

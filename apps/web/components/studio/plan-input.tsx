@@ -53,7 +53,7 @@ export function PlanInputSummary({
         <dd>
           {design.kind === "automatic"
             ? "自动设计"
-            : ((snapshot?.designStyle.snapshot &&
+            : ((snapshot.designStyle.snapshot &&
                 ("title" in snapshot.designStyle.snapshot
                   ? snapshot.designStyle.snapshot.title
                   : snapshot.designStyle.snapshot.label)) ??
@@ -63,7 +63,7 @@ export function PlanInputSummary({
         </dd>
         <dt>知识</dt>
         <dd>
-          {snapshot?.knowledgeReleaseId ?? "尚无可用知识版本，生成前需补齐"}
+          {snapshot.knowledgeReleaseId ?? "尚无可用知识版本，生成前需补齐"}
         </dd>
         <dt>来源</dt>
         <dd>
@@ -78,7 +78,7 @@ export function PlanInputSummary({
       ) : (
         <ul>
           {request.sourceIds.map((id) => {
-            const source = snapshot?.sources.find(
+            const source = snapshot.sources.find(
               (item) => item.sourceId === id,
             );
             return (

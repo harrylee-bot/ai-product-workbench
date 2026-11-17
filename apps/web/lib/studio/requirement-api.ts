@@ -7,6 +7,7 @@ import {
   confirmRequirementRequestSchema,
   requirementSessionSchema,
   requirementSessionsSchema,
+  requirementDiscussionRequestSchema,
 } from "@workbench/workbench-contracts";
 import type { WorkbenchApiClient } from "@/lib/workbench/api/client";
 import { useWorkbenchTransport } from "@/lib/workbench/transport/context";
@@ -48,12 +49,16 @@ export class StudioRequirementApi {
     request: z.input<typeof createRequirementSessionRequestSchema>,
     key: string,
   ) {
+    const parsed = createRequirementSessionRequestSchema.parse(request);
+    // The discussion contract defaults this retired canvas input to null.
+    // Omit it on the wire, as permitted by the authoritative OpenAPI request.
+    const generationRequest = discussionRequestBody(parsed.generationRequest);
     const r = await this.api.POST("/threads/{threadId}/requirement-sessions", {
       params: {
         path: { threadId },
         header: { "Idempotency-Key": normalizeIdempotencyKey(key) },
       },
-      body: createRequirementSessionRequestSchema.parse(request),
+      body: { ...parsed, generationRequest },
     });
     return versioned(
       requirementSessionSchema,
@@ -68,6 +73,7 @@ export class StudioRequirementApi {
     etag: string,
     key: string,
   ) {
+    const parsed = postRequirementMessageRequestSchema.parse(request);
     const r = await this.api.POST(
       "/requirement-sessions/{sessionId}/messages",
       {
@@ -78,7 +84,12 @@ export class StudioRequirementApi {
             "Idempotency-Key": normalizeIdempotencyKey(key),
           },
         },
-        body: postRequirementMessageRequestSchema.parse(request),
+        body: {
+          ...parsed,
+          generationRequest: parsed.generationRequest
+            ? discussionRequestBody(parsed.generationRequest)
+            : undefined,
+        },
       },
     );
     return versioned(
@@ -167,6 +178,12 @@ export class StudioRequirementApi {
       "update requirement analysis",
     );
   }
+}
+
+function discussionRequestBody(request: z.output<typeof requirementDiscussionRequestSchema>) {
+  const { canvasSnapshot, ...body } = request;
+  void canvasSnapshot;
+  return body;
 }
 export function useStudioRequirementApi() {
   const { api } = useWorkbenchTransport();

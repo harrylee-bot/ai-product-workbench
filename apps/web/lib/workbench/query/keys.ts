@@ -223,12 +223,6 @@ export const workbenchQueryKeys = {
     threadId: string,
     filters?: { afterSequence?: number; limit?: number },
   ) => [...workbenchQueryKeys.entryLists(projectId, threadId), filters ?? {}] as const,
-  submissionIntents: (threadId: string) =>
-    [...workbenchQueryKeys.all, "threads", threadId, "submission-intents"] as const,
-  submissionIntent: (intentId: string) =>
-    [...workbenchQueryKeys.all, "submission-intents", intentId] as const,
-  currentSubmissionIntent: (threadId: string) =>
-    [...workbenchQueryKeys.submissionIntents(threadId), "current"] as const,
   runs: () => [...workbenchQueryKeys.all, "runs"] as const,
   runLists: (projectId: string, threadId: string) =>
     [...workbenchQueryKeys.thread(projectId, threadId), "runs"] as const,

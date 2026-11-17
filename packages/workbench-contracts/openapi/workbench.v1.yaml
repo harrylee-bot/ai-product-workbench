@@ -11447,14 +11447,7 @@ components:
         byteSize:
           $ref: "#/components/schemas/SafeInteger"
         status:
-          type: string
-          enum:
-            - uploading
-            - verifying
-            - ready
-            - failed
-            - quarantined
-            - deleted
+          $ref: "#/components/schemas/FileStatus"
         revision:
           $ref: "#/components/schemas/Revision"
         sha256:
@@ -12096,29 +12089,6 @@ components:
         - selection
       additionalProperties: false
       description: Figma Export uses the fixed versioned Workbench Importer contract and does not accept client-controlled converter options.
-    SubmissionIntentClientFingerprint:
-      type: string
-      minLength: 1
-      maxLength: 256
-      description: SubmissionIntent upload slot fingerprints are bounded opaque values without control characters; they are independent from multipart checkpoint fingerprints.
-    SubmissionIntentUploadBinding:
-      type: object
-      properties:
-        submissionIntentId:
-          type: string
-          minLength: 1
-          maxLength: 128
-        attachmentPosition:
-          type: integer
-          minimum: 0
-          maximum: 49
-        clientFingerprint:
-          $ref: "#/components/schemas/SubmissionIntentClientFingerprint"
-      required:
-        - submissionIntentId
-        - attachmentPosition
-        - clientFingerprint
-      additionalProperties: false
     UploadObjectByteSize:
       type: integer
       exclusiveMinimum: 0
@@ -12138,8 +12108,6 @@ components:
         sha256:
           type: string
           pattern: ^[a-f0-9]{64}$
-        submissionIntent:
-          $ref: "#/components/schemas/SubmissionIntentUploadBinding"
       required:
         - fileName
         - declaredMediaType
@@ -12511,351 +12479,6 @@ components:
       required:
         - body
       additionalProperties: false
-    RunArtifactTarget:
-      type: object
-      properties:
-        artifactId:
-          type: string
-          minLength: 1
-          maxLength: 128
-        artifactVersionId:
-          type: string
-          minLength: 1
-          maxLength: 128
-        screenIds:
-          type: array
-          items:
-            type: string
-            minLength: 1
-            maxLength: 128
-          maxItems: 12
-          description: Screen ids within one Artifact target are unique; enforced by the runtime Zod contract.
-          uniqueItems: true
-      required:
-        - artifactId
-        - artifactVersionId
-        - screenIds
-      additionalProperties: false
-    RunArtifactTargets:
-      type: array
-      items:
-        $ref: "#/components/schemas/RunArtifactTarget"
-      maxItems: 12
-      description: Immutable ready ArtifactVersion selections in original request order, including explicit Generate Prototype source screens
-    RunDesignStyleArtifact:
-      type: object
-      properties:
-        kind:
-          type: string
-          enum:
-            - artifact
-        artifactVersionId:
-          type: string
-          minLength: 1
-          maxLength: 128
-      required:
-        - kind
-        - artifactVersionId
-      additionalProperties: false
-    RunDesignStyleAutomatic:
-      type: object
-      properties:
-        kind:
-          type: string
-          enum:
-            - automatic
-      required:
-        - kind
-      additionalProperties: false
-    DesignPresetChecksum:
-      type: string
-      pattern: ^[a-f0-9]{64}$
-    DesignPresetId:
-      type: string
-      minLength: 1
-      maxLength: 128
-      pattern: ^[a-z0-9][a-z0-9._:-]*$
-    RunDesignStylePreset:
-      type: object
-      properties:
-        kind:
-          type: string
-          enum:
-            - preset
-        presetId:
-          $ref: "#/components/schemas/DesignPresetId"
-        version:
-          type: integer
-          exclusiveMinimum: 0
-        checksum:
-          $ref: "#/components/schemas/DesignPresetChecksum"
-      required:
-        - kind
-        - presetId
-        - version
-        - checksum
-      additionalProperties: false
-    RunDesignStyle:
-      oneOf:
-        - $ref: "#/components/schemas/RunDesignStyleAutomatic"
-        - $ref: "#/components/schemas/RunDesignStylePreset"
-        - $ref: "#/components/schemas/RunDesignStyleArtifact"
-      discriminator:
-        propertyName: kind
-        mapping:
-          automatic: "#/components/schemas/RunDesignStyleAutomatic"
-          preset: "#/components/schemas/RunDesignStylePreset"
-          artifact: "#/components/schemas/RunDesignStyleArtifact"
-    RunGenerationIntent:
-      type: string
-      enum:
-        - followup-design
-        - interactive-prototype
-        - prd-prototype
-        - prd-flow
-    RunPrdScreenPlan:
-      type: array
-      items:
-        type: object
-        properties:
-          id:
-            type: string
-            minLength: 1
-            maxLength: 96
-            pattern: ^[A-Za-z][A-Za-z0-9]*(?:[-_.:][A-Za-z0-9]+)*$
-          title:
-            type: string
-            minLength: 1
-            maxLength: 160
-        required:
-          - id
-          - title
-        additionalProperties: false
-      minItems: 1
-      maxItems: 12
-      description: PRD-generated screen ids are unique, ordered and bounded to twelve; single-screen and multi-screen cardinality follows the explicit generation intent.
-    RunSourceIds:
-      type: array
-      items:
-        type: string
-        minLength: 1
-        maxLength: 128
-      maxItems: 50
-      default: []
-      description: Unique ready Import Source ids resolved before Run creation
-      uniqueItems: true
-    RunTargetSurface:
-      type: string
-      enum:
-        - app
-        - web
-    RuntimeRequestedArtifactKind:
-      type: string
-      enum:
-        - prd
-        - prototype
-        - image
-        - code
-        - document
-        - data
-    RunWorkflow:
-      type: string
-      enum:
-        - generate
-        - redesign
-        - ideate
-        - edit
-    StartRunRequest:
-      type: object
-      properties:
-        requirementConfirmationId:
-          type: string
-          minLength: 1
-          maxLength: 128
-        prompt:
-          type: string
-          minLength: 1
-          maxLength: 50000
-        modelId:
-          type: string
-          minLength: 1
-          maxLength: 128
-        workflow:
-          $ref: "#/components/schemas/RunWorkflow"
-        generationIntent:
-          type:
-            - string
-            - "null"
-          enum:
-            - followup-design
-            - interactive-prototype
-            - prd-prototype
-            - prd-flow
-            - null
-          default: null
-        prdScreenPlan:
-          $ref: "#/components/schemas/RunPrdScreenPlan"
-        targetSurface:
-          $ref: "#/components/schemas/RunTargetSurface"
-        designStyle:
-          $ref: "#/components/schemas/RunDesignStyle"
-        sourceIds:
-          $ref: "#/components/schemas/RunSourceIds"
-        artifactTargets:
-          type: array
-          items:
-            $ref: "#/components/schemas/RunArtifactTarget"
-          maxItems: 12
-          default: []
-          description: Immutable ready ArtifactVersion selections in runtime target order; Generate Prototype requires one or more explicit screen ids on every source target
-        requestedArtifactKinds:
-          type: array
-          items:
-            $ref: "#/components/schemas/RuntimeRequestedArtifactKind"
-          maxItems: 12
-          default: []
-        canvasSnapshot:
-          type:
-            - object
-            - "null"
-          properties:
-            protocol:
-              type: string
-              enum:
-                - workbench.canvas-snapshot.v1
-            projectId:
-              type: string
-              minLength: 1
-              maxLength: 128
-              pattern: ^[A-Za-z0-9][A-Za-z0-9._:-]*$
-              description: Canvas entity ids are bounded opaque identifiers and cannot be URI schemes; enforced by the runtime Zod contract.
-            threadId:
-              type: string
-              minLength: 1
-              maxLength: 128
-              pattern: ^[A-Za-z0-9][A-Za-z0-9._:-]*$
-              description: Canvas entity ids are bounded opaque identifiers and cannot be URI schemes; enforced by the runtime Zod contract.
-            runId:
-              type:
-                - string
-                - "null"
-              minLength: 1
-              maxLength: 128
-              pattern: ^[A-Za-z0-9][A-Za-z0-9._:-]*$
-              description: Canvas entity ids are bounded opaque identifiers and cannot be URI schemes; enforced by the runtime Zod contract.
-            boardId:
-              type: string
-              minLength: 1
-              maxLength: 128
-              pattern: ^[A-Za-z0-9][A-Za-z0-9._:-]*$
-              description: Canvas entity ids are bounded opaque identifiers and cannot be URI schemes; enforced by the runtime Zod contract.
-            clientSessionId:
-              type: string
-              minLength: 8
-              maxLength: 128
-              pattern: ^[A-Za-z0-9][A-Za-z0-9._:-]*$
-              description: Canvas browser session ids are bounded opaque identifiers and cannot be URI schemes; enforced by the runtime Zod contract.
-            projectSessionGeneration:
-              $ref: "#/components/schemas/Revision"
-            boardRevision:
-              $ref: "#/components/schemas/Revision"
-            canvasStateRevision:
-              $ref: "#/components/schemas/Revision"
-            capturedAt:
-              type: string
-              format: date-time
-            expiresAt:
-              type: string
-              format: date-time
-            viewport:
-              $ref: "#/components/schemas/CanvasViewport"
-            screens:
-              type: array
-              items:
-                $ref: "#/components/schemas/CanvasScreenSummary"
-              maxItems: 512
-            visibleScreens:
-              type: array
-              items:
-                $ref: "#/components/schemas/CanvasAgentScreenReference"
-              maxItems: 512
-            selectedScreens:
-              type: array
-              items:
-                $ref: "#/components/schemas/CanvasAgentScreenReference"
-              maxItems: 512
-          default: null
-          required:
-            - protocol
-            - projectId
-            - threadId
-            - runId
-            - boardId
-            - clientSessionId
-            - projectSessionGeneration
-            - boardRevision
-            - canvasStateRevision
-            - capturedAt
-            - expiresAt
-            - viewport
-            - screens
-            - visibleScreens
-            - selectedScreens
-          additionalProperties: false
-          description: Canvas snapshots use unique screen references and only expose references declared by the snapshot; enforced by the runtime Zod contract.
-      required:
-        - prompt
-        - modelId
-        - workflow
-        - targetSurface
-        - designStyle
-      additionalProperties: false
-      description: Redesign requires a ready Import Source; Edit requires an Artifact target; Generate accepts explicit source screen targets or one fixed PRD with prdScreenPlan when prototype is requested; Redesign and Ideate forbid targets. Enforced by the runtime Zod contract.
-    CreatePrototypePlanRequest:
-      type: object
-      properties:
-        prompt:
-          type: string
-          minLength: 1
-          maxLength: 20000
-        title:
-          type: string
-          minLength: 1
-          maxLength: 240
-        generationRequest:
-          $ref: "#/components/schemas/StartRunRequest"
-      required:
-        - prompt
-        - title
-        - generationRequest
-      additionalProperties: false
-    CreatePrototypeRevisionPlanRequest:
-      type: object
-      properties:
-        prompt:
-          type: string
-          minLength: 1
-          maxLength: 20000
-        title:
-          type: string
-          minLength: 1
-          maxLength: 240
-        generationRequest:
-          $ref: "#/components/schemas/StartRunRequest"
-        feedbackIds:
-          type: array
-          items:
-            type: string
-            minLength: 1
-            maxLength: 128
-          maxItems: 100
-          default: []
-      required:
-        - prompt
-        - title
-        - generationRequest
-      additionalProperties: false
-      description: Selected feedback ids are unique; transactional validation binds them to the exact source revision and editor permission.
     CreatePrototypeShareRequest:
       type: object
       properties:
@@ -13054,23 +12677,160 @@ components:
             - feedbackIds
             - anchor
           additionalProperties: false
-        - type: object
-          properties:
-            kind:
-              type: string
-              enum:
-                - plan
-            planId:
-              type: string
-              minLength: 1
-              maxLength: 128
-            expectedRevision:
-              $ref: "#/components/schemas/Revision"
-          required:
-            - kind
-            - planId
-            - expectedRevision
-          additionalProperties: false
+    RunArtifactTarget:
+      type: object
+      properties:
+        artifactId:
+          type: string
+          minLength: 1
+          maxLength: 128
+        artifactVersionId:
+          type: string
+          minLength: 1
+          maxLength: 128
+        screenIds:
+          type: array
+          items:
+            type: string
+            minLength: 1
+            maxLength: 128
+          maxItems: 12
+          description: Screen ids within one Artifact target are unique; enforced by the runtime Zod contract.
+          uniqueItems: true
+      required:
+        - artifactId
+        - artifactVersionId
+        - screenIds
+      additionalProperties: false
+    RunArtifactTargets:
+      type: array
+      items:
+        $ref: "#/components/schemas/RunArtifactTarget"
+      maxItems: 12
+      description: Immutable ready ArtifactVersion selections in original request order, including explicit Generate Prototype source screens
+    RunDesignStyleArtifact:
+      type: object
+      properties:
+        kind:
+          type: string
+          enum:
+            - artifact
+        artifactVersionId:
+          type: string
+          minLength: 1
+          maxLength: 128
+      required:
+        - kind
+        - artifactVersionId
+      additionalProperties: false
+    RunDesignStyleAutomatic:
+      type: object
+      properties:
+        kind:
+          type: string
+          enum:
+            - automatic
+      required:
+        - kind
+      additionalProperties: false
+    DesignPresetChecksum:
+      type: string
+      pattern: ^[a-f0-9]{64}$
+    DesignPresetId:
+      type: string
+      minLength: 1
+      maxLength: 128
+      pattern: ^[a-z0-9][a-z0-9._:-]*$
+    RunDesignStylePreset:
+      type: object
+      properties:
+        kind:
+          type: string
+          enum:
+            - preset
+        presetId:
+          $ref: "#/components/schemas/DesignPresetId"
+        version:
+          type: integer
+          exclusiveMinimum: 0
+        checksum:
+          $ref: "#/components/schemas/DesignPresetChecksum"
+      required:
+        - kind
+        - presetId
+        - version
+        - checksum
+      additionalProperties: false
+    RunDesignStyle:
+      oneOf:
+        - $ref: "#/components/schemas/RunDesignStyleAutomatic"
+        - $ref: "#/components/schemas/RunDesignStylePreset"
+        - $ref: "#/components/schemas/RunDesignStyleArtifact"
+      discriminator:
+        propertyName: kind
+        mapping:
+          automatic: "#/components/schemas/RunDesignStyleAutomatic"
+          preset: "#/components/schemas/RunDesignStylePreset"
+          artifact: "#/components/schemas/RunDesignStyleArtifact"
+    RunGenerationIntent:
+      type: string
+      enum:
+        - followup-design
+        - interactive-prototype
+        - prd-prototype
+        - prd-flow
+    RunPrdScreenPlan:
+      type: array
+      items:
+        type: object
+        properties:
+          id:
+            type: string
+            minLength: 1
+            maxLength: 96
+            pattern: ^[A-Za-z][A-Za-z0-9]*(?:[-_.:][A-Za-z0-9]+)*$
+          title:
+            type: string
+            minLength: 1
+            maxLength: 160
+        required:
+          - id
+          - title
+        additionalProperties: false
+      minItems: 1
+      maxItems: 12
+      description: PRD-generated screen ids are unique, ordered and bounded to twelve; single-screen and multi-screen cardinality follows the explicit generation intent.
+    RunSourceIds:
+      type: array
+      items:
+        type: string
+        minLength: 1
+        maxLength: 128
+      maxItems: 50
+      default: []
+      description: Unique ready Import Source ids resolved before Run creation
+      uniqueItems: true
+    RunTargetSurface:
+      type: string
+      enum:
+        - app
+        - web
+    RuntimeRequestedArtifactKind:
+      type: string
+      enum:
+        - prd
+        - prototype
+        - image
+        - code
+        - document
+        - data
+    RunWorkflow:
+      type: string
+      enum:
+        - generate
+        - redesign
+        - ideate
+        - edit
     RequirementDiscussionRequest:
       type: object
       properties:
@@ -13117,94 +12877,7 @@ components:
           maxItems: 12
           default: []
         canvasSnapshot:
-          type:
-            - object
-            - "null"
-          properties:
-            protocol:
-              type: string
-              enum:
-                - workbench.canvas-snapshot.v1
-            projectId:
-              type: string
-              minLength: 1
-              maxLength: 128
-              pattern: ^[A-Za-z0-9][A-Za-z0-9._:-]*$
-              description: Canvas entity ids are bounded opaque identifiers and cannot be URI schemes; enforced by the runtime Zod contract.
-            threadId:
-              type: string
-              minLength: 1
-              maxLength: 128
-              pattern: ^[A-Za-z0-9][A-Za-z0-9._:-]*$
-              description: Canvas entity ids are bounded opaque identifiers and cannot be URI schemes; enforced by the runtime Zod contract.
-            runId:
-              type:
-                - string
-                - "null"
-              minLength: 1
-              maxLength: 128
-              pattern: ^[A-Za-z0-9][A-Za-z0-9._:-]*$
-              description: Canvas entity ids are bounded opaque identifiers and cannot be URI schemes; enforced by the runtime Zod contract.
-            boardId:
-              type: string
-              minLength: 1
-              maxLength: 128
-              pattern: ^[A-Za-z0-9][A-Za-z0-9._:-]*$
-              description: Canvas entity ids are bounded opaque identifiers and cannot be URI schemes; enforced by the runtime Zod contract.
-            clientSessionId:
-              type: string
-              minLength: 8
-              maxLength: 128
-              pattern: ^[A-Za-z0-9][A-Za-z0-9._:-]*$
-              description: Canvas browser session ids are bounded opaque identifiers and cannot be URI schemes; enforced by the runtime Zod contract.
-            projectSessionGeneration:
-              $ref: "#/components/schemas/Revision"
-            boardRevision:
-              $ref: "#/components/schemas/Revision"
-            canvasStateRevision:
-              $ref: "#/components/schemas/Revision"
-            capturedAt:
-              type: string
-              format: date-time
-            expiresAt:
-              type: string
-              format: date-time
-            viewport:
-              $ref: "#/components/schemas/CanvasViewport"
-            screens:
-              type: array
-              items:
-                $ref: "#/components/schemas/CanvasScreenSummary"
-              maxItems: 512
-            visibleScreens:
-              type: array
-              items:
-                $ref: "#/components/schemas/CanvasAgentScreenReference"
-              maxItems: 512
-            selectedScreens:
-              type: array
-              items:
-                $ref: "#/components/schemas/CanvasAgentScreenReference"
-              maxItems: 512
-          default: null
-          required:
-            - protocol
-            - projectId
-            - threadId
-            - runId
-            - boardId
-            - clientSessionId
-            - projectSessionGeneration
-            - boardRevision
-            - canvasStateRevision
-            - capturedAt
-            - expiresAt
-            - viewport
-            - screens
-            - visibleScreens
-            - selectedScreens
-          additionalProperties: false
-          description: Canvas snapshots use unique screen references and only expose references declared by the snapshot; enforced by the runtime Zod contract.
+          type: "null"
       required:
         - prompt
         - modelId
@@ -13222,210 +12895,6 @@ components:
       required:
         - generationRequest
       additionalProperties: false
-    SubmissionIntentAttachmentRequest:
-      oneOf:
-        - type: object
-          properties:
-            kind:
-              type: string
-              enum:
-                - existing
-            fileAssetId:
-              type: string
-              minLength: 1
-              maxLength: 128
-          required:
-            - kind
-            - fileAssetId
-          additionalProperties: false
-        - type: object
-          properties:
-            kind:
-              type: string
-              enum:
-                - upload
-            clientFingerprint:
-              $ref: "#/components/schemas/SubmissionIntentClientFingerprint"
-            fileName:
-              $ref: "#/components/schemas/FileName"
-            declaredMediaType:
-              type: string
-              minLength: 3
-              maxLength: 255
-              pattern: ^[a-z0-9][a-z0-9!#$&^_.+-]*\/[a-z0-9][a-z0-9!#$&^_.+-]*$
-            byteSize:
-              $ref: "#/components/schemas/UploadObjectByteSize"
-            lastModified:
-              $ref: "#/components/schemas/SafeInteger"
-          required:
-            - kind
-            - clientFingerprint
-            - fileName
-            - declaredMediaType
-            - byteSize
-            - lastModified
-          additionalProperties: false
-    SubmissionIntentRunRequest:
-      type: object
-      properties:
-        requirementConfirmationId:
-          type: string
-          minLength: 1
-          maxLength: 128
-        prompt:
-          type: string
-          minLength: 1
-          maxLength: 50000
-        modelId:
-          type: string
-          minLength: 1
-          maxLength: 128
-        workflow:
-          $ref: "#/components/schemas/RunWorkflow"
-        generationIntent:
-          type:
-            - string
-            - "null"
-          enum:
-            - followup-design
-            - interactive-prototype
-            - prd-prototype
-            - prd-flow
-            - null
-          default: null
-        prdScreenPlan:
-          $ref: "#/components/schemas/RunPrdScreenPlan"
-        targetSurface:
-          $ref: "#/components/schemas/RunTargetSurface"
-        designStyle:
-          $ref: "#/components/schemas/RunDesignStyle"
-        sourceIds:
-          $ref: "#/components/schemas/RunSourceIds"
-        artifactTargets:
-          type: array
-          items:
-            $ref: "#/components/schemas/RunArtifactTarget"
-          maxItems: 12
-          default: []
-          description: Immutable ready ArtifactVersion selections in runtime target order; Generate Prototype requires one or more explicit screen ids on every source target
-        requestedArtifactKinds:
-          type: array
-          items:
-            $ref: "#/components/schemas/RuntimeRequestedArtifactKind"
-          maxItems: 12
-          default: []
-        canvasSnapshot:
-          type:
-            - object
-            - "null"
-          properties:
-            protocol:
-              type: string
-              enum:
-                - workbench.canvas-snapshot.v1
-            projectId:
-              type: string
-              minLength: 1
-              maxLength: 128
-              pattern: ^[A-Za-z0-9][A-Za-z0-9._:-]*$
-              description: Canvas entity ids are bounded opaque identifiers and cannot be URI schemes; enforced by the runtime Zod contract.
-            threadId:
-              type: string
-              minLength: 1
-              maxLength: 128
-              pattern: ^[A-Za-z0-9][A-Za-z0-9._:-]*$
-              description: Canvas entity ids are bounded opaque identifiers and cannot be URI schemes; enforced by the runtime Zod contract.
-            runId:
-              type:
-                - string
-                - "null"
-              minLength: 1
-              maxLength: 128
-              pattern: ^[A-Za-z0-9][A-Za-z0-9._:-]*$
-              description: Canvas entity ids are bounded opaque identifiers and cannot be URI schemes; enforced by the runtime Zod contract.
-            boardId:
-              type: string
-              minLength: 1
-              maxLength: 128
-              pattern: ^[A-Za-z0-9][A-Za-z0-9._:-]*$
-              description: Canvas entity ids are bounded opaque identifiers and cannot be URI schemes; enforced by the runtime Zod contract.
-            clientSessionId:
-              type: string
-              minLength: 8
-              maxLength: 128
-              pattern: ^[A-Za-z0-9][A-Za-z0-9._:-]*$
-              description: Canvas browser session ids are bounded opaque identifiers and cannot be URI schemes; enforced by the runtime Zod contract.
-            projectSessionGeneration:
-              $ref: "#/components/schemas/Revision"
-            boardRevision:
-              $ref: "#/components/schemas/Revision"
-            canvasStateRevision:
-              $ref: "#/components/schemas/Revision"
-            capturedAt:
-              type: string
-              format: date-time
-            expiresAt:
-              type: string
-              format: date-time
-            viewport:
-              $ref: "#/components/schemas/CanvasViewport"
-            screens:
-              type: array
-              items:
-                $ref: "#/components/schemas/CanvasScreenSummary"
-              maxItems: 512
-            visibleScreens:
-              type: array
-              items:
-                $ref: "#/components/schemas/CanvasAgentScreenReference"
-              maxItems: 512
-            selectedScreens:
-              type: array
-              items:
-                $ref: "#/components/schemas/CanvasAgentScreenReference"
-              maxItems: 512
-          default: null
-          required:
-            - protocol
-            - projectId
-            - threadId
-            - runId
-            - boardId
-            - clientSessionId
-            - projectSessionGeneration
-            - boardRevision
-            - canvasStateRevision
-            - capturedAt
-            - expiresAt
-            - viewport
-            - screens
-            - visibleScreens
-            - selectedScreens
-          additionalProperties: false
-          description: Canvas snapshots use unique screen references and only expose references declared by the snapshot; enforced by the runtime Zod contract.
-      required:
-        - prompt
-        - modelId
-        - workflow
-        - targetSurface
-        - designStyle
-      additionalProperties: false
-      description: SubmissionIntent requests directly enforce the same workflow, Artifact target, requested output, and pre-submission Canvas scope semantics as StartRun.
-    CreateSubmissionIntentRequest:
-      type: object
-      properties:
-        request:
-          $ref: "#/components/schemas/SubmissionIntentRunRequest"
-        attachments:
-          type: array
-          items:
-            $ref: "#/components/schemas/SubmissionIntentAttachmentRequest"
-          maxItems: 50
-      required:
-        - request
-        - attachments
-      additionalProperties: false
-      description: SubmissionIntent attachment sources are unique, Redesign has a durable source slot, and workflow target semantics directly share the live Run refinement without duplicate validation issues.
     CreateThreadRequest:
       type: object
       properties:
@@ -13435,293 +12904,6 @@ components:
           maxLength: 160
       required:
         - title
-    RunFailure:
-      type: object
-      properties:
-        code:
-          type: string
-          minLength: 1
-          maxLength: 120
-        message:
-          type: string
-          minLength: 1
-          maxLength: 2000
-        retryable:
-          type: boolean
-      required:
-        - code
-        - message
-        - retryable
-      additionalProperties: false
-    SubmissionIntentAttachment:
-      oneOf:
-        - type: object
-          properties:
-            position:
-              type: integer
-              minimum: 0
-              maximum: 49
-            fileStatus:
-              type:
-                - string
-                - "null"
-              enum:
-                - uploading
-                - verifying
-                - ready
-                - failed
-                - quarantined
-                - deleted
-                - null
-            kind:
-              type: string
-              enum:
-                - existing
-            fileAssetId:
-              type: string
-              minLength: 1
-              maxLength: 128
-          required:
-            - position
-            - fileStatus
-            - kind
-            - fileAssetId
-          additionalProperties: false
-        - type: object
-          properties:
-            position:
-              type: integer
-              minimum: 0
-              maximum: 49
-            fileStatus:
-              type:
-                - string
-                - "null"
-              enum:
-                - uploading
-                - verifying
-                - ready
-                - failed
-                - quarantined
-                - deleted
-                - null
-            kind:
-              type: string
-              enum:
-                - upload
-            fileAssetId:
-              type:
-                - string
-                - "null"
-              minLength: 1
-              maxLength: 128
-            clientFingerprint:
-              $ref: "#/components/schemas/SubmissionIntentClientFingerprint"
-            fileName:
-              $ref: "#/components/schemas/FileName"
-            declaredMediaType:
-              type: string
-              minLength: 3
-              maxLength: 255
-              pattern: ^[a-z0-9][a-z0-9!#$&^_.+-]*\/[a-z0-9][a-z0-9!#$&^_.+-]*$
-            byteSize:
-              $ref: "#/components/schemas/UploadObjectByteSize"
-            lastModified:
-              $ref: "#/components/schemas/SafeInteger"
-          required:
-            - position
-            - fileStatus
-            - kind
-            - fileAssetId
-            - clientFingerprint
-            - fileName
-            - declaredMediaType
-            - byteSize
-            - lastModified
-          additionalProperties: false
-    SubmissionIntentStatus:
-      type: string
-      enum:
-        - pending
-        - submitting
-        - submitted
-        - cancelled
-    SubmissionIntent:
-      type: object
-      properties:
-        id:
-          type: string
-          minLength: 1
-          maxLength: 128
-        projectId:
-          type: string
-          minLength: 1
-          maxLength: 128
-        threadId:
-          type: string
-          minLength: 1
-          maxLength: 128
-        status:
-          $ref: "#/components/schemas/SubmissionIntentStatus"
-        request:
-          $ref: "#/components/schemas/SubmissionIntentRunRequest"
-        attachments:
-          type: array
-          items:
-            $ref: "#/components/schemas/SubmissionIntentAttachment"
-          maxItems: 50
-        runId:
-          type:
-            - string
-            - "null"
-          minLength: 1
-          maxLength: 128
-        lastFailure:
-          type:
-            - object
-            - "null"
-          properties:
-            code:
-              type: string
-              minLength: 1
-              maxLength: 120
-            message:
-              type: string
-              minLength: 1
-              maxLength: 2000
-            retryable:
-              type: boolean
-          required:
-            - code
-            - message
-            - retryable
-          additionalProperties: false
-        revision:
-          $ref: "#/components/schemas/Revision"
-        submittedAt:
-          type:
-            - string
-            - "null"
-          format: date-time
-        cancelledAt:
-          type:
-            - string
-            - "null"
-          format: date-time
-        createdAt:
-          type: string
-          format: date-time
-        updatedAt:
-          type: string
-          format: date-time
-      required:
-        - id
-        - projectId
-        - threadId
-        - status
-        - request
-        - attachments
-        - runId
-        - lastFailure
-        - revision
-        - submittedAt
-        - cancelledAt
-        - createdAt
-        - updatedAt
-      additionalProperties: false
-      description: SubmissionIntent request target semantics, attachment positions, and submitted/cancelled lifecycle fields agree; enforced by runtime contracts and database constraints.
-    CurrentSubmissionIntent:
-      type: object
-      properties:
-        item:
-          type:
-            - object
-            - "null"
-          properties:
-            id:
-              type: string
-              minLength: 1
-              maxLength: 128
-            projectId:
-              type: string
-              minLength: 1
-              maxLength: 128
-            threadId:
-              type: string
-              minLength: 1
-              maxLength: 128
-            status:
-              $ref: "#/components/schemas/SubmissionIntentStatus"
-            request:
-              $ref: "#/components/schemas/SubmissionIntentRunRequest"
-            attachments:
-              type: array
-              items:
-                $ref: "#/components/schemas/SubmissionIntentAttachment"
-              maxItems: 50
-            runId:
-              type:
-                - string
-                - "null"
-              minLength: 1
-              maxLength: 128
-            lastFailure:
-              type:
-                - object
-                - "null"
-              properties:
-                code:
-                  type: string
-                  minLength: 1
-                  maxLength: 120
-                message:
-                  type: string
-                  minLength: 1
-                  maxLength: 2000
-                retryable:
-                  type: boolean
-              required:
-                - code
-                - message
-                - retryable
-              additionalProperties: false
-            revision:
-              $ref: "#/components/schemas/Revision"
-            submittedAt:
-              type:
-                - string
-                - "null"
-              format: date-time
-            cancelledAt:
-              type:
-                - string
-                - "null"
-              format: date-time
-            createdAt:
-              type: string
-              format: date-time
-            updatedAt:
-              type: string
-              format: date-time
-          required:
-            - id
-            - projectId
-            - threadId
-            - status
-            - request
-            - attachments
-            - runId
-            - lastFailure
-            - revision
-            - submittedAt
-            - cancelledAt
-            - createdAt
-            - updatedAt
-          additionalProperties: false
-          description: SubmissionIntent request target semantics, attachment positions, and submitted/cancelled lifecycle fields agree; enforced by runtime contracts and database constraints.
-      required:
-        - item
-      additionalProperties: false
     DesignPresetDirectives:
       type: object
       properties:
@@ -16051,6 +15233,24 @@ components:
         - revision
         - createdAt
         - updatedAt
+    RunFailure:
+      type: object
+      properties:
+        code:
+          type: string
+          minLength: 1
+          maxLength: 120
+        message:
+          type: string
+          minLength: 1
+          maxLength: 2000
+        retryable:
+          type: boolean
+      required:
+        - code
+        - message
+        - retryable
+      additionalProperties: false
     RunPhase:
       type: string
       enum:
@@ -18822,7 +18022,6 @@ components:
     PrototypePlanStatus:
       type: string
       enum:
-        - draft
         - approved
         - generating
         - ready
@@ -18908,6 +18107,152 @@ components:
         - updatedAt
         - failure
       additionalProperties: false
+    StartRunRequest:
+      type: object
+      properties:
+        requirementConfirmationId:
+          type: string
+          minLength: 1
+          maxLength: 128
+        prompt:
+          type: string
+          minLength: 1
+          maxLength: 50000
+        modelId:
+          type: string
+          minLength: 1
+          maxLength: 128
+        workflow:
+          $ref: "#/components/schemas/RunWorkflow"
+        generationIntent:
+          type:
+            - string
+            - "null"
+          enum:
+            - followup-design
+            - interactive-prototype
+            - prd-prototype
+            - prd-flow
+            - null
+          default: null
+        prdScreenPlan:
+          $ref: "#/components/schemas/RunPrdScreenPlan"
+        targetSurface:
+          $ref: "#/components/schemas/RunTargetSurface"
+        designStyle:
+          $ref: "#/components/schemas/RunDesignStyle"
+        sourceIds:
+          $ref: "#/components/schemas/RunSourceIds"
+        artifactTargets:
+          type: array
+          items:
+            $ref: "#/components/schemas/RunArtifactTarget"
+          maxItems: 12
+          default: []
+          description: Immutable ready ArtifactVersion selections in runtime target order; Generate Prototype requires one or more explicit screen ids on every source target
+        requestedArtifactKinds:
+          type: array
+          items:
+            $ref: "#/components/schemas/RuntimeRequestedArtifactKind"
+          maxItems: 12
+          default: []
+        canvasSnapshot:
+          type:
+            - object
+            - "null"
+          properties:
+            protocol:
+              type: string
+              enum:
+                - workbench.canvas-snapshot.v1
+            projectId:
+              type: string
+              minLength: 1
+              maxLength: 128
+              pattern: ^[A-Za-z0-9][A-Za-z0-9._:-]*$
+              description: Canvas entity ids are bounded opaque identifiers and cannot be URI schemes; enforced by the runtime Zod contract.
+            threadId:
+              type: string
+              minLength: 1
+              maxLength: 128
+              pattern: ^[A-Za-z0-9][A-Za-z0-9._:-]*$
+              description: Canvas entity ids are bounded opaque identifiers and cannot be URI schemes; enforced by the runtime Zod contract.
+            runId:
+              type:
+                - string
+                - "null"
+              minLength: 1
+              maxLength: 128
+              pattern: ^[A-Za-z0-9][A-Za-z0-9._:-]*$
+              description: Canvas entity ids are bounded opaque identifiers and cannot be URI schemes; enforced by the runtime Zod contract.
+            boardId:
+              type: string
+              minLength: 1
+              maxLength: 128
+              pattern: ^[A-Za-z0-9][A-Za-z0-9._:-]*$
+              description: Canvas entity ids are bounded opaque identifiers and cannot be URI schemes; enforced by the runtime Zod contract.
+            clientSessionId:
+              type: string
+              minLength: 8
+              maxLength: 128
+              pattern: ^[A-Za-z0-9][A-Za-z0-9._:-]*$
+              description: Canvas browser session ids are bounded opaque identifiers and cannot be URI schemes; enforced by the runtime Zod contract.
+            projectSessionGeneration:
+              $ref: "#/components/schemas/Revision"
+            boardRevision:
+              $ref: "#/components/schemas/Revision"
+            canvasStateRevision:
+              $ref: "#/components/schemas/Revision"
+            capturedAt:
+              type: string
+              format: date-time
+            expiresAt:
+              type: string
+              format: date-time
+            viewport:
+              $ref: "#/components/schemas/CanvasViewport"
+            screens:
+              type: array
+              items:
+                $ref: "#/components/schemas/CanvasScreenSummary"
+              maxItems: 512
+            visibleScreens:
+              type: array
+              items:
+                $ref: "#/components/schemas/CanvasAgentScreenReference"
+              maxItems: 512
+            selectedScreens:
+              type: array
+              items:
+                $ref: "#/components/schemas/CanvasAgentScreenReference"
+              maxItems: 512
+          default: null
+          required:
+            - protocol
+            - projectId
+            - threadId
+            - runId
+            - boardId
+            - clientSessionId
+            - projectSessionGeneration
+            - boardRevision
+            - canvasStateRevision
+            - capturedAt
+            - expiresAt
+            - viewport
+            - screens
+            - visibleScreens
+            - selectedScreens
+          additionalProperties: false
+          description: Canvas snapshots use unique screen references and only expose references declared by the snapshot; enforced by the runtime Zod contract.
+      required:
+        - prompt
+        - modelId
+        - workflow
+        - targetSurface
+        - designStyle
+      additionalProperties: false
+      description: Redesign requires a ready Import Source; Edit requires an Artifact target; Generate accepts explicit source screen targets or one fixed PRD with prdScreenPlan when prototype is requested; Redesign and Ideate forbid targets. Enforced by the runtime Zod contract.
     PrototypePlanInput:
       type: object
       properties:
@@ -18916,185 +18261,7 @@ components:
         request:
           $ref: "#/components/schemas/StartRunRequest"
         snapshot:
-          type:
-            - object
-            - "null"
-          properties:
-            sources:
-              type: array
-              items:
-                type: object
-                properties:
-                  sourceId:
-                    type: string
-                    minLength: 1
-                    maxLength: 128
-                  kind:
-                    $ref: "#/components/schemas/ImportSourceKind"
-                  label:
-                    type: string
-                    minLength: 1
-                    maxLength: 240
-                  checksum:
-                    type: string
-                    pattern: ^[a-f0-9]{64}$
-                  descriptor:
-                    oneOf:
-                      - type: object
-                        properties:
-                          kind:
-                            type: string
-                            enum:
-                              - file
-                          fileAssetId:
-                            type: string
-                            minLength: 1
-                            maxLength: 128
-                          originalName:
-                            $ref: "#/components/schemas/FileName"
-                          mediaType:
-                            type: string
-                            minLength: 3
-                            maxLength: 255
-                            pattern: ^[a-z0-9][a-z0-9!#$&^_.+-]*\/[a-z0-9][a-z0-9!#$&^_.+-]*$
-                        required:
-                          - kind
-                          - fileAssetId
-                          - originalName
-                          - mediaType
-                        additionalProperties: false
-                      - type: object
-                        properties:
-                          kind:
-                            type: string
-                            enum:
-                              - design_md
-                          fileAssetId:
-                            type: string
-                            minLength: 1
-                            maxLength: 128
-                          originalName:
-                            $ref: "#/components/schemas/FileName"
-                          mediaType:
-                            type: string
-                            minLength: 3
-                            maxLength: 255
-                            pattern: ^[a-z0-9][a-z0-9!#$&^_.+-]*\/[a-z0-9][a-z0-9!#$&^_.+-]*$
-                        required:
-                          - kind
-                          - fileAssetId
-                          - originalName
-                          - mediaType
-                        additionalProperties: false
-                      - type: object
-                        properties:
-                          kind:
-                            type: string
-                            enum:
-                              - url_snapshot
-                          sourceUrl:
-                            type: string
-                            maxLength: 2048
-                            format: uri
-                            description: Import source locators use HTTP(S); DNS, redirect and private-network checks are enforced by the Import Worker before fetching.
-                          resolvedUrl:
-                            type:
-                              - string
-                              - "null"
-                            maxLength: 2048
-                            format: uri
-                            description: Import source locators use HTTP(S); DNS, redirect and private-network checks are enforced by the Import Worker before fetching.
-                        required:
-                          - kind
-                          - sourceUrl
-                          - resolvedUrl
-                        additionalProperties: false
-                      - type: object
-                        properties:
-                          kind:
-                            type: string
-                            enum:
-                              - github_snapshot
-                          repository:
-                            type: string
-                            minLength: 3
-                            maxLength: 255
-                            pattern: ^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$
-                          commitSha:
-                            type: string
-                            pattern: ^[0-9a-f]{40}$
-                        required:
-                          - kind
-                          - repository
-                          - commitSha
-                        additionalProperties: false
-                      - type: object
-                        properties:
-                          kind:
-                            type: string
-                            enum:
-                              - figma_snapshot
-                          fileKey:
-                            type: string
-                            minLength: 1
-                            maxLength: 128
-                            pattern: ^[A-Za-z0-9_-]+$
-                          versionId:
-                            type: string
-                            minLength: 1
-                            maxLength: 128
-                            pattern: ^[A-Za-z0-9._:-]+$
-                        required:
-                          - kind
-                          - fileKey
-                          - versionId
-                        additionalProperties: false
-                  snapshot:
-                    $ref: "#/components/schemas/RunSourceSnapshotManifest"
-                required:
-                  - sourceId
-                  - kind
-                  - label
-                  - checksum
-                  - descriptor
-                  - snapshot
-                additionalProperties: false
-              maxItems: 50
-            designStyle:
-              type: object
-              properties:
-                artifactVersionId:
-                  type:
-                    - string
-                    - "null"
-                  minLength: 1
-                  maxLength: 128
-                snapshot:
-                  oneOf:
-                    - $ref: "#/components/schemas/RuntimeDesignStyleSnapshot"
-                    - $ref: "#/components/schemas/RuntimePresetDesignStyleSnapshot"
-                    - type: "null"
-                snapshotSha256:
-                  type:
-                    - string
-                    - "null"
-                  pattern: ^[a-f0-9]{64}$
-              required:
-                - artifactVersionId
-                - snapshot
-                - snapshotSha256
-              additionalProperties: false
-            knowledgeReleaseId:
-              type:
-                - string
-                - "null"
-              minLength: 1
-              maxLength: 128
-          required:
-            - sources
-            - designStyle
-            - knowledgeReleaseId
-          additionalProperties: false
+          $ref: "#/components/schemas/PrototypeInputSnapshot"
         sha256:
           type: string
           pattern: ^[a-f0-9]{64}$
@@ -21064,185 +20231,7 @@ components:
         request:
           $ref: "#/components/schemas/StartRunRequest"
         snapshot:
-          type:
-            - object
-            - "null"
-          properties:
-            sources:
-              type: array
-              items:
-                type: object
-                properties:
-                  sourceId:
-                    type: string
-                    minLength: 1
-                    maxLength: 128
-                  kind:
-                    $ref: "#/components/schemas/ImportSourceKind"
-                  label:
-                    type: string
-                    minLength: 1
-                    maxLength: 240
-                  checksum:
-                    type: string
-                    pattern: ^[a-f0-9]{64}$
-                  descriptor:
-                    oneOf:
-                      - type: object
-                        properties:
-                          kind:
-                            type: string
-                            enum:
-                              - file
-                          fileAssetId:
-                            type: string
-                            minLength: 1
-                            maxLength: 128
-                          originalName:
-                            $ref: "#/components/schemas/FileName"
-                          mediaType:
-                            type: string
-                            minLength: 3
-                            maxLength: 255
-                            pattern: ^[a-z0-9][a-z0-9!#$&^_.+-]*\/[a-z0-9][a-z0-9!#$&^_.+-]*$
-                        required:
-                          - kind
-                          - fileAssetId
-                          - originalName
-                          - mediaType
-                        additionalProperties: false
-                      - type: object
-                        properties:
-                          kind:
-                            type: string
-                            enum:
-                              - design_md
-                          fileAssetId:
-                            type: string
-                            minLength: 1
-                            maxLength: 128
-                          originalName:
-                            $ref: "#/components/schemas/FileName"
-                          mediaType:
-                            type: string
-                            minLength: 3
-                            maxLength: 255
-                            pattern: ^[a-z0-9][a-z0-9!#$&^_.+-]*\/[a-z0-9][a-z0-9!#$&^_.+-]*$
-                        required:
-                          - kind
-                          - fileAssetId
-                          - originalName
-                          - mediaType
-                        additionalProperties: false
-                      - type: object
-                        properties:
-                          kind:
-                            type: string
-                            enum:
-                              - url_snapshot
-                          sourceUrl:
-                            type: string
-                            maxLength: 2048
-                            format: uri
-                            description: Import source locators use HTTP(S); DNS, redirect and private-network checks are enforced by the Import Worker before fetching.
-                          resolvedUrl:
-                            type:
-                              - string
-                              - "null"
-                            maxLength: 2048
-                            format: uri
-                            description: Import source locators use HTTP(S); DNS, redirect and private-network checks are enforced by the Import Worker before fetching.
-                        required:
-                          - kind
-                          - sourceUrl
-                          - resolvedUrl
-                        additionalProperties: false
-                      - type: object
-                        properties:
-                          kind:
-                            type: string
-                            enum:
-                              - github_snapshot
-                          repository:
-                            type: string
-                            minLength: 3
-                            maxLength: 255
-                            pattern: ^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$
-                          commitSha:
-                            type: string
-                            pattern: ^[0-9a-f]{40}$
-                        required:
-                          - kind
-                          - repository
-                          - commitSha
-                        additionalProperties: false
-                      - type: object
-                        properties:
-                          kind:
-                            type: string
-                            enum:
-                              - figma_snapshot
-                          fileKey:
-                            type: string
-                            minLength: 1
-                            maxLength: 128
-                            pattern: ^[A-Za-z0-9_-]+$
-                          versionId:
-                            type: string
-                            minLength: 1
-                            maxLength: 128
-                            pattern: ^[A-Za-z0-9._:-]+$
-                        required:
-                          - kind
-                          - fileKey
-                          - versionId
-                        additionalProperties: false
-                  snapshot:
-                    $ref: "#/components/schemas/RunSourceSnapshotManifest"
-                required:
-                  - sourceId
-                  - kind
-                  - label
-                  - checksum
-                  - descriptor
-                  - snapshot
-                additionalProperties: false
-              maxItems: 50
-            designStyle:
-              type: object
-              properties:
-                artifactVersionId:
-                  type:
-                    - string
-                    - "null"
-                  minLength: 1
-                  maxLength: 128
-                snapshot:
-                  oneOf:
-                    - $ref: "#/components/schemas/RuntimeDesignStyleSnapshot"
-                    - $ref: "#/components/schemas/RuntimePresetDesignStyleSnapshot"
-                    - type: "null"
-                snapshotSha256:
-                  type:
-                    - string
-                    - "null"
-                  pattern: ^[a-f0-9]{64}$
-              required:
-                - artifactVersionId
-                - snapshot
-                - snapshotSha256
-              additionalProperties: false
-            knowledgeReleaseId:
-              type:
-                - string
-                - "null"
-              minLength: 1
-              maxLength: 128
-          required:
-            - sources
-            - designStyle
-            - knowledgeReleaseId
-          additionalProperties: false
+          $ref: "#/components/schemas/PrototypeInputSnapshot"
         sha256:
           type: string
           pattern: ^[a-f0-9]{64}$
@@ -23465,25 +22454,6 @@ components:
       required:
         - expectedStatus
       additionalProperties: false
-    RevisePrototypeRevisionRequest:
-      type: object
-      properties:
-        feedbackIds:
-          type: array
-          items:
-            type: string
-            minLength: 1
-            maxLength: 128
-          minItems: 1
-          maxItems: 100
-          description: Feedback ids must be unique and all belong to the selected source revision. Uniqueness is enforced by Zod; ownership and open status are enforced in the transaction.
-        prompt:
-          type: string
-          minLength: 1
-          maxLength: 4000
-      required:
-        - feedbackIds
-      additionalProperties: false
     RevokeProjectShareGrantsResponse:
       type: object
       properties:
@@ -24932,267 +23902,6 @@ components:
       required:
         - approval
         - run
-    SubmitSubmissionIntentResponse:
-      type: object
-      properties:
-        intent:
-          type: object
-          properties:
-            id:
-              type: string
-              minLength: 1
-              maxLength: 128
-            projectId:
-              type: string
-              minLength: 1
-              maxLength: 128
-            threadId:
-              type: string
-              minLength: 1
-              maxLength: 128
-            status:
-              $ref: "#/components/schemas/SubmissionIntentStatus"
-            request:
-              $ref: "#/components/schemas/SubmissionIntentRunRequest"
-            attachments:
-              type: array
-              items:
-                $ref: "#/components/schemas/SubmissionIntentAttachment"
-              maxItems: 50
-            runId:
-              type:
-                - string
-                - "null"
-              minLength: 1
-              maxLength: 128
-            lastFailure:
-              type:
-                - object
-                - "null"
-              properties:
-                code:
-                  type: string
-                  minLength: 1
-                  maxLength: 120
-                message:
-                  type: string
-                  minLength: 1
-                  maxLength: 2000
-                retryable:
-                  type: boolean
-              required:
-                - code
-                - message
-                - retryable
-              additionalProperties: false
-            revision:
-              $ref: "#/components/schemas/Revision"
-            submittedAt:
-              type:
-                - string
-                - "null"
-              format: date-time
-            cancelledAt:
-              type:
-                - string
-                - "null"
-              format: date-time
-            createdAt:
-              type: string
-              format: date-time
-            updatedAt:
-              type: string
-              format: date-time
-          required:
-            - id
-            - projectId
-            - threadId
-            - status
-            - request
-            - attachments
-            - runId
-            - lastFailure
-            - revision
-            - submittedAt
-            - cancelledAt
-            - createdAt
-            - updatedAt
-          additionalProperties: false
-          description: SubmissionIntent request target semantics, attachment positions, and submitted/cancelled lifecycle fields agree; enforced by runtime contracts and database constraints.
-        run:
-          type: object
-          properties:
-            id:
-              type: string
-              minLength: 1
-              maxLength: 128
-            requestId:
-              type: string
-              minLength: 1
-              maxLength: 128
-            projectId:
-              type: string
-              minLength: 1
-              maxLength: 128
-            threadId:
-              type: string
-              minLength: 1
-              maxLength: 128
-            retryOfRunId:
-              type:
-                - string
-                - "null"
-              minLength: 1
-              maxLength: 128
-            status:
-              $ref: "#/components/schemas/RunStatus"
-            modelId:
-              type: string
-              minLength: 1
-              maxLength: 128
-            workflow:
-              $ref: "#/components/schemas/RunWorkflow"
-            generationIntent:
-              type:
-                - string
-                - "null"
-              enum:
-                - followup-design
-                - interactive-prototype
-                - prd-prototype
-                - prd-flow
-                - null
-            prdScreenPlan:
-              $ref: "#/components/schemas/RunPrdScreenPlan"
-            targetSurface:
-              $ref: "#/components/schemas/RunTargetSurface"
-            designStyle:
-              $ref: "#/components/schemas/RunDesignStyle"
-            artifactTargets:
-              $ref: "#/components/schemas/RunArtifactTargets"
-            requestedArtifactKinds:
-              type: array
-              items:
-                $ref: "#/components/schemas/RuntimeRequestedArtifactKind"
-              maxItems: 12
-            sources:
-              type: array
-              items:
-                $ref: "#/components/schemas/RunSourceSnapshot"
-              maxItems: 50
-              description: Immutable Import Source snapshots ordered by contiguous zero-based position
-            knowledgeReleaseId:
-              type:
-                - string
-                - "null"
-              minLength: 1
-              maxLength: 128
-            phase:
-              type:
-                - string
-                - "null"
-              enum:
-                - understanding
-                - retrieving_knowledge
-                - planning
-                - generating
-                - validating
-                - publishing
-                - null
-            phaseLabel:
-              type:
-                - string
-                - "null"
-              minLength: 1
-              maxLength: 240
-            progress:
-              type:
-                - number
-                - "null"
-              minimum: 0
-              maximum: 1
-            attempt:
-              type: integer
-              minimum: 0
-            lastEventSequence:
-              type: integer
-              minimum: 0
-            cancelRequestedAt:
-              type:
-                - string
-                - "null"
-              format: date-time
-            failure:
-              type:
-                - object
-                - "null"
-              properties:
-                code:
-                  type: string
-                  minLength: 1
-                  maxLength: 120
-                message:
-                  type: string
-                  minLength: 1
-                  maxLength: 2000
-                retryable:
-                  type: boolean
-              required:
-                - code
-                - message
-                - retryable
-              additionalProperties: false
-            cancellationReason:
-              type:
-                - string
-                - "null"
-              maxLength: 1000
-            createdAt:
-              type: string
-              format: date-time
-            startedAt:
-              type:
-                - string
-                - "null"
-              format: date-time
-            finishedAt:
-              type:
-                - string
-                - "null"
-              format: date-time
-          required:
-            - id
-            - requestId
-            - projectId
-            - threadId
-            - retryOfRunId
-            - status
-            - modelId
-            - workflow
-            - generationIntent
-            - targetSurface
-            - designStyle
-            - artifactTargets
-            - requestedArtifactKinds
-            - sources
-            - knowledgeReleaseId
-            - phase
-            - phaseLabel
-            - progress
-            - attempt
-            - lastEventSequence
-            - cancelRequestedAt
-            - failure
-            - cancellationReason
-            - createdAt
-            - startedAt
-            - finishedAt
-          additionalProperties: false
-          description: Run Import Source snapshots belong to the Run and Project, preserve immutable manifests, and use contiguous request positions; enforced by the runtime Zod contract.
-      required:
-        - intent
-        - run
-      additionalProperties: false
     ThreadEntryList:
       type: object
       properties:
@@ -25261,24 +23970,6 @@ components:
           type: string
           maxLength: 2000
       description: At least one mutable Project field is required; enforced by the runtime Zod contract.
-    UpdatePrototypePlanRequest:
-      type: object
-      properties:
-        prompt:
-          type: string
-          minLength: 1
-          maxLength: 20000
-        title:
-          type: string
-          minLength: 1
-          maxLength: 240
-        generationRequest:
-          $ref: "#/components/schemas/StartRunRequest"
-      required:
-        - prompt
-        - title
-        - generationRequest
-      additionalProperties: false
     UpdateThreadRequest:
       type: object
       properties:
@@ -25397,10 +24088,6 @@ components:
       minLength: 1
       maxLength: 128
     RequirementTurnId:
-      type: string
-      minLength: 1
-      maxLength: 128
-    SubmissionIntentId:
       type: string
       minLength: 1
       maxLength: 128
@@ -25585,12 +24272,6 @@ components:
         $ref: "#/components/schemas/RequirementTurnId"
       required: true
       name: turnId
-      in: path
-    SubmissionIntentId:
-      schema:
-        $ref: "#/components/schemas/SubmissionIntentId"
-      required: true
-      name: intentId
       in: path
     RunId:
       schema:
@@ -28942,121 +27623,6 @@ paths:
           $ref: "#/components/responses/Problem"
         "428":
           $ref: "#/components/responses/Problem"
-  /threads/{threadId}/submission-intents:
-    post:
-      operationId: createSubmissionIntent
-      summary: Durable SubmissionIntent and ordered attachment slots created
-      parameters:
-        - $ref: "#/components/parameters/ThreadId"
-        - $ref: "#/components/parameters/IdempotencyKey"
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/CreateSubmissionIntentRequest"
-      responses:
-        "201":
-          description: Durable SubmissionIntent and ordered attachment slots created
-          headers:
-            ETag:
-              $ref: "#/components/headers/ETag"
-            Location:
-              schema:
-                type: string
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/SubmissionIntent"
-        "400":
-          $ref: "#/components/responses/Problem"
-        "404":
-          $ref: "#/components/responses/Problem"
-        "409":
-          $ref: "#/components/responses/Problem"
-        "502":
-          $ref: "#/components/responses/Problem"
-        "504":
-          $ref: "#/components/responses/Problem"
-  /threads/{threadId}/submission-intents/current:
-    get:
-      operationId: getCurrentSubmissionIntent
-      summary: Current principal's unique active SubmissionIntent in the Thread or a strict null item
-      parameters:
-        - $ref: "#/components/parameters/ThreadId"
-      responses:
-        "200":
-          description: Current principal's unique active SubmissionIntent in the Thread or a strict null item
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/CurrentSubmissionIntent"
-        "404":
-          $ref: "#/components/responses/Problem"
-  /submission-intents/{intentId}:
-    get:
-      operationId: getSubmissionIntent
-      summary: Creator-owned durable SubmissionIntent
-      parameters:
-        - $ref: "#/components/parameters/SubmissionIntentId"
-      responses:
-        "200":
-          description: Creator-owned durable SubmissionIntent
-          headers:
-            ETag:
-              $ref: "#/components/headers/ETag"
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/SubmissionIntent"
-        "404":
-          $ref: "#/components/responses/Problem"
-    delete:
-      operationId: cancelSubmissionIntent
-      summary: Pending SubmissionIntent cancelled with compare-and-swap
-      parameters:
-        - $ref: "#/components/parameters/SubmissionIntentId"
-        - $ref: "#/components/parameters/IfMatch"
-      responses:
-        "204":
-          description: Pending SubmissionIntent cancelled with compare-and-swap
-        "400":
-          $ref: "#/components/responses/Problem"
-        "404":
-          $ref: "#/components/responses/Problem"
-        "409":
-          $ref: "#/components/responses/Problem"
-        "412":
-          $ref: "#/components/responses/Problem"
-        "428":
-          $ref: "#/components/responses/Problem"
-  /submission-intents/{intentId}/submit:
-    post:
-      operationId: submitSubmissionIntent
-      summary: SubmissionIntent submitted through its durable Run idempotency key
-      parameters:
-        - $ref: "#/components/parameters/SubmissionIntentId"
-      responses:
-        "202":
-          description: SubmissionIntent submitted through its durable Run idempotency key
-          headers:
-            ETag:
-              $ref: "#/components/headers/ETag"
-            Location:
-              schema:
-                type: string
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/SubmitSubmissionIntentResponse"
-        "404":
-          $ref: "#/components/responses/Problem"
-        "409":
-          $ref: "#/components/responses/Problem"
-        "502":
-          $ref: "#/components/responses/Problem"
-        "504":
-          $ref: "#/components/responses/Problem"
   /threads/{threadId}/runs:
     get:
       operationId: listRuns
@@ -29285,39 +27851,6 @@ paths:
         "403":
           $ref: "#/components/responses/Problem"
         "404":
-          $ref: "#/components/responses/Problem"
-    post:
-      operationId: createPrototypePlan
-      summary: Create an idempotent visual prototype plan
-      parameters:
-        - $ref: "#/components/parameters/ProjectId"
-        - $ref: "#/components/parameters/IdempotencyKey"
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/CreatePrototypePlanRequest"
-      responses:
-        "201":
-          description: Create an idempotent visual prototype plan
-          headers:
-            ETag:
-              $ref: "#/components/headers/ETag"
-            Location:
-              schema:
-                type: string
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/PrototypePlan"
-        "400":
-          $ref: "#/components/responses/Problem"
-        "403":
-          $ref: "#/components/responses/Problem"
-        "404":
-          $ref: "#/components/responses/Problem"
-        "409":
           $ref: "#/components/responses/Problem"
   /projects/{projectId}/prototype-v2/revisions/{revisionId}:
     get:
@@ -29652,85 +28185,6 @@ paths:
           $ref: "#/components/responses/Problem"
         "503":
           $ref: "#/components/responses/Problem"
-  /projects/{projectId}/prototype-v2/revisions/{revisionId}/revise:
-    post:
-      operationId: revisePrototype
-      summary: Generate a new immutable version from anchored feedback
-      parameters:
-        - $ref: "#/components/parameters/ProjectId"
-        - $ref: "#/components/parameters/PrototypeRevisionId"
-        - $ref: "#/components/parameters/IdempotencyKey"
-        - $ref: "#/components/parameters/IfMatch"
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/RevisePrototypeRevisionRequest"
-      responses:
-        "202":
-          description: Generate a new immutable version from anchored feedback
-          headers:
-            ETag:
-              $ref: "#/components/headers/ETag"
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/PrototypePlan"
-        "400":
-          $ref: "#/components/responses/Problem"
-        "403":
-          $ref: "#/components/responses/Problem"
-        "404":
-          $ref: "#/components/responses/Problem"
-        "409":
-          $ref: "#/components/responses/Problem"
-        "412":
-          $ref: "#/components/responses/Problem"
-        "428":
-          $ref: "#/components/responses/Problem"
-        "503":
-          $ref: "#/components/responses/Problem"
-  /projects/{projectId}/prototype-v2/plans/{planId}/approve:
-    post:
-      operationId: approvePrototypePlan
-      summary: Approve a plan and enqueue the Temporal generation workflow
-      parameters:
-        - $ref: "#/components/parameters/ProjectId"
-        - $ref: "#/components/parameters/PlanId"
-        - $ref: "#/components/parameters/IdempotencyKey"
-        - $ref: "#/components/parameters/IfMatch"
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/PrototypeWorkflowActionRequest"
-      responses:
-        "202":
-          description: Approve a plan and enqueue the Temporal generation workflow
-          headers:
-            ETag:
-              $ref: "#/components/headers/ETag"
-            Location:
-              schema:
-                type: string
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/PrototypePlan"
-        "403":
-          $ref: "#/components/responses/Problem"
-        "404":
-          $ref: "#/components/responses/Problem"
-        "409":
-          $ref: "#/components/responses/Problem"
-        "412":
-          $ref: "#/components/responses/Problem"
-        "428":
-          $ref: "#/components/responses/Problem"
-        "503":
-          $ref: "#/components/responses/Problem"
   /projects/{projectId}/prototype-v2/plans/{planId}/input:
     get:
       operationId: getPrototypePlanInput
@@ -29754,44 +28208,6 @@ paths:
           $ref: "#/components/responses/Problem"
         "409":
           $ref: "#/components/responses/Problem"
-    post:
-      operationId: updatePrototypePlanInput
-      summary: Adjust draft input atomically and preserve fixed context
-      parameters:
-        - $ref: "#/components/parameters/ProjectId"
-        - $ref: "#/components/parameters/PlanId"
-        - $ref: "#/components/parameters/IdempotencyKey"
-        - $ref: "#/components/parameters/IfMatch"
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/UpdatePrototypePlanRequest"
-      responses:
-        "200":
-          description: Adjust draft input atomically and preserve fixed context
-          headers:
-            ETag:
-              $ref: "#/components/headers/ETag"
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/PrototypePlan"
-        "400":
-          $ref: "#/components/responses/Problem"
-        "403":
-          $ref: "#/components/responses/Problem"
-        "404":
-          $ref: "#/components/responses/Problem"
-        "409":
-          $ref: "#/components/responses/Problem"
-        "412":
-          $ref: "#/components/responses/Problem"
-        "428":
-          $ref: "#/components/responses/Problem"
-        "503":
-          $ref: "#/components/responses/Problem"
   /projects/{projectId}/prototype-v2/revisions/{revisionId}/input:
     get:
       operationId: getPrototypeRevisionInput
@@ -29811,45 +28227,6 @@ paths:
         "404":
           $ref: "#/components/responses/Problem"
         "409":
-          $ref: "#/components/responses/Problem"
-  /projects/{projectId}/prototype-v2/revisions/{revisionId}/plans:
-    post:
-      operationId: createPrototypeRevisionPlan
-      summary: Create a reviewable modification plan in the source version family
-      parameters:
-        - $ref: "#/components/parameters/ProjectId"
-        - $ref: "#/components/parameters/PrototypeRevisionId"
-        - $ref: "#/components/parameters/IdempotencyKey"
-        - $ref: "#/components/parameters/IfMatch"
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/CreatePrototypeRevisionPlanRequest"
-      responses:
-        "201":
-          description: Create a reviewable modification plan in the source version family
-          headers:
-            ETag:
-              $ref: "#/components/headers/ETag"
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/PrototypePlan"
-        "400":
-          $ref: "#/components/responses/Problem"
-        "403":
-          $ref: "#/components/responses/Problem"
-        "404":
-          $ref: "#/components/responses/Problem"
-        "409":
-          $ref: "#/components/responses/Problem"
-        "412":
-          $ref: "#/components/responses/Problem"
-        "428":
-          $ref: "#/components/responses/Problem"
-        "503":
           $ref: "#/components/responses/Problem"
   /projects/{projectId}/prototype-v2/plans/{planId}/progress:
     get:
