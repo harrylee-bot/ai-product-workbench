@@ -136,3 +136,21 @@ schemaVersion 1 使用服务端共享导出渲染器生成完整交互 HTML，�
 `GET /projects/{projectId}/artifact-links` 接受可选的固定版本过滤与移除记录过滤，游标同时绑定项目和这两个过滤条件。创建使用幂等键，重放核对操作者和完整请求。移除使用 If-Match，重复请求返回同一移除结果。浏览器在发出写入前保存原命令，以便刷新后确认操作。
 
 图片另存通过可选 `derivedFrom` 明确指定同项目的可用源图片版本。新图片、创建收据及来源关联在同一事务提交。此前没有该字段的创建命令仍沿用原请求身份。迁移 `20261116020000_artifact_version_links` 从历史画布导入两端都明确绑定到可用产物版本的边，沿用原方向、类型与说明。升级需迁移、API、Contracts/OpenAPI 和 Web 一并生效。
+
+## 增量需求交流与一次确认生成（服务端合同 v1）
+
+普通消息先进入需求交流。先创建/选定已有 Thread，再 `POST /threads/{threadId}/requirement-sessions`（Idempotency-Key，正文 `{generationRequest: StartRunRequest}`）。此处的 request 是输入配置，创建会话不发起生成。会话按操作者、项目和 Thread 隔离。`GET /threads/{threadId}/requirement-sessions` 只返回当前操作者的会话，最多 100 项；`GET /requirement-sessions/{sessionId}` 返回完整快照及 ETag。前端依据服务端 state，不按文字长短或完整度评分决定进入生成。
+
+`POST /requirement-sessions/{sessionId}/messages` 要求 Idempotency-Key、If-Match，正文 `{text, generationRequest?, intent: "discuss" | "confirm_suggestion"}`，返回 202 快照。可随消息调整输入/输出/模型/资料/设计，但只能选择 Flash。消息保存到现有 ThreadEntry；普通分析有独立持久回执和取消/失败状态，不创建产物 Run。新消息立即使旧摘要确认失效，并取代仍在分析的旧消息；迟到模型响应不能覆盖新版本。生成已开始时新增消息开启下一轮讨论，已经冻结的 Run 输入不变。
+
+快照含 `revision/state/generationRequest/summaryVersion/summaryChecksum/card/evidence/activeTurn/confirmation`。state 为 discussing、analyzing、needs_clarification、ready_to_confirm、confirmed、generating。activeTurn.status 为 queued、running、succeeded、failed、cancelled、superseded；modelId 固定 deepseek-flash；failureCode 和 tokens 只记录受控状态，不暴露供应商原始响应。失败/取消不删除输入。取消与重试分别为 `POST .../turns/{turnId}/cancel|retry`，同样使用 CAS 和幂等键；重试不得重新保存同一用户消息。
+
+card 固定目标、业务平台/模块/角色、existingCapabilities（带 evidenceIds 和适用范围）、reuse、changes、affectedPages、affectedFlows、targetSurface、designConstraints、outputKinds、assumptions、issues、platformChanges、preserved。引用包含固定 release/document/chunk 身份、原文和 SHA-256。检索命中只证明出处，不能将“未检索到”判定为平台没有该能力。区域/模板/原型证据不升级为全平台事实。未处理的 scope/workflow/permission/financial/external_dependency/platform 缺口或冲突阻止生成。平台改造必须显示在 platformChanges 并由用户单独接受。模型建议始终留在 assumptions，不标记为用户已确认。
+
+`POST /requirement-sessions/{sessionId}/confirm` 正文 `{summaryVersion,summaryChecksum,acceptedAssumptionIds,acceptedPlatformChanges}`，要求该快照的 ETag 和固定动作键。用户只确认一次，服务冻结完整卡片、消息与引用版本、输入资料/设计及输出配置，并衔接现有 Plan/Run；原计划审批由这次确认完成。PRD-only 也经此入口。重复确认、丢回执和刷新重放返回同一个逻辑生成结果。pending/started 确认公开 planId/runId，客户端轮询会话直到 started，再导航既有 Plan/Run 页面。
+
+`intent=confirm_suggestion` 表示用户在这一条消息中明确授权按建议生成。服务端仍需分析并通过关键缺口、证据和边界检查，只有 ready_to_confirm 才走同一确认实现；不能从模型答复中推导这一意图。它不允许消除关键问题、扩大已批准边界或自动接受尚有争议的平台改造。
+
+新的初始 PRD/原型生成请求必须携带服务端出具的 `requirementConfirmationId`，且与冻结请求完全相符。直接 Plan/Run/SubmissionIntent API 不能绕过确认。既有固定版本编辑、重试沿用原基线和已有业务流程，不把历史产物改写为新确认。服务端错误：REQUIREMENT_CONFIRMATION_REQUIRED、REQUIREMENT_BASELINE_CHANGED、REQUIREMENT_NOT_READY、REQUIREMENT_ASSUMPTIONS_UNACCEPTED、REQUIREMENT_PLATFORM_CHANGE_UNACCEPTED、REQUIREMENT_ALREADY_STARTED、REQUIREMENT_TURN_LIMIT、REQUIREMENT_MODEL_UNAVAILABLE、REQUIREMENT_MODEL_OUTPUT_INVALID、REQUIREMENT_KNOWLEDGE_UNAVAILABLE。409 表示状态或基线冲突，412 表示 CAS 过期，429 表示限额，503 表示当前服务不可用；同一动作重放先核对原回执，不能因 ETag 变旧而重新生成。
+
+接入需要共享 schema/OpenAPI、API、迁移、Worker 的固定需求基线读取一起集成。本文不声明新服务已上线或真实模型验收完成。知识维护源文件不等于当前授权 release 已索引；发布阶段必须按既有知识发布流程检查版本覆盖。
