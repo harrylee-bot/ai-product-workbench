@@ -1,5 +1,6 @@
 import { createHash, randomBytes } from "node:crypto";
 import { PassThrough, Transform } from "node:stream";
+import { finished } from "node:stream/promises";
 import {
   approvalOptionSchema,
   approvalOptionsSchema,
@@ -1704,25 +1705,37 @@ export class DeerFlowRuntimeAdapter implements RuntimePort {
     locator: RuntimeContentLocator,
     signal?: AbortSignal,
   ): Promise<DeerFlowContentHandle> {
-    const stored = await this.storage.getObject(locator, signal).catch((error: unknown) => {
-      throw new Error("RUNTIME_SOURCE_STORAGE_READ_FAILED", { cause: error });
-    });
-    if (stored.byteSize !== locator.byteSize) {
-      stored.body.destroy();
-      throw new Error("RUNTIME_SOURCE_STORAGE_SIZE_MISMATCH");
-    }
-    const multipart = createMultipartUploadStream({
-      source: stored.body,
-      fileName,
-      mediaType: locator.mediaType,
-      byteSize: locator.byteSize,
-      sha256: locator.sha256,
-      signal,
-    });
-    let response: Response;
+    const controller = new AbortController();
+    const timeout = setTimeout(
+      () => controller.abort(new Error("DEERFLOW_REQUEST_TIMEOUT")),
+      this.config.deerFlowTimeoutMs,
+    );
+    const abort = () => controller.abort(signal?.reason);
+    if (signal?.aborted) abort();
+    signal?.addEventListener("abort", abort, { once: true });
+    let stored: Awaited<ReturnType<RuntimeReadyBlobReader["getObject"]>> | undefined;
+    let multipart: ReturnType<typeof createMultipartUploadStream> | undefined;
+    let response: Response | undefined;
     try {
-      response = await this.fetchGatewayWithTimeout(
-        `/api/threads/${encodeURIComponent(externalThreadId)}/uploads`,
+      controller.signal.throwIfAborted();
+      stored = await this.storage.getObject(locator, controller.signal).catch((error: unknown) => {
+        if (controller.signal.aborted) throw abortError(controller.signal);
+        throw new Error("RUNTIME_SOURCE_STORAGE_READ_FAILED", { cause: error });
+      });
+      controller.signal.throwIfAborted();
+      if (stored.byteSize !== locator.byteSize) throw new Error("RUNTIME_SOURCE_STORAGE_SIZE_MISMATCH");
+      multipart = createMultipartUploadStream({
+        source: stored.body,
+        fileName,
+        mediaType: locator.mediaType,
+        byteSize: locator.byteSize,
+        sha256: locator.sha256,
+        signal: controller.signal,
+      });
+      const uploadedBody = finished(multipart.body, { cleanup: true });
+      void uploadedBody.catch((error) => controller.abort(error));
+      response = await tracedFetch(
+        `${this.config.deerFlowGatewayUrl}/api/threads/${encodeURIComponent(externalThreadId)}/uploads`,
         {
           method: "POST",
           headers: {
@@ -1733,36 +1746,31 @@ export class DeerFlowRuntimeAdapter implements RuntimePort {
           },
           body: multipart.body as unknown as BodyInit,
           duplex: "half",
-        },
-        signal,
+          signal: controller.signal,
+        } as RequestInit,
       );
-    } catch (error) {
-      multipart.body.destroy();
-      throw error;
+      if (!response.ok) throw new Error("DEERFLOW_UPLOAD_FAILED");
+      const text = await boundedResponseText(response, MAX_GATEWAY_RESPONSE_SIZE, controller.signal);
+      await uploadedBody;
+      controller.signal.throwIfAborted();
+      const payload = gatewayUploadResponseSchema.parse(JSON.parse(text));
+      const uploaded = payload.files[0];
+      if (!uploaded) throw new Error("DEERFLOW_UPLOAD_HANDLE_MISSING");
+      const handle = {
+        virtualPath: normalizeUploadVirtualPath(uploaded.virtual_path ?? uploaded.virtualPath),
+        markdownVirtualPath: optionalUploadVirtualPath(
+          uploaded.markdown_virtual_path ?? uploaded.markdownVirtualPath,
+        ),
+      };
+      controller.signal.throwIfAborted();
+      return handle;
+    } finally {
+      clearTimeout(timeout);
+      signal?.removeEventListener("abort", abort);
+      await response?.body?.cancel().catch(() => undefined);
+      multipart?.dispose();
+      stored?.body.destroy();
     }
-    if (!response.ok) {
-      await response.body?.cancel().catch(() => undefined);
-      throw new Error("DEERFLOW_UPLOAD_FAILED");
-    }
-    const payload = gatewayUploadResponseSchema.parse(
-      JSON.parse(await boundedResponseText(response, MAX_GATEWAY_RESPONSE_SIZE)),
-    );
-    const uploaded = payload.files[0];
-    if (!uploaded) throw new Error("DEERFLOW_UPLOAD_HANDLE_MISSING");
-    return {
-      virtualPath: normalizeUploadVirtualPath(uploaded.virtual_path ?? uploaded.virtualPath),
-      markdownVirtualPath: optionalUploadVirtualPath(
-        uploaded.markdown_virtual_path ?? uploaded.markdownVirtualPath,
-      ),
-    };
-  }
-
-  private async fetchGatewayWithTimeout(
-    path: string,
-    init: RequestInit & { duplex?: "half" },
-    signal?: AbortSignal,
-  ) {
-    return this.fetchFromBase(this.config.deerFlowGatewayUrl, path, init, signal);
   }
 
   private client(runtimeTransportOwnerId: string, providerIdempotencyKey?: string) {
@@ -1795,28 +1803,6 @@ export class DeerFlowRuntimeAdapter implements RuntimePort {
       },
       streamProtocol: "legacy",
     });
-  }
-
-  private async fetchFromBase(
-    baseUrl: string,
-    path: string,
-    init: RequestInit & { duplex?: "half" },
-    signal?: AbortSignal,
-  ) {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(new Error("DEERFLOW_REQUEST_TIMEOUT")), this.config.deerFlowTimeoutMs);
-    const abort = () => controller.abort(signal?.reason);
-    if (signal?.aborted) abort();
-    signal?.addEventListener("abort", abort, { once: true });
-    try {
-      return await tracedFetch(`${baseUrl}/${path.replace(/^\/+/, "")}`, {
-        ...init,
-        signal: controller.signal,
-      });
-    } finally {
-      clearTimeout(timeout);
-      signal?.removeEventListener("abort", abort);
-    }
   }
 
   private jsonHeaders(runtimeTransportOwnerId?: string) {
@@ -1917,6 +1903,9 @@ export function createMultipartUploadStream(input: {
       callback();
     },
   });
+  const stream = new PassThrough();
+  input.source.once("error", error => verified.destroy(error));
+  verified.once("error", error => stream.destroy(error));
   input.source.pipe(verified);
 
   const form = new FormData();
@@ -1927,7 +1916,6 @@ export function createMultipartUploadStream(input: {
   });
   const contentLength = form.getLengthSync();
   if (!Number.isSafeInteger(contentLength)) throw new Error("RUNTIME_SOURCE_MULTIPART_SIZE_INVALID");
-  const stream = new PassThrough();
   form.once("error", (error) => stream.destroy(error));
   const abort = () => {
     const error = abortError(input.signal);
@@ -1947,6 +1935,14 @@ export function createMultipartUploadStream(input: {
     body: stream,
     contentLength,
     contentType: form.getHeaders()["content-type"]!,
+    dispose() {
+      cleanup();
+      input.source.unpipe(verified);
+      input.source.destroy();
+      verified.destroy();
+      form.destroy();
+      stream.destroy();
+    },
   };
 }
 
@@ -2085,14 +2081,19 @@ function safeVirtualPathSegment(segment: string) {
   }
 }
 
-async function boundedResponseText(response: Response, maximumBytes: number) {
+async function boundedResponseText(response: Response, maximumBytes: number, signal: AbortSignal) {
+  signal.throwIfAborted();
   if (!response.body) return "";
   const reader = response.body.getReader();
+  const abort = () => { void reader.cancel(abortError(signal)).catch(() => undefined); };
+  signal.addEventListener("abort", abort, { once: true });
+  if (signal.aborted) abort();
   const chunks: Uint8Array[] = [];
   let received = 0;
   try {
     while (true) {
       const chunk = await reader.read();
+      signal.throwIfAborted();
       if (chunk.done) break;
       received += chunk.value.byteLength;
       if (received > maximumBytes) {
@@ -2102,8 +2103,11 @@ async function boundedResponseText(response: Response, maximumBytes: number) {
       chunks.push(chunk.value);
     }
   } finally {
+    signal.removeEventListener("abort", abort);
+    await reader.cancel().catch(() => undefined);
     reader.releaseLock();
   }
+  signal.throwIfAborted();
   return Buffer.concat(chunks, received).toString("utf8");
 }
 
