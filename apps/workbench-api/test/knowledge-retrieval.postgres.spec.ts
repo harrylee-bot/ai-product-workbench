@@ -1,5 +1,5 @@
 import { seedFixture,embeddingSpec,retrievalSpec,integrationSegmenter,segmenterIdentity } from "./fixtures/knowledge-retrieval.js";
-import { createHash } from "node:crypto";
+import { createHash,randomBytes } from "node:crypto";
 import { canonicalJson, type KnowledgeToolResponse, type RuntimeResult } from "@workbench/workbench-contracts";
 import { assertGenerationKnowledgeEvidence } from "../../workbench-worker/src/runs/generation-knowledge-evidence.js";
 import { ConfigService } from "@nestjs/config";
@@ -14,7 +14,7 @@ import {
   type JsonValue,
   type RetrievalProfileV1,
 } from "@workbench/workbench-knowledge";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it,vi } from "vitest";
 import { AccessService } from "../src/modules/access/access.service.js";
 import { KnowledgeRetrievalService } from "../src/modules/knowledge/knowledge-retrieval.service.js";
 import { KnowledgeRetrievalConfig } from "../src/modules/knowledge/knowledge-retrieval.config.js";
@@ -487,6 +487,62 @@ describeWithPostgres("Knowledge retrieval PostgreSQL boundaries", () => {
       }, result))).resolves.toBeUndefined();
     } finally { await db.$disconnect(); }
   }, 30_000);
+
+  it('rejects signed capability requests and successful replay while disabled, then permits restored account access',async()=>{
+    const db=new PrismaClient({datasourceUrl:databaseUrl});
+    try{
+      const fixture=await db.$transaction(tx=>seedFixture(tx),{timeout:60000}),h=await createLedgerHarness(db,fixture,'disabled-account');
+      const {tool,authorization,embedding}=signedTool(db,fixture,h),request={protocol:'workbench.knowledge-retrieval-request.v1' as const,query:'产品 工作台 用户 规则'};
+      const key=invocationKey('active-before-disable'),result=await tool.retrieve(authorization,key,request);expect(result.items).toHaveLength(2);
+      const budget=await db.knowledgeToolBudget.findUniqueOrThrow({where:{runtimeAttemptId:h.grant.runtimeAttemptId}}),calls=embedding.mock.calls.length;
+      await db.principal.update({where:{id:fixture.ownerId},data:{status:'disabled'}});
+      for(const action of [key,invocationKey('disabled-new')])await expect(tool.retrieve(authorization,action,request)).rejects.toMatchObject({status:404});
+      expect(embedding).toHaveBeenCalledTimes(calls);expect(await db.knowledgeToolBudget.findUniqueOrThrow({where:{runtimeAttemptId:h.grant.runtimeAttemptId}})).toEqual(budget);
+      expect(await db.knowledgeRetrievalInvocation.count({where:{runtimeAttemptId:h.grant.runtimeAttemptId,status:'succeeded'}})).toBe(1);
+      await db.principal.update({where:{id:fixture.ownerId},data:{status:'active'}});
+      expect(await tool.retrieve(authorization,key,request)).toEqual(result);expect(embedding).toHaveBeenCalledTimes(calls);
+      expect((await tool.retrieve(authorization,invocationKey('restored-new'),request)).items).toHaveLength(2);
+    }finally{await db.$disconnect();}
+  });
+
+  it('discards an in-flight indexed retrieval when the account is disabled before settlement',async()=>{
+    const db=new PrismaClient({datasourceUrl:databaseUrl});const entered=deferred<void>(),resume=deferred<void>();
+    try{
+      const fixture=await db.$transaction(tx=>seedFixture(tx),{timeout:60000}),h=await createLedgerHarness(db,fixture,'disable-during-provider');
+      const {tool,authorization,embedding}=signedTool(db,fixture,h),request={protocol:'workbench.knowledge-retrieval-request.v1' as const,query:'产品 工作台 用户 规则'};
+      embedding.mockImplementationOnce(async()=>{entered.resolve();await resume.promise;return [1,0,0];});
+      const key=invocationKey('disable-in-flight'),pending=tool.retrieve(authorization,key,request);const result=pending.then(value=>({value}),error=>({error}));await entered.promise;
+      await db.principal.update({where:{id:fixture.ownerId},data:{status:'disabled'}});resume.resolve();
+      expect(await result).toMatchObject({error:{status:404}});
+      const receipt=await db.knowledgeRetrievalInvocation.findUniqueOrThrow({where:{runtimeAttemptId_invocationId:{runtimeAttemptId:h.grant.runtimeAttemptId,invocationId:key}}});
+      expect(receipt).toMatchObject({status:'discarded',response:null,responseSha256:null,leaseToken:null,lastErrorCode:'KNOWLEDGE_CAPABILITY_SCOPE_REVOKED'});
+      await db.principal.update({where:{id:fixture.ownerId},data:{status:'active'}});await expect(tool.retrieve(authorization,key,request)).rejects.toMatchObject({status:404});
+      expect((await tool.retrieve(authorization,invocationKey('after-in-flight-restored'),request)).items).toHaveLength(2);
+    }finally{resume.resolve();await db.$disconnect();}
+  });
+
+  it.each(['settlement-first','deactivation-first'] as const)('serializes account deactivation with capability settlement: %s',async order=>{
+    const db=new PrismaClient({datasourceUrl:databaseUrl}),peer=new PrismaClient({datasourceUrl:databaseUrl});const held=deferred<number>(),release=deferred<void>(),otherEntered=deferred<number>();
+    try{
+      const fixture=await db.$transaction(tx=>seedFixture(tx),{timeout:60000}),h=await createLedgerHarness(db,fixture,'account-lock-'+order);
+      const key=invocationKey('account-lock-'+order),reservation=reserved(await h.ledger.reserve(h.grant,key,'account lock query'));
+      const proxied=new Proxy(db,{get(target,method){if(method==='$transaction')return (operation:any)=>db.$transaction(async tx=>{
+        const [{pid}]=await tx.$queryRaw<{pid:number}[]>`SELECT pg_backend_pid() AS pid`;
+        if(order==='deactivation-first')otherEntered.resolve(pid!);
+        const scoped=new Proxy(tx,{get(t,k){if(k==='knowledgeRetrievalInvocation')return new Proxy(t.knowledgeRetrievalInvocation,{get(delegate,name){if(name==='updateMany')return async(args:any)=>{if(order==='settlement-first'&&args.data.status==='succeeded'){held.resolve(pid!);await release.promise;}return delegate.updateMany(args);};const value=Reflect.get(delegate,name);return typeof value==='function'?value.bind(delegate):value;}});const value=Reflect.get(t,k);return typeof value==='function'?value.bind(t):value;}});
+        return operation(scoped);
+      },{timeout:15000});const value=Reflect.get(target,method);return typeof value==='function'?value.bind(target):value;}});
+      const settle=()=>new KnowledgeToolLedgerService(proxied as never).commit(h.grant,reservation,ledgerResponse(fixture));
+      const deactivate=()=>peer.$transaction(async tx=>{const [{pid}]=await tx.$queryRaw<{pid:number}[]>`SELECT pg_backend_pid() AS pid`;if(order==='settlement-first')otherEntered.resolve(pid!);await tx.principal.update({where:{id:fixture.ownerId},data:{status:'disabled'}});if(order==='deactivation-first'){held.resolve(pid!);await release.promise;}},{timeout:15000});
+      const first=order==='settlement-first'?settle():deactivate();const firstPid=await held.promise;
+      const other=order==='settlement-first'?deactivate():settle(),outcome=other.then(value=>({value}),error=>({error}));
+      try{const otherPid=await otherEntered.promise;await vi.waitFor(async()=>{const [{pids}]=await db.$queryRaw<{pids:number[]}[]>`SELECT pg_blocking_pids(${otherPid}::int) AS pids`;expect(pids).toContain(firstPid);},{timeout:3000,interval:20});}finally{release.resolve();}
+      await first;const result=await outcome;
+      if(order==='deactivation-first')expect(result).toMatchObject({error:{status:404}});else expect(result).toHaveProperty('value');
+      expect(await db.knowledgeRetrievalInvocation.findUniqueOrThrow({where:{id:reservation.id}})).toMatchObject({status:order==='settlement-first'?'succeeded':'discarded'});
+      await expect(h.ledger.reserve(h.grant,key,'account lock query')).rejects.toMatchObject({status:404});
+    }finally{release.resolve();await peer.$disconnect();await db.$disconnect();}
+  });
 
   it("settles a failed receipt with the database clock when the API clock is behind", async () => {
     const db = new PrismaClient({ datasourceUrl: databaseUrl });
@@ -1081,8 +1137,9 @@ async function createLedgerHarness(
   attemptStatus: "pending" | "submitting" | "running" = "running",
 ) {
   const runtime = await seedRuntimeFixture(db as never, fixture, attemptStatus);
+  const [{now}]=await db.$queryRaw<Array<{now:Date}>>`SELECT clock_timestamp() AS now`;
   const issuedAt = new Date(
-    Math.floor((Date.now() + issuedAtOffsetMs) / 1_000) * 1_000,
+    Math.floor((now!.getTime() + issuedAtOffsetMs) / 1_000) * 1_000,
   );
   const grant: TestGrantPayload = {
     grantId: `grant_${label.replace(/-/gu, "_")}_${runtime.runId}`,
@@ -1124,6 +1181,17 @@ function ledgerResponse(fixture: Awaited<ReturnType<typeof seedFixture>>) {
     },
     items: [],
   };
+}
+
+/** Actual signed capability, ledger and indexed retrieval; only embedding and
+ * reranking transports are fixtures. No external model/provider requests. */
+function signedTool(db:PrismaClient,fixture:Awaited<ReturnType<typeof seedFixture>>,h:Awaited<ReturnType<typeof createLedgerHarness>>){
+  const secret=randomBytes(32),config={grantSecret:secret,grantMaximumTtlSeconds:900,providers:null as unknown};
+  const access=new AccessService(db as never),tool=new KnowledgeToolService(config as never,access,db as never,h.ledger);
+  const embedding=vi.fn(async()=>[1,0,0]);
+  const retrieval=new KnowledgeRetrievalService(access,new PrismaKnowledgeRetrievalStore(db),{segmenter:new JiebaQuerySegmenterAdapter(),queryEmbedding:{embedQuery:embedding},reranker:{identity:{id:'integration/reranker',revision:'commit-reranker-r1'},rerank:async({candidates})=>candidates.map((x,index)=>({chunkId:x.chunkId,score:1-index/10}))}});
+  config.providers={fixture:true};Object.assign(tool,{retrieval});
+  return {tool,embedding,authorization:'Bearer '+createKnowledgeToolGrant(h.grant,secret,{maximumTtlSeconds:900})};
 }
 
 async function seedExpiredInvocation(

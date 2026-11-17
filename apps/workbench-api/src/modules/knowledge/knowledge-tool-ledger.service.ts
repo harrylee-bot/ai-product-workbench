@@ -329,6 +329,12 @@ export class KnowledgeToolLedgerService {
     grant: KnowledgeToolGrantPayload,
     requireUnexpired: boolean,
   ): Promise<{ row: GrantLedgerRow; dynamicScopeValid: boolean }> {
+    // Account deactivation updates this row. Take its shared lock before the
+    // grant/budget scope in both reservation and settlement, including replay.
+    // A provider response cannot commit across a completed deactivation.
+    const principals=await tx.$queryRaw<Array<{status:string}>>(Prisma.sql`
+      SELECT status::text AS status FROM principals WHERE id=${grant.principalId} FOR SHARE
+    `);
     const rows = await tx.$queryRaw<GrantLedgerRow[]>(Prisma.sql`
       SELECT
         capability."id" AS "grantId",
@@ -389,7 +395,7 @@ export class KnowledgeToolLedgerService {
     if (requireUnexpired && row.expiresAt.getTime() <= row.now.getTime()) {
       throw knowledgeGrantUnauthorizedProblem();
     }
-    return { row, dynamicScopeValid: dynamicScopeMatches(row, grant) };
+    return { row, dynamicScopeValid: principals[0]?.status === "active" && dynamicScopeMatches(row, grant) };
   }
 }
 
