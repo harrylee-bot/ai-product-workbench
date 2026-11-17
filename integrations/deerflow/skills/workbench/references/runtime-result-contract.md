@@ -55,7 +55,7 @@ Target Prototype snapshots may include `assets` containing verified binary metad
 }
 ```
 
-Citation values in examples are illustrative only. Retrieve knowledge successfully for the current Run and copy exact returned citations. Every Artifact requires at least one verified citation from the pinned KnowledgeRelease; empty or invented citations cannot complete generation.
+Citation values in examples are illustrative only. Retrieve knowledge successfully for the current Run and copy exact returned citations. Every Artifact requires at least one verified citation from this attempt's pinned KnowledgeRelease. A revised PRD must also preserve every exact base citation, including its ID and fields; append newly retrieved citations and deduplicate unchanged entries. The backend checks inherited citations against that fixed PRD and the still-authorized published source. Empty or invented citations cannot complete generation.
 
 PRD and Prototype content must satisfy the complete schemas in `runtime-result.schema.json`; do not substitute free-form Markdown or an abbreviated object. Prototype `variables` and state `values` are explicit runtime data sources: every variable/state binding must resolve to one of them, and binding node/value types must match the schema. Forms, submit/reset button types, submit ownership, and select options are explicit IR fields; do not rely on renderer inference.
 

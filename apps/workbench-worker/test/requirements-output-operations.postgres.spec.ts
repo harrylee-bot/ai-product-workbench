@@ -5,6 +5,7 @@ import { PrismaClient, type Prisma } from "@workbench/workbench-db";
 import {
   knowledgeToolResponseSchema,
   startRunRequestSchema,
+  canonicalJson,
   type RuntimeArtifactDraft,
   type RuntimeResult,
 } from "@workbench/workbench-contracts";
@@ -184,6 +185,11 @@ for (const linked of [false, true])
               const prd = content as typeof prdDocumentV3Example;
               prd.revision.number += 1;
               prd.revision.summary = "在原功能中显示报名人数";
+              prd.citations = [
+                ...new Map(
+                  [...prd.citations, ...retrieved].map((citation) => [canonicalJson(citation), citation]),
+                ).values(),
+              ];
             } else {
               const prototype = content as ReturnType<typeof prototypeDocumentFixture>;
               prototype.revision += 1;
@@ -202,7 +208,7 @@ for (const linked of [false, true])
             title: item.kind === "prd" ? "业务需求说明书" : "活动管理原型",
             operation: item.operation,
             content,
-            citations: retrieved,
+            citations: item.kind === "prd" ? (content as typeof prdDocumentV3Example).citations : retrieved,
           } as RuntimeArtifactDraft;
           for (const stage of item.kind === "prd"
             ? ["collecting-prd-context", "structuring-prd", "drafting-prd", "validating-prd"]
@@ -643,6 +649,113 @@ for (const linked of [false, true])
     ).toBe(
       (await db.artifactVersion.findUniqueOrThrow({ where: { id: generated.sourceArtifactVersionId! } }))
         .sourcePrdVersionId,
+    );
+  }, 120000);
+  it.each([{ kinds: ["prd"] }, { kinds: ["prd", "prototype"] }] as { kinds: ("prd" | "prototype")[] }[])(
+    "preserves fixed PRD citations and adds verified knowledge from the new release for $kinds",
+    async ({ kinds }) => {
+      const f = await fixture(),
+        source = await base(f, true);
+      const next = await db.$transaction(
+        (tx) => seedFixture(tx, { workspaceId: f.workspaceId, version: 2 }),
+        { timeout: 60000 },
+      );
+      const created = await f.flow.create(f.request(kinds), {
+        kind: "revision",
+        revisionId: source.revision.id,
+        feedbackIds: [],
+        anchor: null,
+      });
+      expect(created.run.knowledgeReleaseId).toBe(next.releaseId);
+      await deliver(f, created);
+      expect((await db.run.findUniqueOrThrow({ where: { id: created.run.id } })).status).toBe("succeeded");
+      const prd = await db.artifactVersion.findFirstOrThrow({
+        where: { createdByRunId: created.run.id, status: "ready", artifact: { kind: "prd" } },
+      });
+      const before = (source.prd!.content as typeof prdDocumentV3Example).citations;
+      const after = (prd.content as typeof prdDocumentV3Example).citations;
+      expect(after).toEqual(expect.arrayContaining(before));
+      expect(after.some((citation) => citation.chunkId === next.productionChunkId)).toBe(true);
+      expect(
+        await db.knowledgeRetrievalInvocation.count({
+          where: { status: "succeeded", lastGrant: { runId: created.run.id, releaseId: next.releaseId } },
+        }),
+      ).toBeGreaterThan(0);
+    },
+    120000,
+  );
+  it("cannot inherit a private citation from another workspace through a source PRD", async () => {
+    const f = await fixture(),
+      foreign = await fixture();
+    const chunk = await db.knowledgeChunk.findUniqueOrThrow({
+      where: { id: foreign.productionChunkId },
+      include: { document: true },
+    });
+    const citation = {
+      id: "foreign-historical-citation",
+      documentId: chunk.documentId,
+      chunkId: chunk.id,
+      sourcePath: chunk.document.sourcePath,
+      title: chunk.document.title,
+      quote: chunk.content,
+      locator: { heading: "规则", startLine: null, endLine: null },
+    };
+    const document = { ...structuredClone(prdDocumentV3Example), citations: [citation] };
+    // A pre-existing authored source cannot grant access to its claimed KB scope.
+    const artifact = await db.artifact.create({
+      data: {
+        projectId: f.projectId,
+        kind: "prd",
+        title: "Authored source with unverified historical reference",
+      },
+    });
+    const version = await db.artifactVersion.create({
+      data: {
+        projectId: f.projectId,
+        artifactId: artifact.id,
+        version: 1,
+        status: "ready",
+        schemaVersion: 3,
+        content: document as never,
+        citations: [citation],
+        checksum: createHash("sha256").update(canonicalJson(document)).digest("hex"),
+      },
+    });
+    await db.artifact.update({ where: { id: artifact.id }, data: { currentVersionId: version.id } });
+    const request = startRunRequestSchema.parse({
+      ...f.request(["prototype"]),
+      generationIntent: "prd-flow",
+      artifactTargets: [{ artifactId: artifact.id, artifactVersionId: version.id, screenIds: [] }],
+      prdScreenPlan: prototypeDocumentFixture().screens.map((screen) => ({
+        id: screen.id,
+        title: screen.name,
+      })),
+    });
+    const initial = await f.flow.create(request),
+      source = (await deliver(f, initial))!;
+    const created = await f.flow.create(f.request(["prd", "prototype"]), {
+      kind: "revision",
+      revisionId: source.id,
+      feedbackIds: [],
+      anchor: null,
+    });
+    const input = await preparePrototypeRuntime(db, {
+      projectId: f.projectId,
+      planId: created.plan!.id,
+      createdById: f.ownerId,
+    });
+    await expect(
+      new PrototypeRuntimeBridge(db, runtime(f), f.issuer).generate(
+        input,
+        new AbortController().signal,
+        vi.fn(),
+      ),
+    ).rejects.toThrow("KNOWLEDGE_RETAINED_CITATION_SCOPE_INVALID");
+    expect(
+      await db.artifactVersion.count({ where: { createdByRunId: created.run.id, status: "ready" } }),
+    ).toBe(0);
+    expect((await db.artifact.findUniqueOrThrow({ where: { id: artifact.id } })).currentVersionId).toBe(
+      version.id,
     );
   }, 120000);
 });

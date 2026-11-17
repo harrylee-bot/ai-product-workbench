@@ -1606,7 +1606,7 @@ describe("Runtime Artifact revision publication", () => {
   }
 
   function prdRevisionHarness(baseSchemaVersion = 3) {
-    const baseContent = prdDocumentV3Example;
+    const baseContent = {...prdDocumentV3Example,citations:runtimePrdResultFixture.artifacts[0]!.citations};
     const nextContent = {
       ...baseContent,
       revision: {
@@ -1652,7 +1652,7 @@ describe("Runtime Artifact revision publication", () => {
           content: nextContent,
           contentBlobId: null,
           checksum: sha256Canonical(nextContent),
-          citations: [],
+          citations: nextContent.citations,
           runtimeDraftIndex: 0,
           runtimeDraftTitle: nextContent.title,
           artifact: {
@@ -1684,7 +1684,7 @@ describe("Runtime Artifact revision publication", () => {
       kind: "prd" as const,
       schemaVersion: 3 as const,
       title: nextContent.title,
-      citations: [],
+      citations: nextContent.citations,
       operation: { kind: "revise" as const, target },
       content: nextContent,
     };

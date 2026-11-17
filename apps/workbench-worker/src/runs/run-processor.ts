@@ -3246,7 +3246,8 @@ function assertRuntimeArtifactRevisionContent(
     if (next.documentId !== base.documentId || next.revision.number <= base.revision.number) {
       throw new Error("RUNTIME_ARTIFACT_REVISION_CONTINUITY_INVALID");
     }
-    if (canonicalJson(next.citations) !== canonicalJson(base.citations)) {
+    const nextCitations=new Set(next.citations.map(citation=>canonicalJson(citation)));
+    if (base.citations.some(citation=>!nextCitations.has(canonicalJson(citation)))) {
       throw new Error("RUNTIME_ARTIFACT_REVISION_CITATIONS_INVALID");
     }
     return;

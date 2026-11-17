@@ -188,8 +188,10 @@ and reference reads, publish the validated PRD at artifact_index 0, then build
 its Prototype and publish it at artifact_index 1. Submit both artifacts once
 by copying their accepted ACKs' `finalSubmissionArtifact` references into the
 final candidate in that same order. Do not stop after the PRD Draft in a linked Run.
-Every artifact requires nonempty citations copied exactly from successful
-Knowledge retrieval in the current attempt. Missing knowledge is a blocker,
+Every artifact requires at least one exact citation from successful Knowledge
+retrieval in the current attempt. A revised PRD also retains every exact base
+citation and may append newly retrieved citations; never replace historical
+citation IDs or fields when the pinned release changes. Missing knowledge is a blocker,
 not permission to generate from memory or fabricate sources.
 
 Output is the user's fixed requirement-document template, not a freeform lightweight PRD. Every created or revised PRD uses Artifact `schemaVersion: 3` with content protocol `workbench.prd.v3`. Retired PRD protocols are not accepted. Every PRD Artifact in this Runtime uses the following exact structure; a request for an incompatible format is not permission to submit schema-invalid content:

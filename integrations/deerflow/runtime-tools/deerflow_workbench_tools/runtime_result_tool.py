@@ -131,8 +131,9 @@ def _validation_feedback(
             'Match the exact outputOperations entry: create remains valid in an edit when declared; revise uses {"kind":"revise","target":<the exact supplied target>}.'
         ),
         "citations": (
-            "citations must be a nonempty JSON array copied exactly from a successful "
-            "Knowledge retrieval in this attempt. Retrieve authorized knowledge first; "
+            "citations must include at least one exact entry from a successful "
+            "Knowledge retrieval in this attempt. A revised PRD also preserves its "
+            "exact base citations and may append newly retrieved entries. Retrieve authorized knowledge first; "
             "when no relevant knowledge exists, require more knowledge or fail. Never invent citations."
         ),
     }

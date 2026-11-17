@@ -95,7 +95,7 @@ PROTOTYPE_REFERENCE_FILES = (
     ),
     (
         "/mnt/skills/public/workbench/references/runtime-result-contract.md",
-        "9950bc701434eae09802be62ba968d381d3cce8ec9a9ea73d966fac0c021ea50",
+        "864f37398e06e59db8f8f7497eaf297da963d1ce75e0efe1208e660da25bdcbd",
     ),
 )
 _PROTOTYPE_REFERENCE_DIRECTORY = Path("/app/skills/public/workbench/references")

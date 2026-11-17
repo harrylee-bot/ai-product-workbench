@@ -602,7 +602,8 @@ assert(
     && normalizedWorkbenchSkillSource.includes("never call `ask_clarification`")
     && normalizedWorkbenchSkillSource.includes("still complete the PRD")
     && normalizedWorkbenchSkillSource.includes("Missing knowledge is a blocker")
-    && normalizedWorkbenchSkillSource.includes("Every artifact requires nonempty citations")
+    && normalizedWorkbenchSkillSource.includes("Every artifact requires at least one exact citation")
+    && normalizedWorkbenchSkillSource.includes("A revised PRD also retains every exact base citation")
     && normalizedWorkbenchSkillSource.includes("Do not stop after the PRD Draft in a linked Run")
     && !normalizedWorkbenchSkillSource.includes("otherwise request input")
     && !normalizedWorkbenchSkillSource.includes("or use clarification where"),
