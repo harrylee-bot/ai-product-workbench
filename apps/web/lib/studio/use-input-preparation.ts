@@ -84,7 +84,7 @@ export function useStudioInputPreparation(projectId: string) {
       artifactTargets: input.artifactTargets,
       generationIntent: input.generationIntent,
       ...(input.prdScreenPlan ? { prdScreenPlan: input.prdScreenPlan } : {}),
-      canvasSnapshot: input.canvasSnapshot ?? null,
+      canvasSnapshot: null,
     });
   };
   return { prepare, uploads: registry.uploads };

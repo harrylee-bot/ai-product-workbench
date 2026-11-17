@@ -502,33 +502,6 @@ it("scans beyond 100 unrelated discussions and restores the matching source with
   expect(mocks.create).not.toHaveBeenCalled();
   expect(mocks.message).toHaveBeenCalledTimes(1);
 });
-it("creates a draft discussion from the exact original input and sends adjustments only in its message", async () => {
-  const context = {
-    kind: "plan" as const,
-    planId: "draft-one",
-    expectedRevision: 7,
-  };
-  const original = {
-    ...request,
-    prompt: "原始草稿",
-    modelId: "original-model",
-    sourceIds: ["pinned-source"],
-  };
-  mocks.create.mockResolvedValue(
-    versioned(session({ context, generationRequest: original })),
-  );
-  mocks.message.mockResolvedValue(versioned(session({ context, revision: 2 })));
-  const hook = setup({ context, initialGenerationRequest: original });
-  await waitFor(() => expect(hook.result.current.loading).toBe(false));
-  await act(async () => {
-    await hook.result.current.send(input);
-  });
-  expect(mocks.create.mock.calls[0][1]).toEqual({
-    context,
-    generationRequest: original,
-  });
-  expect(mocks.message.mock.calls[0][1].generationRequest).toEqual(request);
-});
 it("recovers dispatch after refresh without the original confirmation key and replays a lost retry exactly", async () => {
   const pending = session({
     state: "confirmed",
@@ -558,7 +531,7 @@ it("recovers dispatch after refresh without the original confirmation key and re
   expect(sent).toEqual([
     "session-one",
     "confirmation-one",
-    '\"8\"',
+    '"8"',
     expect.any(String),
   ]);
   first.unmount();
@@ -651,25 +624,30 @@ it("clears automatic opening when ordinary follow-up supersedes an earlier confi
   expect(hook.result.current.awaitingResult).toBe(false);
   expect(hook.result.current.generationBaseline?.id).toBe("confirmation-one");
 });
-it("migrates the old private baseline without guessing which result a legacy boolean was awaiting", async () => {
-  const { failureCode: _legacyMissing, ...baseline } = receipt();
+it("ignores legacy browser submissions and baselines without migrating or replaying them", async () => {
   sessionStorage.setItem(
     "workbench:studio:actor-one:project-one:requirement-discussion:thread-one:new",
     JSON.stringify({
       version: 1,
-      sessionId: "session-one",
-      baseline,
+      sessionId: "legacy-session",
+      baseline: { id: "legacy-confirmation" },
       awaitingResult: true,
     }),
   );
-  mocks.get.mockResolvedValue(versioned(session({ confirmation: receipt() })));
-  const hook = setup();
-  await waitFor(() =>
-    expect(hook.result.current.snapshot?.confirmation).toBeTruthy(),
+  sessionStorage.setItem(
+    "workbench:studio:actor-one:project-one:submission",
+    JSON.stringify({ target: { kind: "draft", id: "legacy-draft" } }),
   );
+  const hook = setup();
+  await waitFor(() => expect(hook.result.current.loading).toBe(false));
   expect(hook.result.current.storageError).toBe("");
-  expect(hook.result.current.generationBaseline?.failureCode).toBeNull();
+  expect(hook.result.current.command).toBeUndefined();
   expect(hook.result.current.generationResult).toBeUndefined();
+  expect(mocks.get).not.toHaveBeenCalled();
+  expect(mocks.confirm).not.toHaveBeenCalled();
+  expect(
+    sessionStorage.getItem("workbench:studio:actor-one:project-one:submission"),
+  ).toContain("legacy-draft");
 });
 it("switches only among loaded matching sessions and blocks switching with an unknown receipt", async () => {
   const second = session({ id: "session-two" });
@@ -692,3 +670,39 @@ it("switches only among loaded matching sessions and blocks switching with an un
     "先核实",
   );
 });
+
+it.each([99, 100])(
+  "preserves %i selected feedback identities in the new revision discussion",
+  async (count) => {
+    const context = {
+      kind: "revision" as const,
+      revisionId: "revision-one",
+      feedbackIds: Array.from(
+        { length: count },
+        (_, index) => `feedback-${index}`,
+      ),
+      anchor:
+        count === 99
+          ? {
+              sourceRevisionId: "revision-one",
+              scope: "node" as const,
+              pageId: "page-one",
+              nodeId: "node-one",
+              quote: "领取",
+            }
+          : null,
+    };
+    mocks.create.mockResolvedValue(versioned(session({ context })));
+    mocks.message.mockResolvedValue(
+      versioned(session({ context, revision: 2 })),
+    );
+    const hook = setup({ context });
+    await waitFor(() => expect(hook.result.current.loading).toBe(false));
+    await act(async () => {
+      await hook.result.current.send(input);
+    });
+    expect(mocks.create.mock.calls[0][1].context).toEqual(context);
+    expect(mocks.message).toHaveBeenCalledTimes(1);
+    expect(mocks.confirm).not.toHaveBeenCalled();
+  },
+);

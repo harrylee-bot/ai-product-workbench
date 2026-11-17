@@ -12,7 +12,6 @@ import {
   postRequirementMessageRequestSchema,
   confirmRequirementRequestSchema,
   requirementConfirmationSchema,
-  requirementDiscussionRequestSchema,
   type RequirementContext,
   type RequirementSession,
   type ThreadEntry,
@@ -85,14 +84,7 @@ const recordSchema = z
     awaitingResult: z.boolean().optional(),
     awaitingConfirmationId: z.string().optional(),
     awaitingTurnId: z.string().optional(),
-    // Only migrate this private browser record. Wire responses stay strict.
-    baseline: z.preprocess(
-      (value) =>
-        value && typeof value === "object" && !("failureCode" in value)
-          ? { ...value, failureCode: null }
-          : value,
-      requirementConfirmationSchema.optional(),
-    ),
+    baseline: requirementConfirmationSchema.optional(),
   })
   .strict();
 type Command = z.infer<typeof commandSchema>;
@@ -122,16 +114,14 @@ export function useRequirementDiscussion({
   enabled = true,
   initialEntries = [],
   operation,
-  initialGenerationRequest,
 }: {
   projectId: string;
   threadId: string;
-  context: RequirementContext;
+  context: Exclude<RequirementContext, { kind: "plan" }>;
   contextKey: string;
   canEdit: boolean;
   enabled?: boolean;
   initialEntries?: readonly ThreadEntry[];
-  initialGenerationRequest?: z.input<typeof requirementDiscussionRequestSchema>;
   operation?: Pick<
     StudioSubmission,
     "workflow" | "artifactTargets" | "generationIntent" | "prdScreenPlan"
@@ -145,7 +135,7 @@ export function useRequirementDiscussion({
   const key = studioRecordKey(
     user?.id,
     projectId,
-    "requirement-discussion",
+    "requirement-discussion-v1",
     threadId,
     contextKey,
   );
@@ -528,19 +518,7 @@ export function useRequirementDiscussion({
         : {
             kind: "create",
             key: createIdempotencyKey("requirement-session"),
-            request: {
-              generationRequest:
-                context.kind === "plan"
-                  ? requirementDiscussionRequestSchema.parse(
-                      Object.fromEntries(
-                        Object.entries(initialGenerationRequest ?? {}).filter(
-                          ([key]) => key !== "requirementConfirmationId",
-                        ),
-                      ),
-                    )
-                  : generationRequest,
-              context,
-            },
+            request: { generationRequest, context },
             messageKey: createIdempotencyKey("requirement-message"),
             message: request,
           };

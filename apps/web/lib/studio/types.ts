@@ -1,5 +1,4 @@
 import type {
-  CreatePrototypeFeedbackRequest,
   RunDesignStyle,
   RunTargetSurface,
   StartRunRequest,
@@ -17,7 +16,6 @@ export type StudioSubmission = {
   requestedArtifactKinds: StartRunRequest["requestedArtifactKinds"];
   artifactTargets: StartRunRequest["artifactTargets"];
   generationIntent: StartRunRequest["generationIntent"];
-  canvasSnapshot?: StartRunRequest["canvasSnapshot"];
   prdScreenPlan?: StartRunRequest["prdScreenPlan"];
 };
 export type StudioView =
@@ -39,9 +37,8 @@ export type StudioArtifactContext = {
 };
 
 export type StudioPlanTarget = {
-  kind: "draft" | "revision";
+  kind: "revision";
   id: string;
   etag: string;
   feedbackIds?: string[];
-  feedback?: CreatePrototypeFeedbackRequest;
 };

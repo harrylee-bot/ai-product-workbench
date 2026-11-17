@@ -1,22 +1,15 @@
 "use client";
 import { useQuery } from "@tanstack/react-query";
-import type {
-  PrototypePlan,
-  PrototypePlanInput,
-} from "@workbench/workbench-contracts";
+import type { PrototypePlan } from "@workbench/workbench-contracts";
 import { useWorkbenchPrototypeV2Api } from "@/lib/studio/api";
 import { VariantSources } from "./relations";
 
 export function PlanInputSummary({
   projectId,
   plan,
-  canEdit,
-  onAdjust,
 }: {
   projectId: string;
   plan: PrototypePlan;
-  canEdit: boolean;
-  onAdjust: (input: PrototypePlanInput) => void;
 }) {
   const api = useWorkbenchPrototypeV2Api();
   const query = useQuery({
@@ -140,19 +133,12 @@ export function PlanInputSummary({
           {request.prdScreenPlan.map((screen) => screen.title).join(" → ")}
         </p>
       )}
-      {!snapshot && (
-        <p role="status">此记录尚无草稿快照，请调整并保存完整输入后再审批。</p>
-      )}
+      {!snapshot && <p role="status">此记录未提供固定输入快照。</p>}
       <details>
         <summary>输入核对</summary>
         <p className="visual-prose">{request.prompt}</p>
         <small>输入校验：{query.data.sha256}</small>
       </details>
-      {plan.status === "draft" && (
-        <button disabled={!canEdit} onClick={() => onAdjust(query.data!)}>
-          调整完整输入
-        </button>
-      )}
     </section>
   );
 }

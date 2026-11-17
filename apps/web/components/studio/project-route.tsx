@@ -2,11 +2,9 @@
 import Link from "next/link";
 import { isWorkbenchApiError } from "@/lib/workbench/api";
 import { useWorkbenchProjectBootstrap } from "@/lib/workbench/features/projects";
-import { usePlanSubmission } from "@/lib/studio/use-plan-submission";
 import { StudioWorkspace } from "./workspace";
 export function StudioProject({ projectId }: { projectId: string }) {
-  const query = useWorkbenchProjectBootstrap(projectId),
-    submission = usePlanSubmission(projectId);
+  const query = useWorkbenchProjectBootstrap(projectId);
   if (query.isPending)
     return (
       <main className="studio-loading" role="status">
@@ -34,14 +32,11 @@ export function StudioProject({ projectId }: { projectId: string }) {
       projectId={projectId}
       canEdit={canEdit}
       bootstrap={data}
-      submissionNotice={submission.recoveryNotice}
-      recoveryTitle={submission.recoveryTitle}
-      onRecoverSubmission={submission.recover}
       composer={{
         projectId,
         bootstrap: data,
-        busy: submission.pending,
-        uploads: submission.uploads,
+        busy: false,
+        uploads: [],
         disabled: !canEdit,
       }}
     />

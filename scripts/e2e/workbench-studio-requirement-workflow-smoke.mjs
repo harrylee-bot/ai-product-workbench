@@ -16,7 +16,7 @@ const splitModels = process.env.WORKBENCH_E2E_SPLIT_MODEL_CAPABILITIES === "1";
 const origin = process.env.WORKBENCH_E2E_WEB_ORIGIN ?? "http://127.0.0.1:18930";
 const output = new URL(
   process.env.WORKBENCH_E2E_STUDIO_OUTPUT ??
-    "../../output/audit/1.0.0/studio-requirement-final-workflow/",
+    "../../output/audit/1.0.0/studio-rebuild-only-workflow/",
   import.meta.url,
 );
 await mkdir(output, { recursive: true });
@@ -279,6 +279,7 @@ let sessions = [],
 let loseConfirmation = false,
   pendingDispatch = false;
 const dispatchCalls = [];
+const directoryCursors = [];
 const commandReceipts = new Map();
 const run = {
   id: "confirmed-prd-run",
@@ -430,15 +431,19 @@ await context.route("**/api/v1/**", async (route) => {
       return json(route, original.value, original.status);
     }
     if (path === `/api/v1/threads/${thread.id}/requirement-sessions`) {
-      if (method === "GET")
-        return json(route, { items: sessions, nextCursor: null });
-      const body = route.request().postDataJSON();
-      if (body.context.kind === "plan") {
-        const draft = plans.find((plan) => plan.id === body.context.planId);
-        assert.equal(draft?.status, "draft");
-        assert.equal(draft.revision, body.context.expectedRevision);
-        assert.deepEqual(body.generationRequest, requests.get(draft.id));
+      if (method === "GET") {
+        const query = new URL(route.request().url()).searchParams;
+        const offset = Number(query.get("cursor") ?? 0);
+        const limit = Number(query.get("limit") ?? 30);
+        directoryCursors.push(query.get("cursor"));
+        return json(route, {
+          items: sessions.slice(offset, offset + limit),
+          nextCursor:
+            offset + limit < sessions.length ? String(offset + limit) : null,
+        });
       }
+      const body = route.request().postDataJSON();
+      assert(["new", "revision"].includes(body.context.kind));
       createCalls.push(body);
       const value = requirementSessionSchema.parse({
         id: `requirement-${createCalls.length}`,
@@ -813,7 +818,9 @@ try {
     await page.evaluate(async () => {
       sessionStorage.clear();
       await new Promise((resolve) => {
-        const request = indexedDB.deleteDatabase("workbench-studio-composer");
+        const request = indexedDB.deleteDatabase(
+          "workbench-studio-composer-v1",
+        );
         request.onsuccess = resolve;
         request.onerror = resolve;
         request.onblocked = resolve;
@@ -821,6 +828,17 @@ try {
     });
     await page.reload();
     await prompt.waitFor();
+    await page.evaluate(() =>
+      sessionStorage.setItem(
+        "workbench:studio:principal-1:input-project:submission",
+        JSON.stringify({
+          version: 1,
+          key: "legacy-key",
+          request: { title: "旧直接提交" },
+          target: { kind: "draft", id: "old-plan" },
+        }),
+      ),
+    );
     await page
       .getByRole("combobox", { name: "模型", exact: true })
       .selectOption("model-b");
@@ -859,7 +877,7 @@ try {
     await prompt.fill("");
     await page.waitForFunction(async () => {
       const db = await new Promise((resolve) => {
-        const request = indexedDB.open("workbench-studio-composer", 1);
+        const request = indexedDB.open("workbench-studio-composer-v1", 1);
         request.onsuccess = () => resolve(request.result);
       });
       const saved = await new Promise((resolve) => {
@@ -880,11 +898,22 @@ try {
         false,
     );
     if (outputKind === "both") loseConfirmation = true;
+    if (outputKind === "prototype") pendingDispatch = true;
     await confirm.click();
     if (outputKind === "both") {
       const recover = button("恢复确认结果");
       await recover.waitFor();
       await recover.click();
+    }
+    if (outputKind === "prototype") {
+      await button("重试已确认任务").waitFor();
+      const confirmationId = sessions[0].confirmation.id;
+      await page.evaluate(() => sessionStorage.clear());
+      await page.reload();
+      await button("重试已确认任务").click();
+      await page.getByRole("complementary", { name: "本次生成基线" }).waitFor();
+      assert.equal(dispatchCalls.at(-1).confirmationId, confirmationId);
+      assert.notEqual(dispatchCalls.at(-1).key, confirmCalls.at(-1).key);
     }
     await page.getByRole("complementary", { name: "本次生成基线" }).waitFor();
     await page.waitForURL((url) =>
@@ -894,6 +923,8 @@ try {
     );
     assert.equal(confirmCalls.length, before + 1);
     assert.equal(await button("审批并开始生成").count(), 0);
+    assert.equal(await button("讨论并确认需求").count(), 0);
+    assert.equal(await button("确认上次提交").count(), 0);
     await prompt.fill("下一版补充展示说明");
     await prompt.press("Enter");
     await page.waitForFunction(
@@ -961,76 +992,56 @@ try {
     true,
   );
   await page.setViewportSize({ width: 1440, height: 1000 });
-  for (const outputKind of ["both", "prd", "prototype"]) {
-    await page.evaluate(() =>
-      window.dispatchEvent(new Event("workbench:logout")),
-    );
-    sessions = [];
-    entries = [];
-    const draft = {
-      ...root,
-      id: `draft-${outputKind}`,
-      title: `草稿 ${outputKind}`,
-      status: "draft",
-      revision: 7,
-    };
-    plans.push(draft);
-    requests.set(draft.id, structuredClone(requests.get(root.id)));
-    await page.goto(`${origin}/studio/${projectId}?plan=${draft.id}`);
-    await prompt.waitFor();
-    await button("讨论并确认需求").click();
-    await page
-      .locator(".visual-intent")
-      .getByText(`调整计划：草稿 ${outputKind} · 保留原草稿来源`, {
-        exact: true,
-      })
-      .waitFor();
-    await page
-      .getByRole("combobox", { name: "输出类型", exact: true })
-      .selectOption(outputKind);
-    await page
-      .getByRole("combobox", { name: "模型", exact: true })
-      .selectOption("model-b");
-    await prompt.fill("在原草稿中补充领取次数规则，保留固定参考资料");
-    await button("发送需求").click();
-    await page.waitForFunction(
-      () =>
-        document.querySelector(".studio-requirement-confirm")?.disabled ===
-        false,
-    );
-    assert.deepEqual(createCalls.at(-1), {
-      generationRequest: requests.get(draft.id),
-      context: { kind: "plan", planId: draft.id, expectedRevision: 7 },
-    });
-    assert.equal(messages.at(-1).generationRequest.modelId, "model-b");
-    assert.deepEqual(messages.at(-1).generationRequest.sourceIds, ["source-1"]);
-    assert.deepEqual(
-      messages.at(-1).generationRequest.requestedArtifactKinds,
-      outputKind === "both" ? ["prd", "prototype"] : [outputKind],
-    );
-    if (outputKind === "both") pendingDispatch = true;
-    const before = confirmCalls.length;
-    await button("确认需求并生成").click();
-    if (outputKind === "both") {
-      await button("重试已确认任务").waitFor();
-      const confirmationId = sessions[0].confirmation.id;
-      await page.evaluate(() => sessionStorage.clear());
-      await page.reload();
-      await button("重试已确认任务").click();
-      await page.getByRole("complementary", { name: "本次生成基线" }).waitFor();
-      assert.equal(dispatchCalls.at(-1).confirmationId, confirmationId);
-      assert.notEqual(dispatchCalls.at(-1).key, confirmCalls.at(-1).key);
-    }
-    await page.waitForURL((url) =>
-      outputKind === "prd"
-        ? url.searchParams.get("run") === run.id
-        : url.searchParams.get("plan") === root.id,
-    );
-    assert.equal(confirmCalls.length, before + 1);
-    results.checks.push(
-      `draft ${outputKind}: original fixed input creates discussion; adjusted model/output arrive in message; confirmation opens derived task${outputKind === "both" ? "; pending dispatch survives refresh and retries the same receipt without the old key" : ""}`,
-    );
-  }
+  await page.evaluate(() =>
+    window.dispatchEvent(new Event("workbench:logout")),
+  );
+  const saved = {
+    ...structuredClone(sessions[0]),
+    id: "saved-discussion",
+    context: { kind: "new" },
+    state: "ready_to_confirm",
+    confirmation: null,
+    card: cardFor(requests.get(root.id)),
+    generationRequest: structuredClone(requests.get(root.id)),
+  };
+  sessions = [
+    ...Array.from({ length: 100 }, (_, i) => ({
+      ...saved,
+      id: `other-source-${i}`,
+      context: {
+        kind: "revision",
+        revisionId: `unrelated-revision-${i}`,
+        feedbackIds: [],
+        anchor: null,
+      },
+    })),
+    saved,
+    {
+      ...saved,
+      id: "older-discussion",
+      card: { ...saved.card, goal: "更早的范围讨论" },
+      updatedAt: "2026-11-14T00:00:00Z",
+    },
+  ];
+  const createCount = createCalls.length;
+  await page.goto(
+    `${origin}/studio/${projectId}?plan=${root.id}&revision=${revisionId}`,
+  );
+  await prompt.waitFor();
+  await button("新建计划").click();
+  const directory = page.getByRole("combobox", {
+    name: "需求讨论",
+    exact: true,
+  });
+  await directory.waitFor();
+  assert(directoryCursors.includes("100"));
+  assert.equal(await directory.inputValue(), "saved-discussion");
+  await directory.selectOption("older-discussion");
+  await page.getByText("更早的范围讨论", { exact: true }).waitFor();
+  assert.equal(createCalls.length, createCount);
+  results.checks.push(
+    "Directory restores a matching discussion beyond 100 unrelated source sessions and switches among loaded matching discussions without creating a duplicate",
+  );
   assert.deepEqual(results.unknown, []);
   assert.deepEqual(results.errors, []);
   results.status = "passed";

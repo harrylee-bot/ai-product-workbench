@@ -14,7 +14,7 @@ export type ComposerContext =
       title: string;
       target: StudioPlanTarget;
       input: PrototypePlanInput;
-      operationRequest?: StartRunRequest;
+      operationRequest: StartRunRequest;
       version?: number;
     }
   | {
@@ -41,10 +41,9 @@ export type ComposerDraft = {
 type Entry = {
   context: ComposerContext;
   draft: ComposerDraft;
-  conflict?: PrototypePlanInput;
 };
 export type ComposerSession = {
-  version: 2;
+  version: 1;
   activeKey: string;
   entries: Record<string, Entry>;
 };
@@ -54,10 +53,7 @@ const newContext: ComposerContext = {
   title: "新建计划",
 };
 export function newComposerEntry(context: ComposerContext, prompt = ""): Entry {
-  const input =
-    context.kind === "input"
-      ? (context.operationRequest ?? context.input.request)
-      : undefined;
+  const input = context.kind === "input" ? context.operationRequest : undefined;
   return {
     context,
     draft: {
@@ -81,23 +77,16 @@ function restoreComposerEntry(
   prompt: string,
 ): Entry {
   if (!existing) return newComposerEntry(context, prompt);
-  if (
-    existing.context.kind === "input" &&
-    context.kind === "input" &&
-    context.operationRequest
-  )
+  if (existing.context.kind === "input" && context.kind === "input")
     return {
       ...existing,
-      context: {
-        ...existing.context,
-        operationRequest: context.operationRequest,
-      },
+      context,
     };
   return existing;
 }
 function emptySession(prompt = ""): ComposerSession {
   return {
-    version: 2,
+    version: 1,
     activeKey: "new",
     entries: { new: newComposerEntry(newContext, prompt) },
   };
@@ -107,7 +96,7 @@ function emptySession(prompt = ""): ComposerSession {
 // Unuploaded file bytes stay in memory and require explicit reselection on reload.
 async function database(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
-    const request = indexedDB.open("workbench-studio-composer", 1);
+    const request = indexedDB.open("workbench-studio-composer-v1", 1);
     request.onupgradeneeded = () =>
       request.result.createObjectStore("sessions");
     request.onerror = () => reject(request.error);
@@ -126,7 +115,7 @@ export async function readComposerSession(
         const result = request.result as ComposerSession | undefined;
         if (
           result &&
-          (result.version !== 2 ||
+          (result.version !== 1 ||
             !result.entries?.[result.activeKey] ||
             !result.entries.new)
         )
@@ -334,25 +323,6 @@ export function useStudioComposerSession(userId: string, projectId: string) {
             },
       ),
     newContext,
-    setConflict: (entryKey: string, conflict: PrototypePlanInput) =>
-      updateEntry(entryKey, (current) => ({ ...current, conflict })),
-    acceptConflict: () =>
-      updateEntry(entry.context.key, (current) =>
-        current.context.kind === "input" && current.conflict
-          ? {
-              ...current,
-              conflict: undefined,
-              context: {
-                ...current.context,
-                input: current.conflict,
-                target: {
-                  ...current.context.target,
-                  etag: `"${current.conflict.plan.revision}"`,
-                },
-              },
-            }
-          : current,
-      ),
     bindFileSource: (entryKey: string, file: File, sourceId: string) =>
       updateEntry(entryKey, (current) => ({
         ...current,

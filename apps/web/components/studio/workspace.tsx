@@ -100,9 +100,6 @@ type StudioWorkspaceProps = {
     StudioComposerProps,
     "prompt" | "setPrompt" | "draft" | "updateDraft" | "onSubmit"
   >;
-  submissionNotice?: string;
-  recoveryTitle?: string;
-  onRecoverSubmission?: () => Promise<PrototypePlan | string | null>;
   bootstrap: ProjectBootstrap;
 };
 
@@ -134,9 +131,6 @@ export function StudioWorkspace({
   canEdit,
   composer,
   bootstrap,
-  submissionNotice,
-  recoveryTitle,
-  onRecoverSubmission,
 }: StudioWorkspaceProps) {
   const api = useWorkbenchPrototypeV2Api();
   const [selection, setSelection] = useState<Selection>(() =>
@@ -159,7 +153,6 @@ export function StudioWorkspace({
     composerEntry.context.kind === "artifact"
       ? composerEntry.context.artifact
       : undefined;
-  const conflictingInput = composerEntry.conflict;
   const readView = (): StudioView => {
     const value =
       typeof window === "undefined"
@@ -252,18 +245,11 @@ export function StudioWorkspace({
                 }
               : null,
         }
-      : inputContext?.target.kind === "draft"
-        ? {
-            kind: "plan",
-            planId: inputContext.target.id,
-            expectedRevision: inputContext.input.plan.revision,
-          }
-        : { kind: "new" };
+      : { kind: "new" };
   const discussionKey = `${composerEntry.context.key}:${canonicalJson(requirementContext)}`;
   const activeDiscussion = useRef(discussionKey);
   activeDiscussion.current = discussionKey;
-  const initialRequest =
-    inputContext?.operationRequest ?? inputContext?.input.request;
+  const initialRequest = inputContext?.operationRequest;
   const discussion = useRequirementDiscussion({
     projectId,
     threadId: bootstrap.selectedThreadId ?? "",
@@ -271,10 +257,6 @@ export function StudioWorkspace({
     contextKey: discussionKey,
     canEdit,
     enabled: composerSession.ready,
-    initialGenerationRequest:
-      inputContext?.target.kind === "draft"
-        ? inputContext.input.request
-        : undefined,
     initialEntries: bootstrap.entries,
     operation: {
       workflow:
@@ -477,10 +459,6 @@ export function StudioWorkspace({
     setInteraction(undefined);
   }, [selectedRevisionId]);
   useEffect(() => {
-    if (plan?.status === "draft") setPanel("plan");
-  }, [plan?.id, plan?.status]);
-
-  useEffect(() => {
     const restore = () => {
       setSelection(readPrototypeSelection(window.location.search));
       setViewState(readView());
@@ -635,31 +613,11 @@ export function StudioWorkspace({
     const submittedDraft = composerEntry.draft;
     const scope = discussionKey;
     setError(undefined);
-    let accepted;
-    try {
-      accepted = await discussion.send({
-        ...submission,
-        onFileSource: (file, sourceId) =>
-          composerSession.bindFileSource(entryKey, file, sourceId),
-      });
-    } catch (cause) {
-      if (
-        inputContext?.target.kind === "draft" &&
-        isWorkbenchApiError(cause) &&
-        [409, 412].includes(cause.status)
-      ) {
-        const latest = await api.getPlanInput(
-          projectId,
-          inputContext.target.id,
-        );
-        if (
-          activeDiscussion.current === scope &&
-          latest.plan.revision !== inputContext.input.plan.revision
-        )
-          composerSession.setConflict(entryKey, latest);
-      }
-      throw cause;
-    }
+    const accepted = await discussion.send({
+      ...submission,
+      onFileSource: (file, sourceId) =>
+        composerSession.bindFileSource(entryKey, file, sourceId),
+    });
     if (!accepted || activeDiscussion.current !== scope) return null;
     composerSession.complete(entryKey, submittedDraft, true);
     setMessage("需求已保存，正在梳理本次改动；确认前不会启动生成");
@@ -852,28 +810,7 @@ export function StudioWorkspace({
               {livePlanRun && livePlanRun.status !== "waiting_input" && (
                 <RunOutputs run={livePlanRun} />
               )}
-              <PlanInputSummary
-                projectId={projectId}
-                plan={plan}
-                canEdit={canEdit && !running}
-                onAdjust={(input) => {
-                  composerSession.switchTo(
-                    {
-                      kind: "input",
-                      key: `draft:${plan.id}`,
-                      title: `调整计划：${plan.title}`,
-                      target: {
-                        kind: "draft",
-                        id: plan.id,
-                        etag: etag(input.plan),
-                      },
-                      input,
-                    },
-                    input.plan.prompt,
-                  );
-                  setPanel(null);
-                }}
-              />
+              <PlanInputSummary projectId={projectId} plan={plan} />
               {livePlanRun?.status === "waiting_input" && (
                 <RunDetails
                   run={livePlanRun!}
@@ -888,38 +825,6 @@ export function StudioWorkspace({
                 </p>
               )}
               <div className="visual-actions">
-                {plan.status === "draft" && (
-                  <button
-                    type="button"
-                    disabled={!canEdit}
-                    onClick={() =>
-                      void run(async () => {
-                        const input = await api.getPlanInput(
-                          projectId,
-                          plan.id,
-                        );
-                        composerSession.switchTo(
-                          {
-                            kind: "input",
-                            key: `draft:${plan.id}`,
-                            title: `调整计划：${plan.title}`,
-                            target: {
-                              kind: "draft",
-                              id: plan.id,
-                              etag: etag(input.plan),
-                            },
-                            input,
-                          },
-                          input.plan.prompt,
-                        );
-                        setPanel(null);
-                      }, "已载入原草稿，可讨论调整并确认生成")
-                    }
-                    className="visual-primary"
-                  >
-                    讨论并确认需求
-                  </button>
-                )}
                 {running && (
                   <button
                     type="button"
@@ -964,7 +869,7 @@ export function StudioWorkspace({
             </article>
           ) : (
             <p className="visual-muted">
-              从下方输入需求。计划创建后，在这里核对输入并审批。
+              从下方交流需求，核对改动摘要后确认生成。在这里查看已确认的固定输入。
             </p>
           )}
         </>
@@ -1625,7 +1530,7 @@ export function StudioWorkspace({
         }
         bottomBar={
           <footer className="visual-composer-dock" data-focused={focused}>
-            {(running || progress.error || plan?.status === "draft") && (
+            {(running || progress.error) && (
               <div className="visual-progress" role="status">
                 <span className={running ? "visual-pulse" : ""} />
                 <span>
@@ -1633,11 +1538,9 @@ export function StudioWorkspace({
                     ? "正在恢复连接，保留最后画面"
                     : progress.error
                       ? "进度连接暂不可用"
-                      : plan?.status === "draft"
-                        ? "计划等待审批"
-                        : livePlanRun?.status === "waiting_input"
-                          ? "需要补充输入"
-                          : (progress.projection?.phaseLabel ?? "正在准备生成")}
+                      : livePlanRun?.status === "waiting_input"
+                        ? "需要补充输入"
+                        : (progress.projection?.phaseLabel ?? "正在准备生成")}
                 </span>
                 {running && (
                   <time>
@@ -1680,12 +1583,6 @@ export function StudioWorkspace({
               {focused ? "展开输入框" : "专注预览"}
             </button>
             <div hidden={focused}>
-              {inputContext?.target.kind === "revision" &&
-                !inputContext.operationRequest && (
-                  <p role="alert">
-                    源版本操作输入需重新载入，请点击“修改版本”核对后继续；草稿仍保留。
-                  </p>
-                )}
               {composerSession.storageError && (
                 <p role="alert">{composerSession.storageError}</p>
               )}
@@ -1709,69 +1606,6 @@ export function StudioWorkspace({
                     恢复输入：{entry.context.title}
                   </button>
                 ))}
-              {conflictingInput && (
-                <div className="studio-input-conflict" role="alert">
-                  <p>
-                    计划输入已被其他操作更新。你的全部调整仍保留，请先核对最新记录。
-                  </p>
-                  <details>
-                    <summary>查看最新保存的输入</summary>
-                    <p>{conflictingInput.plan.prompt}</p>
-                    <p>
-                      模型 {conflictingInput.request.modelId} · 资料{" "}
-                      {conflictingInput.snapshot?.sources
-                        .map((source) => source.label)
-                        .join("、") || "无"}
-                    </p>
-                  </details>
-                  <button
-                    disabled={conflictingInput.plan.status !== "draft"}
-                    onClick={() => {
-                      composerSession.acceptConflict();
-                      setError(undefined);
-                    }}
-                  >
-                    保留我的调整并继续
-                  </button>
-                </div>
-              )}
-              {submissionNotice && (
-                <p role="status" className="studio-muted">
-                  {submissionNotice}
-                </p>
-              )}
-              {recoveryTitle && onRecoverSubmission && (
-                <div>
-                  <p>待确认：{recoveryTitle}。恢复此提交会保留当前输入。</p>
-                  <button
-                    disabled={!canEdit || composer.busy}
-                    onClick={() =>
-                      void run(async () => {
-                        const result = await onRecoverSubmission();
-                        if (!result) return;
-                        if (typeof result === "string") {
-                          setDirectRunId(result);
-                          const url = new URL(window.location.href);
-                          url.searchParams.set("run", result);
-                          window.history.replaceState(null, "", url);
-                          setView("documents");
-                        } else {
-                          selectPlan(result);
-                          setView("pages");
-                          setPanel("plan");
-                        }
-                      }, "上次提交已确认，当前输入保持不变")
-                    }
-                  >
-                    确认上次提交
-                  </button>
-                </div>
-              )}
-              {inputContext?.target.kind === "draft" && (
-                <p role="status">
-                  本次讨论绑定原草稿及其固定输入。确认后将保留来源并创建后续任务。
-                </p>
-              )}
               {(discussion.error || discussion.storageError) && (
                 <div role="alert">
                   <p>{discussion.error?.message || discussion.storageError}</p>
@@ -1806,33 +1640,10 @@ export function StudioWorkspace({
                   type="button"
                   disabled={discussion.pending || !canEdit}
                   onClick={() =>
-                    void run(async () => {
-                      if (inputContext?.target.kind === "draft") {
-                        const scope = discussionKey;
-                        const latest = await api.getPlanInput(
-                          projectId,
-                          inputContext.target.id,
-                        );
-                        if (activeDiscussion.current !== scope) return;
-                        if (
-                          latest.plan.revision !==
-                            inputContext.input.plan.revision ||
-                          latest.plan.status !== "draft"
-                        ) {
-                          composerSession.setConflict(
-                            composerEntry.context.key,
-                            latest,
-                          );
-                          composerSession.updateDraft((draft) => ({
-                            ...draft,
-                            prompt:
-                              draft.prompt || discussedInput?.prompt || "",
-                          }));
-                          return;
-                        }
-                      }
-                      await discussion.reviewLatest();
-                    }, "已重新读取，请核对最新改动摘要")
+                    void run(
+                      discussion.reviewLatest,
+                      "已重新读取，请核对最新改动摘要",
+                    )
                   }
                 >
                   重新核对最新摘要
@@ -1950,10 +1761,7 @@ export function StudioWorkspace({
                         prompt,
                       }))
                     }
-                    initialInput={
-                      inputContext?.operationRequest ??
-                      inputContext?.input.request
-                    }
+                    initialInput={inputContext?.operationRequest}
                     pinnedSources={inputContext?.input.snapshot?.sources}
                     pinnedDesign={inputContext?.input.snapshot?.designStyle}
                     artifactContext={artifactContext}
@@ -2029,22 +1837,15 @@ export function StudioWorkspace({
                         <span>
                           {editingCurrent
                             ? `源版本 ${inputContext.version} · ${selectedRevision?.id === inputContext.target.id ? interaction?.label || "版本整体" : "仍绑定原来源，浏览不会更改提交目标"}`
-                            : inputContext?.target.kind === "draft"
-                              ? `${inputContext.title} · 保留原草稿来源`
-                              : artifactContext
-                                ? `${artifactPromptLabel(artifactContext)}：${artifactContext.title}`
-                                : "使用下方模型、资料和设计"}
+                            : artifactContext
+                              ? `${artifactPromptLabel(artifactContext)}：${artifactContext.title}`
+                              : "使用下方模型、资料和设计"}
                         </span>
                       </div>
                     }
                     busy={discussion.pending}
                     disabled={
-                      (inputContext?.target.kind === "revision" &&
-                        !inputContext.operationRequest) ||
-                      composer.disabled ||
-                      !canEdit ||
-                      !!conflictingInput ||
-                      !composerSession.ready
+                      composer.disabled || !canEdit || !composerSession.ready
                     }
                     uploads={discussion.uploads}
                     onSubmit={submitPlan}
@@ -2073,7 +1874,6 @@ function statusLabel(status: string): string {
   return (
     (
       {
-        draft: "待审批",
         approved: "已审批",
         queued: "排队中",
         generating: "生成中",
