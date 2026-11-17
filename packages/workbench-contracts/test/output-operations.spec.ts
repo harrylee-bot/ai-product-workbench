@@ -10,6 +10,7 @@ describe('confirmed output operations',()=>{
  it('requires a complete output plan at confirmation',()=>{
   expect(startRunRequestSchema.safeParse(request).success).toBe(false);
   expect(startRunRequestSchema.safeParse({...request,outputOperations:operations.slice(1)}).success).toBe(false);
+  expect(startRunRequestSchema.safeParse({...request,requestedArtifactKinds:[],outputOperations:[]}).success).toBe(false);
  });
  it('rejects a forged revision version, duplicate output, or prototype before its PRD',()=>{
   expect(startRunRequestSchema.safeParse({...request,outputOperations:[operations[0],{kind:'prototype',operation:{kind:'revise',target:{...target,artifactVersionId:'other-version'}}}]}).success).toBe(false);

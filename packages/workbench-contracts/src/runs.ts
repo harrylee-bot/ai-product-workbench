@@ -149,7 +149,7 @@ export const runArtifactOperationSchema=z.discriminatedUnion("kind",[
  * reference inputs; only these exact operations authorize publication. */
 export const runOutputOperationsSchema=z.array(z.object({
   kind:runtimeRequestedArtifactKindSchema,operation:runArtifactOperationSchema,
-}).strict()).min(1).max(20);
+}).strict()).max(20);
 export type RunOutputOperation=z.infer<typeof runOutputOperationsSchema>[number];
 
 type RunWorkflowArtifactTargetInput = Readonly<{
@@ -425,6 +425,7 @@ export const startRunRequestObjectSchema = z.object({
 
 export const startRunRequestSchema = startRunRequestObjectSchema.superRefine((request, context) => {
   if(request.requirementConfirmationId&&!request.outputOperations)context.addIssue({code:"custom",path:["outputOperations"],message:"Confirmed generation requires explicit output operations"});
+  if(request.requirementConfirmationId&&request.requestedArtifactKinds.length===0)context.addIssue({code:"custom",path:["requestedArtifactKinds"],message:"Confirmed generation requires at least one requested output"});
   if(request.outputOperations){
     const seen=new Set<string>(),kinds=new Set(request.outputOperations.map(x=>x.kind));
     if(request.requestedArtifactKinds.some(kind=>!kinds.has(kind))||[...kinds].some(kind=>!request.requestedArtifactKinds.includes(kind)))context.addIssue({code:"custom",path:["outputOperations"],message:"Output operations must cover every requested kind exactly"});

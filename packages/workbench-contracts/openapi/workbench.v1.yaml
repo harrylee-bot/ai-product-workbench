@@ -18144,7 +18144,6 @@ components:
           - kind
           - operation
         additionalProperties: false
-      minItems: 1
       maxItems: 20
     StartRunRequest:
       type: object
