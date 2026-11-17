@@ -4,6 +4,109 @@
  */
 
 export interface paths {
+    "/threads/{threadId}/requirement-sessions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Current principal's sessions */
+        get: operations["listRequirementSessions"];
+        put?: never;
+        /** Discussion session; no generation Run */
+        post: operations["createRequirementSession"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/requirement-sessions/{sessionId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Recoverable requirement snapshot */
+        get: operations["getRequirementSession"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/requirement-sessions/{sessionId}/messages": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Requirement snapshot */
+        post: operations["postRequirementMessage"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/requirement-sessions/{sessionId}/confirm": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Requirement snapshot */
+        post: operations["confirmRequirement"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/requirement-sessions/{sessionId}/turns/{turnId}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Requirement snapshot */
+        post: operations["cancelRequirementTurn"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/requirement-sessions/{sessionId}/turns/{turnId}/retry": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Requirement snapshot */
+        post: operations["retryRequirementTurn"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/system/live": {
         parameters: {
             query?: never;
@@ -5486,6 +5589,12 @@ export interface components {
         ConfirmArtifactFinalizationRequest: {
             checksum: string;
         };
+        ConfirmRequirementRequest: {
+            summaryVersion: number;
+            summaryChecksum: string;
+            acceptedAssumptionIds: string[];
+            acceptedPlatformChanges: boolean;
+        };
         /** @description Source and target must identify two distinct ready versions of this project. The server validates artifact/version identity and permissions. */
         CreateArtifactLinkRequest: {
             source: components["schemas"]["ArtifactLinkTarget"];
@@ -5779,6 +5888,7 @@ export interface components {
         RunWorkflow: "generate" | "redesign" | "ideate" | "edit";
         /** @description Redesign requires a ready Import Source; Edit requires an Artifact target; Generate accepts explicit source screen targets or one fixed PRD with prdScreenPlan when prototype is requested; Redesign and Ideate forbid targets. Enforced by the runtime Zod contract. */
         StartRunRequest: {
+            requirementConfirmationId?: string;
             prompt: string;
             modelId: string;
             workflow: components["schemas"]["RunWorkflow"];
@@ -5846,6 +5956,109 @@ export interface components {
             /** Format: date-time */
             expiresAt?: string | null;
         };
+        PrototypeFeedbackAnchor: {
+            sourceRevisionId: string;
+            pageId: string;
+            quote?: string;
+            /** @enum {string} */
+            scope: "page";
+        } | {
+            sourceRevisionId: string;
+            pageId: string;
+            quote?: string;
+            /** @enum {string} */
+            scope: "node";
+            nodeId: string;
+        } | {
+            sourceRevisionId: string;
+            pageId: string;
+            quote?: string;
+            /** @enum {string} */
+            scope: "unresolved";
+        };
+        RequirementContext: {
+            /** @enum {string} */
+            kind: "new";
+        } | {
+            /** @enum {string} */
+            kind: "revision";
+            revisionId: string;
+            feedbackIds: string[];
+            anchor: {
+                sourceRevisionId: string;
+                pageId: string;
+                quote?: string;
+                /** @enum {string} */
+                scope: "page";
+            } | {
+                sourceRevisionId: string;
+                pageId: string;
+                quote?: string;
+                /** @enum {string} */
+                scope: "node";
+                nodeId: string;
+            } | {
+                sourceRevisionId: string;
+                pageId: string;
+                quote?: string;
+                /** @enum {string} */
+                scope: "unresolved";
+            } | null;
+        };
+        RequirementDiscussionRequest: {
+            prompt: string;
+            modelId: string;
+            workflow: components["schemas"]["RunWorkflow"];
+            /**
+             * @default null
+             * @enum {string|null}
+             */
+            generationIntent: "followup-design" | "interactive-prototype" | "prd-prototype" | "prd-flow" | null;
+            prdScreenPlan?: components["schemas"]["RunPrdScreenPlan"];
+            targetSurface: components["schemas"]["RunTargetSurface"];
+            designStyle: components["schemas"]["RunDesignStyle"];
+            sourceIds?: components["schemas"]["RunSourceIds"];
+            /**
+             * @description Immutable ready ArtifactVersion selections in runtime target order; Generate Prototype requires one or more explicit screen ids on every source target
+             * @default []
+             */
+            artifactTargets: components["schemas"]["RunArtifactTarget"][];
+            /** @default [] */
+            requestedArtifactKinds: components["schemas"]["RuntimeRequestedArtifactKind"][];
+            /**
+             * @description Canvas snapshots use unique screen references and only expose references declared by the snapshot; enforced by the runtime Zod contract.
+             * @default null
+             */
+            canvasSnapshot: {
+                /** @enum {string} */
+                protocol: "workbench.canvas-snapshot.v1";
+                /** @description Canvas entity ids are bounded opaque identifiers and cannot be URI schemes; enforced by the runtime Zod contract. */
+                projectId: string;
+                /** @description Canvas entity ids are bounded opaque identifiers and cannot be URI schemes; enforced by the runtime Zod contract. */
+                threadId: string;
+                /** @description Canvas entity ids are bounded opaque identifiers and cannot be URI schemes; enforced by the runtime Zod contract. */
+                runId: string | null;
+                /** @description Canvas entity ids are bounded opaque identifiers and cannot be URI schemes; enforced by the runtime Zod contract. */
+                boardId: string;
+                /** @description Canvas browser session ids are bounded opaque identifiers and cannot be URI schemes; enforced by the runtime Zod contract. */
+                clientSessionId: string;
+                projectSessionGeneration: components["schemas"]["Revision"];
+                boardRevision: components["schemas"]["Revision"];
+                canvasStateRevision: components["schemas"]["Revision"];
+                /** Format: date-time */
+                capturedAt: string;
+                /** Format: date-time */
+                expiresAt: string;
+                viewport: components["schemas"]["CanvasViewport"];
+                screens: components["schemas"]["CanvasScreenSummary"][];
+                visibleScreens: components["schemas"]["CanvasAgentScreenReference"][];
+                selectedScreens: components["schemas"]["CanvasAgentScreenReference"][];
+            } | null;
+        };
+        CreateRequirementSessionRequest: {
+            generationRequest: components["schemas"]["RequirementDiscussionRequest"];
+            context?: components["schemas"]["RequirementContext"];
+        };
         SubmissionIntentAttachmentRequest: {
             /** @enum {string} */
             kind: "existing";
@@ -5861,6 +6074,7 @@ export interface components {
         };
         /** @description SubmissionIntent requests directly enforce the same workflow, Artifact target, requested output, and pre-submission Canvas scope semantics as StartRun. */
         SubmissionIntentRunRequest: {
+            requirementConfirmationId?: string;
             prompt: string;
             modelId: string;
             workflow: components["schemas"]["RunWorkflow"];
@@ -6583,6 +6797,15 @@ export interface components {
             /** @description Unique partNumber values in strictly ascending order */
             parts: components["schemas"]["UploadedPart"][];
         };
+        PostRequirementMessageRequest: {
+            text: string;
+            generationRequest?: components["schemas"]["RequirementDiscussionRequest"];
+            /**
+             * @default discuss
+             * @enum {string}
+             */
+            intent: "discuss" | "confirm_suggestion";
+        };
         /** @description PRD v3 uses contiguous function-specific sections, optional typed diagrams, embedded or later acceptance, and the same complete safety, table, citation and semantic-reference validation. */
         PrdDocumentV3: {
             /** @enum {string} */
@@ -7175,26 +7398,6 @@ export interface components {
             finishedAt: string | null;
         };
         PrototypeExportList: components["schemas"]["PrototypeExport"][];
-        PrototypeFeedbackAnchor: {
-            sourceRevisionId: string;
-            pageId: string;
-            quote?: string;
-            /** @enum {string} */
-            scope: "page";
-        } | {
-            sourceRevisionId: string;
-            pageId: string;
-            quote?: string;
-            /** @enum {string} */
-            scope: "node";
-            nodeId: string;
-        } | {
-            sourceRevisionId: string;
-            pageId: string;
-            quote?: string;
-            /** @enum {string} */
-            scope: "unresolved";
-        };
         /** @enum {string} */
         PrototypeFeedbackStatus: "open" | "resolved";
         PrototypeFeedback: {
@@ -8524,6 +8727,214 @@ export interface components {
             nodes: components["schemas"]["BoardNodes"];
             edges: components["schemas"]["BoardEdge"][];
         };
+        RequirementAssumption: {
+            id: string;
+            text: string;
+            evidenceIds: string[];
+        };
+        RequirementIssue: {
+            id: string;
+            /** @enum {string} */
+            kind: "missing" | "conflict" | "knowledge_missing" | "scope_expansion";
+            question: string;
+            /** @enum {string} */
+            impact: "scope" | "workflow" | "permission" | "financial" | "external_dependency" | "platform" | "presentation";
+            blocking: boolean;
+            evidenceIds: string[];
+        };
+        RequirementDiscussionCard: {
+            goal?: string | null;
+            platform?: string | null;
+            modules?: string[];
+            roles?: string[];
+            existingCapabilities?: {
+                description: string;
+                evidenceIds: string[];
+                /** @enum {string} */
+                scope: "platform" | "template" | "regional" | "prototype" | "uncertain";
+            }[];
+            reuse?: string[];
+            changes?: string[];
+            affectedPages?: string[];
+            affectedFlows?: string[];
+            /** @enum {string} */
+            targetSurface?: "app" | "web";
+            designConstraints?: string[];
+            outputKinds?: ("prd" | "prototype")[];
+            assumptions?: components["schemas"]["RequirementAssumption"][];
+            issues?: components["schemas"]["RequirementIssue"][];
+            platformChanges?: string[];
+            preserved?: string[];
+        };
+        RequirementAnalysis: {
+            reply: string;
+            card: {
+                goal?: string | null;
+                platform?: string | null;
+                modules?: string[];
+                roles?: string[];
+                existingCapabilities?: {
+                    description: string;
+                    evidenceIds: string[];
+                    /** @enum {string} */
+                    scope: "platform" | "template" | "regional" | "prototype" | "uncertain";
+                }[];
+                reuse?: string[];
+                changes?: string[];
+                affectedPages?: string[];
+                affectedFlows?: string[];
+                /** @enum {string} */
+                targetSurface?: "app" | "web";
+                designConstraints?: string[];
+                outputKinds?: ("prd" | "prototype")[];
+                assumptions?: components["schemas"]["RequirementAssumption"][];
+                issues?: components["schemas"]["RequirementIssue"][];
+                platformChanges?: string[];
+                preserved?: string[];
+            } | null;
+        };
+        RequirementCard: {
+            goal: string;
+            platform: string;
+            modules: string[];
+            roles: string[];
+            existingCapabilities: {
+                description: string;
+                evidenceIds: string[];
+                /** @enum {string} */
+                scope: "platform" | "template" | "regional" | "prototype" | "uncertain";
+            }[];
+            reuse: string[];
+            changes: string[];
+            affectedPages: string[];
+            affectedFlows: string[];
+            /** @enum {string} */
+            targetSurface: "app" | "web";
+            designConstraints: string[];
+            /** @description Requirement output kinds are unique. */
+            outputKinds: ("prd" | "prototype")[];
+            assumptions: components["schemas"]["RequirementAssumption"][];
+            issues: components["schemas"]["RequirementIssue"][];
+            platformChanges: string[];
+            preserved: string[];
+        };
+        RequirementConfirmation: {
+            id: string;
+            summaryVersion: number;
+            summaryChecksum: string;
+            /** @enum {string} */
+            status: "pending" | "started" | "invalidated";
+            acceptedAssumptionIds: string[];
+            acceptedPlatformChanges: boolean;
+            /** Format: date-time */
+            confirmedAt: string;
+            planId: string | null;
+            runId: string | null;
+        };
+        RequirementEvidence: {
+            id: string;
+            releaseId: string;
+            releaseVersion: number;
+            documentId: string;
+            chunkId: string;
+            sourcePath: string;
+            title: string;
+            quote: string;
+            /** @enum {string} */
+            scope: "platform" | "template" | "regional" | "prototype" | "uncertain";
+            checksum: string;
+        };
+        RequirementTurn: {
+            id: string;
+            sessionId: string;
+            inputRevision: components["schemas"]["Revision"];
+            /** @enum {string} */
+            status: "queued" | "running" | "succeeded" | "failed" | "cancelled" | "superseded";
+            /** @enum {string} */
+            modelId: "deepseek-flash";
+            attempt: number;
+            failureCode: string | null;
+            inputTokens: number | null;
+            outputTokens: number | null;
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            finishedAt: string | null;
+        };
+        RequirementSession: {
+            id: string;
+            projectId: string;
+            threadId: string;
+            revision: components["schemas"]["Revision"];
+            /** @enum {string} */
+            state: "discussing" | "analyzing" | "needs_clarification" | "ready_to_confirm" | "confirmed" | "generating";
+            context: components["schemas"]["RequirementContext"];
+            generationRequest: components["schemas"]["RequirementDiscussionRequest"];
+            summaryVersion: number;
+            summaryChecksum: string | null;
+            card: {
+                goal?: string | null;
+                platform?: string | null;
+                modules?: string[];
+                roles?: string[];
+                existingCapabilities?: {
+                    description: string;
+                    evidenceIds: string[];
+                    /** @enum {string} */
+                    scope: "platform" | "template" | "regional" | "prototype" | "uncertain";
+                }[];
+                reuse?: string[];
+                changes?: string[];
+                affectedPages?: string[];
+                affectedFlows?: string[];
+                /** @enum {string} */
+                targetSurface?: "app" | "web";
+                designConstraints?: string[];
+                outputKinds?: ("prd" | "prototype")[];
+                assumptions?: components["schemas"]["RequirementAssumption"][];
+                issues?: components["schemas"]["RequirementIssue"][];
+                platformChanges?: string[];
+                preserved?: string[];
+            } | null;
+            evidence: components["schemas"]["RequirementEvidence"][];
+            activeTurn: {
+                id: string;
+                sessionId: string;
+                inputRevision: components["schemas"]["Revision"];
+                /** @enum {string} */
+                status: "queued" | "running" | "succeeded" | "failed" | "cancelled" | "superseded";
+                /** @enum {string} */
+                modelId: "deepseek-flash";
+                attempt: number;
+                failureCode: string | null;
+                inputTokens: number | null;
+                outputTokens: number | null;
+                /** Format: date-time */
+                createdAt: string;
+                /** Format: date-time */
+                finishedAt: string | null;
+            } | null;
+            confirmation: {
+                id: string;
+                summaryVersion: number;
+                summaryChecksum: string;
+                /** @enum {string} */
+                status: "pending" | "started" | "invalidated";
+                acceptedAssumptionIds: string[];
+                acceptedPlatformChanges: boolean;
+                /** Format: date-time */
+                confirmedAt: string;
+                planId: string | null;
+                runId: string | null;
+            } | null;
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            updatedAt: string;
+        };
+        RequirementSessions: {
+            items: components["schemas"]["RequirementSession"][];
+        };
         RetireKnowledgeProfileRequest: {
             /** @enum {string} */
             expectedStatus: "candidate" | "poc" | "adopted";
@@ -8860,6 +9271,7 @@ export interface components {
             expiresAt: string;
         };
         StartRunRequestObject: {
+            requirementConfirmationId?: string;
             prompt: string;
             modelId: string;
             workflow: components["schemas"]["RunWorkflow"];
@@ -9081,6 +9493,8 @@ export interface components {
         /** @enum {string} */
         KnowledgeProfileType: "embedding" | "retrieval";
         ThreadId: string;
+        RequirementSessionId: string;
+        RequirementTurnId: string;
         SubmissionIntentId: string;
         RunId: string;
         ArtifactId: string;
@@ -9141,6 +9555,8 @@ export interface components {
         KnowledgeProfileType: components["schemas"]["KnowledgeProfileType"];
         KnowledgeProfileId: components["schemas"]["KnowledgeProfileId"];
         ThreadId: components["schemas"]["ThreadId"];
+        RequirementSessionId: components["schemas"]["RequirementSessionId"];
+        RequirementTurnId: components["schemas"]["RequirementTurnId"];
         SubmissionIntentId: components["schemas"]["SubmissionIntentId"];
         RunId: components["schemas"]["RunId"];
         ArtifactId: components["schemas"]["ArtifactId"];
@@ -9183,6 +9599,227 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    listRequirementSessions: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                threadId: components["parameters"]["ThreadId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Current principal's sessions */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RequirementSessions"];
+                };
+            };
+            404: components["responses"]["Problem"];
+        };
+    };
+    createRequirementSession: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                threadId: components["parameters"]["ThreadId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateRequirementSessionRequest"];
+            };
+        };
+        responses: {
+            /** @description Discussion session; no generation Run */
+            201: {
+                headers: {
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RequirementSession"];
+                };
+            };
+            400: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            409: components["responses"]["Problem"];
+        };
+    };
+    getRequirementSession: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                sessionId: components["parameters"]["RequirementSessionId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Recoverable requirement snapshot */
+            200: {
+                headers: {
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RequirementSession"];
+                };
+            };
+            404: components["responses"]["Problem"];
+        };
+    };
+    postRequirementMessage: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                "If-Match": components["parameters"]["IfMatch"];
+            };
+            path: {
+                sessionId: components["parameters"]["RequirementSessionId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PostRequirementMessageRequest"];
+            };
+        };
+        responses: {
+            /** @description Requirement snapshot */
+            202: {
+                headers: {
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RequirementSession"];
+                };
+            };
+            400: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            409: components["responses"]["Problem"];
+            412: components["responses"]["Problem"];
+            428: components["responses"]["Problem"];
+            429: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    confirmRequirement: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                "If-Match": components["parameters"]["IfMatch"];
+            };
+            path: {
+                sessionId: components["parameters"]["RequirementSessionId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConfirmRequirementRequest"];
+            };
+        };
+        responses: {
+            /** @description Requirement snapshot */
+            202: {
+                headers: {
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RequirementSession"];
+                };
+            };
+            400: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            409: components["responses"]["Problem"];
+            412: components["responses"]["Problem"];
+            428: components["responses"]["Problem"];
+            429: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    cancelRequirementTurn: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                "If-Match": components["parameters"]["IfMatch"];
+            };
+            path: {
+                sessionId: components["parameters"]["RequirementSessionId"];
+                turnId: components["parameters"]["RequirementTurnId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Requirement snapshot */
+            200: {
+                headers: {
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RequirementSession"];
+                };
+            };
+            400: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            409: components["responses"]["Problem"];
+            412: components["responses"]["Problem"];
+            428: components["responses"]["Problem"];
+            429: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    retryRequirementTurn: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                "If-Match": components["parameters"]["IfMatch"];
+            };
+            path: {
+                sessionId: components["parameters"]["RequirementSessionId"];
+                turnId: components["parameters"]["RequirementTurnId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Requirement snapshot */
+            202: {
+                headers: {
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RequirementSession"];
+                };
+            };
+            400: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            409: components["responses"]["Problem"];
+            412: components["responses"]["Problem"];
+            428: components["responses"]["Problem"];
+            429: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
     getLiveness: {
         parameters: {
             query?: never;

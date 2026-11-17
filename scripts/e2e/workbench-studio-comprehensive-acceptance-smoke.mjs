@@ -7,6 +7,8 @@ import assert from "node:assert/strict";
 import { chromium } from "playwright";
 
 const origin = process.env.WORKBENCH_E2E_WEB_ORIGIN ?? "http://127.0.0.1:18930";
+const soakMs = Number(process.env.WORKBENCH_E2E_STUDIO_SOAK_MS ?? 0);
+assert(Number.isFinite(soakMs) && soakMs >= 0 && soakMs <= 3_600_000, "Invalid soak duration");
 const output = new URL(
   process.env.WORKBENCH_E2E_STUDIO_OUTPUT ?? "../../output/audit/1.0.0/studio-comprehensive/",
   import.meta.url,
@@ -164,6 +166,9 @@ const server = createServer(async (req, res) => {
     res.end(JSON.stringify(data));
   };
 
+  if (path.endsWith("/requirement-sessions")) return json({ items: [] });
+  if (path.endsWith("/entries")) return json({ items: [], nextAfterSequence: null });
+
   if (path.endsWith("/events")) {
     res.writeHead(200, {
       "content-type": "text/event-stream",
@@ -315,7 +320,7 @@ const server = createServer(async (req, res) => {
         designStyle: null,
       },
       run: sseMode && proj.id === "project-alpha" ? sseRun : null,
-      events: sseMode && proj.id === "project-alpha" ? sseEvents : [],
+      events: sseMode && proj.id === "project-alpha" ? sseEvents.slice(-64) : [],
       coverage: "window",
       finalRevisionId:
         sseMode && proj.id === "project-alpha" ? null : rev1.id,
@@ -642,7 +647,16 @@ try {
       const btn = buttons.find((b) => b.textContent?.trim() === name);
       const t0 = performance.now();
       btn.click();
-      await new Promise((r) => requestAnimationFrame(() => r()));
+      await new Promise((resolve, reject) => {
+        const check = () => {
+          const panel = document.querySelector(`.studio-context[aria-label="${name}"]`);
+          if (panel?.querySelector("h2")?.textContent === name && panel.checkVisibility() && panel.getBoundingClientRect().width > 0) {
+            requestAnimationFrame(() => requestAnimationFrame(resolve));
+          } else if (performance.now() - t0 > 3000) reject(new Error(`Panel ${name} did not become visible`));
+          else requestAnimationFrame(check);
+        };
+        requestAnimationFrame(check);
+      });
       return performance.now() - t0;
     }, targetName);
     actionSamples.push(latency);
@@ -655,8 +669,9 @@ try {
   );
 
   const pageSwitchSamples = [];
-  for (let i = 0; i < 30; i++) {
-    const nextIdx = (i % 50) + 1;
+  const visitedPages = [];
+  for (let i = 0; i < 50; i++) {
+    const nextIdx = i + 1;
     const targetPageId = `page-${nextIdx}`;
     const expectedTitle =
       nextIdx === 1
@@ -670,10 +685,14 @@ try {
       .selectOption(targetPageId);
     await frame.getByRole("heading", { name: expectedTitle }).waitFor();
     pageSwitchSamples.push(performance.now() - t0);
+    visitedPages.push(targetPageId);
+    assert.equal(await page.locator("iframe").count(), 1);
   }
   const activeIframesAfterSwitches = await page.locator("iframe").count();
   assert.equal(activeIframesAfterSwitches, 1);
   results.metrics.cachedPageSwitch = summarizeSamples(pageSwitchSamples, 500);
+  results.metrics.visitedPages = visitedPages;
+  assert.equal(new Set(visitedPages).size, 50);
   assert(
     results.metrics.cachedPageSwitch.passed,
     `Cached page switch P95 exceeded 500ms: ${results.metrics.cachedPageSwitch.p95Ms}ms`,
@@ -1043,6 +1062,118 @@ try {
   await ssePage.locator('[data-draft-node="node-live-2"]').filter({ hasText: "关闭动效仍继续接收" }).waitFor();
   assert.equal(await swarm.count(), 0);
   results.checks.push('Swarm: actual Studio SSE node update starts scoped decorative drawing; disable leaves SSE content updates working; screenshot recorded');
+  if (soakMs > 0) {
+    const session = await ctx3.newCDPSession(ssePage);
+    await session.send("Performance.enable");
+    const capture = async (label) => {
+      // NamedNodeMap creates native Attr objects lazily. Materialize the live
+      // attributes at BOTH matched endpoints so inspecting a current element
+      // during the workload is not counted as a detached-node leak. Retained
+      // detached trees still remain in getDOMCounters after GC.
+      const connected = label ? await ssePage.evaluate(() => {
+        let nodes = 0, attributes = 0;
+        const visit = root => {
+          for (const node of root.childNodes) {
+            nodes++;
+            if (node instanceof Element) {
+              attributes += Array.from(node.attributes).length;
+              if (node.shadowRoot) visit(node.shadowRoot);
+            }
+            visit(node);
+          }
+        };
+        visit(document);
+        return { nodes, attributes };
+      }) : undefined;
+      await session.send("HeapProfiler.collectGarbage");
+      const counters = await session.send("Memory.getDOMCounters");
+      if (label) {
+        const snapshot = await session.send("DOMSnapshot.captureSnapshot", { computedStyles: [] });
+        const detached = await session.send("DOM.getDetachedDomNodes");
+        await writeFile(new URL(`resource-${label}-dom.json`, output), JSON.stringify({ snapshot, detached }));
+        if (process.env.WORKBENCH_E2E_STUDIO_HEAP_SNAPSHOTS === "1") {
+          const chunks = [];
+          const collect = ({ chunk }) => chunks.push(chunk);
+          session.on("HeapProfiler.addHeapSnapshotChunk", collect);
+          try {
+            await session.send("HeapProfiler.takeHeapSnapshot", { reportProgress: false });
+            await writeFile(new URL(`resource-${label}.heapsnapshot`, output), chunks.join(""));
+          } finally { session.off("HeapProfiler.addHeapSnapshotChunk", collect); }
+        }
+      }
+      const performance = await session.send("Performance.getMetrics");
+      const metrics = Object.fromEntries(performance.metrics.map(item => [item.name, item.value]));
+      return { elapsedMs: Date.now() - started, ...counters, connected, heapBytes: metrics.JSHeapUsedSize,
+        taskSeconds: metrics.TaskDuration, layoutSeconds: metrics.LayoutDuration,
+        streams: sseStreams.size, iframes: await ssePage.locator("iframe").count(),
+        overlays: await ssePage.locator("[data-swarm-projection]").count() };
+    };
+    const makeTwoPages = label => {
+      const payload = makePreviewPayload(label);
+      payload.preview.screens.push({ ...payload.preview.screens[0], id: "screen-live-2", name: "实时明细" });
+      return payload;
+    };
+    // Warm both page/animation lifecycle paths before measuring retained objects.
+    emitSse("artifact.preview.updated", makeTwoPages("资源检查预热"));
+    const switchPage = { selectOption: id => ssePage.locator(".visual-draft-pages").getByRole("button", {
+      name: id === "screen-live-1" ? /^实时首页/ : /^实时明细/,
+    }).click() };
+    await switchPage.selectOption("screen-live-2");
+    await switchPage.selectOption("screen-live-1");
+    const setMotion = async enabled => {
+      const button = ssePage.getByRole("button", { name: enabled ? "开启绘制动效" : "关闭绘制动效", exact: true });
+      if (await button.count()) await button.click();
+    };
+    await setMotion(true);
+    emitSse("artifact.preview.updated", makeTwoPages("资源检查绘制预热"));
+    await ssePage.locator("[data-swarm-projection]").waitFor();
+    await setMotion(false);
+    await ssePage.locator("[data-swarm-projection]").waitFor({ state: "detached" });
+    // Exercise the same toggle locator used by the sustained loop before the
+    // baseline. Chromium lazily materializes Attr objects on inspected live
+    // controls; a cold control is not a matching retained-object baseline.
+    const warmToggle = ssePage.getByRole("button", { name: /^(开启|关闭)绘制动效$/ });
+    await warmToggle.click();
+    await warmToggle.click();
+    await ssePage.locator("[data-swarm-projection]").waitFor({ state: "detached" });
+    const started = Date.now();
+    const samples = [await capture("initial")];
+    let updates = 0, switches = 0, toggles = 0;
+    while (Date.now() - started < soakMs) {
+      updates++;
+      emitSse("artifact.preview.updated", makeTwoPages(`资源检查持续更新 ${updates}`));
+      await ssePage.locator('[data-draft-node="node-live-2"]').filter({ hasText: `资源检查持续更新 ${updates}` }).waitFor();
+      if (updates % 10 === 0) { await switchPage.selectOption(updates % 20 === 0 ? "screen-live-1" : "screen-live-2"); switches++; }
+      if (updates % 30 === 0) {
+        const toggle = ssePage.getByRole("button", { name: /^(开启|关闭)绘制动效$/ });
+        await toggle.click(); toggles++;
+      }
+      if (Date.now() - started - samples.at(-1).elapsedMs >= 30_000) {
+        const sample = await capture(); samples.push(sample);
+        assert(sample.streams <= 1 && sample.iframes <= 1 && sample.overlays <= 1, "Accumulated stream/frame/overlay");
+        await writeFile(new URL("soak-progress.json", output), JSON.stringify({ requestedMs: soakMs, updates, switches, toggles, samples }, null, 2));
+        console.log(`Resource check ${Math.round(sample.elapsedMs / 1000)}s: SSE=${sample.streams} frames=${sample.iframes} listeners=${sample.jsEventListeners}`);
+      }
+      await new Promise(resolve => setTimeout(resolve, Math.min(1000, Math.max(0, soakMs - (Date.now() - started)))));
+    }
+    await switchPage.selectOption("screen-live-1");
+    const disable = ssePage.getByRole("button", { name: "关闭绘制动效", exact: true });
+    if (await disable.count()) await disable.click();
+    await ssePage.locator("[data-swarm-projection]").waitFor({ state: "detached" });
+    await ssePage.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+    samples.push(await capture("final"));
+    const initial = samples[0], final = samples.at(-1);
+    results.metrics.resourceSoak = { requestedMs: soakMs, elapsedMs: final.elapsedMs, meets20Minutes: final.elapsedMs >= 1_200_000,
+      updates, switches, toggles, samples, retainedDelta: { documents: final.documents - initial.documents,
+        nodes: final.nodes - initial.nodes, listeners: final.jsEventListeners - initial.jsEventListeners,
+        heapBytes: final.heapBytes - initial.heapBytes } };
+    assert.deepEqual(final.connected, initial.connected, "Matched endpoints differ in connected nodes or attributes");
+    assert(final.documents <= initial.documents, "Retained documents increased after matched-state GC");
+    assert(final.jsEventListeners <= initial.jsEventListeners, "Retained listeners increased after matched-state GC");
+    assert(final.nodes <= initial.nodes, "Retained DOM nodes increased after matched-state GC");
+    results.checks.push(`Resource soak: ${final.elapsedMs}ms / ${updates} updates / ${switches} page switches / ${toggles} animation toggles; matched-state retained DOM/listeners do not increase; ${soakMs >= 1_200_000 ? '20-minute duration met' : 'short diagnostic only'}`);
+    await session.detach();
+  }
   await ctx3.close();
 
   assert.deepEqual(results.errors, []);

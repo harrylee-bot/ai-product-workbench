@@ -37,16 +37,12 @@ export function StudioProject({ projectId }: { projectId: string }) {
       submissionNotice={submission.recoveryNotice}
       recoveryTitle={submission.recoveryTitle}
       onRecoverSubmission={submission.recover}
-      onCreatePlan={submission.create}
-      onSaveInput={submission.saveInput}
       composer={{
         projectId,
         bootstrap: data,
         busy: submission.pending,
         uploads: submission.uploads,
         disabled: !canEdit,
-        onSubmit: (input) =>
-          submission.submitRun(input, data.selectedThreadId ?? ""),
       }}
     />
   );

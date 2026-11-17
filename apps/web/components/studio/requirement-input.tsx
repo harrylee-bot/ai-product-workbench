@@ -1,7 +1,7 @@
 "use client";
 import { RequirementDiscussion } from "./requirement-discussion";
 import { StudioComposer, type StudioComposerProps } from "./composer";
-import type { ComponentProps } from "react";
+import type { ComponentProps, ReactNode } from "react";
 
 /** Shares the Onlook-derived input, attachments, model/output selection and
  * fixed version/feedback context. The supplied submit handler is discussion
@@ -9,27 +9,33 @@ import type { ComponentProps } from "react";
 export function RequirementInput({
   discussion,
   composer,
+  children,
 }: {
   discussion: ComponentProps<typeof RequirementDiscussion>;
-  composer: StudioComposerProps;
-}) {
+} & (
+  | { composer: StudioComposerProps; children?: never }
+  | { composer?: never; children: ReactNode }
+)) {
   return (
     <div className="studio-requirement-input">
       <RequirementDiscussion {...discussion} />
-      <StudioComposer
-        {...composer}
-        discussion
-        intentControl={
-          <>
-            {composer.intentControl}
-            <p className="studio-muted">
-              {discussion.view.status === "generating"
-                ? "发送会保存到后续讨论，不会改变正在生成的需求。"
-                : "先交流本次需求，审阅改动后再确认生成。"}
-            </p>
-          </>
-        }
-      />
+      {children}
+      {composer && (
+        <StudioComposer
+          {...composer}
+          discussion
+          intentControl={
+            <>
+              {composer.intentControl}
+              <p className="studio-muted">
+                {discussion.view.status === "generating"
+                  ? "发送会保存到后续讨论，不会改变正在生成的需求。"
+                  : "先交流本次需求，审阅改动后再确认生成。"}
+              </p>
+            </>
+          }
+        />
+      )}
     </div>
   );
 }

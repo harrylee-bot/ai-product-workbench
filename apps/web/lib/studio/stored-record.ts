@@ -76,13 +76,15 @@ export function useStudioStoredRecord<T>(
     return () => window.removeEventListener("workbench:logout", logout);
   }, []);
   const save = (value: T) => {
-    if (!key || !current()) return;
+    if (!key || !current()) return false;
     setState({ key, value });
     try {
       sessionStorage.setItem(key, JSON.stringify(schema.parse(value)));
       setError("");
+      return true;
     } catch {
       setError("浏览器无法保存本地编辑记录，刷新页面会丢失尚未保存的内容。");
+      return false;
     }
   };
   const clear = () => {

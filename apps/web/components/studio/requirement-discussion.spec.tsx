@@ -102,6 +102,26 @@ function show(view = ready(), extras = {}) {
 }
 afterEach(cleanup);
 
+it("distinguishes an accepted generation waiting to start from an unknown confirmation receipt", async () => {
+  const retry = vi.fn().mockResolvedValue(undefined);
+  const view = {
+    ...ready(),
+    status: "generating" as const,
+    generationStarting: true,
+    generationIssue: "DISPATCH_UNAVAILABLE",
+  };
+  const result = show(view, { onRetryGeneration: retry });
+  expect(screen.queryByRole("button", { name: "恢复确认结果" })).toBeNull();
+  expect(
+    screen.getByText("需求已确认，生成暂未启动。重试会继续同一份冻结任务。"),
+  ).toBeVisible();
+  await act(async () => {
+    fireEvent.click(screen.getByRole("button", { name: "重试已确认任务" }));
+  });
+  expect(retry).toHaveBeenCalledTimes(1);
+  expect(result.props.onConfirm).not.toHaveBeenCalled();
+});
+
 it("allows an incomplete goal or a knowledge question without manufacturing a card", () => {
   const view = {
     ...ready(),
@@ -248,7 +268,7 @@ it("keeps generation baseline distinct from subsequent messages and escapes sour
     },
   ];
   show(view);
-  fireEvent.click(screen.getByText("交流记录 · 1 条"));
+  fireEvent.click(screen.getByText("项目交流记录 · 1 条"));
   expect(screen.getByText(/后续讨论，未纳入本次生成/)).toBeVisible();
   expect(screen.getByText('<script>alert("x")</script>')).toBeVisible();
   expect(document.querySelector("script")).toBeNull();

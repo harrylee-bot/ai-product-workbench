@@ -12,6 +12,7 @@ const provenance = {
   user: "用户已明确",
   knowledge: "知识依据",
   suggestion: "建议，确认后采用",
+  analysis: "需求梳理，待确认",
 };
 const scopes = {
   platform: "平台共性",
@@ -26,6 +27,7 @@ const knowledgeLabels = {
   conflict: "知识来源存在差异，请核对各自适用范围",
   restricted: "部分资料无法访问，需要有权限的依据",
   searching: "正在核对平台能力依据…",
+  "not-provided": "当前尚未返回可核对的知识引用",
 };
 
 function FactList({
@@ -87,7 +89,7 @@ function TextList({ items }: { items: readonly string[] }) {
 }
 
 /** Controlled UI; no model calls, local readiness scoring or generation side effects.
- * Production wiring awaits the coordinator's fixed backend contract. */
+ * Backend readiness and fixed input identities are supplied by the adapter. */
 type RequirementDiscussionProps = {
   view: RequirementDiscussionView;
   canEdit: boolean;
@@ -99,6 +101,7 @@ type RequirementDiscussionProps = {
   }) => Promise<void>;
   onContinue: () => void;
   onRecoverConfirmation: () => Promise<void>;
+  onRetryGeneration?: () => Promise<void>;
   onLoadEarlier: () => Promise<void>;
 };
 export function RequirementDiscussion(props: RequirementDiscussionProps) {
@@ -111,6 +114,7 @@ function DiscussionBody({
   onConfirm,
   onContinue,
   onRecoverConfirmation,
+  onRetryGeneration,
   onLoadEarlier,
 }: RequirementDiscussionProps) {
   const heading = useId(),
@@ -170,9 +174,11 @@ function DiscussionBody({
             ? "正在梳理"
             : view.status === "ready"
               ? "待确认改动"
-              : view.status === "generating"
-                ? "生成中，可继续讨论"
-                : "梳理本次增量"}
+              : view.generationStarting
+                ? "已确认，等待生成"
+                : view.status === "generating"
+                  ? "生成中，可继续讨论"
+                  : "梳理本次增量"}
         </span>
       </header>
       <p className="studio-requirement-knowledge">
@@ -189,21 +195,21 @@ function DiscussionBody({
         className="studio-requirement-history"
         open={view.messages.length > 0 && !review}
       >
-        <summary>交流记录 · {view.messages.length} 条</summary>
+        <summary>项目交流记录 · {view.messages.length} 条</summary>
         {view.hasEarlierMessages && (
           <button
             type="button"
             disabled={!!operation}
-            onClick={() => void perform("读取更早记录", onLoadEarlier)}
+            onClick={() => void perform("读取更多记录", onLoadEarlier)}
           >
-            加载更早的交流
+            加载更多交流
           </button>
         )}
         <ol>
           {view.messages.map((message) => (
             <li key={message.id} data-speaker={message.speaker}>
               <strong>
-                {message.speaker === "user" ? "你" : "需求助手"}
+                {message.speaker === "user" ? "用户" : "需求助手"}
                 {message.afterConfirmation ? " · 后续讨论，未纳入本次生成" : ""}
               </strong>
               <p>{message.text}</p>
@@ -259,7 +265,10 @@ function DiscussionBody({
             </div>
             <div>
               <dt>使用角色</dt>
-              <dd>{review.roles.join("、") || "待明确"}</dd>
+              <dd>
+                {review.roles.join("、") ||
+                  (review.rolesUnchanged ? "沿用现有角色及权限边界" : "待明确")}
+              </dd>
             </div>
             <div>
               <dt>交付范围</dt>
@@ -288,9 +297,17 @@ function DiscussionBody({
           <details>
             <summary>影响页面、流程及保持的范围</summary>
             <h4>影响页面</h4>
-            <TextList items={review.pages} />
+            {review.pagesUnaffected ? (
+              <p className="studio-muted">本次不涉及页面改动。</p>
+            ) : (
+              <TextList items={review.pages} />
+            )}
             <h4>影响流程</h4>
-            <TextList items={review.flows} />
+            {review.flowsUnaffected ? (
+              <p className="studio-muted">本次不涉及流程改动。</p>
+            ) : (
+              <TextList items={review.flows} />
+            )}
             <h4>保持已有能力</h4>
             <TextList items={review.preserved} />
             <h4>设计约束</h4>
@@ -375,6 +392,27 @@ function DiscussionBody({
           >
             恢复确认结果
           </button>
+        </div>
+      )}
+      {view.generationStarting && !view.confirmationPending && (
+        <div className="studio-requirement-recovery" role="status">
+          <p>
+            {view.generationIssue
+              ? "需求已确认，生成暂未启动。重试会继续同一份冻结任务。"
+              : "需求已确认，正在等待生成启动，无需再次确认。"}
+          </p>
+          {view.generationIssue && <p>诊断码：{view.generationIssue}</p>}
+          {view.generationIssue && onRetryGeneration && (
+            <button
+              type="button"
+              disabled={!canEdit || !!operation}
+              onClick={() =>
+                void perform("正在恢复已确认任务", onRetryGeneration)
+              }
+            >
+              重试已确认任务
+            </button>
+          )}
         </div>
       )}
       {operation && <p role="status">{operation}…</p>}

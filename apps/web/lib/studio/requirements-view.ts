@@ -3,7 +3,7 @@
 export type RequirementFactView = {
   id: string;
   text: string;
-  origin: "user" | "knowledge" | "suggestion";
+  origin: "user" | "knowledge" | "suggestion" | "analysis";
   evidenceIds: readonly string[];
 };
 export type RequirementEvidenceView = {
@@ -28,12 +28,15 @@ export type RequirementReviewView = {
   goal: string;
   platform?: string;
   roles: readonly string[];
+  rolesUnchanged?: boolean;
   modules: readonly string[];
   existing: readonly RequirementFactView[];
   reuse: readonly RequirementFactView[];
   changes: readonly RequirementFactView[];
   pages: readonly string[];
   flows: readonly string[];
+  pagesUnaffected?: boolean;
+  flowsUnaffected?: boolean;
   preserved: readonly string[];
   assumptions: readonly RequirementFactView[];
   platformChanges: readonly string[];
@@ -66,11 +69,14 @@ export type RequirementDiscussionView = {
     | "missing"
     | "conflict"
     | "restricted"
-    | "searching";
+    | "searching"
+    | "not-provided";
   // Authoritative result of server readiness + latest input/summary binding.
   canConfirm: boolean;
   reviewCurrent: boolean;
   confirmationPending: boolean;
+  generationStarting?: boolean;
+  generationIssue?: string;
   hasEarlierMessages: boolean;
   currentGeneration?: { label: string; baseline: string };
 };
@@ -82,6 +88,10 @@ export function requirementConfirmationBlock(
   if (!options.canEdit) return "当前权限只能查看需求讨论。";
   if (view.confirmationPending)
     return "上次确认的结果尚未核实，请先恢复确认结果。";
+  if (view.generationStarting)
+    return view.generationIssue
+      ? "已确认的生成暂未启动，请恢复同一份任务。"
+      : "需求已确认，正在等待生成启动。";
   if (view.status === "generating")
     return "本次生成已开始；追加需求会保留到后续讨论。";
   if (view.status === "analyzing")

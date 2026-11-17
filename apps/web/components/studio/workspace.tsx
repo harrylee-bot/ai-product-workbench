@@ -19,7 +19,6 @@ import {
   useWorkbenchPrototypeV2RevisionDiff,
   useWorkbenchPrototypeV2Shares,
   useWorkbenchPrototypeV2Exports,
-  useReviseWorkbenchPrototypeV2Revision,
   useRetryWorkbenchPrototypeV2Plan,
   useWorkbenchPrototypeProgress,
 } from "@/lib/workbench/features/prototype-v2";
@@ -32,6 +31,7 @@ import {
   type PrototypeFeedbackLocations,
   type PrototypePlan,
   type PrototypeShare,
+  type RequirementContext,
 } from "@workbench/workbench-contracts";
 import { z } from "zod";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -44,16 +44,14 @@ import { type PrototypePreviewInteraction } from "./preview";
 import { useStudioRun, projectedRun, isActiveRun } from "@/lib/studio/run";
 import { useWorkbenchPrototypeV2Api } from "@/lib/studio/api";
 import { useStudioComposerSession } from "@/lib/studio/composer-session";
+import { useRequirementDiscussion } from "@/lib/studio/use-requirement-discussion";
+import { requirementView } from "@/lib/studio/requirement-view-adapter";
+import { RequirementInput } from "./requirement-input";
 import { PlanInputSummary } from "./plan-input";
 import { RevisionRelations, RunOutputs } from "./relations";
 import { PageStage } from "./page-stage";
 import { StudioComposer, type StudioComposerProps } from "./composer";
-import type {
-  StudioSubmission,
-  StudioArtifactContext,
-  StudioPlanTarget,
-  StudioView,
-} from "@/lib/studio/types";
+import type { StudioArtifactContext, StudioView } from "@/lib/studio/types";
 import type { ProjectBootstrap } from "@workbench/workbench-contracts";
 import { verifyDownload, saveBlob } from "./actions";
 import { Main } from "./onlook/main";
@@ -78,10 +76,6 @@ import {
   Send,
 } from "lucide-react";
 
-export type PrototypePlanSubmit = (
-  submission: StudioSubmission,
-) => Promise<PrototypePlan | null>;
-
 const feedbackCommandSchema = z
   .object({
     version: z.literal(1),
@@ -103,16 +97,11 @@ type StudioWorkspaceProps = {
   canEdit: boolean;
   composer: Omit<
     StudioComposerProps,
-    "prompt" | "setPrompt" | "draft" | "updateDraft"
+    "prompt" | "setPrompt" | "draft" | "updateDraft" | "onSubmit"
   >;
   submissionNotice?: string;
   recoveryTitle?: string;
   onRecoverSubmission?: () => Promise<PrototypePlan | string | null>;
-  onCreatePlan: PrototypePlanSubmit;
-  onSaveInput: (
-    input: StudioSubmission,
-    target: StudioPlanTarget,
-  ) => Promise<PrototypePlan | null>;
   bootstrap: ProjectBootstrap;
 };
 
@@ -143,8 +132,6 @@ export function StudioWorkspace({
   projectId,
   canEdit,
   composer,
-  onCreatePlan,
-  onSaveInput,
   bootstrap,
   submissionNotice,
   recoveryTitle,
@@ -243,9 +230,97 @@ export function StudioWorkspace({
   const [message, setMessage] = useState<string>();
   const [error, setError] = useState<string>();
   const [previewUrl, setPreviewUrl] = useState<string>();
-  const [submitting, setSubmitting] = useState(false);
 
   const [interaction, setInteraction] = useState<PrototypePreviewInteraction>();
+
+  const requirementContext: RequirementContext =
+    inputContext?.target.kind === "revision"
+      ? {
+          kind: "revision",
+          revisionId: inputContext.target.id,
+          feedbackIds: inputContext.target.feedbackIds ?? [],
+          anchor:
+            interaction?.revisionId === inputContext.target.id &&
+            selectedRevisionId === inputContext.target.id
+              ? {
+                  sourceRevisionId: interaction.revisionId,
+                  scope: "node",
+                  pageId: interaction.pageId,
+                  nodeId: interaction.nodeId,
+                  quote: interaction.label,
+                }
+              : null,
+        }
+      : { kind: "new" };
+  const discussionKey = `${composerEntry.context.key}:${canonicalJson(requirementContext)}`;
+  const activeDiscussion = useRef(discussionKey);
+  activeDiscussion.current = discussionKey;
+  const initialRequest =
+    inputContext?.operationRequest ?? inputContext?.input.request;
+  const discussion = useRequirementDiscussion({
+    projectId,
+    threadId: bootstrap.selectedThreadId ?? "",
+    context: requirementContext,
+    contextKey: discussionKey,
+    canEdit,
+    enabled: composerSession.ready && inputContext?.target.kind !== "draft",
+    initialEntries: bootstrap.entries,
+    operation: {
+      workflow:
+        artifactContext?.workflow ?? initialRequest?.workflow ?? "generate",
+      artifactTargets:
+        artifactContext?.artifactTargets ??
+        initialRequest?.artifactTargets ??
+        [],
+      generationIntent:
+        artifactContext?.generationIntent ??
+        initialRequest?.generationIntent ??
+        null,
+      prdScreenPlan:
+        artifactContext?.prdScreenPlan ?? initialRequest?.prdScreenPlan,
+    },
+  });
+  const discussedInput = discussion.snapshot?.generationRequest;
+  const configDirty =
+    !!discussedInput &&
+    canonicalJson({
+      modelId: composerEntry.draft.modelId,
+      targetSurface: composerEntry.draft.targetSurface,
+      designStyle: composerEntry.draft.designStyle,
+      sourceIds: [...composerEntry.draft.sourceIds].sort(),
+      requestedArtifactKinds: [
+        ...composerEntry.draft.requestedArtifactKinds,
+      ].sort(),
+    }) !==
+      canonicalJson({
+        modelId: discussedInput.modelId,
+        targetSurface: discussedInput.targetSurface,
+        designStyle: discussedInput.designStyle,
+        sourceIds: [...discussedInput.sourceIds].sort(),
+        requestedArtifactKinds: [
+          ...discussedInput.requestedArtifactKinds,
+        ].sort(),
+      });
+  const discussionView = requirementView(discussion.snapshot, {
+    scopeKey: `${user?.id ?? ""}:${projectId}:${discussionKey}`,
+    contextLabel:
+      composerEntry.context.kind === "new"
+        ? "本项目的新需求"
+        : `${composerEntry.context.title}${requirementContext.kind === "revision" ? ` · ${requirementContext.feedbackIds.length} 条所选批注${requirementContext.anchor ? ` · 元素：${requirementContext.anchor.quote}` : ""}` : ""}`,
+    entries: discussion.messages,
+    pendingConfirmation: discussion.command?.kind === "confirm",
+    hasMore: discussion.hasMore,
+    generationBaseline: discussion.generationBaseline,
+  });
+  discussionView.reviewCurrent =
+    discussionView.reviewCurrent &&
+    !discussion.requiresReview &&
+    !discussion.pending;
+  const discussionDirty =
+    !!composerEntry.draft.prompt.trim() ||
+    !!composerEntry.draft.files.length ||
+    !!composerEntry.draft.missingFiles.length ||
+    configDirty;
 
   const awaitingPlan = useRef<string | undefined>(undefined);
   const plansQuery = useWorkbenchPrototypeV2Plans(projectId);
@@ -332,14 +407,9 @@ export function StudioWorkspace({
     projectId,
     selectedRevision?.id ?? "",
   );
-  const approvePlan = usePrototypeV2PlanAction(projectId, planId, "approve");
   const cancelPlan = usePrototypeV2PlanAction(projectId, planId, "cancel");
   const retryPlan = useRetryWorkbenchPrototypeV2Plan(projectId, planId);
   const createFeedback = useCreateWorkbenchPrototypeV2Feedback(
-    projectId,
-    selectedRevision?.id ?? "",
-  );
-  const reviseRevision = useReviseWorkbenchPrototypeV2Revision(
     projectId,
     selectedRevision?.id ?? "",
   );
@@ -548,101 +618,79 @@ export function StudioWorkspace({
     setFocused(false);
   };
   const submitPlan: StudioComposerProps["onSubmit"] = async (submission) => {
-    submission = {
+    const entryKey = composerEntry.context.key;
+    const submittedDraft = composerEntry.draft;
+    const scope = discussionKey;
+    setError(undefined);
+    const accepted = await discussion.send({
       ...submission,
       onFileSource: (file, sourceId) =>
-        composerSession.bindFileSource(
-          composerEntry.context.key,
-          file,
-          sourceId,
-        ),
-    };
-    setSubmitting(true);
-    setError(undefined);
-    try {
-      if (inputContext) {
-        const target: StudioPlanTarget = { ...inputContext.target };
-        if (
-          target.kind === "revision" &&
-          target.id === selectedRevision?.id &&
-          interaction?.revisionId === target.id
-        ) {
-          target.feedback = {
-            body: submission.prompt,
-            anchor: {
-              sourceRevisionId: interaction.revisionId,
-              scope: "node",
-              pageId: interaction.pageId,
-              nodeId: interaction.nodeId,
-              quote: interaction.label,
-            },
-          };
-        }
-        const saved = await onSaveInput(submission, target);
-        if (!saved) return null;
-        composerSession.complete(
-          composerEntry.context.key,
-          composerEntry.draft,
-        );
-        selectPlan(saved);
-        setPanel("plan");
-        setMessage(
-          target.kind === "draft"
-            ? "完整输入已保存，请重新审阅后开始生成"
-            : "修改计划已创建，保留源版本关系；请审阅后开始生成",
-        );
-        return saved.id;
-      }
-      if (!(submission.requestedArtifactKinds ?? []).includes("prototype")) {
-        const accepted = await composer.onSubmit(submission);
-        if (accepted) {
-          composerSession.complete(
-            composerEntry.context.key,
-            composerEntry.draft,
+        composerSession.bindFileSource(entryKey, file, sourceId),
+    });
+    if (!accepted || activeDiscussion.current !== scope) return null;
+    composerSession.complete(entryKey, submittedDraft, true);
+    setMessage("需求已保存，正在梳理本次改动；确认前不会启动生成");
+    return accepted.id;
+  };
+  const openedConfirmations = useRef(new Set<string>());
+  useEffect(() => {
+    const receipt = discussion.snapshot?.confirmation;
+    if (
+      !discussion.awaitingResult ||
+      receipt?.status !== "started" ||
+      openedConfirmations.current.has(receipt.id)
+    )
+      return;
+    const scope = discussionKey;
+    openedConfirmations.current.add(receipt.id);
+    const open = async () => {
+      try {
+        if (receipt.planId) {
+          const accepted = await api.getPlan(projectId, receipt.planId);
+          if (activeDiscussion.current !== scope) return;
+          if (
+            accepted.value.projectId !== projectId ||
+            accepted.value.id !== receipt.planId
+          )
+            throw new Error("生成回执与当前项目不匹配");
+          queryClient.setQueryData(
+            workbenchQueryKeys.prototypeV2Plan(projectId, accepted.value.id),
+            accepted,
           );
-          setDirectRunId(accepted);
+          awaitingPlan.current = accepted.value.id;
+          setSelection({
+            planId: accepted.value.id,
+            revisionId: "",
+            pageId: "",
+          });
+          setFollowRun(true);
+          setView("pages");
+          setPanel(null);
+          void queryClient.invalidateQueries({
+            queryKey: workbenchQueryKeys.prototypeV2(projectId),
+          });
+        } else if (receipt.runId) {
+          if (activeDiscussion.current !== scope) return;
+          setDirectRunId(receipt.runId);
           const url = new URL(window.location.href);
-          url.searchParams.set("run", accepted);
+          url.searchParams.set("run", receipt.runId);
           window.history.replaceState(null, "", url);
           setView("documents");
-        }
-        return accepted;
-      }
-      const created = await onCreatePlan(submission);
-      if (!created) return null;
-      composerSession.complete(composerEntry.context.key, composerEntry.draft);
-      selectPlan(created);
-      setFollowRun(true);
-      setPanel("plan");
-      setMessage("计划已创建，请审阅后审批生成");
-      return created.id;
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "提交原型请求失败");
-      if (
-        isWorkbenchApiError(cause) &&
-        [409, 412].includes(cause.status) &&
-        inputContext?.target.kind === "draft"
-      ) {
-        await queryClient.invalidateQueries({
-          queryKey: workbenchQueryKeys.prototypeV2(projectId),
-        });
-        await queryClient.invalidateQueries({
-          queryKey: ["studio", "plan-input", projectId],
-        });
-        try {
-          composerSession.setConflict(
-            composerEntry.context.key,
-            await api.getPlanInput(projectId, inputContext.target.id),
+        } else
+          throw new Error("生成已受理，正在等待计划或运行标识，请刷新需求状态");
+        discussion.acknowledgeResult();
+      } catch (cause) {
+        if (activeDiscussion.current === scope)
+          setError(
+            cause instanceof Error
+              ? cause.message
+              : "无法打开本次生成，请刷新需求状态",
           );
-        } catch {
-          /* Keep the local draft; normal plan input loading exposes recovery. */
-        }
+        openedConfirmations.current.delete(receipt.id);
       }
-      return null;
-    } finally {
-      setSubmitting(false);
-    }
-  };
+    };
+    void open();
+  }, [api, projectId, queryClient, discussion, discussionKey]);
   const addFeedback = () =>
     run(async () => {
       if (!selectedRevision) return;
@@ -801,21 +849,33 @@ export function StudioWorkspace({
                 {plan.status === "draft" && (
                   <button
                     type="button"
-                    disabled={!canEdit || approvePlan.isPending}
+                    disabled={!canEdit}
                     onClick={() =>
                       void run(async () => {
-                        awaitingPlan.current = plan.id;
-                        setFollowRun(true);
-                        await approvePlan.mutateAsync({
-                          ifMatch: etag(plan),
-                          request: {},
-                        });
-                        progress.reconnect();
-                      }, "已提交生成，等待执行")
+                        const input = await api.getPlanInput(
+                          projectId,
+                          plan.id,
+                        );
+                        composerSession.switchTo(
+                          {
+                            kind: "input",
+                            key: `draft:${plan.id}`,
+                            title: `调整计划：${plan.title}`,
+                            target: {
+                              kind: "draft",
+                              id: plan.id,
+                              etag: etag(input.plan),
+                            },
+                            input,
+                          },
+                          input.plan.prompt,
+                        );
+                        setPanel(null);
+                      }, "已载入原草稿；固定草稿来源接入后方可确认生成")
                     }
                     className="visual-primary"
                   >
-                    审批并开始生成
+                    讨论并确认需求
                   </button>
                 )}
                 {running && (
@@ -1171,27 +1231,43 @@ export function StudioWorkspace({
                   !feedbackIds.length ||
                   feedbackIds.length > 100 ||
                   running ||
-                  reviseRevision.isPending
+                  discussion.pending
                 }
                 onClick={() =>
                   void run(async () => {
-                    const next = await reviseRevision.mutateAsync({
-                      ifMatch: etag(selectedRevision),
-                      request: {
-                        feedbackIds,
+                    const input = await api.getRevisionInput(
+                      projectId,
+                      selectedRevision.id,
+                    );
+                    const selected = [...feedbackIds].sort();
+                    composerSession.switchTo(
+                      {
+                        kind: "input",
+                        key: `revision:${selectedRevision.id}:feedback:${selected.join(",")}`,
+                        title: `修改版本 ${selectedRevision.version}`,
+                        target: {
+                          kind: "revision",
+                          id: selectedRevision.id,
+                          etag: etag(selectedRevision),
+                          feedbackIds: selected,
+                        },
+                        input: {
+                          plan: input.plan,
+                          request: input.request,
+                          snapshot: input.snapshot,
+                          sha256: input.sha256,
+                        },
+                        operationRequest: input.modificationRequest,
+                        version: selectedRevision.version,
                       },
-                    });
-                    awaitingPlan.current = next.value.id;
-                    setFeedbackIds([]);
-                    setFollowRun(true);
-                    setSelection((current) => ({
-                      ...current,
-                      planId: next.value.id,
-                    }));
-                  }, "已根据所选批注开始生成新版本")
+                      "请根据所选批注梳理本次增量改动",
+                    );
+                    setInteraction(undefined);
+                    setPanel(null);
+                  }, "已将所选批注带入需求讨论，尚未启动生成")
                 }
               >
-                使用所选 {feedbackIds.length} 条批注生成新版本
+                讨论所选 {feedbackIds.length} 条批注
               </button>
               <p className="visual-muted">
                 一次最多 100
@@ -1649,116 +1725,242 @@ export function StudioWorkspace({
                   </button>
                 </div>
               )}
-              {composerSession.ready && (
-                <StudioComposer
-                  {...composer}
-                  key={composerEntry.context.key}
-                  draft={composerEntry.draft}
-                  updateDraft={composerSession.updateDraft}
-                  prompt={composerEntry.draft.prompt}
-                  setPrompt={(prompt) =>
+              {inputContext?.target.kind === "draft" && (
+                <p role="status">
+                  原草稿已保留。当前讨论接口尚未支持固定草稿来源，补齐后才能继续确认生成。
+                </p>
+              )}
+              {(discussion.error || discussion.storageError) && (
+                <div role="alert">
+                  <p>{discussion.error?.message || discussion.storageError}</p>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      void run(discussion.refresh, "已重新读取需求状态")
+                    }
+                  >
+                    重新读取需求状态
+                  </button>
+                </div>
+              )}
+              {discussion.command &&
+                discussion.command.kind !== "confirm" &&
+                !discussion.requiresReview && (
+                  <button
+                    type="button"
+                    disabled={discussion.pending || !canEdit}
+                    onClick={() =>
+                      void run(async () => {
+                        await discussion.recover();
+                      }, "已核实上次操作回执")
+                    }
+                  >
+                    恢复上次需求操作
+                  </button>
+                )}
+              {discussion.requiresReview && (
+                <button
+                  type="button"
+                  disabled={discussion.pending || !canEdit}
+                  onClick={() =>
+                    void run(
+                      discussion.reviewLatest,
+                      "已重新读取，请核对最新改动摘要",
+                    )
+                  }
+                >
+                  重新核对最新摘要
+                </button>
+              )}
+              {configDirty && discussedInput && (
+                <button
+                  type="button"
+                  disabled={discussion.pending || !canEdit}
+                  onClick={() =>
                     composerSession.updateDraft((current) => ({
                       ...current,
-                      prompt,
+                      modelId: discussedInput.modelId,
+                      sourceIds: discussedInput.sourceIds,
+                      targetSurface: discussedInput.targetSurface,
+                      designStyle: discussedInput.designStyle,
+                      requestedArtifactKinds:
+                        discussedInput.requestedArtifactKinds,
                     }))
                   }
-                  initialInput={
-                    inputContext?.operationRequest ??
-                    inputContext?.input.request
-                  }
-                  pinnedSources={inputContext?.input.snapshot?.sources}
-                  pinnedDesign={inputContext?.input.snapshot?.designStyle}
-                  artifactContext={artifactContext}
-                  locked={false}
-                  outputLocked={Boolean(
-                    inputContext?.target.kind === "revision" ||
-                      inputContext?.input.plan.sourceRevisionId,
-                  )}
-                  intentControl={
-                    <div className="visual-intent">
-                      <button
-                        type="button"
-                        aria-pressed={
-                          editingCurrent &&
-                          inputContext.target.id === selectedRevision?.id
-                        }
-                        disabled={
-                          !selectedRevision ||
-                          !["ready", "confirmed", "rejected"].includes(
-                            selectedRevision.status,
-                          )
-                        }
-                        onClick={() =>
-                          void run(async () => {
-                            if (!selectedRevision) return;
-                            const input = await api.getRevisionInput(
-                              projectId,
-                              selectedRevision.id,
-                            );
+                >
+                  采用已讨论的输入配置
+                </button>
+              )}
+              {discussion.snapshot?.activeTurn &&
+                ["queued", "running"].includes(
+                  discussion.snapshot.activeTurn.status,
+                ) && (
+                  <button
+                    type="button"
+                    disabled={discussion.pending || !canEdit}
+                    onClick={() =>
+                      void run(async () => {
+                        await discussion.turn("cancel");
+                      }, "已请求停止需求分析")
+                    }
+                  >
+                    停止需求分析
+                  </button>
+                )}
+              {discussion.snapshot?.activeTurn?.status === "failed" && (
+                <div role="status">
+                  <p>本次需求分析未完成，输入已保存。</p>
+                  <button
+                    type="button"
+                    disabled={discussion.pending || !canEdit}
+                    onClick={() =>
+                      void run(async () => {
+                        await discussion.turn("retry");
+                      }, "已重新提交需求分析")
+                    }
+                  >
+                    重试需求分析
+                  </button>
+                </div>
+              )}
+              {composerSession.ready && (
+                <RequirementInput
+                  discussion={{
+                    view: discussionView,
+                    canEdit,
+                    dirtyInput: discussionDirty,
+                    onConfirm: async (review) => {
+                      await discussion.confirm(review);
+                    },
+                    onContinue: () => {
+                      document
+                        .querySelector<HTMLTextAreaElement>(
+                          ".studio-composer textarea",
+                        )
+                        ?.focus();
+                    },
+                    onRecoverConfirmation: async () => {
+                      await discussion.recover();
+                    },
+                    onLoadEarlier: discussion.loadMore,
+                  }}
+                >
+                  <StudioComposer
+                    discussion
+                    {...composer}
+                    key={composerEntry.context.key}
+                    draft={composerEntry.draft}
+                    updateDraft={composerSession.updateDraft}
+                    prompt={composerEntry.draft.prompt}
+                    setPrompt={(prompt) =>
+                      composerSession.updateDraft((current) => ({
+                        ...current,
+                        prompt,
+                      }))
+                    }
+                    initialInput={
+                      inputContext?.operationRequest ??
+                      inputContext?.input.request
+                    }
+                    pinnedSources={inputContext?.input.snapshot?.sources}
+                    pinnedDesign={inputContext?.input.snapshot?.designStyle}
+                    artifactContext={artifactContext}
+                    locked={false}
+                    outputLocked={Boolean(
+                      inputContext?.target.kind === "revision" ||
+                        inputContext?.input.plan.sourceRevisionId,
+                    )}
+                    intentControl={
+                      <div className="visual-intent">
+                        <button
+                          type="button"
+                          aria-pressed={
+                            editingCurrent &&
+                            inputContext.target.id === selectedRevision?.id
+                          }
+                          disabled={
+                            !selectedRevision ||
+                            !["ready", "confirmed", "rejected"].includes(
+                              selectedRevision.status,
+                            )
+                          }
+                          onClick={() =>
+                            void run(async () => {
+                              if (!selectedRevision) return;
+                              const input = await api.getRevisionInput(
+                                projectId,
+                                selectedRevision.id,
+                              );
+                              composerSession.switchTo(
+                                {
+                                  kind: "input",
+                                  key: `revision:${selectedRevision.id}`,
+                                  title: `修改版本 ${selectedRevision.version}`,
+                                  target: {
+                                    kind: "revision",
+                                    id: selectedRevision.id,
+                                    etag: etag(selectedRevision),
+                                    feedbackIds,
+                                  },
+                                  input: {
+                                    plan: input.plan,
+                                    request: input.request,
+                                    snapshot: input.snapshot,
+                                    sha256: input.sha256,
+                                  },
+                                  operationRequest: input.modificationRequest,
+                                  version: selectedRevision.version,
+                                },
+                                "",
+                                {
+                                  inheritPrompt: true,
+                                  fromKey: composerEntry.context.key,
+                                },
+                              );
+                            }, "已载入该版本的固定输入，可调整资料和设计")
+                          }
+                        >
+                          修改版本
+                          {selectedRevision
+                            ? ` ${selectedRevision.version}`
+                            : ""}
+                        </button>
+                        <button
+                          type="button"
+                          aria-pressed={composerEntry.context.kind === "new"}
+                          onClick={() => {
                             composerSession.switchTo(
-                              {
-                                kind: "input",
-                                key: `revision:${selectedRevision.id}`,
-                                title: `修改版本 ${selectedRevision.version}`,
-                                target: {
-                                  kind: "revision",
-                                  id: selectedRevision.id,
-                                  etag: etag(selectedRevision),
-                                  feedbackIds,
-                                },
-                                input: {
-                                  plan: input.plan,
-                                  request: input.request,
-                                  snapshot: input.snapshot,
-                                  sha256: input.sha256,
-                                },
-                                operationRequest: input.modificationRequest,
-                                version: selectedRevision.version,
-                              },
-                              "",
-                              {
-                                inheritPrompt: true,
-                                fromKey: composerEntry.context.key,
-                              },
+                              composerSession.newContext,
                             );
-                          }, "已载入该版本的固定输入，可调整资料和设计")
-                        }
-                      >
-                        修改版本
-                        {selectedRevision ? ` ${selectedRevision.version}` : ""}
-                      </button>
-                      <button
-                        type="button"
-                        aria-pressed={composerEntry.context.kind === "new"}
-                        onClick={() => {
-                          composerSession.switchTo(composerSession.newContext);
-                          setInteraction(undefined);
-                        }}
-                      >
-                        新建计划
-                      </button>
-                      <span>
-                        {editingCurrent
-                          ? `源版本 ${inputContext.version} · ${selectedRevision?.id === inputContext.target.id ? interaction?.label || "版本整体" : "仍绑定原来源，浏览不会更改提交目标"}`
-                          : inputContext?.target.kind === "draft"
-                            ? `${inputContext.title} · 保存后需审批`
-                            : artifactContext
-                              ? `${artifactPromptLabel(artifactContext)}：${artifactContext.title}`
-                              : "使用下方模型、资料和设计"}
-                      </span>
-                    </div>
-                  }
-                  busy={composer.busy || submitting || running || directRunning}
-                  disabled={
-                    (inputContext?.target.kind === "revision" &&
-                      !inputContext.operationRequest) ||
-                    composer.disabled ||
-                    !canEdit ||
-                    !!conflictingInput ||
-                    !composerSession.ready
-                  }
-                  onSubmit={submitPlan}
-                />
+                            setInteraction(undefined);
+                          }}
+                        >
+                          新建计划
+                        </button>
+                        <span>
+                          {editingCurrent
+                            ? `源版本 ${inputContext.version} · ${selectedRevision?.id === inputContext.target.id ? interaction?.label || "版本整体" : "仍绑定原来源，浏览不会更改提交目标"}`
+                            : inputContext?.target.kind === "draft"
+                              ? `${inputContext.title} · 保留原草稿来源`
+                              : artifactContext
+                                ? `${artifactPromptLabel(artifactContext)}：${artifactContext.title}`
+                                : "使用下方模型、资料和设计"}
+                        </span>
+                      </div>
+                    }
+                    busy={discussion.pending}
+                    disabled={
+                      (inputContext?.target.kind === "revision" &&
+                        !inputContext.operationRequest) ||
+                      composer.disabled ||
+                      !canEdit ||
+                      !!conflictingInput ||
+                      !composerSession.ready
+                    }
+                    uploads={discussion.uploads}
+                    onSubmit={submitPlan}
+                  />
+                </RequirementInput>
               )}
             </div>
           </footer>

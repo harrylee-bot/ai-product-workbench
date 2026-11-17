@@ -361,7 +361,7 @@ export function useStudioComposerSession(userId: string, projectId: string) {
           sourceIds: [...new Set([...current.draft.sourceIds, sourceId])],
         },
       })),
-    complete: (entryKey: string, submitted: ComposerDraft) =>
+    complete: (entryKey: string, submitted: ComposerDraft, keepContext = false) =>
       update((current) => {
         const original = current.entries[entryKey];
         if (!original) return current;
@@ -380,6 +380,7 @@ export function useStudioComposerSession(userId: string, projectId: string) {
           [entryKey]: { ...original, draft },
         };
         const finished =
+          !keepContext &&
           entryKey !== "new" &&
           !draft.prompt &&
           !draft.files.length &&

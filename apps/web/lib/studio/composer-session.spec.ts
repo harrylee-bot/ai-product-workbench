@@ -187,3 +187,14 @@ describe("Studio composer context and recovery", () => {
     ).toBeUndefined();
   });
 });
+
+it("keeps a fixed artifact discussion active after accepted text without erasing later edits", async () => {
+  const { result } = renderHook(() => useStudioComposerSession("account-one", "project-one"));
+  await waitFor(() => expect(result.current.ready).toBe(true));
+  act(() => result.current.switchTo(artifact, "本次需求"));
+  const submitted = result.current.entry.draft;
+  act(() => result.current.complete(artifact.key, submitted, true));
+  expect(result.current.entry.context.key).toBe(artifact.key);
+  expect(result.current.entry.draft.prompt).toBe("");
+  expect(result.current.entry.context.kind).toBe("artifact");
+});
