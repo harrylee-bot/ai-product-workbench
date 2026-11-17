@@ -12,6 +12,7 @@ import {
   useWorkbenchRunsApi,
 } from "@/lib/studio/api";
 import { isActiveRun } from "@/lib/studio/run";
+import { workbenchQueryKeys } from "@/lib/workbench/query/keys";
 import { PrototypeVariants, type ArtifactPrompt } from "./prototype-variants";
 
 type Version = ArtifactVersionRelations["version"];
@@ -79,13 +80,22 @@ function VariantSource({
   const version = query.data;
   const revisionId = version?.prototypeRevision?.id ?? "";
   const revisionQuery = useQuery({
-    queryKey: ["studio", "variant-source-revision", projectId, revisionId],
+    queryKey: [...workbenchQueryKeys.prototypeV2(projectId), "revision", revisionId],
     queryFn: () => protoApi.getRevision(projectId, revisionId),
-    enabled: Boolean(projectId && revisionId),
-    retry: false,
+    // A name-only source summary must not download every frozen page and HTML.
+    // Subscribe to the revision already opened in the workspace; the link below
+    // loads the actual source when the user chooses to view it.
+    enabled: false,
   });
+  const cachedRevision = revisionQuery.data?.value;
+  const matchingRevision =
+    cachedRevision?.id === revisionId &&
+    cachedRevision.projectId === projectId &&
+    cachedRevision.planId === version?.prototypeRevision?.planId
+      ? cachedRevision
+      : undefined;
   const pageTitleById = new Map(
-    (revisionQuery.data?.value.pages ?? []).map((p) => [p.id, p.title]),
+    (matchingRevision?.pages ?? []).map((p) => [p.id, p.title]),
   );
   return (
     <li>
@@ -106,6 +116,19 @@ function VariantSource({
         <button onClick={() => void query.refetch()}>重试读取来源名称</button>
       )}
       <span> · 已选 {target.screenIds.length} 个页面</span>
+      {version?.prototypeRevision && !matchingRevision && (
+        <button
+          type="button"
+          disabled={revisionQuery.isFetching}
+          onClick={() => void revisionQuery.refetch()}
+        >
+          {revisionQuery.isFetching
+            ? "正在读取来源页面名称…"
+            : revisionQuery.error
+              ? "重试读取来源页面名称"
+              : "显示来源页面名称"}
+        </button>
+      )}
       {version?.prototypeRevision ? (
         <ul>
           {target.screenIds.map((id) => {

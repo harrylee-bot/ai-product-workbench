@@ -275,6 +275,7 @@ const results = {
   checks: [],
   unknown: [],
   errors: [],
+  revisionReads: [],
 };
 const browser = await chromium.launch({
   headless: true,
@@ -618,7 +619,10 @@ await context.route("**/api/v1/**", async (route) => {
     }
     if (!match[2]) return json(route, plan);
   }
-  if (path.endsWith(`/revisions/${revisionId}`)) return json(route, revision);
+  if (path.endsWith(`/revisions/${revisionId}`)) {
+    results.revisionReads.push(revisionId);
+    return json(route, revision);
+  }
   if (path.endsWith(`/revisions/${secondRevision.id}`))
     return json(route, secondRevision);
   if (path.endsWith("/feedback-locations"))
@@ -709,12 +713,18 @@ try {
       })
       .waitFor();
     assert.equal(await prompt.inputValue(), "设计变体保留订单列表和详情");
+    const sourceReadsBeforeSummary = results.revisionReads.length;
     await button("发送需求").click();
     const fixedSources = page.getByRole("region", { name: "固定变体来源" });
     await fixedSources
       .getByRole("link", { name: "页面 detail", exact: true })
       .waitFor();
+    // A cold name-only summary does not automatically fetch frozen HTML.
+    // The user can explicitly load it; already-opened sources use the same cache.
+    assert.equal(results.revisionReads.length, sourceReadsBeforeSummary);
+    await fixedSources.getByRole("button", { name: "显示来源页面名称" }).click();
     await fixedSources.getByText("· 订单详情", { exact: true }).waitFor();
+    assert.equal(results.revisionReads.length, sourceReadsBeforeSummary + 1);
     assert.match(
       await fixedSources
         .getByRole("link", { name: "页面 detail", exact: true })

@@ -35,6 +35,7 @@ export type StudioComposerProps = {
   intentControl?: ReactNode;
   artifactContext?: StudioArtifactContext;
   onSubmit: (value: StudioSubmission) => Promise<string | null>;
+  discussion?: boolean;
 };
 export function StudioComposer({
   projectId,
@@ -54,6 +55,7 @@ export function StudioComposer({
   intentControl,
   artifactContext,
   onSubmit,
+  discussion = false,
 }: StudioComposerProps) {
   const models = useWorkbenchRuntimeModels(),
     presets = useWorkbenchDesignPresets(),
@@ -245,6 +247,7 @@ export function StudioComposer({
       onFiles={addFiles}
       onScreenshot={screenshot}
       isStreaming={busy}
+      discussion={discussion}
       disabled={
         disabled ||
         !modelId ||

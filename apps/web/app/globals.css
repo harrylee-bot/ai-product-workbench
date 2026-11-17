@@ -1998,6 +1998,42 @@ textarea:focus-visible {
 .studio-prd-edge text {fill:#435a77;font-size:12px;}
 .studio-prd-diagram details {margin-top:12px;}
 .studio-prd-diagram summary {cursor:pointer;}
+.studio-requirement-input {display:flex;flex-direction:column;gap:10px;min-width:0;}
+.studio-requirement-discussion {max-height:min(44dvh,560px);overflow:auto;overscroll-behavior:contain;background:#fff;border:1px solid var(--studio-line);border-radius:16px;padding:18px;color:var(--studio-text);font-size:13px;line-height:1.65;scrollbar-gutter:stable;}
+.studio-requirement-discussion>header {display:flex;align-items:flex-start;justify-content:space-between;gap:12px;}
+.studio-requirement-discussion h2 {font-size:16px;margin:0;}
+.studio-requirement-discussion h3 {font-size:15px;margin:14px 0 8px;}
+.studio-requirement-discussion h3>span {font-size:11px;color:#5c6b80;font-weight:400;}
+.studio-requirement-discussion h4 {font-size:13px;margin:14px 0 6px;}
+.studio-requirement-discussion p {margin:4px 0;overflow-wrap:anywhere;white-space:pre-wrap;}
+.studio-requirement-discussion button {min-height:44px;white-space:normal;}
+.studio-requirement-discussion summary {min-height:44px;cursor:pointer;display:list-item;align-content:center;}
+.studio-requirement-discussion ul,.studio-requirement-discussion ol {padding-left:20px;}
+.studio-requirement-discussion li {margin:8px 0;overflow-wrap:anywhere;}
+.studio-requirement-state {font-size:11px;background:#edf3ff;color:#275cb4;padding:4px 9px;border-radius:20px;flex-shrink:0;}
+.studio-requirement-knowledge {color:#52657f;font-size:12px;}
+.studio-requirement-history ol {list-style:none;padding:0;}
+.studio-requirement-history li {padding:10px 12px;border-radius:9px;background:#f4f6f9;}
+.studio-requirement-history li[data-speaker=user] {background:#eef4ff;}
+.studio-requirement-history li>strong {font-size:11px;color:#4e6079;}
+.studio-requirement-questions,.studio-requirement-platform,.studio-requirement-current {border-left:3px solid #c28c2f;background:#fffbf2;padding:10px 14px;margin:12px 0;border-radius:6px;}
+.studio-requirement-questions li>span {font-size:11px;color:#73541e;}
+.studio-requirement-meta {display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:14px 0;}
+.studio-requirement-meta dt {font-size:11px;color:#52657f;}
+.studio-requirement-meta dd {margin:0;overflow-wrap:anywhere;}
+.studio-requirement-columns {display:grid;grid-template-columns:1fr 1fr;gap:16px;}
+.studio-requirement-facts {list-style:none;padding:0!important;}
+.studio-requirement-facts>li {padding:9px 11px;border:1px solid #e5eaf2;border-radius:8px;}
+.studio-requirement-origin {display:inline-block;font-size:11px;color:#496382;background:#eef3fa;padding:1px 6px;border-radius:4px;}
+.studio-requirement-origin[data-origin=suggestion] {color:#795821;background:#fff3d8;}
+.studio-requirement-evidence {font-size:11px;color:#52657f;}
+.studio-requirement-evidence blockquote {margin:8px 0;padding-left:12px;border-left:2px solid #ccd7e9;white-space:pre-wrap;overflow-wrap:anywhere;}
+.studio-requirement-platform label {display:flex;align-items:center;gap:9px;min-height:44px;cursor:pointer;}
+.studio-requirement-review footer {border-top:1px solid var(--studio-line);padding-top:12px;margin-top:16px;}
+.studio-requirement-review footer>div {display:flex;gap:8px;justify-content:flex-end;margin-top:10px;flex-wrap:wrap;}
+.studio-requirement-confirm {background:#2563eb!important;color:#fff;}
+.studio-requirement-recovery {margin-top:12px;background:#eef4ff;padding:12px;border-radius:8px;}
+@media(max-width:600px){.studio-requirement-discussion{padding:12px;max-height:38dvh;}.studio-requirement-meta,.studio-requirement-columns{grid-template-columns:1fr;gap:4px;}.studio-requirement-state{max-width:110px;}.studio-requirement-review footer>div>button{flex:1;}}
 
 .visual-draft-motion { display:flex;align-items:center;justify-content:space-between;gap:12px;margin:10px 0;color:#667085;font-size:12px; }
 .visual-draft-motion button { border:1px solid #d5dce7;border-radius:7px;padding:5px 10px;min-height:44px;background:white;color:#344054;cursor:pointer; }

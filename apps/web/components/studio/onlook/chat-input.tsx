@@ -2,7 +2,8 @@
 // Upstream: apps/web/client/src/app/project/[id]/_components/right-panel/chat-tab/chat-input/index.tsx
 // Commit: 423e2e924366419e418ee049093872d535eea41a. See third_party/onlook.
 // Modified: bottom dock, controlled per-project draft, business request callback,
-// attachments instead of sandbox context, no queuing, natural keyboard traversal.
+// attachments instead of sandbox context, explicit discussion mode, no queuing,
+// natural keyboard traversal.
 "use client";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { ArrowUp, Paperclip, Camera } from "lucide-react";
@@ -18,6 +19,7 @@ export function ChatInput({
   controls,
   attachments,
   error,
+  discussion = false,
 }: {
   value: string;
   onChange: (value: string) => void;
@@ -30,6 +32,7 @@ export function ChatInput({
   controls: ReactNode;
   attachments?: ReactNode;
   error?: string;
+  discussion?: boolean;
 }) {
   const textareaRef = useRef<HTMLTextAreaElement>(null),
     fileRef = useRef<HTMLInputElement>(null);
@@ -100,7 +103,11 @@ export function ChatInput({
         ref={textareaRef}
         rows={1}
         aria-label="描述需求或修改"
-        placeholder="描述你的产品想法，或选中元素提出修改…"
+        placeholder={
+          discussion
+            ? "说说本次需求，或继续修改上方的改动摘要…"
+            : "描述你的产品想法，或选中元素提出修改…"
+        }
         value={value}
         onChange={(e) => onChange(e.target.value)}
         onKeyDown={handleKeyDown}
@@ -142,7 +149,9 @@ export function ChatInput({
           aria-label="发送需求"
           title={
             isStreaming
-              ? "等待当前运行完成，或先停止"
+              ? discussion
+                ? "正在发送本条需求，请稍候"
+                : "等待当前运行完成，或先停止"
               : "Enter 发送，Shift+Enter 换行"
           }
           disabled={disabled || inputEmpty || isStreaming || sending}
