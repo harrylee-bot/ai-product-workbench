@@ -698,6 +698,8 @@ export function useRequirementDiscussion({
       else await history.fetchNextPage();
     },
     uploads: input.uploads,
+    retryUpload: input.retryUpload,
+    cancelUpload: input.cancelUpload,
     pending: pendingScope === identity,
     loading:
       searchingDirectory ||

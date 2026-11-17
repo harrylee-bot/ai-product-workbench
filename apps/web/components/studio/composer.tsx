@@ -25,6 +25,8 @@ export type StudioComposerProps = {
   busy: boolean;
   disabled: boolean;
   uploads?: WorkbenchUploadItemViewModel[];
+  onRetryUpload?: (id: string) => Promise<void>;
+  onCancelUpload?: (id: string) => Promise<void>;
   draft: ComposerDraft;
   updateDraft: (transform: (draft: ComposerDraft) => ComposerDraft) => void;
   locked?: boolean;
@@ -45,6 +47,8 @@ export function StudioComposer({
   busy,
   disabled,
   uploads = [],
+  onRetryUpload,
+  onCancelUpload,
   draft,
   updateDraft,
   locked = false,
@@ -86,6 +90,11 @@ export function StudioComposer({
     }));
   const [error, setError] = useState(""),
     [contextOpen, setContextOpen] = useState(false);
+  const uploadAction = async (operation: () => Promise<void>) => {
+    setError("");
+    try { await operation(); }
+    catch (cause) { setError(cause instanceof Error ? cause.message : "附件操作失败，请重试"); }
+  };
   const sourceLabels = useRef(new Map<string, string>());
   for (const source of [...sources.items, ...sources.selectedItems])
     sourceLabels.current.set(source.id, source.label);
@@ -319,24 +328,36 @@ export function StudioComposer({
           )}
           {files.length > 0 && (
             <div className="studio-chips">
-              {files.map((file, i) => (
+              {files.map((file, i) => {
+                const upload = uploads.find(item => item.sourceFile === file);
+                return (
                 <span key={`${file.name}-${i}`}>
                   {file.name} ·{" "}
-                  {uploads.find(
-                    (item) =>
-                      item.fileName === file.name &&
-                      item.byteSize === file.size,
-                  )?.statusLabel ?? "待上传"}
+                  {upload?.statusLabel ?? "待上传"}
+                  {upload?.error && <span role="alert">{upload.error.message}</span>}
+                  {upload?.canRetry && onRetryUpload && (
+                    <button type="button" disabled={disabled || !!upload.actionPending}
+                      aria-label={`重试上传 ${file.name}`}
+                      onClick={() => void uploadAction(() => onRetryUpload(upload.id))}>重试上传</button>
+                  )}
+                  {upload?.canCancel && onCancelUpload && (
+                    <button type="button" disabled={disabled || !!upload.actionPending}
+                      aria-label={`取消上传 ${file.name}`}
+                      onClick={() => void uploadAction(() => onCancelUpload(upload.id))}>取消上传</button>
+                  )}
                   <button
+                    type="button"
                     aria-label={`移除 ${file.name}`}
-                    onClick={() =>
-                      setFiles((current) => current.filter((f) => f !== file))
-                    }
+                    disabled={disabled || !!upload?.actionPending || (busy && !(upload?.canCancel && onCancelUpload))}
+                    onClick={() => void uploadAction(async () => {
+                      if (upload?.canCancel && onCancelUpload) await onCancelUpload(upload.id);
+                      setFiles((current) => current.filter((f) => f !== file));
+                    })}
                   >
                     ×
                   </button>
                 </span>
-              ))}
+              ); })}
             </div>
           )}
           {contextOpen && (

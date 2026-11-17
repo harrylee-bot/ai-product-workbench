@@ -6087,6 +6087,44 @@
       ],
       "additionalProperties": false
     },
+    "RunArtifactOperation": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "create"
+              ]
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "revise"
+              ]
+            },
+            "target": {
+              "$ref": "#/$defs/RunArtifactTarget"
+            }
+          },
+          "required": [
+            "kind",
+            "target"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
     "RunArtifactTarget": {
       "type": "object",
       "properties": {
@@ -6172,42 +6210,7 @@
           "$ref": "#/$defs/JsonValue"
         },
         "operation": {
-          "oneOf": [
-            {
-              "type": "object",
-              "properties": {
-                "kind": {
-                  "type": "string",
-                  "enum": [
-                    "create"
-                  ]
-                }
-              },
-              "required": [
-                "kind"
-              ],
-              "additionalProperties": false
-            },
-            {
-              "type": "object",
-              "properties": {
-                "kind": {
-                  "type": "string",
-                  "enum": [
-                    "revise"
-                  ]
-                },
-                "target": {
-                  "$ref": "#/$defs/RunArtifactTarget"
-                }
-              },
-              "required": [
-                "kind",
-                "target"
-              ],
-              "additionalProperties": false
-            }
-          ]
+          "$ref": "#/$defs/RunArtifactOperation"
         }
       },
       "required": [
@@ -6250,42 +6253,7 @@
           "$ref": "#/$defs/JsonValue"
         },
         "operation": {
-          "oneOf": [
-            {
-              "type": "object",
-              "properties": {
-                "kind": {
-                  "type": "string",
-                  "enum": [
-                    "create"
-                  ]
-                }
-              },
-              "required": [
-                "kind"
-              ],
-              "additionalProperties": false
-            },
-            {
-              "type": "object",
-              "properties": {
-                "kind": {
-                  "type": "string",
-                  "enum": [
-                    "revise"
-                  ]
-                },
-                "target": {
-                  "$ref": "#/$defs/RunArtifactTarget"
-                }
-              },
-              "required": [
-                "kind",
-                "target"
-              ],
-              "additionalProperties": false
-            }
-          ]
+          "$ref": "#/$defs/RunArtifactOperation"
         }
       },
       "required": [
@@ -6328,42 +6296,7 @@
           "$ref": "#/$defs/JsonValue"
         },
         "operation": {
-          "oneOf": [
-            {
-              "type": "object",
-              "properties": {
-                "kind": {
-                  "type": "string",
-                  "enum": [
-                    "create"
-                  ]
-                }
-              },
-              "required": [
-                "kind"
-              ],
-              "additionalProperties": false
-            },
-            {
-              "type": "object",
-              "properties": {
-                "kind": {
-                  "type": "string",
-                  "enum": [
-                    "revise"
-                  ]
-                },
-                "target": {
-                  "$ref": "#/$defs/RunArtifactTarget"
-                }
-              },
-              "required": [
-                "kind",
-                "target"
-              ],
-              "additionalProperties": false
-            }
-          ]
+          "$ref": "#/$defs/RunArtifactOperation"
         }
       },
       "required": [
@@ -6406,42 +6339,7 @@
           "$ref": "#/$defs/JsonValue"
         },
         "operation": {
-          "oneOf": [
-            {
-              "type": "object",
-              "properties": {
-                "kind": {
-                  "type": "string",
-                  "enum": [
-                    "create"
-                  ]
-                }
-              },
-              "required": [
-                "kind"
-              ],
-              "additionalProperties": false
-            },
-            {
-              "type": "object",
-              "properties": {
-                "kind": {
-                  "type": "string",
-                  "enum": [
-                    "revise"
-                  ]
-                },
-                "target": {
-                  "$ref": "#/$defs/RunArtifactTarget"
-                }
-              },
-              "required": [
-                "kind",
-                "target"
-              ],
-              "additionalProperties": false
-            }
-          ]
+          "$ref": "#/$defs/RunArtifactOperation"
         }
       },
       "required": [
@@ -6486,42 +6384,7 @@
           "$ref": "#/$defs/PrdDocument"
         },
         "operation": {
-          "oneOf": [
-            {
-              "type": "object",
-              "properties": {
-                "kind": {
-                  "type": "string",
-                  "enum": [
-                    "create"
-                  ]
-                }
-              },
-              "required": [
-                "kind"
-              ],
-              "additionalProperties": false
-            },
-            {
-              "type": "object",
-              "properties": {
-                "kind": {
-                  "type": "string",
-                  "enum": [
-                    "revise"
-                  ]
-                },
-                "target": {
-                  "$ref": "#/$defs/RunArtifactTarget"
-                }
-              },
-              "required": [
-                "kind",
-                "target"
-              ],
-              "additionalProperties": false
-            }
-          ]
+          "$ref": "#/$defs/RunArtifactOperation"
         }
       },
       "required": [
@@ -6566,42 +6429,7 @@
           "$ref": "#/$defs/PrototypeDocument"
         },
         "operation": {
-          "oneOf": [
-            {
-              "type": "object",
-              "properties": {
-                "kind": {
-                  "type": "string",
-                  "enum": [
-                    "create"
-                  ]
-                }
-              },
-              "required": [
-                "kind"
-              ],
-              "additionalProperties": false
-            },
-            {
-              "type": "object",
-              "properties": {
-                "kind": {
-                  "type": "string",
-                  "enum": [
-                    "revise"
-                  ]
-                },
-                "target": {
-                  "$ref": "#/$defs/RunArtifactTarget"
-                }
-              },
-              "required": [
-                "kind",
-                "target"
-              ],
-              "additionalProperties": false
-            }
-          ]
+          "$ref": "#/$defs/RunArtifactOperation"
         }
       },
       "required": [

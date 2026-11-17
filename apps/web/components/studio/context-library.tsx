@@ -108,7 +108,7 @@ export function ContextImports({
                 title,
                 document: {
                   protocol: "workbench.design-system.v1",
-                  documentId: crypto.randomUUID(),
+                  documentId: `design-${crypto.randomUUID()}`,
                   title,
                   tokens: [
                     {

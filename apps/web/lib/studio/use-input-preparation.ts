@@ -18,13 +18,20 @@ export function useStudioInputPreparation(projectId: string) {
   const registry = useWorkbenchUploadRegistry(
     useWorkbenchFileTransferService(),
   );
+  const active = useRef<{ cancelled: boolean } | null>(null);
   const fileSources = useRef({
     projectId,
     files: new WeakMap<File, Promise<string>>(),
   });
   if (fileSources.current.projectId !== projectId)
     fileSources.current = { projectId, files: new WeakMap() };
-  const prepare = async (input: StudioSubmission, checkActive: () => void) => {
+  const prepare = async (input: StudioSubmission, assertScope: () => void) => {
+    const attempt = { cancelled: false };
+    active.current = attempt;
+    const checkActive = () => {
+      assertScope();
+      if (attempt.cancelled) throw new Error("附件上传已取消，本次需求未发送。输入已保留，请核对附件后重新发送。");
+    };
     checkActive();
     const ids: string[] = [];
     for (const file of input.files) {
@@ -33,9 +40,10 @@ export function useStudioInputPreparation(projectId: string) {
       if (!result) {
         result = (async () => {
           const batch = await registry.uploadFiles(projectId, [{ file }]);
+          if (attempt.cancelled || !batch.fileAssetIds[0]) registry.completeUploadBatch(batch.batchId);
           checkActive();
           const fileAssetId = batch.fileAssetIds[0];
-          if (!fileAssetId) throw new Error("附件上传未完成，请重试");
+          if (!fileAssetId) throw new Error("附件上传已取消，本次需求未发送。输入已保留。");
           const source = await sources.createImportSource(
             projectId,
             { kind: "file", fileAssetId },
@@ -87,5 +95,13 @@ export function useStudioInputPreparation(projectId: string) {
       canvasSnapshot: null,
     });
   };
-  return { prepare, uploads: registry.uploads };
+  return {
+    prepare,
+    uploads: registry.uploads,
+    retryUpload: registry.retryUpload,
+    cancelUpload: async (id: string) => {
+      if (active.current) active.current.cancelled = true;
+      await registry.cancelUpload(id);
+    },
+  };
 }

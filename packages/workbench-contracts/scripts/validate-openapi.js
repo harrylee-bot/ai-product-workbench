@@ -694,7 +694,7 @@ for (const [schemaName, kind] of [
 assert(literalValue(schemas.RuntimeArtifactDraftPrd.properties.kind) === "prd", "Runtime PRD kind must remain prd");
 assert(literalValue(schemas.RuntimeArtifactDraftPrd.properties.schemaVersion) === 3, "Runtime PRD must require schemaVersion 3");
 assert(schemas.RuntimeArtifactDraftPrd.properties.content.$ref === "#/components/schemas/PrdDocument", "Runtime PRD must use the persisted document contract");
-assert(JSON.stringify(schemas.RuntimeArtifactDraftPrd.properties.operation.oneOf.map((option) => literalValue(option.properties.kind))) === JSON.stringify(["create", "revise"]), "Current PRD must allow create and revise operations");
+assert(JSON.stringify(resolveSchema(schemas.RuntimeArtifactDraftPrd.properties.operation).oneOf.map((option) => literalValue(option.properties.kind))) === JSON.stringify(["create", "revise"]), "Current PRD must allow create and revise operations");
 assert(literalValue(schemas.RuntimeArtifactDraftPrototype.properties.schemaVersion) === 1, "Runtime Prototype draft schemaVersion must be 1");
 for (const schemaName of ["RuntimeArtifactDraftImage", "RuntimeArtifactDraftCode", "RuntimeArtifactDraftDocument", "RuntimeArtifactDraftData"]) {
   assert(schemas[schemaName].properties.content.$ref === "#/components/schemas/JsonValue", `${schemaName} must use JsonValue`);

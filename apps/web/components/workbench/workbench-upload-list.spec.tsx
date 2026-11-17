@@ -134,6 +134,7 @@ function uploadViewModel(
 ): WorkbenchUploadItemViewModel {
   return {
     id: "upload-1",
+    sourceFile: new File([new Uint8Array(1_024)], "brief.pdf", { type: "application/pdf" }),
     controllerId: "controller-1",
     projectId: "project-1",
     fileName: "brief.pdf",

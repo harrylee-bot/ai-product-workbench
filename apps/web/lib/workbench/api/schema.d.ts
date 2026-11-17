@@ -7421,9 +7421,22 @@ export interface components {
                 detail: string;
             } | null;
         };
+        RunArtifactOperation: {
+            /** @enum {string} */
+            kind: "create";
+        } | {
+            /** @enum {string} */
+            kind: "revise";
+            target: components["schemas"]["RunArtifactTarget"];
+        };
+        RunOutputOperations: {
+            kind: components["schemas"]["RuntimeRequestedArtifactKind"];
+            operation: components["schemas"]["RunArtifactOperation"];
+        }[];
         /** @description Redesign requires a ready Import Source; Edit requires an Artifact target; Generate accepts explicit source screen targets or one fixed PRD with prdScreenPlan when prototype is requested; Redesign and Ideate forbid targets. Enforced by the runtime Zod contract. */
         StartRunRequest: {
             requirementConfirmationId?: string;
+            outputOperations?: components["schemas"]["RunOutputOperations"];
             prompt: string;
             modelId: string;
             workflow: components["schemas"]["RunWorkflow"];
@@ -8716,14 +8729,7 @@ export interface components {
             kind: "code";
             schemaVersion: number;
             content: components["schemas"]["JsonValue"];
-            operation: {
-                /** @enum {string} */
-                kind: "create";
-            } | {
-                /** @enum {string} */
-                kind: "revise";
-                target: components["schemas"]["RunArtifactTarget"];
-            };
+            operation: components["schemas"]["RunArtifactOperation"];
         };
         RuntimeArtifactDraftData: {
             title: string;
@@ -8732,14 +8738,7 @@ export interface components {
             kind: "data";
             schemaVersion: number;
             content: components["schemas"]["JsonValue"];
-            operation: {
-                /** @enum {string} */
-                kind: "create";
-            } | {
-                /** @enum {string} */
-                kind: "revise";
-                target: components["schemas"]["RunArtifactTarget"];
-            };
+            operation: components["schemas"]["RunArtifactOperation"];
         };
         RuntimeArtifactDraftDocument: {
             title: string;
@@ -8748,14 +8747,7 @@ export interface components {
             kind: "document";
             schemaVersion: number;
             content: components["schemas"]["JsonValue"];
-            operation: {
-                /** @enum {string} */
-                kind: "create";
-            } | {
-                /** @enum {string} */
-                kind: "revise";
-                target: components["schemas"]["RunArtifactTarget"];
-            };
+            operation: components["schemas"]["RunArtifactOperation"];
         };
         RuntimeArtifactDraftImage: {
             title: string;
@@ -8764,14 +8756,7 @@ export interface components {
             kind: "image";
             schemaVersion: number;
             content: components["schemas"]["JsonValue"];
-            operation: {
-                /** @enum {string} */
-                kind: "create";
-            } | {
-                /** @enum {string} */
-                kind: "revise";
-                target: components["schemas"]["RunArtifactTarget"];
-            };
+            operation: components["schemas"]["RunArtifactOperation"];
         };
         RuntimeArtifactDraftPrd: {
             title: string;
@@ -8781,14 +8766,7 @@ export interface components {
             /** @enum {number} */
             schemaVersion: 3;
             content: components["schemas"]["PrdDocument"];
-            operation: {
-                /** @enum {string} */
-                kind: "create";
-            } | {
-                /** @enum {string} */
-                kind: "revise";
-                target: components["schemas"]["RunArtifactTarget"];
-            };
+            operation: components["schemas"]["RunArtifactOperation"];
         };
         RuntimeArtifactDraftPrototype: {
             title: string;
@@ -8798,14 +8776,7 @@ export interface components {
             /** @enum {number} */
             schemaVersion: 1;
             content: components["schemas"]["PrototypeDocument"];
-            operation: {
-                /** @enum {string} */
-                kind: "create";
-            } | {
-                /** @enum {string} */
-                kind: "revise";
-                target: components["schemas"]["RunArtifactTarget"];
-            };
+            operation: components["schemas"]["RunArtifactOperation"];
         };
         /** @description A PRD draft's top-level citations exactly match its content citations; enforced by the runtime Zod contract. */
         RuntimeArtifactDraft: components["schemas"]["RuntimeArtifactDraftPrd"] | components["schemas"]["RuntimeArtifactDraftPrototype"] | components["schemas"]["RuntimeArtifactDraftImage"] | components["schemas"]["RuntimeArtifactDraftCode"] | components["schemas"]["RuntimeArtifactDraftDocument"] | components["schemas"]["RuntimeArtifactDraftData"];
@@ -8873,6 +8844,7 @@ export interface components {
         };
         StartRunRequestObject: {
             requirementConfirmationId?: string;
+            outputOperations?: components["schemas"]["RunOutputOperations"];
             prompt: string;
             modelId: string;
             workflow: components["schemas"]["RunWorkflow"];

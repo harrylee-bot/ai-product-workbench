@@ -114,6 +114,6 @@ export function isCancellableRun(run: Pick<Run, "status">): boolean {
     || run.status === "waiting_input";
 }
 
-export function isRetryableRun(run: Pick<Run, "status" | "failure">): boolean {
-  return run.status === "failed" && run.failure?.retryable === true;
+export function isRetryableRun(run: Pick<Run, "status" | "failure"> & Partial<Pick<Run, "requestedArtifactKinds">>): boolean {
+  return !run.requestedArtifactKinds?.includes("prototype") && run.status === "failed" && run.failure?.retryable === true;
 }

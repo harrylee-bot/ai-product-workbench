@@ -118,3 +118,24 @@ it('keeps polling an accepted export cancellation and only displays completion a
  expect(screen.queryByRole('button',{name:'取消导出'})).toBeNull();expect(screen.queryByRole('button',{name:'重试'})).toBeNull();
  await screen.findByText('HTML · 已取消',{}, {timeout:5000});
 });
+
+it('rechecks and removes private views on a later denial of the same HTTP path',async()=>{
+ await mount();const path='/api/v1/projects/project-one/prototype-v2/shares';
+ const signal=()=>window.dispatchEvent(new CustomEvent('workbench:access-denied',{detail:{path,status:403}}));
+ const initial=m.api.getProjectBootstrap.mock.calls.length;
+ act(signal);await waitFor(()=>expect(m.api.getProjectBootstrap.mock.calls.length).toBeGreaterThan(initial));
+ await screen.findByTestId('private-preview');
+ m.api.getProjectBootstrap.mockRejectedValue(new WorkbenchApiError({status:403,code:'PROJECT_FORBIDDEN',title:'removed',type:'about:blank'}));
+ const before=m.api.getProjectBootstrap.mock.calls.length;act(signal);
+ await waitFor(()=>expect(screen.queryByTestId('private-preview')).toBeNull());
+ await waitFor(()=>expect(screen.getByRole('alert').textContent).toContain('项目访问权限已失效'));
+ expect(m.api.getProjectBootstrap.mock.calls.length).toBeGreaterThan(before);
+});
+it('stops automatic remount loops when a resource repeatedly denies access but project bootstrap succeeds',async()=>{
+ await mount();const signal=()=>window.dispatchEvent(new CustomEvent('workbench:access-denied',{detail:{path:'/api/v1/projects/project-one/prototype-v2/shares',status:403}}));
+ act(signal);await screen.findByTestId('private-preview');
+ act(signal);await waitFor(()=>expect(screen.getByRole('alert').textContent).toContain('资源仍拒绝访问'));
+ expect(screen.queryByTestId('private-preview')).toBeNull();
+ const calls=m.api.getProjectBootstrap.mock.calls.length;await act(async()=>{await new Promise(r=>setTimeout(r,100));});expect(m.api.getProjectBootstrap).toHaveBeenCalledTimes(calls);
+ fireEvent.click(screen.getByRole('button',{name:'重新核验权限'}));await screen.findByTestId('private-preview');
+});

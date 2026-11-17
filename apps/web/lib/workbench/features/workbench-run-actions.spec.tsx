@@ -288,3 +288,5 @@ function wrapper(queryClient: QueryClient) {
 }
 
 const timestamp = "2026-07-13T00:00:00.000Z";
+
+it.each([['prototype'],['prd','prototype']])('never offers generic retry for output %j',async(...kinds)=>{const current={...run('failed',true),requestedArtifactKinds:kinds.flat() as Run['requestedArtifactKinds']};const c=client();const hook=renderHook(()=>useWorkbenchRunActions(current),{wrapper:wrapper(c)});expect(hook.result.current.canRetry).toBe(false);await expect(hook.result.current.retry()).rejects.toThrow('cannot be retried');expect(mocks.retryRun).not.toHaveBeenCalled();hook.unmount();c.clear();});

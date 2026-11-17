@@ -25,6 +25,7 @@ type WorkbenchUploadAction = "cancel" | "retry";
 
 export type WorkbenchUploadItemViewModel = {
   id: string;
+  sourceFile: File;
   controllerId: string;
   projectId: string;
   fileName: string;
@@ -87,6 +88,7 @@ type Settlement<T> = {
 
 type UploadRecord = {
   id: string;
+  sourceFile: File;
   batchId: string;
   controller: UploadController;
   snapshot: WorkbenchUploadSnapshot;
@@ -149,6 +151,7 @@ export class WorkbenchUploadRegistry {
         void settlement.promise.catch(() => undefined);
         const record: UploadRecord = {
           id,
+          sourceFile: file,
           batchId,
           controller,
           snapshot,
@@ -224,6 +227,8 @@ export class WorkbenchUploadRegistry {
         await record.controller.cancel();
         return record.controller.getSnapshot();
       });
+      if (record.controller.getSnapshot().phase !== "cancelled")
+        throw new Error(record.controller.getSnapshot().error?.message ?? "取消上传尚未完成，请重试");
     } finally {
       if (this.records.has(id)) {
         record.actionPending = null;
@@ -383,6 +388,7 @@ function toViewModel(record: UploadRecord): WorkbenchUploadItemViewModel {
   );
   return {
     id: record.id,
+    sourceFile: record.sourceFile,
     controllerId: snapshot.id,
     projectId: snapshot.projectId,
     fileName: snapshot.fileName,

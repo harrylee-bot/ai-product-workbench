@@ -1887,6 +1887,8 @@ export function StudioWorkspace({
                       composer.disabled || !canEdit || !composerSession.ready
                     }
                     uploads={discussion.uploads}
+                    onRetryUpload={discussion.retryUpload}
+                    onCancelUpload={discussion.cancelUpload}
                     onSubmit={submitPlan}
                   />
                 </RequirementInput>

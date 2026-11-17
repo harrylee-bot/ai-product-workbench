@@ -10,20 +10,14 @@ import {
 } from "./prototype-patches.js";
 import { prototypeDocumentSchema, type PrototypeDocument } from "./prototype.js";
 import {
-  runArtifactTargetSchema,
+  runArtifactOperationSchema,
   type RunArtifactTarget,
   type RunGenerationStage,
 } from "./runs.js";
 
 export const runtimeCitationSchema = artifactCitationSchema;
 
-export const runtimeArtifactOperationSchema = z.discriminatedUnion("kind", [
-  z.object({ kind: z.literal("create") }).strict(),
-  z.object({
-    kind: z.literal("revise"),
-    target: runArtifactTargetSchema,
-  }).strict(),
-]);
+export const runtimeArtifactOperationSchema = runArtifactOperationSchema;
 
 const runtimeArtifactDraftBaseShape = {
   title: z.string().min(1).max(240),

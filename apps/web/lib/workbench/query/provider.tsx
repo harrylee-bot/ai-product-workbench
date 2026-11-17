@@ -14,7 +14,6 @@ import {
 } from "react";
 
 import { isWorkbenchApiError } from "../api/problem-details";
-import { WorkbenchPrdDraftProvider } from "../prd-editor/draft-context";
 
 const DEFAULT_STALE_TIME_MS = 30_000;
 
@@ -52,9 +51,7 @@ export function WorkbenchQueryProvider({
       {privateCacheNamespace !== undefined ? (
         <WorkbenchPrivateQueryCacheBoundary cacheNamespace={privateCacheNamespace} />
       ) : null}
-      <WorkbenchPrdDraftProvider namespace={privateCacheNamespace}>
-        {children}
-      </WorkbenchPrdDraftProvider>
+      {children}
     </QueryClientProvider>
   );
 }

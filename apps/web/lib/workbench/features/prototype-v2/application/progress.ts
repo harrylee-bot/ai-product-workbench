@@ -9,9 +9,16 @@ import { useWorkbenchPrototypeV2Api } from "../api-adapter";
 
 export function seedPrototypeProgress(snapshot: PrototypeProgress): RunProjectionState | null {
   if (!snapshot.run) return null;
-  let state = createRunProjection(snapshot.run);
-  for (const event of snapshot.events) state = reduceRunEvent({ ...state, lastSequence: event.sequence - 1 }, event);
-  return { ...state, status: snapshot.run.status, lastSequence: snapshot.run.lastEventSequence, phase: snapshot.run.phase, phaseLabel: snapshot.run.phaseLabel, progress: snapshot.run.progress };
+  // This is an authorized history window, not events arriving after the Run
+  // ended. Rebuild its content before restoring the authoritative lifecycle.
+  let state = createRunProjection({ ...snapshot.run, status: "running" });
+  for (const event of [...snapshot.events].sort((a, b) => a.sequence - b.sequence)) {
+    const previews = state.generationPreviews;
+    state = reduceRunEvent({ ...state, lastSequence: event.sequence - 1 }, event);
+    if (["run.failed", "run.cancelled", "run.completed"].includes(event.type))
+      state = { ...state, generationPreviews: previews };
+  }
+  return { ...state, status: snapshot.run.status, attempt: snapshot.run.attempt, failure: snapshot.run.failure, cancellationReason: snapshot.run.cancellationReason, lastSequence: snapshot.run.lastEventSequence, phase: snapshot.run.phase, phaseLabel: snapshot.run.phaseLabel, progress: snapshot.run.progress };
 }
 
 export function applyPrototypeProgress(state: RunProjectionState, event: RunEvent) {
@@ -20,6 +27,7 @@ export function applyPrototypeProgress(state: RunProjectionState, event: RunEven
   if (event.runId !== state.runId || event.projectId !== state.projectId || event.requestId !== state.requestId || event.threadId !== state.threadId) throw new Error("PROGRESS_IDENTITY_MISMATCH");
   if (event.sequence <= state.lastSequence) return state;
   if (event.sequence !== state.lastSequence + 1) throw new Error("PROGRESS_SEQUENCE_GAP");
+  if (["succeeded", "failed", "cancelled"].includes(state.status)) return { ...state, lastSequence: event.sequence };
   if ("attempt" in event.payload && typeof event.payload.attempt === "number" && event.payload.attempt < (state.attempt ?? 0)) return { ...state, lastSequence: event.sequence };
   return reduceRunEvent(state, event);
 }

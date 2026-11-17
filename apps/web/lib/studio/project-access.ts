@@ -23,8 +23,13 @@ export function useStudioProjectAccess(projectId: string) {
   const [state, setState] = useState({ blocked: true, checking: true, error: "", generation: 0 });
   const lifecycle = useRef({ active: true, checking: false, generation: 0 });
   const checkedFailures = useRef(new Set<string>());
-  const verify = async () => {
+  const verify = async (failureKey?: string) => {
     if (!lifecycle.current.active || lifecycle.current.checking) return;
+    // Never swallow a new denial. A resource that still denies access after a
+    // successful project recheck remains blocked until an explicit retry, so
+    // remounting its query cannot create a verification loop.
+    const repeated = !!failureKey && checkedFailures.current.has(failureKey);
+    if (failureKey) checkedFailures.current.add(failureKey);
     lifecycle.current.checking = true;
     const generation = ++lifecycle.current.generation;
     const current = () => lifecycle.current.active && lifecycle.current.generation === generation;
@@ -36,6 +41,10 @@ export function useStudioProjectAccess(projectId: string) {
       const bootstrap = await api.getProjectBootstrap(projectId);
       if (!current()) return;
       if (bootstrap.value.project.id !== projectId) throw new WorkbenchContractError("verify project access");
+      if (repeated) {
+        setState(previous => ({ ...previous, blocked: true, checking: false, error: "项目中的资源仍拒绝访问。请核对权限后重新核验，未发送的草稿已保留。" }));
+        return;
+      }
       client.setQueryData(workbenchQueryKeys.bootstrap(projectId), bootstrap);
       setState(previous => ({ ...previous, blocked: false, checking: false, error: "" }));
     } catch (error) {
@@ -57,20 +66,18 @@ export function useStudioProjectAccess(projectId: string) {
       if (event.type !== "updated") return;
       const failureKey = `query:${event.query.queryHash}`;
       if (event.action.type === "success") checkedFailures.current.delete(failureKey);
-      if (event.action.type !== "error" || checkedFailures.current.has(failureKey)) return;
+      if (event.action.type !== "error") return;
       const error = event.query.state.error;
       if (belongsToProject(event.query, projectId) && isWorkbenchApiError(error) && [401, 403].includes(error.status)) {
-        checkedFailures.current.add(failureKey);
-        void verifyRef.current();
+        void verifyRef.current(failureKey);
       }
     });
     const denied = (event: Event) => {
       const detail = (event as CustomEvent<{ path: string; status: number }>).detail;
       const projectPath = `/api/v1/projects/${encodeURIComponent(projectId)}`;
       const failureKey = `http:${detail?.path}`;
-      if (!checkedFailures.current.has(failureKey) && (detail?.status === 401 || detail?.status === 403 && (detail.path === projectPath || detail.path.startsWith(projectPath + "/")))) {
-        checkedFailures.current.add(failureKey);
-        void verifyRef.current();
+      if (detail?.status === 401 || detail?.status === 403 && (detail.path === projectPath || detail.path.startsWith(projectPath + "/"))) {
+        void verifyRef.current(failureKey);
       }
     };
     window.addEventListener("workbench:access-denied", denied);

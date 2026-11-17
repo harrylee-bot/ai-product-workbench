@@ -1,5 +1,5 @@
 "use client";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   useInfiniteQuery,
   useQuery,
@@ -15,6 +15,8 @@ import type {
 import { useWorkbenchImportSourcesApi } from "@/lib/studio/api";
 import { useWorkbenchProjectsApi } from "@/lib/studio/api";
 import { useWorkbenchRunsApi } from "@/lib/studio/api";
+import { useWorkbenchPrototypeV2Api } from "@/lib/studio/api";
+import { findStudioRunPlan } from "@/lib/studio/prototype-run-plan";
 import { useWorkbenchArtifactsApi } from "@/lib/studio/api";
 import { useWorkbenchRunActions } from "@/lib/workbench/features/workbench-run-actions";
 import { useWorkbenchRunController } from "@/lib/workbench/features/run-controller";
@@ -739,6 +741,12 @@ function RunDetailsContent({
   const run = projectedRun(snapshot, projection)!;
   const actions = useWorkbenchRunActions(run, onRetried),
     action = useStudioAction();
+  const prototypeApi = useWorkbenchPrototypeV2Api();
+  const currentRun = useRef<string | null>(run.id);
+  useEffect(() => {
+    currentRun.current = run.id;
+    return () => { currentRun.current = null; };
+  }, [run.id]);
   const [answer, setAnswer] = useState("");
   const approval = actions.pendingApproval;
   return (
@@ -781,6 +789,17 @@ function RunDetailsContent({
           >
             重试
           </button>
+        )}
+        {run.requestedArtifactKinds.includes("prototype") && ["failed", "cancelled"].includes(run.status) && (
+          <button disabled={!canEdit || action.busy} onClick={() => void action.run(async () => {
+            const planId = await findStudioRunPlan(prototypeApi, run);
+            if (currentRun.current !== run.id) return;
+            const url = new URL(window.location.href);
+            url.searchParams.set("view", "pages");
+            url.searchParams.set("plan", planId);
+            for (const key of ["run", "revision", "page"]) url.searchParams.delete(key);
+            window.history.pushState(null, "", url);
+          }, "已打开关联原型任务，请在详情中重试生成")}>打开原型任务</button>
         )}
       </div>
       {Boolean(actions.approvalsError) && (

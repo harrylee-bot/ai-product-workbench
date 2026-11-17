@@ -28,6 +28,7 @@ import {
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { useWorkbenchArtifactsApi } from "@/lib/studio/api";
+import { isWorkbenchApiError } from "@/lib/workbench/api";
 import {
   StructuredContent,
   PrototypeArtifactPreview,
@@ -51,6 +52,12 @@ const documentDraftRecordSchema = z
     version: z.literal(1),
     baseChecksum: z.string(),
     draft: jsonValueSchema,
+    conflict: z.literal(true).optional(),
+    baseline: z.object({
+      artifactVersionId: z.string(),
+      etag: z.string(),
+      document: prdDocumentSchema,
+    }).strict().optional(),
     prepared: z
       .object({
         signature: z.string(),
@@ -203,6 +210,10 @@ export function DocumentView({
   const currentKey = useRef(recordKey);
   currentKey.current = recordKey;
   const local = useStudioStoredRecord(recordKey, documentDraftRecordSchema);
+  const [conflictReview, setConflictReview] = useState<{
+    key: string | null;
+    baseline: NonNullable<z.infer<typeof documentDraftRecordSchema>["baseline"]>;
+  } | null>(null);
   const value = detail.error ? undefined : detail.data?.value,
     content = detail.error
       ? null
@@ -241,6 +252,7 @@ export function DocumentView({
     setDraft(copy);
     if (value?.kind === "prd")
       local.save({
+        ...local.value,
         version: 1,
         baseChecksum: value.checksum,
         draft: copy,
@@ -452,9 +464,35 @@ export function DocumentView({
                 放弃文档草稿
               </button>
             )}
+            {editing && local.value?.conflict && (
+              <section aria-label="文档保存冲突">
+                <p role="alert">文档已有更新，草稿已保留。请先核对最新版本，再选择是否用当前草稿创建新版本。</p>
+                <button disabled={!canEdit || action.busy} onClick={() => void action.run(async () => {
+                  const operationKey = recordKey;
+                  const current = await api.getArtifact(artifact.id);
+                  const id = current.value.currentVersion?.artifactVersionId;
+                  if (current.value.projectId !== artifact.projectId || !id) throw new Error("最新文档不可用，请重新读取");
+                  const latest = await api.getArtifactVersion(artifact.id, id);
+                  if (!alive.current || !local.isCurrent() || currentKey.current !== operationKey) return;
+                  if (latest.value.artifactId !== artifact.id || latest.value.kind !== "prd" || latest.value.status !== "ready" || latest.value.contentMode !== "inline") throw new Error("最新版本暂不能编辑，请稍后重试");
+                  setConflictReview({ key: operationKey, baseline: { artifactVersionId: id, etag: current.etag, document: prdDocumentSchema.parse(latest.value.content) } });
+                }, "最新版本已读取，请核对正文")}>读取最新版本并核对</button>
+                {conflictReview?.key === recordKey && (
+                  <>
+                    <details open><summary>最新版本正文</summary><StructuredContent value={conflictReview.baseline.document as unknown as JsonValue} /></details>
+                    <p>下方仍是你的草稿。继续后，保存将以这份草稿创建新版本；最新正文不会自动合并。文档身份和引用沿用已核对的版本。</p>
+                    <button disabled={!canEdit || action.busy} onClick={() => {
+                      if (!content || !local.value) return;
+                      const { conflict: _conflict, ...record } = local.value;
+                      if (local.save({ ...record, draft: content, prepared: null, baseline: conflictReview.baseline })) setConflictReview(null);
+                    }}>已核对，以最新版本为基线</button>
+                  </>
+                )}
+              </section>
+            )}
             {editing && (
               <button
-                disabled={!canEdit || action.busy}
+                disabled={!canEdit || action.busy || !!local.value?.conflict || !local.ready}
                 onClick={() =>
                   void action.run(async () => {
                     const operationKey = recordKey;
@@ -465,8 +503,10 @@ export function DocumentView({
                         : null;
                     if (!prepared) {
                       const document = parsePrdDraft(content);
-                      const baseline = prdDocumentSchema.parse(value.content);
-                      const current = await api.getArtifact(artifact.id);
+                      const baseline = local.value?.baseline?.document ?? prdDocumentSchema.parse(value.content);
+                      const current = local.value?.baseline
+                        ? { value: { projectId: artifact.projectId, currentVersion: { artifactVersionId: local.value.baseline.artifactVersionId } }, etag: local.value.baseline.etag }
+                        : await api.getArtifact(artifact.id);
                       if (
                         !alive.current ||
                         !local.isCurrent() ||
@@ -475,12 +515,18 @@ export function DocumentView({
                         return;
                       if (current.value.projectId !== artifact.projectId)
                         throw new Error("文档不属于当前项目");
+                      if (!local.value?.baseline && current.value.currentVersion?.artifactVersionId !== versionId) {
+                        local.save({ version: 1, baseChecksum: value.checksum, draft: content!, prepared: null, conflict: true });
+                        throw new Error("文档已有更新，请读取最新版本并核对。草稿已保留。");
+                      }
                       prepared = {
                         signature,
                         key: `studio-prd:${crypto.randomUUID()}`,
                         etag: current.etag,
                         document: prdDocumentSchema.parse({
                           ...document,
+                          documentId: baseline.documentId,
+                          citations: baseline.citations,
                           revision: {
                             ...document.revision,
                             number:
@@ -495,12 +541,13 @@ export function DocumentView({
                           },
                         }),
                       };
-                      local.save({
+                      if (!local.save({
+                        ...local.value,
                         version: 1,
                         baseChecksum: value.checksum,
                         draft: content!,
                         prepared,
-                      });
+                      })) throw new Error("保存动作未能记录，文档尚未提交。请保留页面并重试。");
                     }
                     if (
                       !alive.current ||
@@ -508,16 +555,23 @@ export function DocumentView({
                       currentKey.current !== operationKey
                     )
                       return;
-                    const next = await api.createArtifactVersion(
+                    let next;
+                    try { next = await api.createArtifactVersion(
                       artifact.id,
                       {
                         kind: "prd",
-                        baseArtifactVersionId: versionId,
+                        baseArtifactVersionId: local.value?.baseline?.artifactVersionId ?? versionId,
                         document: prepared.document,
                       },
                       prepared.etag,
                       prepared.key,
-                    );
+                    ); } catch (cause) {
+                      if (isWorkbenchApiError(cause) && [409, 412].includes(cause.status) && alive.current && local.isCurrent() && currentKey.current === operationKey) {
+                        local.save({ version: 1, baseChecksum: value.checksum, draft: content!, prepared: null, conflict: true });
+                        setConflictReview(null);
+                      }
+                      throw cause;
+                    }
                     if (
                       !alive.current ||
                       !local.isCurrent() ||
