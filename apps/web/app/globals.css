@@ -198,15 +198,6 @@
   }
 }
 
-/* ─── Focus resets ─── */
-button:focus-visible,
-select:focus-visible,
-[role="button"]:focus-visible,
-input:focus-visible,
-textarea:focus-visible {
-  outline: none;
-}
-
 /* ─── Utilities ─── */
 @utility text-balance {
   text-wrap: balance;
