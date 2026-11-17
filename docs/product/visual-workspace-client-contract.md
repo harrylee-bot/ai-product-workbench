@@ -185,6 +185,8 @@ roles 字段同样区分未知与明确不涉及：讨论可省略；完整的�
 
 新建、按版本修改、按批注修改均在需求会话讨论和调整输入；通过就绪校验后确认一次。包含原型时确认事务直接生成approved计划与绑定Run，approved表示已确认、等待执行，不存在draft审批阶段。公开计划状态为approved、generating、ready、failed、cancelled。取消、原样重试、版本确认/驳回、分享和导出沿用各自业务状态。
 
+原型导出状态为queued、building、cancelling、succeeded、failed、cancelled。`POST P/exports/{exportId}/cancel` 接受后返回cancelling，artifact/failure/finishedAt均为null，表示正在等待执行清理；前端继续读取状态且不显示“已取消”或允许重试。只有执行器完成取消和资源清理后才返回cancelled及finishedAt。网关失联时保留cancelling和持久命令，重启可恢复投递；成功投递取消命令本身也不是清理完成。原动作重放保留接受回执，GET用于获取当前终态。
+
 公开合同删除 `POST P/plans`、`POST P/plans/:planId/approve`、`POST P/plans/:planId/input`、`POST P/revisions/:revisionId/plans`、`POST P/revisions/:revisionId/revise` 及全部SubmissionIntent接口/上传绑定；这些路径不存在。资料通过独立文件上传和ImportSource形成sourceId，再纳入讨论；分片上传、断点续传及幂等回执保留。讨论配置canvasSnapshot只能为null，版本与节点来源以revision、反馈锚点和artifactTargets绑定。
 
 `GET P/plans/:planId/input` 与进度只读取明确绑定的Run，snapshot为必填对象，不从旧草稿或后来的资料重建。修改输入须重新讨论确认；原样重试仍使用原确认链。API拒绝重试无确认的旧Run，Worker拒绝无确认的执行与原型构建准备。旧表、行与迁移保留，旧draft不进入公开计划列表、不恢复旧审批；已有冻结版本、资料和导出数据不删除。此为产品流程替换，不提供双写、旧入口别名、历史JSON展示修复或执行豁免。

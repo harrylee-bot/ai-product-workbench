@@ -16803,6 +16803,7 @@ components:
       enum:
         - queued
         - building
+        - cancelling
         - succeeded
         - failed
         - cancelled

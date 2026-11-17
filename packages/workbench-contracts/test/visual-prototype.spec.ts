@@ -32,6 +32,8 @@ describe("visual prototype v2 contract", () => {
     const base = { id: "export_1", projectId: "project_1", revisionId: "rev_1", format: "html" as const, revision: 1, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), finishedAt: new Date().toISOString() };
     expect(prototypeExportSchema.safeParse({ ...base, status: "failed", artifact: null, failure: null }).success).toBe(false);
     expect(prototypeExportSchema.safeParse({ ...base, status: "succeeded", artifact: null, failure: null }).success).toBe(false);
+    expect(prototypeExportSchema.safeParse({ ...base, status: "cancelling", artifact: null, failure: null }).success).toBe(false);
+    expect(prototypeExportSchema.safeParse({ ...base, status: "cancelling", artifact: null, failure: null, finishedAt:null }).success).toBe(true);
   });
 
   it("keeps action payload strict and bounded", () => {

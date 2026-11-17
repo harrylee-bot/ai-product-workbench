@@ -219,6 +219,7 @@ enum PrototypeExportFormat {
 enum PrototypeExportStatus {
   queued
   building
+  cancelling
   succeeded
   failed
   cancelled
