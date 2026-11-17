@@ -1,3 +1,4 @@
+import { confirmedRequirementBaseline,freezeConfirmedSources } from "./confirmed-requirement-baseline.js";
 import { createHash, randomUUID } from "node:crypto";
 import {
   approvalOptionsSchema,
@@ -390,6 +391,7 @@ export class RunProcessor {
         runtimeTransportOwnerId,
         externalThreadId: binding.externalThreadId,
         request: prepared.request,
+        ...(prepared.confirmedRequirement?{confirmedRequirement:prepared.confirmedRequirement}:{}),
         artifactTargets: prepared.artifactTargets,
         prototypePatchBaselines: prepared.prototypePatchBaselines,
         sources: prepared.sources,
@@ -984,6 +986,7 @@ export class RunProcessor {
       if (!recovering && run.status !== "queued") return null;
       if (recovering && run.attempt < 1) throw new Error("RUNTIME_ATTEMPT_INVALID");
       const request = startRunRequestSchema.parse(run.request);
+      const confirmedRequirement=await confirmedRequirementBaseline(tx,run,request);
       const artifactTargets = await loadRuntimeArtifactTargets(
         tx,
         run.projectId,
@@ -1058,11 +1061,12 @@ export class RunProcessor {
           project: run.thread.project,
           entryId: run.outputEntryId,
           request,
+          confirmedRequirement,
           artifactTargets,
           prototypePatchBaselines,
           designStyleSnapshot,
           designAssets,
-          sources: mapRuntimeSources(run.sourceSnapshots),
+          sources: await freezeConfirmedSources(tx,confirmedRequirement,mapRuntimeSources(run.sourceSnapshots)),
           resume,
           previousAssistantText: draftText(run.draft?.content),
         };
@@ -1129,11 +1133,12 @@ export class RunProcessor {
         project: run.thread.project,
         entryId,
         request,
+        confirmedRequirement,
         artifactTargets,
         prototypePatchBaselines,
         designStyleSnapshot,
         designAssets,
-        sources: mapRuntimeSources(run.sourceSnapshots),
+        sources: await freezeConfirmedSources(tx,confirmedRequirement,mapRuntimeSources(run.sourceSnapshots)),
         resume,
         previousAssistantText: draftText(run.draft?.content),
       };

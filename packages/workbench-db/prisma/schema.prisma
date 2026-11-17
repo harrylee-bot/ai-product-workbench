@@ -509,6 +509,8 @@ model AuthJwk {
 }
 
 model Principal {
+ requirementSessions RequirementSession[]
+ privateRequirementEntries ThreadEntry[] @relation("RequirementEntryAudience")
   artifactLinksCreated ArtifactLink[] @relation("ArtifactLinkCreator")
   id                              String                            @id @default(cuid())
   issuer                          String
@@ -694,6 +696,7 @@ model ProjectInvitation {
 }
 
 model Thread {
+ requirementSessions RequirementSession[]
   id                  String               @id @default(cuid())
   projectId           String               @map("project_id")
   createdById         String               @map("created_by_id")
@@ -778,6 +781,10 @@ model SubmissionIntentAttachment {
 }
 
 model ThreadEntry {
+  requirementSessionId String? @map("requirement_session_id")
+  audiencePrincipalId String? @map("audience_principal_id")
+  requirementSession RequirementSession? @relation(fields:[requirementSessionId],references:[id],onDelete:Restrict,onUpdate:NoAction)
+  requirementAudience Principal? @relation("RequirementEntryAudience",fields:[audiencePrincipalId],references:[id],onDelete:Restrict,onUpdate:NoAction)
   id              String          @id @default(cuid())
   threadId        String          @map("thread_id")
   sequence        Int
@@ -796,6 +803,7 @@ model ThreadEntry {
 }
 
 model Run {
+ requirementConfirmations RequirementConfirmation[]
   id                           String                     @id @default(cuid())
   projectId                    String                     @map("project_id")
   threadId                     String                     @map("thread_id")
@@ -2306,6 +2314,7 @@ model ProjectPreviewArtifactVersion {
 }
 
 model KnowledgeRelease {
+ requirementSummaries RequirementSummary[]
   id                         String                    @id @default(cuid())
   key                        String
   workspaceId                String?                   @map("workspace_id")
@@ -2589,6 +2598,7 @@ model KnowledgeEmbeddingBatch {
 }
 
 model PrototypePlan {
+ requirementConfirmations RequirementConfirmation[]
   retryOfPlanId String? @map("retry_of_plan_id")
   reusedRunId String? @map("reused_run_id")
   reusedRun Run? @relation("PrototypePlanReusedRun", fields: [reusedRunId, projectId], references: [id, projectId], onDelete: Restrict, onUpdate: Restrict, map: "prototype_plans_reused_run_project_fkey")
@@ -2754,4 +2764,114 @@ model PrototypeWorkflowCommand {
   createdAt DateTime @default(now()) @map("created_at")
   @@index([deliveredAt, availableAt])
   @@map("prototype_workflow_commands")
+}
+
+// Discussion state is separate from generation execution. Scoped to one principal.
+model RequirementSession {
+ thread Thread @relation(fields:[threadId,projectId],references:[id,projectId],onDelete:Cascade,onUpdate:NoAction)
+ principal Principal @relation(fields:[principalId],references:[id],onDelete:Restrict,onUpdate:NoAction)
+ entries ThreadEntry[]
+ turns RequirementTurn[]
+ summaries RequirementSummary[]
+ confirmations RequirementConfirmation[]
+ receipts RequirementActionReceipt[]
+ context Json @default("{\"kind\":\"new\"}")
+ id String @id
+ projectId String @map("project_id")
+ threadId String @map("thread_id")
+ principalId String @map("principal_id")
+ idempotencyKey String @map("idempotency_key")
+ requestHash String @map("request_hash")
+ revision Int @default(0)
+ state String @default("discussing")
+ generationRequest Json @map("generation_request")
+ summaryVersion Int @default(0) @map("summary_version")
+ currentTurnId String? @map("current_turn_id")
+ confirmationId String? @map("confirmation_id")
+ createdAt DateTime @default(now()) @map("created_at")
+ updatedAt DateTime @updatedAt @map("updated_at")
+ @@unique([id,projectId,principalId])
+ @@unique([threadId,principalId,idempotencyKey])
+ @@index([principalId,projectId,updatedAt])
+ @@map("requirement_sessions")
+}
+model RequirementTurn {
+ session RequirementSession @relation(fields:[sessionId,projectId,principalId],references:[id,projectId,principalId],onDelete:Cascade,onUpdate:NoAction)
+ id String @id
+ sessionId String @map("session_id")
+ principalId String @map("principal_id")
+ projectId String @map("project_id")
+ inputRevision Int @map("input_revision")
+ idempotencyKey String @map("idempotency_key")
+ requestHash String @map("request_hash")
+ input Json
+ status String @default("queued")
+ modelId String @default("deepseek-flash") @map("model_id")
+ attempt Int @default(0)
+ leaseOwner String? @map("lease_owner")
+ leaseExpiresAt DateTime? @map("lease_expires_at")
+ failureCode String? @map("failure_code")
+ inputTokens Int? @map("input_tokens")
+ outputTokens Int? @map("output_tokens")
+ createdAt DateTime @default(now()) @map("created_at")
+ finishedAt DateTime? @map("finished_at")
+ @@unique([sessionId,idempotencyKey])
+ @@index([status,createdAt])
+ @@index([principalId,projectId,createdAt])
+ @@map("requirement_turns")
+}
+model RequirementSummary {
+ session RequirementSession @relation(fields:[sessionId],references:[id],onDelete:Cascade,onUpdate:NoAction)
+ knowledgeRelease KnowledgeRelease @relation(fields:[knowledgeReleaseId],references:[id],onDelete:Restrict,onUpdate:NoAction)
+ confirmations RequirementConfirmation[]
+ contextSnapshot Json @map("context_snapshot")
+ id String @id
+ sessionId String @map("session_id")
+ version Int
+ inputRevision Int @map("input_revision")
+ checksum String
+ card Json
+ evidence Json
+ knowledgeReleaseId String @map("knowledge_release_id")
+ createdAt DateTime @default(now()) @map("created_at")
+ @@unique([sessionId,version])
+ @@map("requirement_summaries")
+}
+model RequirementConfirmation {
+ session RequirementSession @relation(fields:[sessionId,projectId,principalId],references:[id,projectId,principalId],onDelete:Cascade,onUpdate:NoAction)
+ summary RequirementSummary @relation(fields:[sessionId,summaryVersion],references:[sessionId,version],onDelete:Restrict,onUpdate:NoAction)
+ plan PrototypePlan? @relation(fields:[planId],references:[id],onDelete:Restrict,onUpdate:NoAction)
+ run Run? @relation(fields:[runId],references:[id],onDelete:Restrict,onUpdate:NoAction)
+ lastFailureCode String? @map("last_failure_code")
+ dispatchAttempts Int @default(0) @map("dispatch_attempts")
+ nextAttemptAt DateTime @default(now()) @map("next_attempt_at")
+ id String @id
+ sessionId String @map("session_id")
+ projectId String @map("project_id")
+ principalId String @map("principal_id")
+ summaryVersion Int @map("summary_version")
+ inputRevision Int @map("input_revision")
+ idempotencyKey String @map("idempotency_key")
+ requestHash String @map("request_hash")
+ status String @default("pending")
+ baseline Json
+ generationRequest Json @map("generation_request")
+ inputSnapshot Json @map("input_snapshot")
+ planId String? @map("plan_id")
+ runId String? @map("run_id")
+ confirmedAt DateTime @default(now()) @map("confirmed_at")
+ @@unique([sessionId,idempotencyKey])
+ @@unique([sessionId,summaryVersion])
+ @@map("requirement_confirmations")
+}
+model RequirementActionReceipt {
+ session RequirementSession @relation(fields:[sessionId],references:[id],onDelete:Cascade,onUpdate:NoAction)
+ id String @id
+ principalId String @map("principal_id")
+ sessionId String @map("session_id")
+ idempotencyKey String @map("idempotency_key")
+ requestHash String @map("request_hash")
+ createdAt DateTime @default(now()) @map("created_at")
+ @@unique([sessionId,idempotencyKey])
+ @@map("requirement_action_receipts")
 }

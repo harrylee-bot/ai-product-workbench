@@ -1,3 +1,4 @@
+import { threadEntryVisibility } from "../threads/thread-entry-visibility.js";
 import { Injectable } from "@nestjs/common";
 import { Prisma } from "@workbench/workbench-db";
 import type {
@@ -339,7 +340,7 @@ export class ProjectsService {
     const [entries, latestRun] = selectedThread
       ? await Promise.all([
           this.db.threadEntry.findMany({
-            where: { threadId: selectedThread.id },
+            where: { threadId: selectedThread.id,...threadEntryVisibility(principalId) },
             orderBy: { sequence: "desc" },
             take: 500,
           }),

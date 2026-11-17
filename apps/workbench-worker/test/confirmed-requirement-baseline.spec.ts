@@ -1,0 +1,20 @@
+import { describe,it,expect,vi } from 'vitest';
+import { confirmedRequirementBaseline,freezeConfirmedSources } from '../src/runs/confirmed-requirement-baseline.js';
+import { startRunRequestSchema } from '@workbench/workbench-contracts';
+const request=startRunRequestSchema.parse({prompt:'固定的业务增量',modelId:'deepseek-flash',workflow:'generate',targetSurface:'web',designStyle:{kind:'automatic'},sourceIds:[],requestedArtifactKinds:['prd'],requirementConfirmationId:'confirmation-1'});
+const baseline={analysisContext:{request:{prompt:'fixed'}},summaryChecksum:'a'.repeat(64),card:{goal:'原目标'},evidence:[],entries:[],sourceContents:{readings:[]}};
+const confirmation={id:'confirmation-1',principalId:'owner',sessionId:'session-1',summaryVersion:1,runId:'run-original',generationRequest:request,inputSnapshot:{sources:[],designStyle:{artifactVersionId:null,snapshot:null,snapshotSha256:null},knowledgeReleaseId:'release-1'},baseline};
+const run={id:'run-original',projectId:'project-1',createdById:'owner',knowledgeReleaseId:'release-1',retryOfRunId:null};
+function db(){return {requirementConfirmation:{findFirst:vi.fn().mockResolvedValue(confirmation)},requirementSummary:{findUnique:vi.fn().mockResolvedValue({version:1,checksum:'a'.repeat(64),card:baseline.card,evidence:[],contextSnapshot:baseline.analysisContext})},run:{findFirst:vi.fn().mockImplementation(async({where}:{where:{id:string}})=>({...run,id:where.id,request,retryOfRunId:where.id===run.id?null:run.id}))}};}
+describe('Worker confirmed baseline integrity',()=>{
+ it('validates frozen request, summary and actual knowledge pin before runtime',async()=>expect(await confirmedRequirementBaseline(db() as never,run,request)).toMatchObject({confirmationId:'confirmation-1',checksum:'a'.repeat(64)}));
+ it('rejects a changed prompt or configuration',async()=>expect(confirmedRequirementBaseline(db() as never,run,{...request,prompt:'隐含新增整个平台'})).rejects.toThrow('REQUIREMENT_BASELINE_CHANGED'));
+ it('rejects a different knowledge release',async()=>expect(confirmedRequirementBaseline(db() as never,{...run,knowledgeReleaseId:'new-release'},request)).rejects.toThrow('REQUIREMENT_KNOWLEDGE_BASELINE_CHANGED'));
+ it('permits original-input retries but checks their exact lineage',async()=>expect(await confirmedRequirementBaseline(db() as never,{...run,id:'retry-run',retryOfRunId:'run-original'},request)).toMatchObject({confirmationId:'confirmation-1'}));
+ it('does not attach confirmation to an unrelated Run',async()=>{const store=db();store.run.findFirst.mockResolvedValue(null as never);await expect(confirmedRequirementBaseline(store as never,{...run,id:'unrelated'},request)).rejects.toThrow('REQUIREMENT_BASELINE_RUN_MISMATCH');});
+ it('retains the original confirmation author for a different authorized retry actor',async()=>expect(await confirmedRequirementBaseline(db() as never,{...run,id:'retry-run',createdById:'editor',retryOfRunId:run.id},request)).toMatchObject({confirmationId:confirmation.id}));
+ it('rejects a chain rooted in a different confirmation author',async()=>{const store=db();store.run.findFirst.mockResolvedValue({...run,createdById:'foreign',request} as never);await expect(confirmedRequirementBaseline(store as never,run,request)).rejects.toThrow('REQUIREMENT_BASELINE_RUN_MISMATCH');});
+ it('reads historical Runs using their existing published input',async()=>expect(await confirmedRequirementBaseline({} as never,run,{...request,requirementConfirmationId:undefined})).toBeNull());
+ it('does not switch a textual source to a later extraction',async()=>{const source={sourceId:'source-1',blobId:'blob-1',sha256:'b'.repeat(64),extraction:{kind:'text',position:0,content:{sha256:'c'.repeat(64)}}};const fixed={baseline:{sourceContents:{readings:[{sourceId:'source-1',originalBlobId:'blob-1',blobId:'blob-1',sha256:'b'.repeat(64),extraction:null}]}}};expect((await freezeConfirmedSources({} as never,fixed,[source as never]))[0].extraction).toBeNull();});
+ it('rejects missing frozen source identities',async()=>expect(freezeConfirmedSources({} as never,{baseline},[{sourceId:'foreign',blobId:'foreign'} as never])).rejects.toThrow());
+});

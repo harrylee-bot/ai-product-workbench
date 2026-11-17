@@ -1,3 +1,4 @@
+import { threadEntryVisibility } from "./thread-entry-visibility.js";
 import { Injectable } from "@nestjs/common";
 import { Prisma } from "@workbench/workbench-db";
 import type {
@@ -187,7 +188,7 @@ export class ThreadsService {
     await this.access.findThread(principalId, threadId, "read");
     const limit = clampLimit(requestedLimit, 100, 500);
     const entries = await this.db.threadEntry.findMany({
-      where: { threadId, sequence: { gt: afterSequence } },
+      where: { threadId, sequence: { gt: afterSequence }, ...threadEntryVisibility(principalId) },
       orderBy: { sequence: "asc" },
       take: limit + 1,
     });

@@ -123,6 +123,7 @@ export type RuntimeExecution = {
   runtimeTransportOwnerId: string;
   externalThreadId: string;
   request: StartRunRequest;
+  confirmedRequirement?: {confirmationId:string;summaryVersion:number;checksum:string;baseline:unknown}|null;
   artifactTargets: RuntimeArtifactTarget[];
   prototypePatchBaselines: RuntimePrototypePatchBaseline[];
   sources: RuntimeSource[];

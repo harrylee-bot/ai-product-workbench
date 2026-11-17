@@ -1,3 +1,4 @@
+import { lockRequirementConfirmation,consumeRequirementConfirmation } from "../requirements/requirement-generation-gate.js";
 import { createHash, randomUUID } from "node:crypto";
 import { relationVersion, relationVersionSelect } from "../artifacts/artifact-relations.js";
 import { Injectable } from "@nestjs/common";
@@ -103,7 +104,7 @@ export class RunsService {
     await this.assertPrototypeCanvasReferences(tx, projectId, snapshot.threadId, snapshot);
   }
 
-  async resolvePrototypeRevisionRequest(tx:Prisma.TransactionClient,projectId:string,revisionId:string,request:StartRunRequest):Promise<StartRunRequest>{
+  async resolvePrototypeRevisionRequest(tx:Prisma.TransactionClient,projectId:string,revisionId:string,request:StartRunRequest,preserveOutputKinds=false):Promise<StartRunRequest>{
       const source = await tx.prototypeRevision.findFirst({ where: {
         id: revisionId, projectId: projectId,
         status: { in: ["ready", "confirmed", "rejected"] },
@@ -125,7 +126,7 @@ export class RunsService {
       if (versions[0]!.artifact.currentVersionId !== versions[0]!.id) throw new ProblemException({ title: "Prototype base version changed", status: 409, detail: "Select the current prototype version before requesting a revision", code: "PROTOTYPE_BASE_VERSION_CONFLICT" });
       const editingRequest = { ...request }; delete editingRequest.prdScreenPlan;
       return startRunRequestSchema.parse({ ...editingRequest, workflow: "edit", generationIntent: null,
-        requestedArtifactKinds: ["prototype"], canvasSnapshot: null,
+        requestedArtifactKinds: preserveOutputKinds?request.requestedArtifactKinds:["prototype"], canvasSnapshot: null,
         artifactTargets: [{ artifactId: versions[0]!.artifactId, artifactVersionId: versions[0]!.id, screenIds: [] }],
       });
 
@@ -140,8 +141,11 @@ export class RunsService {
   }
 
   async capturePrototypeInput(tx: Prisma.TransactionClient, projectId: string, request: StartRunRequest, inherited?: {request:StartRunRequest;snapshot:PrototypeInputSnapshot|null}) {
-    assertRunWorkflowInputs(request);
     if(!request.requestedArtifactKinds.includes("prototype"))throw validationProblem("Prototype plans must include a prototype artifact");
+    return this.captureGenerationInput(tx,projectId,request,inherited);
+  }
+  async captureGenerationInput(tx:Prisma.TransactionClient,projectId:string,request:StartRunRequest,inherited?:{request:StartRunRequest;snapshot:PrototypeInputSnapshot|null}){
+    assertRunWorkflowInputs(request);
     await this.runtimeModels.assertAvailable(request.modelId,request.workflow);
     await this.validatePrototypePlanCanvas(tx,projectId,request);
     await this.assertReadyArtifactTargets(tx,projectId,request);
@@ -173,7 +177,7 @@ export class RunsService {
       throw runRetryConflictProblem("Prototype retry must preserve its original terminal Run request");
     }
     if (input.sourceRevisionId && !pinned) {
-      request=await this.resolvePrototypeRevisionRequest(tx,input.projectId,input.sourceRevisionId,request);
+      request=await this.resolvePrototypeRevisionRequest(tx,input.projectId,input.sourceRevisionId,request,!!request.requirementConfirmationId);
     }
 
     if (pinned && request.workflow === "edit") {
@@ -182,6 +186,8 @@ export class RunsService {
         if (artifact?.currentVersionId !== target.artifactVersionId) throw new ProblemException({ title: "Prototype base version changed", status: 409, detail: "Select the current prototype version before retrying this edit", code: "PROTOTYPE_BASE_VERSION_CONFLICT" });
       }
     }
+    const requirement=pinned?null:await lockRequirementConfirmation(tx,input.principalId,input.projectId,request);
+    if(requirement)input={...input,inputSnapshot:requirement.inputSnapshot};
     assertRunWorkflowInputs(request);
     if (!request.requestedArtifactKinds.includes("prototype")) {
       throw validationProblem("Prototype plans must include a prototype artifact");
@@ -194,6 +200,8 @@ export class RunsService {
       threadId = pinned.threadId;
       const thread = await tx.thread.findFirst({ where: { id: threadId, projectId: input.projectId, status: "active" } });
       if (!thread) throw notFoundProblem("Thread");
+    } else if(requirement){
+      const session=await tx.requirementSession.findUniqueOrThrow({where:{id:requirement.sessionId}});threadId=session.threadId;
     } else if (request.canvasSnapshot) {
       threadId = request.canvasSnapshot.threadId;
       const rows = await tx.$queryRaw<Array<{ status: string }>>(Prisma.sql`
@@ -208,6 +216,7 @@ export class RunsService {
       threadId = thread.id;
     }
     await tx.$queryRaw(Prisma.sql`SELECT "id" FROM "threads" WHERE "id" = ${threadId} FOR UPDATE`);
+    if(!await tx.thread.findFirst({where:{id:threadId,projectId:input.projectId,status:"active"}}))throw notFoundProblem("Thread");
     const activeRun = await tx.run.findFirst({ where: { threadId, status: { in: [...activeStatuses] } }, select: { id: true } });
     if (activeRun) throw activeRunConflictProblem(activeRun.id);
     const sources = pinned
@@ -230,6 +239,7 @@ export class RunsService {
       content: { protocol: "workbench.entry.v1", type: "user.prompt", text: request.prompt, sourceIds: request.sourceIds } } });
     const run = await tx.run.create({ data: {
       projectId: input.projectId, threadId, createdById: input.principalId,
+      retryOfRunId: pinned?.id??null,
       knowledgeReleaseId: release.id, designStyleArtifactVersionId: designStyle.artifactVersionId,
       designStyleSnapshot: (designStyle.snapshot??undefined) as Prisma.InputJsonValue | undefined,
       designStyleSnapshotSha256: designStyle.snapshotSha256,
@@ -242,6 +252,7 @@ export class RunsService {
       descriptor: source.descriptor as Prisma.InputJsonValue, snapshot: source.snapshot as Prisma.InputJsonValue,
     })) });
     await this.events.append(tx, run.id, "run.queued", { position: null });
+    if(requirement)await consumeRequirementConfirmation(tx,requirement.id,run.id,input.planId);
     return run.id;
   }
 
@@ -284,7 +295,7 @@ export class RunsService {
       );
     }
 
-    if (request.designStyle.kind === "preset") {
+    if (!retryOfRunId && request.designStyle.kind === "preset") {
       this.designPresets.resolve({
         presetId: request.designStyle.presetId,
         version: request.designStyle.version,
@@ -308,6 +319,9 @@ export class RunsService {
           return duplicate;
         }
 
+        const requirement=retryOfRunId?null:await lockRequirementConfirmation(tx,principalId,thread.projectId,request);
+        const retry=retryOfRunId?await tx.run.findFirst({where:{id:retryOfRunId,projectId:thread.projectId,threadId,status:'failed',errorRetryable:true}}):null;
+        if(retryOfRunId&&(!retry||canonicalJson(startRunRequestSchema.parse(retry.request))!==canonicalJson(request)))throw runRetryConflictProblem('Retry must preserve its failed source Run');
         const lockedThreads = await tx.$queryRaw<Array<{ status: string }>>(
           Prisma.sql`SELECT "status"::text AS "status" FROM "threads" WHERE "id" = ${threadId} FOR UPDATE`,
         );
@@ -321,7 +335,7 @@ export class RunsService {
 
         const sources = retryOfRunId
           ? await this.copyRetrySourceSnapshots(tx, retryOfRunId, request.sourceIds)
-          : await this.resolveSourceSnapshots(tx, thread.projectId, request.sourceIds);
+          : requirement?.inputSnapshot.sources??await this.resolveSourceSnapshots(tx, thread.projectId, request.sourceIds);
         await this.assertReadyArtifactTargets(
           tx,
           thread.projectId,
@@ -333,14 +347,10 @@ export class RunsService {
           threadId,
           request.canvasSnapshot ?? null,
         );
-        const designStyle = await this.resolveDesignStyle(
-          tx,
-          thread.projectId,
-          request.designStyle,
-        );
+        const designStyle = retry?{artifactVersionId:retry.designStyleArtifactVersionId,snapshot:retry.designStyleSnapshot??undefined,snapshotSha256:retry.designStyleSnapshotSha256}:requirement?.inputSnapshot.designStyle??await this.resolveDesignStyle(tx,thread.projectId,request.designStyle);
         const requestHash = runRequestHash(request, designStyle.snapshotSha256);
 
-        const knowledgeRelease = await tx.knowledgeRelease.findFirst({
+        const knowledgeRelease = retry?await tx.knowledgeRelease.findFirst({where:{id:retry.knowledgeReleaseId??'',status:'ready'}}):requirement?await tx.knowledgeRelease.findFirst({where:{id:requirement.inputSnapshot.knowledgeReleaseId??"",status:"ready"}}):(await tx.knowledgeRelease.findFirst({
           where: { status: "ready", projectId: thread.projectId },
           orderBy: [{ version: "desc" }],
         }) ?? await tx.knowledgeRelease.findFirst({
@@ -350,7 +360,7 @@ export class RunsService {
             OR: [{ workspaceId: thread.project.workspaceId }, { workspaceId: null }],
           },
           orderBy: [{ version: "desc" }, { createdAt: "desc" }],
-        });
+        }));
         if (!knowledgeRelease) {
           if (process.env.WORKBENCH_E2E_DATABASE_DIAGNOSTICS === "1") {
             const rows = await tx.$queryRaw<Array<{
@@ -403,7 +413,7 @@ export class RunsService {
             createdById: principalId,
             knowledgeReleaseId: knowledgeRelease.id,
             designStyleArtifactVersionId: designStyle.artifactVersionId,
-            designStyleSnapshot: designStyle.snapshot as Prisma.InputJsonValue | undefined,
+            designStyleSnapshot: (designStyle.snapshot??undefined) as Prisma.InputJsonValue | undefined,
             designStyleSnapshotSha256: designStyle.snapshotSha256,
             idempotencyKey,
             requestHash,
@@ -414,6 +424,7 @@ export class RunsService {
             traceId: randomUUID(),
           },
         });
+        if(requirement)await consumeRequirementConfirmation(tx,requirement.id,created.id,null);
         if (sources.length > 0) {
           await tx.runSourceSnapshot.createMany({
             data: sources.map((source, position) => ({

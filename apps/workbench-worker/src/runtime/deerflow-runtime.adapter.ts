@@ -1409,6 +1409,7 @@ export class DeerFlowRuntimeAdapter implements RuntimePort {
             assetHandles: designAssetHandleMap,
           }
         : execution.request.designStyle,
+      ...(execution.confirmedRequirement?{confirmedRequirement:execution.confirmedRequirement}:{}),
       knowledgeReleaseId: knowledgeToolCapability?.releaseId ?? null,
       knowledgeTool,
       canvasTool: canvasToolCapability?.reference ?? null,

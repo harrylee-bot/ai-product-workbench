@@ -1,3 +1,6 @@
+// Source-validation unit suite isolates the new confirmation collaborator.
+// Real confirmation, single consumption and DB isolation are tested separately.
+vi.mock("../src/modules/requirements/requirement-generation-gate.js",()=>({lockRequirementConfirmation:vi.fn().mockResolvedValue(null),consumeRequirementConfirmation:vi.fn()}));
 import { hashRequest } from "../src/common/idempotency.js";
 import {
   notFoundProblem,
@@ -147,7 +150,9 @@ function persistedRun(overrides: Record<string, unknown> = {}) {
     threadId: "thread_1",
     retryOfRunId: null,
     createdById: "principal_1",
-    knowledgeReleaseId: null,
+    knowledgeReleaseId: "knowledge_1",
+    designStyleArtifactVersionId: null,
+    designStyleSnapshot: null,
     idempotencyKey: "run:key:12345678",
     requestHash: hashRequest(request),
     designStyleSnapshotSha256: null,
@@ -289,7 +294,7 @@ function createHarness(options: {
     }),
     run: {
       findUnique: vi.fn().mockResolvedValue(null),
-      findFirst: vi.fn().mockResolvedValue(null),
+      findFirst: vi.fn().mockImplementation(async ({where}:{where:{id?:string}}) => where.id ? access.findRun() : null),
       create: vi.fn().mockImplementation(async ({ data }: { data: {
         request?: Record<string, unknown>;
         retryOfRunId?: string | null;

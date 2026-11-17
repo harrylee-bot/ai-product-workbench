@@ -1,3 +1,4 @@
+import { RequirementsModule } from "./modules/requirements/requirements.module.js";
 import { SourcePrototypePreviewModule } from "./modules/source-prototype-preview/source-prototype-preview.module.js";
 import { Module } from "@nestjs/common";
 import { ConfigModule } from "@nestjs/config";
@@ -28,6 +29,7 @@ import { PrototypesModule } from "./modules/prototypes/prototypes.module.js";
 
 @Module({
   imports: [
+    RequirementsModule,
     ConfigModule.forRoot({
       isGlobal: true,
       envFilePath: [".env", "../../.env"],

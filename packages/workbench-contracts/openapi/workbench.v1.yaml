@@ -13054,6 +13054,23 @@ components:
             - feedbackIds
             - anchor
           additionalProperties: false
+        - type: object
+          properties:
+            kind:
+              type: string
+              enum:
+                - plan
+            planId:
+              type: string
+              minLength: 1
+              maxLength: 128
+            expectedRevision:
+              $ref: "#/components/schemas/Revision"
+          required:
+            - kind
+            - planId
+            - expectedRevision
+          additionalProperties: false
     RequirementDiscussionRequest:
       type: object
       properties:
@@ -22787,7 +22804,6 @@ components:
             type: string
             minLength: 1
             maxLength: 240
-          minItems: 1
           maxItems: 30
         existingCapabilities:
           type: array
@@ -22932,6 +22948,10 @@ components:
             - pending
             - started
             - invalidated
+        failureCode:
+          type:
+            - string
+            - "null"
         acceptedAssumptionIds:
           type: array
           items:
@@ -22961,6 +22981,7 @@ components:
         - summaryVersion
         - summaryChecksum
         - status
+        - failureCode
         - acceptedAssumptionIds
         - acceptedPlatformChanges
         - confirmedAt
@@ -23353,6 +23374,10 @@ components:
                 - pending
                 - started
                 - invalidated
+            failureCode:
+              type:
+                - string
+                - "null"
             acceptedAssumptionIds:
               type: array
               items:
@@ -23382,6 +23407,7 @@ components:
             - summaryVersion
             - summaryChecksum
             - status
+            - failureCode
             - acceptedAssumptionIds
             - acceptedPlatformChanges
             - confirmedAt
@@ -23419,8 +23445,13 @@ components:
           items:
             $ref: "#/components/schemas/RequirementSession"
           maxItems: 100
+        nextCursor:
+          type:
+            - string
+            - "null"
       required:
         - items
+        - nextCursor
       additionalProperties: false
     RetireKnowledgeProfileRequest:
       type: object
@@ -25361,6 +25392,10 @@ components:
       type: string
       minLength: 1
       maxLength: 128
+    RequirementConfirmationId:
+      type: string
+      minLength: 1
+      maxLength: 128
     RequirementTurnId:
       type: string
       minLength: 1
@@ -25539,6 +25574,12 @@ components:
       required: true
       name: sessionId
       in: path
+    RequirementConfirmationId:
+      schema:
+        $ref: "#/components/schemas/RequirementConfirmationId"
+      required: true
+      name: confirmationId
+      in: path
     RequirementTurnId:
       schema:
         $ref: "#/components/schemas/RequirementTurnId"
@@ -25687,12 +25728,54 @@ components:
       name: Last-Event-ID
       in: header
 paths:
+  /requirement-sessions/{sessionId}/confirmations/{confirmationId}/retry:
+    post:
+      operationId: retryRequirementConfirmation
+      summary: Resume the same frozen confirmation without repeating discussion
+      parameters:
+        - $ref: "#/components/parameters/RequirementSessionId"
+        - $ref: "#/components/parameters/RequirementConfirmationId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/IfMatch"
+      responses:
+        "202":
+          description: Resume the same frozen confirmation without repeating discussion
+          headers:
+            ETag:
+              $ref: "#/components/headers/ETag"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RequirementSession"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+        "409":
+          $ref: "#/components/responses/Problem"
+        "412":
+          $ref: "#/components/responses/Problem"
+        "428":
+          $ref: "#/components/responses/Problem"
   /threads/{threadId}/requirement-sessions:
     get:
       operationId: listRequirementSessions
       summary: Current principal's sessions
       parameters:
         - $ref: "#/components/parameters/ThreadId"
+        - schema:
+            type: string
+          required: false
+          name: cursor
+          in: query
+        - schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 30
+          required: false
+          name: limit
+          in: query
       responses:
         "200":
           description: Current principal's sessions
