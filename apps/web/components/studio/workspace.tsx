@@ -1921,6 +1921,7 @@ function statusLabel(status: string): string {
         confirmed: "已确认",
         rejected: "已驳回",
         failed: "失败",
+        cancelling: "正在取消",
         cancelled: "已取消",
         active: "有效",
         revoked: "已撤销",
@@ -2075,10 +2076,10 @@ function ExportRow({
   const cancel = useCancelWorkbenchPrototypeV2Export(projectId, item.id);
   const download = useDownloadWorkbenchPrototypeV2Export(projectId, item.id);
   return (
-    <div className="mt-2 rounded border border-slate-200 p-2 text-xs">
+    <div data-studio-export-id={item.id} className="mt-2 rounded border border-slate-200 p-2 text-xs">
       <div className="flex flex-wrap items-center gap-2">
         <span>
-          {item.format.toUpperCase()} · {statusLabel(item.status)}
+          {item.format.toUpperCase()} · {item.status === "cancelled" && !item.finishedAt ? "等待取消完成回执" : statusLabel(item.status)}
         </span>
         {item.status === "succeeded" && (
           <button

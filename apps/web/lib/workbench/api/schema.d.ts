@@ -7021,7 +7021,7 @@ export interface components {
             mediaType: string;
         };
         /** @enum {string} */
-        PrototypeExportStatus: "queued" | "building" | "succeeded" | "failed" | "cancelled";
+        PrototypeExportStatus: "queued" | "building" | "cancelling" | "succeeded" | "failed" | "cancelled";
         /** @description Visual Prototype exports require an immutable artifact on success, failure details on failure, and no output on cancellation; enforced by the runtime V2 contract. */
         PrototypeExport: {
             id: string;

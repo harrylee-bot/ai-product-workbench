@@ -166,6 +166,8 @@ roles 字段同样区分未知与明确不涉及：讨论可省略；完整的�
 
 原样重试保持确认作者、request、知识发布、设计快照、资料及完整重试来源链。实际重试操作者依当前项目编辑权限授权，可与原确认作者不同；Worker验证同项目链最终归属于原确认Run，不将重试操作者当作新的确认作者。后来发布知识或切换设计不会改变重试输入。
 
+包含原型（含PRD+原型联合输出）的生成只能通过对应 `POST P/plans/{planId}/retry` 重试，以派生Plan、启动命令和版本构建保持完整生命周期。通用 `POST /runs/{runId}/retry` 对此返回409 `PROTOTYPE_PLAN_RETRY_REQUIRED`，不创建Run或入普通执行队列；前端保留原planId并使用计划动作。仅PRD失败Run继续使用通用重试入口。
+
 
 ### 确认派发故障与恢复
 
@@ -182,6 +184,8 @@ roles 字段同样区分未知与明确不涉及：讨论可省略；完整的�
 ## 统一新产品模型
 
 新建、按版本修改、按批注修改均在需求会话讨论和调整输入；通过就绪校验后确认一次。包含原型时确认事务直接生成approved计划与绑定Run，approved表示已确认、等待执行，不存在draft审批阶段。公开计划状态为approved、generating、ready、failed、cancelled。取消、原样重试、版本确认/驳回、分享和导出沿用各自业务状态。
+
+原型导出状态为queued、building、cancelling、succeeded、failed、cancelled。`POST P/exports/{exportId}/cancel` 接受后返回cancelling，artifact/failure/finishedAt均为null，表示正在等待执行清理；前端继续读取状态且不显示“已取消”或允许重试。只有执行器完成取消和资源清理后才返回cancelled及finishedAt。网关失联时保留cancelling和持久命令，重启可恢复投递；成功投递取消命令本身也不是清理完成。原动作重放保留接受回执，GET用于获取当前终态。
 
 公开合同删除 `POST P/plans`、`POST P/plans/:planId/approve`、`POST P/plans/:planId/input`、`POST P/revisions/:revisionId/plans`、`POST P/revisions/:revisionId/revise` 及全部SubmissionIntent接口/上传绑定；这些路径不存在。资料通过独立文件上传和ImportSource形成sourceId，再纳入讨论；分片上传、断点续传及幂等回执保留。讨论配置canvasSnapshot只能为null，版本与节点来源以revision、反馈锚点和artifactTargets绑定。
 

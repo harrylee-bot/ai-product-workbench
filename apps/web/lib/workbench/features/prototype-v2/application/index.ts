@@ -106,7 +106,10 @@ export function useWorkbenchPrototypeV2Export(projectId: string, exportId: strin
     queryKey: workbenchQueryKeys.prototypeV2Export(projectId, exportId),
     queryFn: () => api.getExport(projectId, exportId),
     enabled: Boolean(projectId && exportId),
-    refetchInterval: (query) => ["succeeded", "failed", "cancelled"].includes(query.state.data?.value.status ?? "") ? false : 3_000,
+    refetchInterval: (query) => {
+      const value = query.state.data?.value;
+      return value && (["succeeded", "failed"].includes(value.status) || value.status === "cancelled" && !!value.finishedAt) ? false : 3_000;
+    },
   });
 }
 

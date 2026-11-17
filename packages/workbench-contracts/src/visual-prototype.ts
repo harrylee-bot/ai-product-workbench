@@ -13,7 +13,7 @@ export const prototypePlanStatusSchema = z.enum(["approved", "generating", "read
 export const prototypeRevisionStatusSchema = z.enum(["queued", "generating", "ready", "confirmed", "rejected", "failed", "cancelled"]);
 export const prototypeFeedbackStatusSchema = z.enum(["open", "resolved"]);
 export const prototypeShareStatusSchema = z.enum(["active", "revoked", "expired"]);
-export const prototypeExportStatusSchema = z.enum(["queued", "building", "succeeded", "failed", "cancelled"]);
+export const prototypeExportStatusSchema = z.enum(["queued", "building", "cancelling", "succeeded", "failed", "cancelled"]);
 export const prototypeExportFormatSchema = z.enum(["html", "react"]);
 
 export const prototypePageSchema = z.object({
@@ -160,7 +160,10 @@ export const prototypeExportSchema = z.object({
   if (value.status === "failed" && value.failure === null) {
     context.addIssue({ code: "custom", path: ["failure"], message: "Failed exports require failure details" });
   }
-  if (value.status === "cancelled" && (value.artifact !== null || value.failure !== null)) {
+  if (value.status === "cancelling" && value.finishedAt !== null) {
+    context.addIssue({code:"custom",path:["finishedAt"],message:"Cancellation requests are not execution acknowledgements"});
+  }
+  if ((value.status === "cancelled" || value.status === "cancelling") && (value.artifact !== null || value.failure !== null)) {
     context.addIssue({ code: "custom", path: ["status"], message: "Cancelled exports cannot carry an artifact or failure" });
   }
 });

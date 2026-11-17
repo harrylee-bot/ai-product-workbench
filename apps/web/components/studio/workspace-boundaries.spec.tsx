@@ -107,3 +107,14 @@ it('restores the same actor unsent draft only after fresh project authorization 
  await waitFor(()=>expect(screen.getByTestId('composer-prompt').textContent).toBe('合法未发送的草稿'));
  expect(screen.getByTestId('private-preview').textContent).toBe('PRIVATE_FROZEN_HTML');
 });
+
+it('keeps polling an accepted export cancellation and only displays completion after GET acknowledges cleanup',async()=>{
+ const now='2026-11-17T00:00:00.000Z';
+ const item={id:'export-one',projectId:'project-one',revisionId:'revision-one',format:'html',status:'cancelling',revision:1,artifact:null,failure:null,createdAt:now,updatedAt:now,finishedAt:null};
+ m.api.listExports.mockResolvedValueOnce([item]).mockResolvedValue([{...item,status:'cancelled',finishedAt:now}]);
+ await mount();
+ fireEvent.click(screen.getByRole('button',{name:'分享 / 导出'}));
+ await screen.findByText('HTML · 正在取消',{}, {timeout:5000});
+ expect(screen.queryByRole('button',{name:'取消导出'})).toBeNull();expect(screen.queryByRole('button',{name:'重试'})).toBeNull();
+ await screen.findByText('HTML · 已取消',{}, {timeout:5000});
+});
