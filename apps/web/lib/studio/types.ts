@@ -1,4 +1,5 @@
 import type {
+  CreatePrototypeFeedbackRequest,
   RunDesignStyle,
   RunTargetSurface,
   StartRunRequest,
@@ -41,4 +42,5 @@ export type StudioPlanTarget = {
   id: string;
   etag: string;
   feedbackIds?: string[];
+  feedback?: CreatePrototypeFeedbackRequest;
 };

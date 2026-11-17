@@ -1964,6 +1964,12 @@ textarea:focus-visible {
 .studio-link-form>label {display:flex;flex-direction:column;gap:6px;}
 .studio-link-form :is(input,select) {width:100%;min-width:0;max-width:100%;}
 .studio-link-pending {padding:12px;border:1px solid #c8d7f5;border-radius:8px;background:#f2f6ff;}
+.studio-variant-actions {margin:16px 0;padding:12px;border:1px solid var(--studio-line);border-radius:10px;background:var(--studio-paper);}
+.studio-variant-actions summary {font-weight:650;cursor:pointer;}
+.studio-variant-actions p {margin:8px 0;overflow-wrap:anywhere;}
+.studio-variant-actions fieldset {margin-top:10px;min-width:0;}
+.studio-variant-pages {max-height:184px;overflow:auto;}
+.studio-variant-pages label {display:flex;gap:8px;align-items:center;min-height:34px;overflow-wrap:anywhere;}
 .studio-image-editor>label {display:flex;align-items:center;gap:12px;margin:12px 0;flex-wrap:wrap;}
 .studio-image-editor .studio-media {max-height:360px;object-fit:contain;}
 .studio-crop-area {position:relative;height:360px;max-width:100%;margin:16px 0;background:#e8ebf0;}

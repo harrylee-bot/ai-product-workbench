@@ -123,7 +123,18 @@ try{
  assert.equal(feedback.filter(item=>item.body==='断线后重试页面批注').length,1);
  assert.deepEqual(retryRequests[0].request.anchor,{scope:'page',sourceRevisionId:secondRevisionId,pageId:'page-1',quote:'账户概览'});
  results.checks.push('page feedback binds the current revision; acknowledgement loss retains text and reuses the same idempotency key');
+ await page.getByRole('textbox',{name:'当前版本批注'}).fill('断线后跨刷新确认批注');
+ await page.getByRole('button',{name:'保存批注',exact:true}).click();
+ await page.getByText(/批注回执暂时中断|请重试保存/).first().waitFor();
+ await page.reload({waitUntil:'networkidle'});
+ await page.getByRole('button',{name:'批注',exact:true}).click();
+ await page.getByRole('button',{name:'确认上次批注保存',exact:true}).click();
+ await page.getByText('上次批注保存已确认',{exact:true}).waitFor();
+ const reloadFeedbackRequests=feedbackRequests.filter(item=>item.request.body==='断线后跨刷新确认批注');
+ assert.equal(reloadFeedbackRequests.length,2);assert.equal(reloadFeedbackRequests[0].key,reloadFeedbackRequests[1].key);
+ results.checks.push('feedback save intent survives page reload and confirms with the original idempotency key');
  // Changed semantics must use a different command key; strict fixture hash rejects reuse.
+ await page.getByRole('combobox',{name:'批注范围'}).selectOption('page');
  await page.getByRole('textbox',{name:'当前版本批注'}).fill('断线后更改范围');
  await page.getByRole('button',{name:'保存批注',exact:true}).click();
  await page.getByText(/批注回执暂时中断|请重试保存/).first().waitFor();

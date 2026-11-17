@@ -5,6 +5,7 @@ import type {
   PrototypePlanInput,
 } from "@workbench/workbench-contracts";
 import { useWorkbenchPrototypeV2Api } from "@/lib/studio/api";
+import { VariantSources } from "./relations";
 
 export function PlanInputSummary({
   projectId,
@@ -98,21 +99,28 @@ export function PlanInputSummary({
           })}
         </ul>
       )}
-      {request.artifactTargets.length > 0 && (
-        <>
-          <h3>固定产物版本</h3>
-          <ul>
-            {request.artifactTargets.map((target) => (
-              <li key={target.artifactVersionId}>
-                {target.artifactVersionId}
-                {target.screenIds.length
-                  ? ` · 页面 ${target.screenIds.join("、")}`
-                  : " · 完整产物"}
-              </li>
-            ))}
-          </ul>
-        </>
-      )}
+      <VariantSources
+        projectId={projectId}
+        targets={request.artifactTargets}
+        intent={request.generationIntent}
+      />
+      {request.artifactTargets.length > 0 &&
+        request.generationIntent !== "followup-design" &&
+        request.generationIntent !== "interactive-prototype" && (
+          <>
+            <h3>固定产物版本</h3>
+            <ul>
+              {request.artifactTargets.map((target) => (
+                <li key={target.artifactVersionId}>
+                  {target.artifactVersionId}
+                  {target.screenIds.length
+                    ? ` · 页面 ${target.screenIds.join("、")}`
+                    : " · 完整产物"}
+                </li>
+              ))}
+            </ul>
+          </>
+        )}
       {request.generationIntent && (
         <p>
           生成意图：

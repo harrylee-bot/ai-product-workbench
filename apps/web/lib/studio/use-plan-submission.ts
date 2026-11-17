@@ -4,6 +4,7 @@ import { z } from "zod";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   canonicalJson,
+  createPrototypeFeedbackRequestSchema,
   createPrototypePlanRequestSchema,
 } from "@workbench/workbench-contracts";
 import { isWorkbenchApiError } from "@/lib/workbench/api";
@@ -34,6 +35,8 @@ const submissionTargetSchema = z.discriminatedUnion("kind", [
       id: z.string(),
       etag: z.string(),
       feedbackIds: z.array(z.string()),
+      feedback: createPrototypeFeedbackRequestSchema.optional(),
+      feedbackKey: z.string().optional(),
     })
     .strict(),
 ]);
@@ -123,9 +126,14 @@ export function usePlanSubmission(projectId: string) {
     });
     // An accepted write may advance the ETag. Recover the original command before
     // checking mutable source status or replacing its compare-and-swap token.
-    const { etag: _etag, ...identity } = {
+    const {
+      etag: _etag,
+      feedbackKey: _feedbackKey,
+      ...identity
+    } = {
       ...target,
       etag: "etag" in target ? target.etag : undefined,
+      feedbackKey: "feedbackKey" in target ? target.feedbackKey : undefined,
     };
     const signature = canonicalJson({ projectId, target: identity, request });
     if (local.value?.signature === signature) return local.value;
@@ -150,7 +158,15 @@ export function usePlanSubmission(projectId: string) {
       signature,
       key: createIdempotencyKey("studio-plan"),
       request,
-      target,
+      target:
+        target.kind === "revision" && target.feedback
+          ? {
+              ...target,
+              feedbackKey:
+                target.feedbackKey ??
+                createIdempotencyKey("prototype-feedback"),
+            }
+          : target,
     };
     local.save(command);
     return command;
@@ -177,6 +193,19 @@ export function usePlanSubmission(projectId: string) {
       });
       return result.value.run.id;
     }
+    let feedbackIds = target.kind === "revision" ? target.feedbackIds : [];
+    if (target.kind === "revision" && target.feedback) {
+      const savedFeedback = await api.createFeedback(
+        projectId,
+        target.id,
+        target.feedback,
+        target.feedbackKey ?? createIdempotencyKey("prototype-feedback"),
+      );
+      checkActive();
+      feedbackIds = [
+        ...new Set([...feedbackIds, savedFeedback.value.id]),
+      ].sort();
+    }
     const result =
       target.kind === "new"
         ? await api.createPlan(projectId, command.request, command.key)
@@ -192,7 +221,7 @@ export function usePlanSubmission(projectId: string) {
               projectId,
               target.id,
               target.etag,
-              { ...command.request, feedbackIds: target.feedbackIds },
+              { ...command.request, feedbackIds },
               command.key,
             );
     checkActive();
@@ -258,8 +287,11 @@ export function usePlanSubmission(projectId: string) {
     const normalized =
       target.kind === "revision"
         ? {
-            ...target,
+            kind: target.kind,
+            id: target.id,
+            etag: target.etag,
             feedbackIds: [...new Set(target.feedbackIds ?? [])].sort(),
+            ...(target.feedback ? { feedback: target.feedback } : {}),
           }
         : { kind: target.kind, id: target.id, etag: target.etag };
     const result = await submit(input, normalized);

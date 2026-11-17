@@ -45,6 +45,7 @@ import {
 import { ImageEditor } from "./image-editor";
 import { ArtifactRelations } from "./relations";
 import { ArtifactLinks } from "./artifact-links";
+import { PrototypeVariants } from "./prototype-variants";
 const documentDraftRecordSchema = z
   .object({
     version: z.literal(1),
@@ -712,6 +713,25 @@ export function DocumentView({
           </article>
         )
       )}
+      {canEdit &&
+        value?.status === "ready" &&
+        value.kind === "prototype" &&
+        value.contentMode === "inline" &&
+        value.schemaVersion === 1 && (
+          <PrototypeVariants
+            key={value.artifactVersionId}
+            source={{
+              artifactId: value.artifactId,
+              artifactVersionId: value.artifactVersionId,
+            }}
+            versionTitle={`${artifact.title} · 版本 ${value.version}`}
+            screens={value.content.screens.map((screen) => ({
+              id: screen.id,
+              title: screen.name,
+            }))}
+            onPrompt={onPrompt}
+          />
+        )}
       {value?.status === "ready" && !detail.error && (
         <ArtifactLinks
           key={versionId}

@@ -5,6 +5,7 @@ const mocks = vi.hoisted(() => ({
   createPlan: vi.fn(),
   updatePlanInput: vi.fn(),
   createRevisionPlan: vi.fn(),
+  createFeedback: vi.fn(),
   createSubmissionIntent: vi.fn(),
   submitSubmissionIntent: vi.fn(),
   createImportSource: vi.fn(),
@@ -57,6 +58,7 @@ beforeEach(() => {
   mocks.createPlan.mockResolvedValue({ value: { id: "plan-one" } });
   mocks.updatePlanInput.mockResolvedValue({ value: { id: "plan-one" } });
   mocks.createRevisionPlan.mockResolvedValue({ value: { id: "plan-two" } });
+  mocks.createFeedback.mockResolvedValue({ value: { id: "feedback-one" } });
   mocks.uploadFiles.mockResolvedValue({
     fileAssetIds: ["file-one"],
     batchId: "batch-one",
@@ -272,5 +274,53 @@ describe("Studio durable submission commands", () => {
       mocks.createPlan.mock.calls[1]![2],
     );
     expect(sessionStorage.length).toBe(1);
+  });
+  it("persists element feedback key with revision plan submission and replays both across reload", async () => {
+    mocks.createRevisionPlan.mockRejectedValueOnce(new Error("lost"));
+    const first = renderHook(() => usePlanSubmission("project-one"));
+    const target = {
+      kind: "revision" as const,
+      id: "rev-1",
+      etag: '"1"',
+      feedbackIds: [],
+      feedback: {
+        body: "调整按钮配色",
+        anchor: {
+          sourceRevisionId: "rev-1",
+          scope: "node" as const,
+          pageId: "home",
+          nodeId: "save",
+          quote: "保存",
+        },
+      },
+    };
+    await act(async () => {
+      await expect(
+        first.result.current.saveInput(
+          input({
+            prompt: "调整按钮配色",
+            workflow: "edit",
+            artifactTargets: [
+              {
+                artifactId: "proto-1",
+                artifactVersionId: "ver-1",
+                screenIds: [],
+              },
+            ],
+          }),
+          target,
+        ),
+      ).rejects.toThrow("lost");
+    });
+    const firstFeedbackCall = mocks.createFeedback.mock.calls[0];
+    const firstPlanCall = mocks.createRevisionPlan.mock.calls[0];
+    first.unmount();
+    const second = renderHook(() => usePlanSubmission("project-one"));
+    await act(async () => {
+      await second.result.current.recover();
+    });
+    expect(mocks.createFeedback.mock.calls[1]).toEqual(firstFeedbackCall);
+    expect(mocks.createRevisionPlan.mock.calls[1]).toEqual(firstPlanCall);
+    expect(firstPlanCall![3].feedbackIds).toEqual(["feedback-one"]);
   });
 });

@@ -4,15 +4,19 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import assert from "node:assert/strict";
 import { prdDocumentV3Example } from "@workbench/workbench-contracts/test-fixtures";
+import { startRunRequestSchema } from "@workbench/workbench-contracts";
+const variants = process.env.WORKBENCH_E2E_PROTOTYPE_VARIANTS === "1";
 const recovery = process.env.WORKBENCH_E2E_SUBMISSION_RECOVERY === "1";
 const splitModels = process.env.WORKBENCH_E2E_SPLIT_MODEL_CAPABILITIES === "1";
 const origin = process.env.WORKBENCH_E2E_WEB_ORIGIN ?? "http://127.0.0.1:18930";
 const output = new URL(
-  recovery
-    ? "../../output/audit/1.0.0/studio-submission-recovery/"
-    : splitModels
-      ? "../../output/audit/1.0.0/studio-revision-models/"
-      : "../../output/audit/1.0.0/studio-input/",
+  variants
+    ? "../../output/audit/1.0.0/studio-variants/"
+    : recovery
+      ? "../../output/audit/1.0.0/studio-submission-recovery/"
+      : splitModels
+        ? "../../output/audit/1.0.0/studio-revision-models/"
+        : "../../output/audit/1.0.0/studio-input/",
   import.meta.url,
 );
 await mkdir(output, { recursive: true });
@@ -71,6 +75,8 @@ const secondPlan = {
 };
 const plans = [root, secondPlan],
   commands = [];
+let role = "owner";
+let misboundRelation = false;
 let conflicts = recovery ? 1 : 0;
 const receipts = new Map(),
   lostKinds = new Set(),
@@ -104,6 +110,33 @@ const revision = {
   ],
   previewHtml: html,
 };
+if (variants) {
+  const detailHtml = '<main data-wb-screen="detail"><h1>订单详情</h1></main>';
+  revision.pages.push({
+    id: "detail",
+    slug: "detail",
+    title: "订单详情",
+    route: "/detail",
+    order: 1,
+    content: detailHtml,
+    sha256: hash(detailHtml),
+  });
+  revision.pages.push(
+    ...Array.from({ length: 12 }, (_, index) => {
+      const id = `extra-${index + 1}`;
+      const pageHtml = `<main data-wb-screen="${id}"><h1>扩展页面 ${index + 1}</h1></main>`;
+      return {
+        id,
+        slug: id,
+        title: `扩展页面 ${index + 1}`,
+        route: `/extra-${index + 1}`,
+        order: index + 2,
+        content: pageHtml,
+        sha256: hash(pageHtml),
+      };
+    }),
+  );
+}
 const source = (id) => ({
   id,
   projectId,
@@ -326,7 +359,7 @@ await context.route("**/api/v1/**", async (route) => {
   if (path.endsWith("/bootstrap"))
     return json(route, {
       project,
-      access: { role: "owner" },
+      access: { role },
       threads: [thread],
       selectedThreadId: thread.id,
       entries: [],
@@ -336,6 +369,8 @@ await context.route("**/api/v1/**", async (route) => {
     });
   if (path === `/api/v1/projects/${projectId}/artifacts`)
     return json(route, { items: [prdArtifact, artifact], nextCursor: null });
+  if (path.endsWith("/artifact-links"))
+    return json(route, { items: [], nextCursor: null });
   if (path.endsWith("/runtime/models"))
     return json(route, {
       items: ["model-a", "model-b"].map((id) => ({
@@ -389,10 +424,29 @@ await context.route("**/api/v1/**", async (route) => {
       derivedPrototypes: [prototypeRelation],
       nextCursor: null,
     });
+  if (path.endsWith("/source-prototype/versions/source-version-1/relations"))
+    return json(route, {
+      version: prototypeRelation,
+      sourcePrd: prdRelation,
+      derivedPrototypes: [],
+      nextCursor: null,
+    });
   if (path.includes("/prototype-v2/revisions/") && path.endsWith("/relations"))
     return json(route, {
-      revisionId: path.split("/").at(-2),
-      sourceArtifact: prototypeRelation,
+      revisionId: misboundRelation ? "wrong-revision" : path.split("/").at(-2),
+      sourceArtifact:
+        variants && path.includes(`/${secondRevision.id}/`)
+          ? {
+              ...prototypeRelation,
+              artifactVersionId: "source-version-2",
+              version: 2,
+              prototypeRevision: {
+                id: secondRevision.id,
+                planId: root.id,
+                version: 2,
+              },
+            }
+          : prototypeRelation,
       sourcePrd: prdRelation,
     });
   if (path.endsWith("/artifacts/artifact-prd")) return json(route, prdArtifact);
@@ -596,7 +650,144 @@ const page = await context.newPage();
 page.setDefaultTimeout(12000);
 page.on("pageerror", (e) => results.errors.push(e.message));
 try {
-  if (recovery) {
+  if (variants) {
+    const sourceUrl = `${origin}/studio/${projectId}?plan=${root.id}&revision=${revisionId}&page=detail`;
+    const button = (name) => page.getByRole("button", { name, exact: true });
+    const versions = () => button("版本").first().click();
+    const prompt = page.getByRole("textbox", { name: "描述需求或修改" });
+    const choice = page.getByText("从此版本生成变体", { exact: true });
+    await page.goto(sourceUrl, { waitUntil: "networkidle", timeout: 60000 });
+    await versions();
+    await choice.click();
+    const home = page.getByRole("checkbox", { name: "订单管理", exact: true });
+    const detail = page.getByRole("checkbox", {
+      name: "订单详情",
+      exact: true,
+    });
+    assert.equal(await detail.isChecked(), true);
+    for (let i = 1; i <= 11; i++) {
+      await page
+        .getByRole("checkbox", { name: `扩展页面 ${i}`, exact: true })
+        .check();
+    }
+    const extra12 = page.getByRole("checkbox", {
+      name: "扩展页面 12",
+      exact: true,
+    });
+    assert.equal(await extra12.isDisabled(), true);
+    const filter = page.getByLabel("筛选来源页面", { exact: true });
+    await filter.fill("扩展页面 12");
+    assert.equal(await extra12.isDisabled(), true);
+    await filter.clear();
+    for (let i = 1; i <= 11; i++) {
+      await page
+        .getByRole("checkbox", { name: `扩展页面 ${i}`, exact: true })
+        .uncheck();
+    }
+    await detail.uncheck();
+    assert.equal(await button("生成设计变体").isDisabled(), true);
+    assert.equal(await button("生成交互变体").isDisabled(), true);
+    await home.check();
+    await detail.check();
+    await button("生成设计变体").click();
+    await page
+      .getByText("设计变体：订单管理 · 原型修订 1 · 订单管理、订单详情", {
+        exact: true,
+      })
+      .waitFor();
+    await prompt.fill("设计变体保留订单列表和详情");
+    await versions();
+    await page.getByRole("button", { name: /^版本 2 ·/ }).click();
+    await page.reload({ waitUntil: "networkidle" });
+    assert.equal(
+      new URL(page.url()).searchParams.get("revision"),
+      secondRevision.id,
+    );
+    await page
+      .getByText("设计变体：订单管理 · 原型修订 1 · 订单管理、订单详情", {
+        exact: true,
+      })
+      .waitFor();
+    assert.equal(await prompt.inputValue(), "设计变体保留订单列表和详情");
+    await button("发送需求").click();
+    const fixedSources = page.getByRole("region", { name: "固定变体来源" });
+    await fixedSources
+      .getByRole("link", { name: "页面 detail", exact: true })
+      .waitFor();
+    assert.match(
+      await fixedSources
+        .getByRole("link", { name: "页面 detail", exact: true })
+        .getAttribute("href"),
+      /revision=input-revision&page=detail/,
+    );
+    const design = startRunRequestSchema.parse(
+      commands.at(-1).body.generationRequest,
+    );
+    assert.equal(commands.at(-1).kind, "new");
+    assert.equal(design.workflow, "generate");
+    assert.equal(design.generationIntent, "followup-design");
+    assert.deepEqual(design.requestedArtifactKinds, ["prototype"]);
+    assert.deepEqual(design.artifactTargets, [
+      {
+        artifactId: "source-prototype",
+        artifactVersionId: "source-version-1",
+        screenIds: ["home", "detail"],
+      },
+    ]);
+    results.checks.push(
+      "design variant uses selected pages of an older fixed version after browsing a newer one and reloading the composer",
+    );
+    await page.goto(sourceUrl, { waitUntil: "networkidle" });
+    await versions();
+    await choice.click();
+    assert.equal(await detail.isChecked(), true);
+    await button("生成交互变体").click();
+    await page
+      .getByText("交互变体：订单管理 · 原型修订 1 · 订单详情", { exact: true })
+      .waitFor();
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.screenshot({
+      path: new URL("mobile-variant-composer.png", output).pathname,
+    });
+    assert(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth <= innerWidth + 1,
+      ),
+    );
+    await button("发送需求").click();
+    await fixedSources
+      .getByRole("link", { name: "页面 detail", exact: true })
+      .waitFor();
+    const interactive = startRunRequestSchema.parse(
+      commands.at(-1).body.generationRequest,
+    );
+    assert.equal(interactive.generationIntent, "interactive-prototype");
+    assert.deepEqual(interactive.artifactTargets, [
+      {
+        artifactId: "source-prototype",
+        artifactVersionId: "source-version-1",
+        screenIds: ["detail"],
+      },
+    ]);
+    assert.equal(commands.length, 2);
+    results.checks.push(
+      "interactive variant submits independently with the active fixed source page in a reviewable plan on a phone",
+    );
+    misboundRelation = true;
+    await page.goto(sourceUrl, { waitUntil: "networkidle" });
+    await versions();
+    await page.getByText("需求来源暂不可用。", { exact: true }).waitFor();
+    assert.equal(await choice.count(), 0);
+    misboundRelation = false;
+    role = "viewer";
+    await page.goto(sourceUrl, { waitUntil: "networkidle" });
+    await versions();
+    await page.getByText(/固定原型产物/).waitFor();
+    assert.equal(await choice.count(), 0);
+    results.checks.push(
+      "mismatched source relation and viewer access both disable variant generation while preserving provenance",
+    );
+  } else if (recovery) {
     await page.goto(
       `${origin}/studio/${projectId}?plan=${root.id}&revision=${revisionId}&page=home`,
       { waitUntil: "networkidle" },

@@ -23,16 +23,23 @@ import {
   useRetryWorkbenchPrototypeV2Plan,
   useWorkbenchPrototypeProgress,
 } from "@/lib/workbench/features/prototype-v2";
-import type {
-  PrototypeExport,
-  PrototypeFeedback,
-  PrototypeFeedbackLocation,
-  PrototypeFeedbackLocations,
-  PrototypePlan,
-  PrototypeShare,
+import {
+  canonicalJson,
+  createPrototypeFeedbackRequestSchema,
+  type PrototypeExport,
+  type PrototypeFeedback,
+  type PrototypeFeedbackLocation,
+  type PrototypeFeedbackLocations,
+  type PrototypePlan,
+  type PrototypeShare,
 } from "@workbench/workbench-contracts";
+import { z } from "zod";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createIdempotencyKey } from "@/lib/workbench/transport/contracts";
+import {
+  studioRecordKey,
+  useStudioStoredRecord,
+} from "@/lib/studio/stored-record";
 import { type PrototypePreviewInteraction } from "./preview";
 import { useStudioRun, projectedRun, isActiveRun } from "@/lib/studio/run";
 import { useWorkbenchPrototypeV2Api } from "@/lib/studio/api";
@@ -43,6 +50,7 @@ import { PageStage } from "./page-stage";
 import { StudioComposer, type StudioComposerProps } from "./composer";
 import type {
   StudioSubmission,
+  StudioArtifactContext,
   StudioPlanTarget,
   StudioView,
 } from "@/lib/studio/types";
@@ -73,6 +81,22 @@ import {
 export type PrototypePlanSubmit = (
   submission: StudioSubmission,
 ) => Promise<PrototypePlan | null>;
+
+const feedbackCommandSchema = z
+  .object({
+    version: z.literal(1),
+    signature: z.string(),
+    key: z.string().min(8),
+    revisionId: z.string().min(1),
+    request: createPrototypeFeedbackRequestSchema,
+  })
+  .strict();
+
+function artifactPromptLabel(context: StudioArtifactContext) {
+  if (context.generationIntent === "followup-design") return "设计变体";
+  if (context.generationIntent === "interactive-prototype") return "交互变体";
+  return context.workflow === "generate" ? "基于固定 PRD 生成" : "完善固定产物";
+}
 
 type StudioWorkspaceProps = {
   projectId: string;
@@ -212,8 +236,9 @@ export function StudioWorkspace({
     isActiveRun(direct.run) ||
     Boolean(directRunId && !direct.run && !direct.error);
 
-  const pendingFeedback = useRef<{ signature: string; key: string } | null>(
-    null,
+  const feedbackRecord = useStudioStoredRecord(
+    studioRecordKey(user?.id, projectId, "feedback"),
+    feedbackCommandSchema,
   );
   const [message, setMessage] = useState<string>();
   const [error, setError] = useState<string>();
@@ -498,6 +523,30 @@ export function StudioWorkspace({
     awaitingPlan.current = undefined;
     setSelection({ planId: next.id, revisionId: "", pageId: "" });
   };
+  const queueArtifactPrompt = (
+    text: string,
+    context?: StudioArtifactContext,
+  ) => {
+    composerSession.switchTo(
+      context
+        ? {
+            kind: "artifact",
+            key: `artifact:${JSON.stringify({
+              workflow: context.workflow,
+              generationIntent: context.generationIntent ?? null,
+              prdScreenPlan: context.prdScreenPlan ?? null,
+              targets: context.artifactTargets,
+            })}`,
+            title: `${artifactPromptLabel(context)}：${context.title}`,
+            artifact: context,
+          }
+        : composerSession.newContext,
+      text,
+    );
+    setInteraction(undefined);
+    setPanel(null);
+    setFocused(false);
+  };
   const submitPlan: StudioComposerProps["onSubmit"] = async (submission) => {
     submission = {
       ...submission,
@@ -512,38 +561,22 @@ export function StudioWorkspace({
     setError(undefined);
     try {
       if (inputContext) {
-        const target = { ...inputContext.target };
+        const target: StudioPlanTarget = { ...inputContext.target };
         if (
           target.kind === "revision" &&
           target.id === selectedRevision?.id &&
           interaction?.revisionId === target.id
         ) {
-          const signature = JSON.stringify({
-            revisionId: target.id,
-            prompt: submission.prompt,
-            interaction,
-          });
-          if (pendingFeedback.current?.signature !== signature)
-            pendingFeedback.current = {
-              signature,
-              key: createIdempotencyKey("prototype-feedback"),
-            };
-          const saved = await createFeedback.mutateAsync({
-            idempotencyKey: pendingFeedback.current.key,
-            request: {
-              body: submission.prompt,
-              anchor: {
-                sourceRevisionId: interaction.revisionId,
-                scope: "node",
-                pageId: interaction.pageId,
-                nodeId: interaction.nodeId,
-                quote: interaction.label,
-              },
+          target.feedback = {
+            body: submission.prompt,
+            anchor: {
+              sourceRevisionId: interaction.revisionId,
+              scope: "node",
+              pageId: interaction.pageId,
+              nodeId: interaction.nodeId,
+              quote: interaction.label,
             },
-          });
-          target.feedbackIds = [
-            ...new Set([...(target.feedbackIds ?? []), saved.value.id]),
-          ];
+          };
         }
         const saved = await onSaveInput(submission, target);
         if (!saved) return null;
@@ -612,6 +645,7 @@ export function StudioWorkspace({
   };
   const addFeedback = () =>
     run(async () => {
+      if (!selectedRevision) return;
       const pageId = interaction?.pageId || selectedPage?.id;
       const anchor =
         interaction && pageId
@@ -630,25 +664,50 @@ export function StudioWorkspace({
                 quote: selectedPage.title,
               }
             : null;
-      const request = { body: feedback.trim(), anchor };
-      const signature = JSON.stringify({
-        revisionId: selectedRevision?.id,
+      const request = createPrototypeFeedbackRequestSchema.parse({
+        body: feedback.trim(),
+        anchor,
+      });
+      const signature = canonicalJson({
+        projectId,
+        revisionId: selectedRevision.id,
         request,
       });
-      if (pendingFeedback.current?.signature !== signature)
-        pendingFeedback.current = {
-          signature,
-          key: createIdempotencyKey("prototype-feedback"),
-        };
+      const command =
+        feedbackRecord.value?.signature === signature
+          ? feedbackRecord.value
+          : {
+              version: 1 as const,
+              signature,
+              key: createIdempotencyKey("prototype-feedback"),
+              revisionId: selectedRevision.id,
+              request,
+            };
+      feedbackRecord.save(command);
       await createFeedback.mutateAsync({
-        idempotencyKey: pendingFeedback.current.key,
-        request,
+        idempotencyKey: command.key,
+        request: command.request,
       });
+      if (!feedbackRecord.isCurrent()) return;
+      feedbackRecord.clear();
       setFeedbackFilter("all");
-      setFeedbackSourceId(selectedRevision?.id ?? "");
+      setFeedbackSourceId(selectedRevision.id);
       setFeedback((current) => (current === feedback ? "" : current));
-      pendingFeedback.current = null;
     }, "批注已保存到当前版本");
+
+  const confirmSavedFeedback = () =>
+    run(async () => {
+      const command = feedbackRecord.value;
+      if (!command || command.revisionId !== selectedRevision?.id) return;
+      await createFeedback.mutateAsync({
+        idempotencyKey: command.key,
+        request: command.request,
+      });
+      if (!feedbackRecord.isCurrent()) return;
+      feedbackRecord.clear();
+      setFeedbackFilter("all");
+      setFeedbackSourceId(command.revisionId);
+    }, "上次批注保存已确认");
 
   const chooseRevision = (id: string) => {
     const revision = revisions.find((item) => item.id === id);
@@ -813,7 +872,9 @@ export function StudioWorkspace({
           {selectedRevision && (
             <RevisionRelations
               projectId={projectId}
-              revisionId={selectedRevision.id}
+              revision={selectedRevision}
+              pageId={selectedPage?.id}
+              onPrompt={canEdit ? queueArtifactPrompt : undefined}
             />
           )}
           {revisions.length === 0 && <p>尚无生成版本</p>}
@@ -955,6 +1016,31 @@ export function StudioWorkspace({
                   </button>
                 )}
               </div>
+              {feedbackRecord.value &&
+                feedbackRecord.value.revisionId === selectedRevision.id && (
+                  <div className="studio-link-pending" role="status">
+                    <p>
+                      已保留未确认的批注保存：
+                      {feedbackRecord.value.request.body}
+                    </p>
+                    <div className="visual-actions">
+                      <button
+                        type="button"
+                        disabled={!canEdit || createFeedback.isPending}
+                        onClick={() => void confirmSavedFeedback()}
+                      >
+                        确认上次批注保存
+                      </button>
+                      <button
+                        type="button"
+                        disabled={!canEdit || createFeedback.isPending}
+                        onClick={() => feedbackRecord.clear()}
+                      >
+                        放弃批注记录
+                      </button>
+                    </div>
+                  </div>
+                )}
               <label>
                 查看批注来源
                 <select
@@ -1414,20 +1500,7 @@ export function StudioWorkspace({
                 view={view}
                 bootstrap={bootstrap}
                 canEdit={canEdit}
-                onPrompt={(text, context) => {
-                  composerSession.switchTo(
-                    context
-                      ? {
-                          kind: "artifact",
-                          key: `artifact:${JSON.stringify({ workflow: context.workflow, generationIntent: context.generationIntent ?? null, prdScreenPlan: context.prdScreenPlan ?? null, targets: context.artifactTargets })}`,
-                          title: `${context.workflow === "generate" ? "基于 PRD 生成" : "完善"}：${context.title}`,
-                          artifact: context,
-                        }
-                      : composerSession.newContext,
-                    text,
-                  );
-                  setFocused(false);
-                }}
+                onPrompt={queueArtifactPrompt}
               />
             )}
           </>
@@ -1670,7 +1743,7 @@ export function StudioWorkspace({
                           : inputContext?.target.kind === "draft"
                             ? `${inputContext.title} · 保存后需审批`
                             : artifactContext
-                              ? `${artifactContext.workflow === "generate" ? "基于固定 PRD 生成" : "完善固定产物"}：${artifactContext.title}`
+                              ? `${artifactPromptLabel(artifactContext)}：${artifactContext.title}`
                               : "使用下方模型、资料和设计"}
                       </span>
                     </div>

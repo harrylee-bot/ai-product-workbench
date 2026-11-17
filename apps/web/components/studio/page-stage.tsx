@@ -165,6 +165,19 @@ export function PageStage({
     }
   }, [mode]);
   useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      const target = event.target as HTMLElement | null;
+      if (target && ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName))
+        return;
+      setMode("browse");
+      setLayersOpen(false);
+      setPanMode(false);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, []);
+  useEffect(() => {
     if (!html || loaded) return;
     const timer = setTimeout(
       () => setNotice("页面加载较慢，可重新载入；这不会重新生成版本。"),

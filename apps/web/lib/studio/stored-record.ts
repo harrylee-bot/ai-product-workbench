@@ -63,6 +63,14 @@ export function useStudioStoredRecord<T>(
       currentKey.current.generation++;
       setState({ key: null, value: null });
       setError("");
+      try {
+        for (const item of Object.keys(sessionStorage)) {
+          if (item.startsWith("workbench:studio:"))
+            sessionStorage.removeItem(item);
+        }
+      } catch {
+        /* Storage can be disabled; logout still invalidates in-memory state. */
+      }
     };
     window.addEventListener("workbench:logout", logout);
     return () => window.removeEventListener("workbench:logout", logout);

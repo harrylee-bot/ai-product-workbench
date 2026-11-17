@@ -28,7 +28,7 @@ import type { RunProjectionState } from "@/lib/workbench/run/reducer";
 import { isActiveRun, projectedRun } from "@/lib/studio/run";
 import { ImageEditor } from "./image-editor";
 import { DocumentView } from "./document-view";
-import { RunOutputs } from "./relations";
+import { RunOutputs, VariantSources } from "./relations";
 import { ProjectMembers } from "./project-members";
 const uniqueItems = <T extends { id: string }>(items: T[]) => [
   ...new Map(items.map((item) => [item.id, item])).values(),
@@ -751,6 +751,11 @@ function RunDetailsContent({
         · 第 {run.attempt} 次执行
       </p>
       <small>运行编号：{run.id}</small>
+      <VariantSources
+        projectId={run.projectId}
+        targets={run.artifactTargets}
+        intent={run.generationIntent}
+      />
       <RunOutputs run={run} />
       {action.notice}
       {run.failure && (

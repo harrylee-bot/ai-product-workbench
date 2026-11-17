@@ -2,7 +2,9 @@
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import type {
   ArtifactVersionRelations,
+  PrototypeRevision,
   Run,
+  RunArtifactTarget,
 } from "@workbench/workbench-contracts";
 import {
   useWorkbenchArtifactsApi,
@@ -10,6 +12,7 @@ import {
   useWorkbenchRunsApi,
 } from "@/lib/studio/api";
 import { isActiveRun } from "@/lib/studio/run";
+import { PrototypeVariants, type ArtifactPrompt } from "./prototype-variants";
 
 type Version = ArtifactVersionRelations["version"];
 export function documentUrl(
@@ -35,6 +38,106 @@ function VersionLink({
       {version.title} · 版本 {version.version}
       {revision ? ` · 原型修订 ${revision.version}` : ""}
     </a>
+  );
+}
+
+function generationRunUrl(projectId: string, runId: string) {
+  return `/studio/${encodeURIComponent(projectId)}?${new URLSearchParams({ view: "runs", run: runId })}`;
+}
+
+function VariantSource({
+  projectId,
+  target,
+}: {
+  projectId: string;
+  target: RunArtifactTarget;
+}) {
+  const api = useWorkbenchArtifactsApi();
+  const query = useQuery({
+    queryKey: [
+      "studio",
+      "variant-source",
+      projectId,
+      target.artifactId,
+      target.artifactVersionId,
+    ],
+    queryFn: async () => {
+      const { version } = await api.getArtifactVersionRelations(
+        target.artifactId,
+        target.artifactVersionId,
+        { limit: 1 },
+      );
+      if (
+        version.artifactId !== target.artifactId ||
+        version.artifactVersionId !== target.artifactVersionId
+      )
+        throw new Error("变体来源与固定版本不匹配");
+      return version;
+    },
+  });
+  const version = query.data;
+  return (
+    <li>
+      {version ? (
+        <VersionLink projectId={projectId} version={version} />
+      ) : (
+        <a
+          href={documentUrl(
+            projectId,
+            target.artifactId,
+            target.artifactVersionId,
+          )}
+        >
+          打开固定来源版本
+        </a>
+      )}
+      {query.error && (
+        <button onClick={() => void query.refetch()}>重试读取来源名称</button>
+      )}
+      <span> · 已选 {target.screenIds.length} 个页面</span>
+      {version?.prototypeRevision ? (
+        <ul>
+          {target.screenIds.map((id) => (
+            <li key={id}>
+              <a
+                href={`/studio/${encodeURIComponent(projectId)}?${new URLSearchParams({ view: "pages", plan: version.prototypeRevision!.planId, revision: version.prototypeRevision!.id, page: id })}`}
+              >
+                页面 {id}
+              </a>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p>页面标识：{target.screenIds.join("、")}</p>
+      )}
+    </li>
+  );
+}
+
+export function VariantSources({
+  projectId,
+  targets,
+  intent,
+}: {
+  projectId: string;
+  targets: Run["artifactTargets"];
+  intent: Run["generationIntent"];
+}) {
+  if (intent !== "followup-design" && intent !== "interactive-prototype")
+    return null;
+  return (
+    <section aria-label="固定变体来源">
+      <h3>固定变体来源</h3>
+      <ul>
+        {targets.map((target) => (
+          <VariantSource
+            key={target.artifactVersionId}
+            projectId={projectId}
+            target={target}
+          />
+        ))}
+      </ul>
+    </section>
   );
 }
 export function ArtifactRelations({
@@ -78,9 +181,7 @@ export function ArtifactRelations({
         </p>
       )}
       {first?.version.createdByRunId && (
-        <a
-          href={`/studio/${encodeURIComponent(projectId)}?${new URLSearchParams({ view: "runs", run: first.version.createdByRunId })}`}
-        >
+        <a href={generationRunUrl(projectId, first.version.createdByRunId)}>
           查看生成运行
         </a>
       )}
@@ -134,24 +235,39 @@ export function ArtifactRelations({
 }
 export function RevisionRelations({
   projectId,
-  revisionId,
+  revision,
+  pageId,
+  onPrompt,
 }: {
   projectId: string;
-  revisionId: string;
+  revision: PrototypeRevision;
+  pageId?: string;
+  onPrompt?: ArtifactPrompt;
 }) {
+  const revisionId = revision.id;
   const api = useWorkbenchPrototypeV2Api();
   const query = useQuery({
     queryKey: ["studio", "revision-relations", projectId, revisionId],
-    queryFn: () => api.revisionRelations(projectId, revisionId),
+    queryFn: async () => {
+      const relations = await api.revisionRelations(projectId, revisionId);
+      if (
+        relations.revisionId !== revisionId ||
+        (relations.sourceArtifact?.prototypeRevision &&
+          relations.sourceArtifact.prototypeRevision.id !== revisionId)
+      )
+        throw new Error("原型来源与当前版本不匹配");
+      return relations;
+    },
     enabled: Boolean(revisionId),
   });
+  const source = query.error ? undefined : query.data?.sourceArtifact;
   return (
     <section aria-label="原型需求来源">
       {query.isPending ? (
         <p role="status">正在读取需求来源…</p>
       ) : query.error ? (
         <p role="alert">
-          需求来源暂不可用。
+          <span>需求来源暂不可用。</span>
           <button onClick={() => void query.refetch()}>重试来源</button>
         </p>
       ) : query.data?.sourcePrd ? (
@@ -162,6 +278,44 @@ export function RevisionRelations({
       ) : (
         <p className="visual-muted">此版本未记录 PRD 来源。</p>
       )}
+      {source?.status === "ready" && (
+        <p>
+          固定原型产物：
+          <a
+            href={documentUrl(
+              projectId,
+              source.artifactId,
+              source.artifactVersionId,
+            )}
+          >
+            {source.title} · 版本 {source.version}
+          </a>
+        </p>
+      )}
+      {source?.createdByRunId && (
+        <p>
+          <a href={generationRunUrl(projectId, source.createdByRunId)}>
+            查看生成运行
+          </a>
+        </p>
+      )}
+      {onPrompt &&
+        source?.kind === "prototype" &&
+        source.status === "ready" &&
+        source.schemaVersion === 1 &&
+        ["ready", "confirmed", "rejected"].includes(revision.status) && (
+          <PrototypeVariants
+            key={revision.id}
+            source={{
+              artifactId: source.artifactId,
+              artifactVersionId: source.artifactVersionId,
+            }}
+            versionTitle={`${revision.title} · 原型修订 ${revision.version}`}
+            screens={revision.pages}
+            initialScreenId={pageId}
+            onPrompt={onPrompt}
+          />
+        )}
     </section>
   );
 }
