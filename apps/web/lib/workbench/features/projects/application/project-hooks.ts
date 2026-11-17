@@ -59,12 +59,13 @@ export function useInfiniteWorkbenchProjects(
   });
 }
 
-export function useWorkbenchProjectBootstrap(projectId: string, threadId?: string) {
+export function useWorkbenchProjectBootstrap(projectId: string, threadId?: string, enabled = true) {
   const api = useWorkbenchProjectsApi();
   return useQuery({
     queryKey: workbenchQueryKeys.bootstrap(projectId, threadId),
     queryFn: () => api.getProjectBootstrap(projectId, threadId),
-    enabled: Boolean(projectId),
+    enabled: Boolean(projectId) && enabled,
+    refetchInterval: 30_000,
   });
 }
 

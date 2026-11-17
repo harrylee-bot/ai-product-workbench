@@ -98,6 +98,7 @@ export function useStudioStoredRecord<T>(
     }
   };
   return {
+    ready: !!key && state.key === key,
     value: state.key === key ? state.value : null,
     save,
     clear,

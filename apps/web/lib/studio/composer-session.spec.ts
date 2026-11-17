@@ -229,3 +229,19 @@ it("keeps a fixed artifact discussion active after accepted text without erasing
   expect(result.current.entry.draft.prompt).toBe("");
   expect(result.current.entry.context.kind).toBe("artifact");
 });
+
+it("invalidates asynchronous source choices on repeated explicit selection, account changes and unmount", async () => {
+  const hook = renderHook(({ user }) => useStudioComposerSession(user, "project-one"), { initialProps: { user: "account-one" } });
+  await waitFor(() => expect(hook.result.current.ready).toBe(true));
+  const source = hook.result.current.beginSourceSelection();
+  act(() => hook.result.current.switchTo(hook.result.current.newContext));
+  act(() => expect(source(artifact, "迟到的来源")).toBe(false));
+  expect(hook.result.current.entry.context.kind).toBe("new");
+  const accountOneSource = hook.result.current.beginSourceSelection();
+  hook.rerender({ user: "account-two" });
+  await waitFor(() => expect(hook.result.current.ready).toBe(true));
+  act(() => expect(accountOneSource(artifact, "账户一的迟到来源")).toBe(false));
+  const unmountedSource = hook.result.current.beginSourceSelection();
+  hook.unmount();
+  expect(unmountedSource(artifact, "离开后的来源")).toBe(false);
+});

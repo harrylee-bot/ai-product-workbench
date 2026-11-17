@@ -39,8 +39,8 @@ vi.mock("@/lib/workbench/features/runtime-models", () => ({
 vi.mock("@/lib/workbench/features/design-presets", () => ({
   useWorkbenchDesignPresets: () => ({ data: { items: state.presets } }),
 }));
-vi.mock("@/lib/workbench/features/import-sources", () => ({
-  useWorkbenchImportSources: () => ({ data: { items: [] } }),
+vi.mock("@/lib/studio/import-sources", () => ({
+  useStudioImportSources: () => ({ items: [], selectedItems: [], invalidIds: [], unverifiedIds: [] }),
 }));
 const preset = {
   presetId: "calm",

@@ -10,7 +10,7 @@ import type {
 } from "@workbench/workbench-contracts";
 import { useWorkbenchRuntimeModels } from "@/lib/workbench/features/runtime-models";
 import { useWorkbenchDesignPresets } from "@/lib/workbench/features/design-presets";
-import { useWorkbenchImportSources } from "@/lib/workbench/features/import-sources";
+import { useStudioImportSources } from "@/lib/studio/import-sources";
 import type { WorkbenchUploadItemViewModel } from "@/lib/workbench/files/upload-registry";
 import type {
   StudioSubmission,
@@ -59,7 +59,7 @@ export function StudioComposer({
 }: StudioComposerProps) {
   const models = useWorkbenchRuntimeModels(),
     presets = useWorkbenchDesignPresets(),
-    sources = useWorkbenchImportSources(projectId);
+    sources = useStudioImportSources(projectId, draft.sourceIds.filter(id => !pinnedSources.some(source => source.sourceId === id)));
   const {
     files,
     sourceIds,
@@ -87,7 +87,7 @@ export function StudioComposer({
   const [error, setError] = useState(""),
     [contextOpen, setContextOpen] = useState(false);
   const sourceLabels = useRef(new Map<string, string>());
-  for (const source of sources.data?.items ?? [])
+  for (const source of [...sources.items, ...sources.selectedItems])
     sourceLabels.current.set(source.id, source.label);
   for (const source of pinnedSources)
     sourceLabels.current.set(source.sourceId, source.label);
@@ -174,6 +174,7 @@ export function StudioComposer({
     try {
       if (!designAvailable)
         throw new Error("所选设计已失效，请重新选择固定版本");
+      if (!readySources) throw new Error("引用资料尚未完成核验，请重试或移除失效引用。");
       const designStyle = designReference;
       const text = prompt;
       await onSubmit({
@@ -208,15 +209,8 @@ export function StudioComposer({
       setError(cause instanceof Error ? cause.message : "提交失败，请重试");
     }
   };
-  const invalidSources = sourceIds.filter(
-    (id) =>
-      !pinnedSources.some((source) => source.sourceId === id) &&
-      (sources.isError ||
-        !sources.data?.items.some(
-          (item) => item.id === id && item.status === "ready",
-        )),
-  );
-  const readySources = invalidSources.length === 0;
+  const invalidSources = sources.invalidIds;
+  const readySources = invalidSources.length === 0 && sources.unverifiedIds.length === 0;
   const designAvailable =
     design === "automatic" ||
     (design.startsWith("artifact:") &&
@@ -267,8 +261,10 @@ export function StudioComposer({
           ? "附件内容尚未恢复，请重新选择本机文件或移除后再提交"
           : !designAvailable
             ? "所选设计不可用，请重载或明确选择其他设计"
-            : !readySources
+            : invalidSources.length > 0
               ? "引用资料尚未就绪、已删除或无权限。请移除失效引用或重新加载资料。"
+              : sources.unverifiedIds.length > 0
+                ? sources.verificationFailed ? "暂时无法核验引用资料，请重试。引用与文字已保留。" : "正在核验已引用资料…"
               : !models.isPending && !modelId
                 ? model && available.length
                   ? "所选模型不支持当前操作，请选择可用模型"
@@ -346,10 +342,10 @@ export function StudioComposer({
           {contextOpen && (
             <div className="studio-composer-options">
               <h3>引用资料</h3>
-              {sources.data?.items.length === 0 && (
+              {!sources.isPending && !sources.items.length && (
                 <p>在资料视图导入网站、GitHub、Figma 或文件。</p>
               )}
-              {sources.data?.items.map((source) => (
+              {sources.items.map((source) => (
                 <label key={source.id}>
                   <input
                     type="checkbox"
@@ -375,8 +371,12 @@ export function StudioComposer({
                   重新加载资料
                 </button>
               )}
+              {sources.hasNextPage && <button disabled={sources.isFetchingNextPage} onClick={() => void sources.fetchNextPage()}>
+                {sources.isFetchingNextPage ? "正在载入资料…" : "加载更多资料"}
+              </button>}
             </div>
           )}
+          {(sources.verificationFailed || invalidSources.length > 0) && <button onClick={() => void sources.retrySelected()}>重新核验引用资料</button>}
         </>
       }
       controls={

@@ -25,6 +25,7 @@ import {
 import {
   canonicalJson,
   createPrototypeFeedbackRequestSchema,
+  createPrototypeShareRequestSchema,
   type PrototypeExport,
   type PrototypeFeedback,
   type PrototypeFeedbackLocation,
@@ -86,6 +87,12 @@ const feedbackCommandSchema = z
     request: createPrototypeFeedbackRequestSchema,
   })
   .strict();
+
+const shareCommandSchema = z.object({
+  version: z.literal(1),
+  key: z.string().min(8),
+  request: createPrototypeShareRequestSchema,
+}).strict();
 
 function artifactPromptLabel(context: StudioArtifactContext) {
   if (context.generationIntent === "followup-design") return "设计变体";
@@ -195,6 +202,11 @@ export function StudioWorkspace({
   const [feedbackIds, setFeedbackIds] = useState<string[]>([]);
   const [feedbackFilter, setFeedbackFilter] = useState("all");
   const [expiry, setExpiry] = useState("7");
+  const shareRecord = useStudioStoredRecord(
+    studioRecordKey(user?.id, projectId, "share-command-v1"),
+    shareCommandSchema,
+  );
+  const shareFlight = useRef(false);
   const [followRun, setFollowRun] = useState(true);
   const [clock, setClock] = useState(Date.now());
   const progress = useWorkbenchPrototypeProgress(projectId, planId);
@@ -566,8 +578,8 @@ export function StudioWorkspace({
     setError(undefined);
     setMessage(undefined);
     try {
-      await operation();
-      setMessage(success);
+      const result = await operation();
+      if (result !== false) setMessage(success);
     } catch (cause) {
       if (isWorkbenchApiError(cause) && [409, 412].includes(cause.status)) {
         await queryClient.invalidateQueries({
@@ -1182,12 +1194,13 @@ export function StudioWorkspace({
                 }
                 onClick={() =>
                   void run(async () => {
+                    const applySource = composerSession.beginSourceSelection();
                     const input = await api.getRevisionInput(
                       projectId,
                       selectedRevision.id,
                     );
                     const selected = [...feedbackIds].sort();
-                    composerSession.switchTo(
+                    const applied = applySource(
                       {
                         kind: "input",
                         key: `revision:${selectedRevision.id}:feedback:${selected.join(",")}`,
@@ -1209,6 +1222,7 @@ export function StudioWorkspace({
                       },
                       "请根据所选批注梳理本次增量改动",
                     );
+                    if (!applied) return false;
                     setInteraction(undefined);
                     setPanel(null);
                   }, "已将所选批注带入需求讨论，尚未启动生成")
@@ -1235,6 +1249,7 @@ export function StudioWorkspace({
                 分享有效期
                 <select
                   value={expiry}
+                  disabled={!!shareRecord.value || shareFlight.current}
                   onChange={(e) => setExpiry(e.target.value)}
                 >
                   <option value="7">7 天</option>
@@ -1244,12 +1259,17 @@ export function StudioWorkspace({
               </label>
               <button
                 type="button"
-                disabled={!canEdit || !ready || createShare.isPending}
+                disabled={!canEdit || !ready || createShare.isPending || !shareRecord.ready || !!shareRecord.error}
                 onClick={() =>
                   void run(
-                    () =>
-                      createShare.mutateAsync({
-                        request: {
+                    async () => {
+                      if (shareFlight.current) return false;
+                      shareFlight.current = true;
+                      try {
+                        const command = shareRecord.value ?? {
+                          version: 1 as const,
+                          key: createIdempotencyKey("studio-share"),
+                          request: {
                           revisionId: selectedRevision.id,
                           expiresAt:
                             expiry === "0"
@@ -1257,14 +1277,32 @@ export function StudioWorkspace({
                               : new Date(
                                   Date.now() + Number(expiry) * 86400000,
                                 ).toISOString(),
-                        },
-                      }),
+                          },
+                        };
+                        if (!shareRecord.value && !shareRecord.save(command))
+                          throw new Error("无法保存本次分享动作，请恢复浏览器存储后再试。");
+                        const result = await createShare.mutateAsync({
+                          request: command.request,
+                          idempotencyKey: command.key,
+                        });
+                        if (!shareRecord.isCurrent()) return false;
+                        if (result.value.projectId !== projectId || result.value.revisionId !== command.request.revisionId)
+                          throw new Error("分享回执与固定版本不匹配，请恢复原操作。");
+                        shareRecord.clear();
+                      } finally { shareFlight.current = false; }
+                    },
                     "分享链接已创建",
                   )
                 }
               >
-                创建分享
+                {shareRecord.value ? "恢复分享结果" : "创建分享"}
               </button>
+              {shareRecord.error && <p role="alert">{shareRecord.error}</p>}
+              {shareRecord.value && <p>
+                上次创建分享的结果尚未核实，恢复会沿用原版本、到期时间和操作编号。
+                <button disabled={createShare.isPending} onClick={() => shareRecord.clear()}>放弃恢复</button>
+                放弃恢复不会撤销可能已创建的链接，可在下方核对后撤销。
+              </p>}
               <div className="visual-actions">
                 {(["html", "react"] as const).map((format) => (
                   <button
@@ -1784,11 +1822,12 @@ export function StudioWorkspace({
                           onClick={() =>
                             void run(async () => {
                               if (!selectedRevision) return;
+                              const applySource = composerSession.beginSourceSelection();
                               const input = await api.getRevisionInput(
                                 projectId,
                                 selectedRevision.id,
                               );
-                              composerSession.switchTo(
+                              return applySource(
                                 {
                                   kind: "input",
                                   key: `revision:${selectedRevision.id}`,

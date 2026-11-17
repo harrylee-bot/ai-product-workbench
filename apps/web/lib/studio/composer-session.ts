@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type {
   PrototypePlanInput,
   StartRunRequest,
@@ -201,6 +201,13 @@ function enqueueWrite(key: string, session: ComposerSession) {
 }
 export function useStudioComposerSession(userId: string, projectId: string) {
   const key = `${userId}:${projectId}`;
+  const selection = useRef({ key, generation: 0, active: true });
+  if (selection.current.key !== key)
+    selection.current = { key, generation: selection.current.generation + 1, active: true };
+  useEffect(() => {
+    selection.current.active = true;
+    return () => { selection.current.active = false; selection.current.generation++; };
+  }, [key]);
   const [state, setState] = useState<{
     key: string;
     value: ComposerSession;
@@ -209,8 +216,11 @@ export function useStudioComposerSession(userId: string, projectId: string) {
   }>({ key, value: emptySession(), ready: false, persist: false });
   const [storageError, setStorageError] = useState("");
   useEffect(() => {
-    const logout = () =>
+    const logout = () => {
+      selection.current.generation++;
+      selection.current.active = false;
       setState({ key, value: emptySession(), ready: false, persist: false });
+    };
     window.addEventListener("workbench:logout", logout);
     return () => window.removeEventListener("workbench:logout", logout);
   }, [key]);
@@ -280,6 +290,24 @@ export function useStudioComposerSession(userId: string, projectId: string) {
           }
         : current,
     );
+  const switchTo = (
+    context: ComposerContext,
+    prompt = "",
+    options?: { inheritPrompt: boolean; fromKey: string },
+  ) => {
+    if (!selection.current.active || selection.current.key !== key) return false;
+    selection.current.generation++;
+    update((current) =>
+      options && current.activeKey !== options.fromKey ? current : {
+        ...current, activeKey: context.key,
+        entries: { ...current.entries, [context.key]: restoreComposerEntry(
+          current.entries[context.key], context,
+          options?.inheritPrompt ? current.entries[current.activeKey]!.draft.prompt : prompt,
+        ) },
+      },
+    );
+    return true;
+  };
   return {
     ready,
     entry,
@@ -290,29 +318,14 @@ export function useStudioComposerSession(userId: string, projectId: string) {
         ...current,
         draft: transform(current.draft),
       })),
-    switchTo: (
-      context: ComposerContext,
-      prompt = "",
-      options?: { inheritPrompt: boolean; fromKey: string },
-    ) =>
-      update((current) =>
-        options && current.activeKey !== options.fromKey
-          ? current
-          : {
-              ...current,
-              activeKey: context.key,
-              entries: {
-                ...current.entries,
-                [context.key]: restoreComposerEntry(
-                  current.entries[context.key],
-                  context,
-                  options?.inheritPrompt
-                    ? current.entries[current.activeKey]!.draft.prompt
-                    : prompt,
-                ),
-              },
-            },
-      ),
+    switchTo,
+    beginSourceSelection: () => {
+      const generation = ++selection.current.generation;
+      return (...args: Parameters<typeof switchTo>) => {
+        if (!selection.current.active || selection.current.key !== key || selection.current.generation !== generation) return false;
+        return switchTo(...args);
+      };
+    },
     newContext,
     bindFileSource: (entryKey: string, file: File, sourceId: string) =>
       updateEntry(entryKey, (current) => ({

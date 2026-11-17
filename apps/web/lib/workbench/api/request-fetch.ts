@@ -27,7 +27,13 @@ export function createWorkbenchFetch({
   return async (request) => {
     const decorated = await decorateRequest(request);
     assertSameOriginBffRequest(decorated);
-    return fetchImplementation(new Request(decorated, { credentials: "same-origin" }));
+    const response = await fetchImplementation(new Request(decorated, { credentials: "same-origin" }));
+    if (typeof window !== "undefined" && [401, 403].includes(response.status)) {
+      window.dispatchEvent(new CustomEvent("workbench:access-denied", {
+        detail: { path: new URL(decorated.url).pathname, status: response.status },
+      }));
+    }
+    return response;
   };
 }
 
