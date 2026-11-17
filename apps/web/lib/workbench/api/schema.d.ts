@@ -4,6 +4,23 @@
  */
 
 export interface paths {
+    "/requirement-sessions/{sessionId}/confirmations/{confirmationId}/retry": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Resume the same frozen confirmation without repeating discussion */
+        post: operations["retryRequirementConfirmation"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/threads/{threadId}/requirement-sessions": {
         parameters: {
             query?: never;
@@ -6004,6 +6021,11 @@ export interface components {
                 /** @enum {string} */
                 scope: "unresolved";
             } | null;
+        } | {
+            /** @enum {string} */
+            kind: "plan";
+            planId: string;
+            expectedRevision: components["schemas"]["Revision"];
         };
         RequirementDiscussionRequest: {
             prompt: string;
@@ -8824,6 +8846,7 @@ export interface components {
             summaryChecksum: string;
             /** @enum {string} */
             status: "pending" | "started" | "invalidated";
+            failureCode: string | null;
             acceptedAssumptionIds: string[];
             acceptedPlatformChanges: boolean;
             /** Format: date-time */
@@ -8920,6 +8943,7 @@ export interface components {
                 summaryChecksum: string;
                 /** @enum {string} */
                 status: "pending" | "started" | "invalidated";
+                failureCode: string | null;
                 acceptedAssumptionIds: string[];
                 acceptedPlatformChanges: boolean;
                 /** Format: date-time */
@@ -8934,6 +8958,7 @@ export interface components {
         };
         RequirementSessions: {
             items: components["schemas"]["RequirementSession"][];
+            nextCursor: string | null;
         };
         RetireKnowledgeProfileRequest: {
             /** @enum {string} */
@@ -9494,6 +9519,7 @@ export interface components {
         KnowledgeProfileType: "embedding" | "retrieval";
         ThreadId: string;
         RequirementSessionId: string;
+        RequirementConfirmationId: string;
         RequirementTurnId: string;
         SubmissionIntentId: string;
         RunId: string;
@@ -9556,6 +9582,7 @@ export interface components {
         KnowledgeProfileId: components["schemas"]["KnowledgeProfileId"];
         ThreadId: components["schemas"]["ThreadId"];
         RequirementSessionId: components["schemas"]["RequirementSessionId"];
+        RequirementConfirmationId: components["schemas"]["RequirementConfirmationId"];
         RequirementTurnId: components["schemas"]["RequirementTurnId"];
         SubmissionIntentId: components["schemas"]["SubmissionIntentId"];
         RunId: components["schemas"]["RunId"];
@@ -9599,9 +9626,44 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
-    listRequirementSessions: {
+    retryRequirementConfirmation: {
         parameters: {
             query?: never;
+            header: {
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                "If-Match": components["parameters"]["IfMatch"];
+            };
+            path: {
+                sessionId: components["parameters"]["RequirementSessionId"];
+                confirmationId: components["parameters"]["RequirementConfirmationId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Resume the same frozen confirmation without repeating discussion */
+            202: {
+                headers: {
+                    ETag: components["headers"]["ETag"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RequirementSession"];
+                };
+            };
+            400: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            409: components["responses"]["Problem"];
+            412: components["responses"]["Problem"];
+            428: components["responses"]["Problem"];
+        };
+    };
+    listRequirementSessions: {
+        parameters: {
+            query?: {
+                cursor?: string;
+                limit?: number;
+            };
             header?: never;
             path: {
                 threadId: components["parameters"]["ThreadId"];

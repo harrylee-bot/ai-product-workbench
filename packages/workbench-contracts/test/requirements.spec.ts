@@ -9,4 +9,8 @@ describe('Requirement discussion contracts',()=>{
  it('preserves exact revision, selected feedback and element context',()=>expect(createRequirementSessionRequestSchema.parse({generationRequest:config,context:{kind:'revision',revisionId:'revision-1',feedbackIds:['feedback-1'],anchor:{scope:'node',sourceRevisionId:'revision-1',pageId:'page-1',nodeId:'node-1',quote:'报名'}}}).context.kind).toBe('revision'));
  it('rejects a client-invented confirmation inside discussion input',()=>expect(createRequirementSessionRequestSchema.safeParse({generationRequest:{...config,requirementConfirmationId:'forged'}}).success).toBe(false));
  it('does not infer confirmation intent by default',()=>expect(postRequirementMessageRequestSchema.parse({text:'请再想想'}).intent).toBe('discuss'));
+ it('requires the exact source draft revision for a plan discussion',()=>{
+  expect(createRequirementSessionRequestSchema.parse({generationRequest:config,context:{kind:'plan',planId:'draft-1',expectedRevision:3}}).context).toEqual({kind:'plan',planId:'draft-1',expectedRevision:3});
+  expect(createRequirementSessionRequestSchema.safeParse({generationRequest:config,context:{kind:'plan',planId:'draft-1'}}).success).toBe(false);
+ });
 });

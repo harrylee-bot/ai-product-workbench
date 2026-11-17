@@ -17,6 +17,7 @@ export type StudioSubmission = {
   requestedArtifactKinds: StartRunRequest["requestedArtifactKinds"];
   artifactTargets: StartRunRequest["artifactTargets"];
   generationIntent: StartRunRequest["generationIntent"];
+  canvasSnapshot?: StartRunRequest["canvasSnapshot"];
   prdScreenPlan?: StartRunRequest["prdScreenPlan"];
 };
 export type StudioView =

@@ -201,6 +201,7 @@ export function StudioComposer({
           artifactContext?.generationIntent ??
           initialInput?.generationIntent ??
           null,
+        canvasSnapshot: initialInput?.canvasSnapshot ?? null,
         prdScreenPlan:
           artifactContext?.prdScreenPlan ?? initialInput?.prdScreenPlan,
       });

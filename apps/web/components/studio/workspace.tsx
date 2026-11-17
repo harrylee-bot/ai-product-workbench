@@ -47,6 +47,7 @@ import { useStudioComposerSession } from "@/lib/studio/composer-session";
 import { useRequirementDiscussion } from "@/lib/studio/use-requirement-discussion";
 import { requirementView } from "@/lib/studio/requirement-view-adapter";
 import { RequirementInput } from "./requirement-input";
+import { RequirementSessions } from "./requirement-sessions";
 import { PlanInputSummary } from "./plan-input";
 import { RevisionRelations, RunOutputs } from "./relations";
 import { PageStage } from "./page-stage";
@@ -251,7 +252,13 @@ export function StudioWorkspace({
                 }
               : null,
         }
-      : { kind: "new" };
+      : inputContext?.target.kind === "draft"
+        ? {
+            kind: "plan",
+            planId: inputContext.target.id,
+            expectedRevision: inputContext.input.plan.revision,
+          }
+        : { kind: "new" };
   const discussionKey = `${composerEntry.context.key}:${canonicalJson(requirementContext)}`;
   const activeDiscussion = useRef(discussionKey);
   activeDiscussion.current = discussionKey;
@@ -263,7 +270,11 @@ export function StudioWorkspace({
     context: requirementContext,
     contextKey: discussionKey,
     canEdit,
-    enabled: composerSession.ready && inputContext?.target.kind !== "draft",
+    enabled: composerSession.ready,
+    initialGenerationRequest:
+      inputContext?.target.kind === "draft"
+        ? inputContext.input.request
+        : undefined,
     initialEntries: bootstrap.entries,
     operation: {
       workflow:
@@ -308,7 +319,9 @@ export function StudioWorkspace({
         ? "本项目的新需求"
         : `${composerEntry.context.title}${requirementContext.kind === "revision" ? ` · ${requirementContext.feedbackIds.length} 条所选批注${requirementContext.anchor ? ` · 元素：${requirementContext.anchor.quote}` : ""}` : ""}`,
     entries: discussion.messages,
-    pendingConfirmation: discussion.command?.kind === "confirm",
+    pendingConfirmation:
+      discussion.command?.kind === "confirm" ||
+      discussion.command?.kind === "dispatch",
     hasMore: discussion.hasMore,
     generationBaseline: discussion.generationBaseline,
   });
@@ -622,21 +635,42 @@ export function StudioWorkspace({
     const submittedDraft = composerEntry.draft;
     const scope = discussionKey;
     setError(undefined);
-    const accepted = await discussion.send({
-      ...submission,
-      onFileSource: (file, sourceId) =>
-        composerSession.bindFileSource(entryKey, file, sourceId),
-    });
+    let accepted;
+    try {
+      accepted = await discussion.send({
+        ...submission,
+        onFileSource: (file, sourceId) =>
+          composerSession.bindFileSource(entryKey, file, sourceId),
+      });
+    } catch (cause) {
+      if (
+        inputContext?.target.kind === "draft" &&
+        isWorkbenchApiError(cause) &&
+        [409, 412].includes(cause.status)
+      ) {
+        const latest = await api.getPlanInput(
+          projectId,
+          inputContext.target.id,
+        );
+        if (
+          activeDiscussion.current === scope &&
+          latest.plan.revision !== inputContext.input.plan.revision
+        )
+          composerSession.setConflict(entryKey, latest);
+      }
+      throw cause;
+    }
     if (!accepted || activeDiscussion.current !== scope) return null;
     composerSession.complete(entryKey, submittedDraft, true);
     setMessage("需求已保存，正在梳理本次改动；确认前不会启动生成");
     return accepted.id;
   };
   const openedConfirmations = useRef(new Set<string>());
+  const expectedGeneration = useRef<string | undefined>(undefined);
+  expectedGeneration.current = discussion.generationResult?.id;
   useEffect(() => {
-    const receipt = discussion.snapshot?.confirmation;
+    const receipt = discussion.generationResult;
     if (
-      !discussion.awaitingResult ||
       receipt?.status !== "started" ||
       openedConfirmations.current.has(receipt.id)
     )
@@ -647,7 +681,11 @@ export function StudioWorkspace({
       try {
         if (receipt.planId) {
           const accepted = await api.getPlan(projectId, receipt.planId);
-          if (activeDiscussion.current !== scope) return;
+          if (
+            activeDiscussion.current !== scope ||
+            expectedGeneration.current !== receipt.id
+          )
+            return;
           if (
             accepted.value.projectId !== projectId ||
             accepted.value.id !== receipt.planId
@@ -670,7 +708,11 @@ export function StudioWorkspace({
             queryKey: workbenchQueryKeys.prototypeV2(projectId),
           });
         } else if (receipt.runId) {
-          if (activeDiscussion.current !== scope) return;
+          if (
+            activeDiscussion.current !== scope ||
+            expectedGeneration.current !== receipt.id
+          )
+            return;
           setDirectRunId(receipt.runId);
           const url = new URL(window.location.href);
           url.searchParams.set("run", receipt.runId);
@@ -871,7 +913,7 @@ export function StudioWorkspace({
                           input.plan.prompt,
                         );
                         setPanel(null);
-                      }, "已载入原草稿；固定草稿来源接入后方可确认生成")
+                      }, "已载入原草稿，可讨论调整并确认生成")
                     }
                     className="visual-primary"
                   >
@@ -1727,7 +1769,7 @@ export function StudioWorkspace({
               )}
               {inputContext?.target.kind === "draft" && (
                 <p role="status">
-                  原草稿已保留。当前讨论接口尚未支持固定草稿来源，补齐后才能继续确认生成。
+                  本次讨论绑定原草稿及其固定输入。确认后将保留来源并创建后续任务。
                 </p>
               )}
               {(discussion.error || discussion.storageError) && (
@@ -1745,6 +1787,7 @@ export function StudioWorkspace({
               )}
               {discussion.command &&
                 discussion.command.kind !== "confirm" &&
+                discussion.command.kind !== "dispatch" &&
                 !discussion.requiresReview && (
                   <button
                     type="button"
@@ -1763,10 +1806,33 @@ export function StudioWorkspace({
                   type="button"
                   disabled={discussion.pending || !canEdit}
                   onClick={() =>
-                    void run(
-                      discussion.reviewLatest,
-                      "已重新读取，请核对最新改动摘要",
-                    )
+                    void run(async () => {
+                      if (inputContext?.target.kind === "draft") {
+                        const scope = discussionKey;
+                        const latest = await api.getPlanInput(
+                          projectId,
+                          inputContext.target.id,
+                        );
+                        if (activeDiscussion.current !== scope) return;
+                        if (
+                          latest.plan.revision !==
+                            inputContext.input.plan.revision ||
+                          latest.plan.status !== "draft"
+                        ) {
+                          composerSession.setConflict(
+                            composerEntry.context.key,
+                            latest,
+                          );
+                          composerSession.updateDraft((draft) => ({
+                            ...draft,
+                            prompt:
+                              draft.prompt || discussedInput?.prompt || "",
+                          }));
+                          return;
+                        }
+                      }
+                      await discussion.reviewLatest();
+                    }, "已重新读取，请核对最新改动摘要")
                   }
                 >
                   重新核对最新摘要
@@ -1823,6 +1889,29 @@ export function StudioWorkspace({
                   </button>
                 </div>
               )}
+              <RequirementSessions
+                items={discussion.directory.map((session) => ({
+                  id: session.id,
+                  label: session.card?.goal || session.generationRequest.prompt,
+                  version: session.summaryVersion,
+                }))}
+                selectedId={discussion.sessionId}
+                hasMore={discussion.hasMoreSessions}
+                loading={discussion.loadingSessions}
+                disabled={
+                  discussion.pending ||
+                  !!discussion.command ||
+                  discussion.requiresReview
+                }
+                onSelect={(id) =>
+                  void run(async () => {
+                    discussion.selectSession(id);
+                  }, "已切换需求讨论，未发送的输入仍保留")
+                }
+                onMore={() =>
+                  void run(discussion.loadMoreSessions, "已读取更多需求讨论")
+                }
+              />
               {composerSession.ready && (
                 <RequirementInput
                   discussion={{
@@ -1841,6 +1930,9 @@ export function StudioWorkspace({
                     },
                     onRecoverConfirmation: async () => {
                       await discussion.recover();
+                    },
+                    onRetryGeneration: async () => {
+                      await discussion.retryGeneration();
                     },
                     onLoadEarlier: discussion.loadMore,
                   }}
@@ -1866,10 +1958,7 @@ export function StudioWorkspace({
                     pinnedDesign={inputContext?.input.snapshot?.designStyle}
                     artifactContext={artifactContext}
                     locked={false}
-                    outputLocked={Boolean(
-                      inputContext?.target.kind === "revision" ||
-                        inputContext?.input.plan.sourceRevisionId,
-                    )}
+                    outputLocked={false}
                     intentControl={
                       <div className="visual-intent">
                         <button

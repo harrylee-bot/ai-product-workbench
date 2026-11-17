@@ -15,7 +15,8 @@ const recovery = process.env.WORKBENCH_E2E_SUBMISSION_RECOVERY === "1";
 const splitModels = process.env.WORKBENCH_E2E_SPLIT_MODEL_CAPABILITIES === "1";
 const origin = process.env.WORKBENCH_E2E_WEB_ORIGIN ?? "http://127.0.0.1:18930";
 const output = new URL(
-  "../../output/audit/1.0.0/studio-requirement-workflow/",
+  process.env.WORKBENCH_E2E_STUDIO_OUTPUT ??
+    "../../output/audit/1.0.0/studio-requirement-final-workflow/",
   import.meta.url,
 );
 await mkdir(output, { recursive: true });
@@ -275,7 +276,9 @@ let sessions = [],
   confirmCalls = [],
   messages = [],
   createCalls = [];
-let loseConfirmation = false;
+let loseConfirmation = false,
+  pendingDispatch = false;
+const dispatchCalls = [];
 const commandReceipts = new Map();
 const run = {
   id: "confirmed-prd-run",
@@ -427,8 +430,15 @@ await context.route("**/api/v1/**", async (route) => {
       return json(route, original.value, original.status);
     }
     if (path === `/api/v1/threads/${thread.id}/requirement-sessions`) {
-      if (method === "GET") return json(route, { items: sessions });
+      if (method === "GET")
+        return json(route, { items: sessions, nextCursor: null });
       const body = route.request().postDataJSON();
+      if (body.context.kind === "plan") {
+        const draft = plans.find((plan) => plan.id === body.context.planId);
+        assert.equal(draft?.status, "draft");
+        assert.equal(draft.revision, body.context.expectedRevision);
+        assert.deepEqual(body.generationRequest, requests.get(draft.id));
+      }
       createCalls.push(body);
       const value = requirementSessionSchema.parse({
         id: `requirement-${createCalls.length}`,
@@ -461,6 +471,7 @@ await context.route("**/api/v1/**", async (route) => {
       addEntry(body.text);
       value.revision++;
       value.generationRequest = body.generationRequest;
+      value.confirmation = null;
       if (body.text.includes("先了解")) {
         value.card = null;
         value.state = "needs_clarification";
@@ -473,6 +484,26 @@ await context.route("**/api/v1/**", async (route) => {
         value.evidence = evidence;
         addEntry("已整理为现有平台上的增量改动，请核对摘要。", true);
       }
+      return json(route, requirementSessionSchema.parse(value), 202);
+    }
+    if (path.includes("/confirmations/") && path.endsWith("/retry")) {
+      assert.equal(body, null);
+      const confirmationId = path.split("/confirmations/")[1].split("/")[0];
+      assert.equal(confirmationId, value.confirmation.id);
+      dispatchCalls.push({
+        confirmationId,
+        key,
+        etag: route.request().headers()["if-match"],
+      });
+      value.revision++;
+      value.state = "generating";
+      value.confirmation = {
+        ...value.confirmation,
+        status: "started",
+        failureCode: null,
+        planId: root.id,
+        runId: null,
+      };
       return json(route, requirementSessionSchema.parse(value), 202);
     }
     if (path.endsWith("/confirm")) {
@@ -491,6 +522,7 @@ await context.route("**/api/v1/**", async (route) => {
         summaryVersion: value.summaryVersion,
         summaryChecksum: value.summaryChecksum,
         status: "started",
+        failureCode: null,
         acceptedAssumptionIds: body.acceptedAssumptionIds,
         acceptedPlatformChanges: body.acceptedPlatformChanges,
         confirmedAt: now,
@@ -505,6 +537,17 @@ await context.route("**/api/v1/**", async (route) => {
           ? null
           : run.id,
       };
+      if (pendingDispatch) {
+        pendingDispatch = false;
+        value.state = "confirmed";
+        value.confirmation = {
+          ...value.confirmation,
+          status: "pending",
+          failureCode: "DISPATCH_UNAVAILABLE",
+          planId: null,
+          runId: null,
+        };
+      }
       const receipt = requirementSessionSchema.parse(value);
       commandReceipts.set(key, {
         body: structuredClone(body),
@@ -800,7 +843,9 @@ try {
     const confirm = button("确认需求并生成");
     await confirm.waitFor();
     await page.waitForFunction(
-      () => !document.querySelector(".studio-requirement-confirm")?.disabled,
+      () =>
+        document.querySelector(".studio-requirement-confirm")?.disabled ===
+        false,
     );
     assert.equal(createCalls.at(-1).generationRequest.modelId, "model-b");
     assert.deepEqual(
@@ -830,7 +875,9 @@ try {
     await page.reload();
     await confirm.waitFor();
     await page.waitForFunction(
-      () => !document.querySelector(".studio-requirement-confirm")?.disabled,
+      () =>
+        document.querySelector(".studio-requirement-confirm")?.disabled ===
+        false,
     );
     if (outputKind === "both") loseConfirmation = true;
     await confirm.click();
@@ -872,7 +919,16 @@ try {
   );
   await prompt.waitFor();
   await button("修改版本 1").click();
+  await page
+    .locator(".visual-intent")
+    .getByText(/^源版本 1/)
+    .waitFor();
   await prompt.fill("仅调整该版本领取按钮的文案，保持其他页面不变");
+  const revisionOutput = page.getByRole("combobox", {
+    name: "输出类型",
+    exact: true,
+  });
+  await revisionOutput.selectOption("both");
   await button("发送需求").click();
   await page.waitForFunction(
     () => document.querySelector("textarea")?.value === "",
@@ -887,6 +943,10 @@ try {
     },
   ]);
   assert.equal(createCalls.at(-1).generationRequest.workflow, "edit");
+  assert.deepEqual(messages.at(-1).generationRequest.requestedArtifactKinds, [
+    "prd",
+    "prototype",
+  ]);
   results.checks.push(
     "Revision discussion retains exact revision, fixed artifact version and edit workflow; no legacy plan/revise bypass",
   );
@@ -900,6 +960,77 @@ try {
     ),
     true,
   );
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  for (const outputKind of ["both", "prd", "prototype"]) {
+    await page.evaluate(() =>
+      window.dispatchEvent(new Event("workbench:logout")),
+    );
+    sessions = [];
+    entries = [];
+    const draft = {
+      ...root,
+      id: `draft-${outputKind}`,
+      title: `草稿 ${outputKind}`,
+      status: "draft",
+      revision: 7,
+    };
+    plans.push(draft);
+    requests.set(draft.id, structuredClone(requests.get(root.id)));
+    await page.goto(`${origin}/studio/${projectId}?plan=${draft.id}`);
+    await prompt.waitFor();
+    await button("讨论并确认需求").click();
+    await page
+      .locator(".visual-intent")
+      .getByText(`调整计划：草稿 ${outputKind} · 保留原草稿来源`, {
+        exact: true,
+      })
+      .waitFor();
+    await page
+      .getByRole("combobox", { name: "输出类型", exact: true })
+      .selectOption(outputKind);
+    await page
+      .getByRole("combobox", { name: "模型", exact: true })
+      .selectOption("model-b");
+    await prompt.fill("在原草稿中补充领取次数规则，保留固定参考资料");
+    await button("发送需求").click();
+    await page.waitForFunction(
+      () =>
+        document.querySelector(".studio-requirement-confirm")?.disabled ===
+        false,
+    );
+    assert.deepEqual(createCalls.at(-1), {
+      generationRequest: requests.get(draft.id),
+      context: { kind: "plan", planId: draft.id, expectedRevision: 7 },
+    });
+    assert.equal(messages.at(-1).generationRequest.modelId, "model-b");
+    assert.deepEqual(messages.at(-1).generationRequest.sourceIds, ["source-1"]);
+    assert.deepEqual(
+      messages.at(-1).generationRequest.requestedArtifactKinds,
+      outputKind === "both" ? ["prd", "prototype"] : [outputKind],
+    );
+    if (outputKind === "both") pendingDispatch = true;
+    const before = confirmCalls.length;
+    await button("确认需求并生成").click();
+    if (outputKind === "both") {
+      await button("重试已确认任务").waitFor();
+      const confirmationId = sessions[0].confirmation.id;
+      await page.evaluate(() => sessionStorage.clear());
+      await page.reload();
+      await button("重试已确认任务").click();
+      await page.getByRole("complementary", { name: "本次生成基线" }).waitFor();
+      assert.equal(dispatchCalls.at(-1).confirmationId, confirmationId);
+      assert.notEqual(dispatchCalls.at(-1).key, confirmCalls.at(-1).key);
+    }
+    await page.waitForURL((url) =>
+      outputKind === "prd"
+        ? url.searchParams.get("run") === run.id
+        : url.searchParams.get("plan") === root.id,
+    );
+    assert.equal(confirmCalls.length, before + 1);
+    results.checks.push(
+      `draft ${outputKind}: original fixed input creates discussion; adjusted model/output arrive in message; confirmation opens derived task${outputKind === "both" ? "; pending dispatch survives refresh and retries the same receipt without the old key" : ""}`,
+    );
+  }
   assert.deepEqual(results.unknown, []);
   assert.deepEqual(results.errors, []);
   results.status = "passed";
@@ -913,7 +1044,14 @@ try {
   await writeFile(
     new URL("results.json", output),
     JSON.stringify(
-      { ...results, createCalls, messages, confirmCalls, modelCalls: 0 },
+      {
+        ...results,
+        createCalls,
+        messages,
+        confirmCalls,
+        dispatchCalls,
+        modelCalls: 0,
+      },
       null,
       2,
     ),

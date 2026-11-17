@@ -1,6 +1,6 @@
 # Studio 客户端合同
 
-代码基线：`aa7700cd20653dd11bccf22b841ded54e315527e`。应用版本为 1.0.0。执行结果只记入 `docs/audit/1.0.0.md`。
+应用版本为 1.0.0。共享 schema 与本文件随增量需求确认服务一并集成；源码与验证身份记入 `docs/audit/1.0.0.md`。
 
 ## 开源来源与应用边界
 
@@ -46,11 +46,11 @@
 
 令 `P = projects/:projectId/prototype-v2`。`GET P/plans/:planId/input` 返回授权的完整固定请求、资料/设计/知识快照及摘要 SHA；已绑定运行时读取该 Run 的权威输入。旧记录缺少快照时明确返回 null，不声称已经固定。
 
-`POST P/plans/:planId/input` 使用 If-Match 与 Idempotency-Key，仅允许尚未绑定 Run 的 draft。调整包括需求、模型、终端、输出、资料与设计，保留 artifactTargets、generationIntent 和来源身份。快照与输入一次性保存；数据库限制执行中改写及任何来源身份变化。412/409 后保留所有本地调整，读取最新输入，用户核对后明确继续；不自动覆盖。
+待审批计划调整进入下述 `context.kind=plan` 的需求交流，以原 planId/expectedRevision 和固定输入为起点。需求、模型、终端、输出、资料与设计可在讨论消息中明确调整；artifactTargets、generationIntent、workflow、prdScreenPlan 与来源身份保持绑定。旧 `POST P/plans/:planId/input` 不接受新增调整，返回 REQUIREMENT_CONFIRMATION_REQUIRED；原计划审批不能绕过需求确认。412/409 后保留本地调整，读取最新输入并由用户重新核对。
 
 `GET P/revisions/:revisionId/input` 读取生成所选内容版本的实际计划/Run，而非始终取根计划。历史 `request` 原样保留；另返回服务归一化的 `modificationRequest`，明确 edit 操作与精确源产物目标。Composer 按该操作筛选模型，不改写历史输入，也不自动替换原模型；不兼容时保留并提示用户选择支持编辑的模型。刷新恢复保留操作上下文，旧缓存缺少操作上下文时须重新载入源版本。
 
-`POST P/revisions/:revisionId/plans` 创建待审批修改计划，固定 rootPlanId、sourceRevisionId、内容版本、选定反馈；审批前不启动运行。新增资料须就绪并校验项目和 blob 清单，保留的资料/设计沿用源快照。服务将修改请求绑定为 edit 及该源版本的精确 prototype artifactVersion；基准已变化时返回冲突，不把修改附到其他版本。
+针对固定修订提出新改动，使用 `context.kind=revision` 进入需求交流，固定 sourceRevisionId、选定反馈及页面/节点锚点。明确确认后创建已审批的派生计划，不再进行第二次审批。旧 `POST P/revisions/:revisionId/plans` 和 revise 返回 REQUIREMENT_CONFIRMATION_REQUIRED。新增资料须就绪且属于当前项目；已固定的资料/设计及源产物版本不会换成最新版本。服务将修改绑定为 edit，保持用户明确选择的 PRD/原型输出；基准变化时返回冲突。
 
 浏览计划、版本或前后导航不改变正在编辑的提交目标，输入区始终显示固定来源。显式切换新计划或文档操作会暂存先前完整草稿，并提供恢复入口。提交分支直接来自同一上下文状态；异步加载来源期间输入的文字保留，已放弃上下文的迟到响应不抢回输入区。设计预设选择固定 id/version/checksum；失效设计或模型要求明确替换，只有确有服务端快照的原设计可以继续沿用。
 
@@ -139,7 +139,7 @@ schemaVersion 1 使用服务端共享导出渲染器生成完整交互 HTML，�
 
 ## 增量需求交流与一次确认生成（服务端合同 v1）
 
-普通消息先进入需求交流。先创建/选定已有 Thread，再 `POST /threads/{threadId}/requirement-sessions`（Idempotency-Key，正文 `{generationRequest: StartRunRequest}`）。此处的 request 是输入配置，创建会话不发起生成。会话按操作者、项目和 Thread 隔离。`GET /threads/{threadId}/requirement-sessions` 只返回当前操作者的会话，最多 100 项；`GET /requirement-sessions/{sessionId}` 返回完整快照及 ETag。前端依据服务端 state，不按文字长短或完整度评分决定进入生成。
+普通消息先进入需求交流。先创建/选定已有 Thread，再 `POST /threads/{threadId}/requirement-sessions`（Idempotency-Key，正文 `{generationRequest: StartRunRequest}`）。此处的 request 是输入配置，创建会话不发起生成。会话按操作者、项目和 Thread 隔离。`GET /threads/{threadId}/requirement-sessions` 只返回当前操作者的会话，按 cursor/limit 分页（默认30，最大100），返回 nextCursor；游标绑定用户和 Thread；`GET /requirement-sessions/{sessionId}` 返回完整快照及 ETag。前端依据服务端 state，不按文字长短或完整度评分决定进入生成。
 
 `POST /requirement-sessions/{sessionId}/messages` 要求 Idempotency-Key、If-Match，正文 `{text, generationRequest?, intent: "discuss" | "confirm_suggestion"}`，返回 202 快照。可随消息调整输入/输出/模型/资料/设计，生成模型保留产品支持列表中的用户选择，并固定其身份。需求分析内部默认 Flash 是服务端成本配置；Flash-only 仅约束本轮实际测试，不删减产品的生成模型选择能力。消息保存到现有 ThreadEntry；普通分析有独立持久回执和取消/失败状态，不创建产物 Run。新消息立即使旧摘要确认失效，并取代仍在分析的旧消息；迟到模型响应不能覆盖新版本。生成已开始时新增消息开启下一轮讨论，已经冻结的 Run 输入不变。
 
@@ -151,6 +151,31 @@ schemaVersion 1 使用服务端共享导出渲染器生成完整交互 HTML，�
 
 `intent=confirm_suggestion` 表示用户在这一条消息中明确授权按建议生成。服务端仍需分析并通过关键缺口、证据和边界检查，只有 ready_to_confirm 才走同一确认实现；不能从模型答复中推导这一意图。它不允许消除关键问题、扩大已批准边界或自动接受尚有争议的平台改造。
 
-新的初始 PRD/原型生成请求必须携带服务端出具的 `requirementConfirmationId`，且与冻结请求完全相符。直接 Plan/Run/SubmissionIntent API 不能绕过确认。历史版本读取、分享、导出及同一次固定输入的原样重试保留原记录。针对现有版本提出新功能改动是新意图，必须进入需求对话并明确确认。创建会话的 context 使用 {kind:"new"} 或 {kind:"revision",revisionId,feedbackIds,anchor}，保持精确的页面/节点/批注和源版本；不得从提示词猜来源。旧 revise、revision-plan、plan-update 等新增改动入口也受服务端门槛约束。服务端错误：REQUIREMENT_CONFIRMATION_REQUIRED、REQUIREMENT_BASELINE_CHANGED、REQUIREMENT_NOT_READY、REQUIREMENT_ASSUMPTIONS_UNACCEPTED、REQUIREMENT_PLATFORM_CHANGE_UNACCEPTED、REQUIREMENT_ALREADY_STARTED、REQUIREMENT_TURN_LIMIT、REQUIREMENT_MODEL_UNAVAILABLE、REQUIREMENT_MODEL_OUTPUT_INVALID、REQUIREMENT_KNOWLEDGE_UNAVAILABLE。409 表示状态或基线冲突，412 表示 CAS 过期，429 表示限额，503 表示当前服务不可用；同一动作重放先核对原回执，不能因 ETag 变旧而重新生成。
+新的初始 PRD/原型生成请求必须携带服务端出具的 `requirementConfirmationId`，且与冻结请求完全相符。直接 Plan/Run/SubmissionIntent API 不能绕过确认。历史版本读取、分享、导出及同一次固定输入的原样重试保留原记录。针对现有版本提出新功能改动是新意图，必须进入需求对话并明确确认。context 为 {kind:"new"}、{kind:"revision",revisionId,feedbackIds,anchor} 或 {kind:"plan",planId,expectedRevision}；保持精确来源，不得从提示词猜测。旧 revise、revision-plan、plan-update 等新增改动入口同样受服务端门槛约束。服务端错误：REQUIREMENT_CONFIRMATION_REQUIRED、REQUIREMENT_BASELINE_CHANGED、REQUIREMENT_PLAN_CONTEXT_UNAVAILABLE、REQUIREMENT_NOT_READY、REQUIREMENT_ASSUMPTIONS_UNACCEPTED、REQUIREMENT_PLATFORM_CHANGE_UNACCEPTED、REQUIREMENT_ALREADY_STARTED、REQUIREMENT_TURN_LIMIT、REQUIREMENT_MODEL_UNAVAILABLE、REQUIREMENT_MODEL_OUTPUT_INVALID、REQUIREMENT_KNOWLEDGE_UNAVAILABLE。409 表示状态或基线冲突，412 表示 CAS 过期，429 表示限额，503 表示当前服务不可用；同一动作重放先核对原回执，不能因 ETag 变旧而重新生成。
 
 接入需要共享 schema/OpenAPI、API、迁移、Worker 的固定需求基线读取一起集成。本文不声明新服务已上线或真实模型验收完成。知识维护源文件不等于当前授权 release 已索引；发布阶段必须按既有知识发布流程检查版本覆盖。
+
+完整就绪卡中的 affectedPages/affectedFlows 字段必须明确出现；空数组表示用户目标明确不涉及该维度，省略表示讨论中尚未明确。仅文档的接口或后端规则增量可以没有页面改动；请求原型输出时需要明确页面范围。业务名称包含“未知渠道”等正常术语不等于未明确。已有能力的 scope 必须有实际同范围来源支持，不能仅由模型把不确定或区域来源重贴为模板/平台规则。
+
+确认端点的重放响应中，confirmation 始终对应本次提交的摘要/动作回执，即使会话后来进入了新一轮讨论；该响应仍给出当前 revision/state。GET 会话返回当前讨论快照。前端用 confirmation.summaryVersion/checksum 识别原确认，不能把旧确认套到后来修改的卡片。pending 回执的 failureCode 用于展示派发失败，后台按固定动作键有界重试；生成结果和讨论任务使用各自状态。
+
+Flash 测试映射以现有授权 Provider 配置及实时模型目录为准：产品所称 deepseek-4.1-flash 使用 wire id deepseek-flash。此映射只有一个目标，不是候选模型或自动回退；禁止 Pro。需求分析私有配置可写该别名或 wire id，服务统一请求 deepseek-flash。生成仍冻结用户选择的受支持 modelId。
+
+roles 字段同样区分未知与明确不涉及：讨论可省略；完整的纯文档/后台增量可明确提供空数组，表示不新增或改变角色，保留现有调用方/权限边界。若涉及新权限或调用方差异，必须在 issues 中解决；原型输出仍需要明确角色与页面范围，不能为了满足卡片数量而发明人类角色。
+
+来源修改在确认事务中再次核对所选批注的项目、源修订、正文、锚点和状态/修订号，与分析时的固定记录一致。就绪后批注被解决等变化返回 REQUIREMENT_BASELINE_CHANGED（409），保留讨论供用户重新核对；不能沿用旧卡片发起修改。生成已经开始后，解决批注不会改写其冻结输入；同一确认重放仍返回原任务。
+
+### 待审批计划进入讨论
+
+从 `GET P/plans/:planId/input` 取得原 draft 的 request 和计划 revision，再创建 `{generationRequest:原request,context:{kind:"plan",planId,expectedRevision:revision}}`。创建不改变原计划，也不启动 Run；初始 request 必须与原计划相符，调整通过后续 messages 明确提交。原固定资料/设计快照沿用，新增或替换项重新校验。没有可恢复固定输入的历史记录返回 REQUIREMENT_PLAN_CONTEXT_UNAVAILABLE，不能冒充无来源的新建。
+
+创建、分析、确认和消费确认均校验同项目 draft、期望修订及未绑定 Run；变化返回 REQUIREMENT_BASELINE_CHANGED。确认冻结原计划身份、原输入和调整后的配置。消费确认时在同一事务把原 draft 标为 cancelled、修订加1、原因 REQUIREMENT_PLAN_REPLACED，并创建一个 approved 派生计划与Run；rootPlanId 沿用原家族，contentVersion 递增，原 sourceRevisionId/feedbackIds 保留。仅PRD输出创建Run并保留基线中的原计划关联，confirmation.planId 为 null。重复确认/派发返回同一结果；原输入不会被改写。
+
+原样重试保持确认作者、request、知识发布、设计快照、资料及完整重试来源链。实际重试操作者依当前项目编辑权限授权，可与原确认作者不同；Worker验证同项目链最终归属于原确认Run，不将重试操作者当作新的确认作者。后来发布知识或切换设计不会改变重试输入。
+
+
+### 确认派发故障与恢复
+
+后台对同一冻结确认执行最多12次、有界间隔的派发尝试。达到上限仍保留 pending、failureCode、原输入和确认，不重新分析需求。页面提供“重试派发”：`POST /requirement-sessions/{sessionId}/confirmations/{confirmationId}/retry`，无正文，使用当前 If-Match 与新的 Idempotency-Key。服务重新校验身份、当前确认及基线，恢复同一确认的派发预算；进程重启继续读取持久记录。若已经 started，返回同一 planId/runId。刷新后可仅依靠服务端会话和 confirmationId 恢复，不依赖找回浏览器原确认键。
+
+仍持有原确认命令时，重放 `POST .../confirm` 的同一动作也能恢复失败的 pending 派发，使用原摘要、正文和幂等键；重放先核对回执，不因旧 ETag 重建确认。确认失效或需求已改变时，重试端点拒绝恢复旧输入。两个入口均不会创建第二个逻辑生成任务，也不要求用户再次回答需求问题。

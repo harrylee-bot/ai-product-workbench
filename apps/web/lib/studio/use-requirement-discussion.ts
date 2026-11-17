@@ -12,6 +12,7 @@ import {
   postRequirementMessageRequestSchema,
   confirmRequirementRequestSchema,
   requirementConfirmationSchema,
+  requirementDiscussionRequestSchema,
   type RequirementContext,
   type RequirementSession,
   type ThreadEntry,
@@ -65,6 +66,15 @@ const commandSchema = z.discriminatedUnion("kind", [
       action: z.enum(["cancel", "retry"]),
     })
     .strict(),
+  z
+    .object({
+      kind: z.literal("dispatch"),
+      ...addressed,
+      confirmationId: z.string().min(1),
+      summaryVersion: z.number().int().positive(),
+      summaryChecksum: z.string().min(1),
+    })
+    .strict(),
 ]);
 const recordSchema = z
   .object({
@@ -73,7 +83,16 @@ const recordSchema = z
     command: commandSchema.optional(),
     requiresReview: z.boolean().optional(),
     awaitingResult: z.boolean().optional(),
-    baseline: requirementConfirmationSchema.optional(),
+    awaitingConfirmationId: z.string().optional(),
+    awaitingTurnId: z.string().optional(),
+    // Only migrate this private browser record. Wire responses stay strict.
+    baseline: z.preprocess(
+      (value) =>
+        value && typeof value === "object" && !("failureCode" in value)
+          ? { ...value, failureCode: null }
+          : value,
+      requirementConfirmationSchema.optional(),
+    ),
   })
   .strict();
 type Command = z.infer<typeof commandSchema>;
@@ -103,6 +122,7 @@ export function useRequirementDiscussion({
   enabled = true,
   initialEntries = [],
   operation,
+  initialGenerationRequest,
 }: {
   projectId: string;
   threadId: string;
@@ -111,6 +131,7 @@ export function useRequirementDiscussion({
   canEdit: boolean;
   enabled?: boolean;
   initialEntries?: readonly ThreadEntry[];
+  initialGenerationRequest?: z.input<typeof requirementDiscussionRequestSchema>;
   operation?: Pick<
     StudioSubmission,
     "workflow" | "artifactTargets" | "generationIntent" | "prdScreenPlan"
@@ -184,11 +205,15 @@ export function useRequirementDiscussion({
           ...operation,
           prdScreenPlan: operation.prdScreenPlan ?? null,
         }));
-  const list = useQuery({
+  const list = useInfiniteQuery({
     queryKey: [...queryPrefix, "list"],
     enabled: enabled && !!user && !!threadId && !revoked,
-    queryFn: async () => {
-      const result = await api.list(threadId);
+    initialPageParam: undefined as string | undefined,
+    queryFn: async ({ pageParam }) => {
+      const result = await api.list(threadId, {
+        cursor: pageParam,
+        limit: 100,
+      });
       if (
         result.items.some(
           (session) =>
@@ -196,13 +221,36 @@ export function useRequirementDiscussion({
         )
       )
         throw new Error("讨论目录与当前项目不匹配");
-      return result.items
-        .filter(matches)
-        .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+      return result;
     },
+    getNextPageParam: (page) => page.nextCursor ?? undefined,
     retry: false,
   });
-  const sessionId = local.value?.sessionId ?? list.data?.[0]?.id ?? "";
+  const directory = [
+    ...new Map(
+      (list.data?.pages.flatMap((page) => page.items) ?? [])
+        .filter(matches)
+        .map((session) => [session.id, session]),
+    ).values(),
+  ].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+  // An unrelated first page must never cause a duplicate discussion. Continue
+  // reading until a matching fixed context is found, or the catalog is exhausted.
+  const searchingDirectory =
+    !local.value?.sessionId &&
+    !directory.length &&
+    (list.isPending || !!list.hasNextPage);
+  useEffect(() => {
+    if (
+      enabled &&
+      !revoked &&
+      searchingDirectory &&
+      list.hasNextPage &&
+      !list.isFetching &&
+      !list.error
+    )
+      void list.fetchNextPage();
+  }, [enabled, revoked, searchingDirectory, list]);
+  const sessionId = local.value?.sessionId ?? directory[0]?.id ?? "";
   const snapshotKey = (id: string) => [...queryPrefix, "session", id];
   const snapshot = useQuery({
     queryKey: snapshotKey(sessionId),
@@ -303,13 +351,6 @@ export function useRequirementDiscussion({
     if (!matches(result.value))
       throw new Error("返回的需求讨论与当前项目或源版本不匹配");
     client.setQueryData(snapshotKey(result.value.id), result);
-    client.setQueryData<RequirementSession[]>(
-      [...queryPrefix, "list"],
-      (previous) => [
-        result.value,
-        ...(previous ?? []).filter((session) => session.id !== result.value.id),
-      ],
-    );
     void client.invalidateQueries({ queryKey: [...queryPrefix, "list"] });
     void client.invalidateQueries({ queryKey: [...queryPrefix, "entries"] });
   };
@@ -344,6 +385,13 @@ export function useRequirementDiscussion({
           command.etag,
           command.key,
         );
+      else if (command.kind === "dispatch")
+        result = await api.retryConfirmation(
+          command.sessionId,
+          command.confirmationId,
+          command.etag,
+          command.key,
+        );
       else
         result = await api.turn(
           command.action,
@@ -355,7 +403,7 @@ export function useRequirementDiscussion({
     } catch (cause) {
       check();
       if (isWorkbenchApiError(cause) && [409, 412].includes(cause.status)) {
-        local.save({
+        persist({
           version: 1,
           sessionId: command.sessionId,
           command,
@@ -367,30 +415,52 @@ export function useRequirementDiscussion({
       }
       throw cause;
     }
+    const receipt = result.value.confirmation;
+    if (
+      (command.kind === "confirm" &&
+        (!receipt ||
+          receipt.summaryVersion !== command.request.summaryVersion ||
+          receipt.summaryChecksum !== command.request.summaryChecksum)) ||
+      (command.kind === "dispatch" &&
+        (!receipt ||
+          receipt.id !== command.confirmationId ||
+          receipt.summaryVersion !== command.summaryVersion ||
+          receipt.summaryChecksum !== command.summaryChecksum))
+    )
+      throw new Error(
+        "生成回执与本次确认不匹配，请恢复原操作核实，未打开其他任务",
+      );
+    if (result.value.id !== command.sessionId)
+      throw new Error("需求回执与本次讨论不匹配");
     remember(result);
-    local.save({
+    const starts =
+      command.kind === "confirm" ||
+      command.kind === "dispatch" ||
+      (command.kind === "message" &&
+        command.request.intent === "confirm_suggestion");
+    const retains = command.kind === "turn" && command.action === "retry";
+    persist({
       version: 1,
       sessionId: result.value.id,
-      baseline:
-        result.value.confirmation?.status === "started"
-          ? result.value.confirmation
-          : (local.value?.baseline ??
-            (snapshot.data?.value.confirmation?.status === "started"
-              ? snapshot.data.value.confirmation
-              : undefined)),
-      awaitingResult:
-        command.kind === "confirm" ||
-        (command.kind === "message" &&
-          command.request.intent === "confirm_suggestion") ||
-        local.value?.awaitingResult,
+      baseline: receipt?.status === "started" ? receipt : undefined,
+      awaitingResult: starts || (retains && local.value?.awaitingResult),
+      awaitingConfirmationId: starts
+        ? receipt?.id
+        : retains
+          ? local.value?.awaitingConfirmationId
+          : undefined,
+      awaitingTurnId: starts
+        ? receipt
+          ? undefined
+          : result.value.activeTurn?.id
+        : retains
+          ? local.value?.awaitingTurnId
+          : undefined,
     });
     return result.value;
   };
   const perform = async (action: () => Promise<RequirementSession | null>) => {
-    if (!enabled)
-      throw new Error(
-        "旧草稿的固定来源尚未接入需求讨论，请保留草稿，等待来源契约补齐。",
-      );
+    if (!enabled) throw new Error("固定来源尚未恢复完成，请稍后重试。");
     if (privateDenied)
       throw new Error("当前需求讨论已无法访问，请重新核对项目权限");
     if (!canEdit) throw new Error("当前权限只能查看需求讨论");
@@ -420,7 +490,11 @@ export function useRequirementDiscussion({
   const send = (submission: StudioSubmission) =>
     perform(async () => {
       requireSettledCommand();
-      if (list.isPending || (sessionId && snapshot.isPending))
+      if (
+        searchingDirectory ||
+        list.isPending ||
+        (sessionId && snapshot.isPending)
+      )
         throw new Error("正在恢复已有需求讨论，请稍候再发送");
       if (!local.value?.sessionId && list.error) throw list.error;
       if (!threadId) throw new Error("项目对话尚未就绪，请重新加载");
@@ -454,7 +528,19 @@ export function useRequirementDiscussion({
         : {
             kind: "create",
             key: createIdempotencyKey("requirement-session"),
-            request: { generationRequest, context },
+            request: {
+              generationRequest:
+                context.kind === "plan"
+                  ? requirementDiscussionRequestSchema.parse(
+                      Object.fromEntries(
+                        Object.entries(initialGenerationRequest ?? {}).filter(
+                          ([key]) => key !== "requirementConfirmationId",
+                        ),
+                      ),
+                    )
+                  : generationRequest,
+              context,
+            },
             messageKey: createIdempotencyKey("requirement-message"),
             message: request,
           };
@@ -529,6 +615,33 @@ export function useRequirementDiscussion({
         turnId: current.value.activeTurn.id,
         action,
       };
+      persist({
+        version: 1,
+        sessionId,
+        command,
+        awaitingResult: local.value?.awaitingResult,
+        awaitingConfirmationId: local.value?.awaitingConfirmationId,
+        awaitingTurnId: local.value?.awaitingTurnId,
+      });
+      return execute(command);
+    });
+  const retryGeneration = () =>
+    perform(async () => {
+      requireSettledCommand();
+      if (local.value?.requiresReview) throw new Error("请先核对最新需求状态");
+      const current = snapshot.data;
+      const receipt = current?.value.confirmation;
+      if (!current || receipt?.status !== "pending")
+        throw new Error("当前没有等待启动的已确认任务，请重新读取状态");
+      const command: Command = {
+        kind: "dispatch",
+        sessionId,
+        etag: current.etag,
+        key: createIdempotencyKey("requirement-dispatch"),
+        confirmationId: receipt.id,
+        summaryVersion: receipt.summaryVersion,
+        summaryChecksum: receipt.summaryChecksum,
+      };
       persist({ version: 1, sessionId, command });
       return execute(command);
     });
@@ -556,11 +669,47 @@ export function useRequirementDiscussion({
         : snapshot.data?.value.confirmation?.status === "started"
           ? snapshot.data.value.confirmation
           : (local.value?.baseline ??
-            list.data?.find(
+            directory.find(
               (session) => session.confirmation?.status === "started",
             )?.confirmation ??
             undefined),
+    generationResult:
+      enabled &&
+      !privateDenied &&
+      local.value?.awaitingResult &&
+      !local.value.command &&
+      !local.value.requiresReview &&
+      confirmedBaseline?.status === "started" &&
+      (local.value.awaitingConfirmationId
+        ? confirmedBaseline.id === local.value.awaitingConfirmationId
+        : !!local.value.awaitingTurnId &&
+          snapshot.data?.value.activeTurn?.id === local.value.awaitingTurnId)
+        ? confirmedBaseline
+        : undefined,
+    directory,
+    sessionId,
+    hasMoreSessions: !!list.hasNextPage,
+    loadingSessions: list.isFetching,
+    loadMoreSessions: async () => {
+      if (enabled && !privateDenied && list.hasNextPage && !list.isFetching)
+        await list.fetchNextPage();
+    },
+    selectSession: (id: string) => {
+      check();
+      if (
+        !enabled ||
+        privateDenied ||
+        busy.current?.isCurrent() ||
+        local.value?.command ||
+        local.value?.requiresReview
+      )
+        throw new Error("请先核实当前操作，再切换需求讨论");
+      if (!directory.some((session) => session.id === id))
+        throw new Error("所选讨论与当前固定来源不匹配");
+      persist({ version: 1, sessionId: id });
+    },
     hasMore,
+    retryGeneration,
     send,
     confirm,
     recover,
@@ -572,7 +721,10 @@ export function useRequirementDiscussion({
     },
     uploads: input.uploads,
     pending: pendingScope === identity,
-    loading: list.isPending || (!!sessionId && snapshot.isPending),
+    loading:
+      searchingDirectory ||
+      list.isPending ||
+      (!!sessionId && snapshot.isPending),
     error:
       (revoked ? accessFailure.error : null) ??
       snapshot.error ??
@@ -602,6 +754,8 @@ export function useRequirementDiscussion({
         version: 1,
         sessionId,
         awaitingResult: local.value.awaitingResult,
+        awaitingConfirmationId: local.value.awaitingConfirmationId,
+        awaitingTurnId: local.value.awaitingTurnId,
       });
     },
     refresh: async () => {

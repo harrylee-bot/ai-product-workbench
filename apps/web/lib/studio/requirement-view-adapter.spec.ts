@@ -151,6 +151,7 @@ it("keeps the original generation visible alongside the next discussion card", (
       summaryVersion: 2,
       summaryChecksum: "a".repeat(64),
       status: "started",
+      failureCode: null,
       acceptedAssumptionIds: [],
       acceptedPlatformChanges: false,
       confirmedAt: "2026-11-17T00:00:00Z",

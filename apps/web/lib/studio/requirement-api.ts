@@ -19,9 +19,12 @@ import {
 
 export class StudioRequirementApi {
   constructor(private readonly api: WorkbenchApiClient) {}
-  async list(threadId: string) {
+  async list(
+    threadId: string,
+    query: { cursor?: string; limit?: number } = {},
+  ) {
     const r = await this.api.GET("/threads/{threadId}/requirement-sessions", {
-      params: { path: { threadId } },
+      params: { path: { threadId }, query },
     });
     return parseContract(
       requirementSessionsSchema,
@@ -106,6 +109,31 @@ export class StudioRequirementApi {
       r.data,
       r.response,
       "confirm requirement baseline",
+    );
+  }
+  async retryConfirmation(
+    sessionId: string,
+    confirmationId: string,
+    etag: string,
+    key: string,
+  ) {
+    const r = await this.api.POST(
+      "/requirement-sessions/{sessionId}/confirmations/{confirmationId}/retry",
+      {
+        params: {
+          path: { sessionId, confirmationId },
+          header: {
+            "If-Match": normalizeEtag(etag),
+            "Idempotency-Key": normalizeIdempotencyKey(key),
+          },
+        },
+      },
+    );
+    return versioned(
+      requirementSessionSchema,
+      r.data,
+      r.response,
+      "retry confirmed generation",
     );
   }
   async turn(

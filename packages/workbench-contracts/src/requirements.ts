@@ -15,7 +15,7 @@ export const requirementIssueSchema = z.object({
 }).strict();
 export const requirementAssumptionSchema = z.object({id:text(80),text:text(2000),evidenceIds:z.array(opaqueIdSchema).max(20)}).strict();
 export const requirementCardSchema = z.object({
-  goal:text(), platform:text(240), modules:z.array(text(240)).min(1).max(30), roles:z.array(text(240)).min(1).max(30),
+  goal:text(), platform:text(240), modules:z.array(text(240)).min(1).max(30), roles:z.array(text(240)).max(30),
   existingCapabilities:z.array(z.object({description:text(2000),evidenceIds:z.array(opaqueIdSchema).min(1).max(20),scope:z.enum(["platform","template","regional","prototype","uncertain"])}).strict()).max(50),
   reuse:z.array(text(2000)).max(50), changes:z.array(text(2000)).min(1).max(50),
   affectedPages:z.array(text(500)).max(50), affectedFlows:z.array(text(2000)).max(30),
@@ -33,6 +33,7 @@ export const requirementDiscussionRequestSchema=startRunRequestObjectSchema.omit
 export const requirementContextSchema = z.discriminatedUnion("kind",[
  z.object({kind:z.literal("new")}).strict(),
  z.object({kind:z.literal("revision"),revisionId:opaqueIdSchema,feedbackIds:z.array(opaqueIdSchema).max(100),anchor:prototypeFeedbackAnchorSchema.nullable()}).strict(),
+ z.object({kind:z.literal("plan"),planId:opaqueIdSchema,expectedRevision:revisionSchema}).strict(),
 ]);
 export const requirementAnalysisSchema = z.object({reply:text(12000),card:requirementDiscussionCardSchema.nullable()}).strict();
 export const requirementTurnSchema = z.object({
@@ -44,7 +45,7 @@ export const requirementTurnSchema = z.object({
 }).strict();
 export const requirementConfirmationSchema = z.object({
   id:opaqueIdSchema,summaryVersion:z.number().int().positive(),summaryChecksum:z.string().regex(/^[a-f0-9]{64}$/),
-  status:z.enum(["pending","started","invalidated"]),acceptedAssumptionIds:z.array(text(80)).max(30),
+  status:z.enum(["pending","started","invalidated"]),failureCode:z.string().nullable(),acceptedAssumptionIds:z.array(text(80)).max(30),
   acceptedPlatformChanges:z.boolean(),confirmedAt:isoDateTimeSchema,planId:opaqueIdSchema.nullable(),runId:opaqueIdSchema.nullable(),
 }).strict();
 export const requirementSessionSchema = z.object({
@@ -58,7 +59,7 @@ export const requirementSessionSchema = z.object({
 export const createRequirementSessionRequestSchema=z.object({generationRequest:requirementDiscussionRequestSchema,context:requirementContextSchema.default({kind:"new"})}).strict();
 export const postRequirementMessageRequestSchema=z.object({text:text(12000),generationRequest:requirementDiscussionRequestSchema.optional(),intent:z.enum(["discuss","confirm_suggestion"]).default("discuss")}).strict();
 export const confirmRequirementRequestSchema=z.object({summaryVersion:z.number().int().positive(),summaryChecksum:z.string().regex(/^[a-f0-9]{64}$/),acceptedAssumptionIds:z.array(text(80)).max(30),acceptedPlatformChanges:z.boolean()}).strict();
-export const requirementSessionsSchema=z.object({items:z.array(requirementSessionSchema).max(100)}).strict();
+export const requirementSessionsSchema=z.object({items:z.array(requirementSessionSchema).max(100),nextCursor:z.string().nullable()}).strict();
 export type RequirementCard=z.infer<typeof requirementCardSchema>;
 export type RequirementContext=z.infer<typeof requirementContextSchema>;
 export type RequirementEvidence=z.infer<typeof requirementEvidenceSchema>;

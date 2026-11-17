@@ -108,11 +108,21 @@ export function requirementView(
       !!session &&
       session.state === "ready_to_confirm" &&
       full.success &&
+      card?.targetSurface === session.generationRequest.targetSurface &&
+      [...(card?.outputKinds ?? [])].sort().join(",") ===
+        [...session.generationRequest.requestedArtifactKinds]
+          .sort()
+          .join(",") &&
       !!session.summaryChecksum &&
       !active,
     reviewCurrent: !!session && !active,
     confirmationPending: options.pendingConfirmation,
     generationStarting: session?.confirmation?.status === "pending",
+    generationIssue:
+      session?.confirmation?.status === "pending" &&
+      session.confirmation.failureCode
+        ? "生成启动暂未完成，已确认的需求仍保留，可重试同一份任务。"
+        : undefined,
     hasEarlierMessages: options.hasMore,
   };
   if (card && session)

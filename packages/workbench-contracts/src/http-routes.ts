@@ -267,8 +267,9 @@ const canvasClientCommandPageQuery = z.object({
 }).strict();
 
 export const workbenchHttpRoutes = [
+  {method:"post",path:"/requirement-sessions/{sessionId}/confirmations/{confirmationId}/retry",operationId:"retryRequirementConfirmation",requestHeaders:["idempotencyKey","ifMatch"],response:response(202,"Resume the same frozen confirmation without repeating discussion",named("RequirementSession",requirementSessionSchema),["etag"]),problemStatuses:problems(400,404,409,412,428)},
 
-  {method:"get",path:"/threads/{threadId}/requirement-sessions",operationId:"listRequirementSessions",response:response(200,"Current principal's sessions",named("RequirementSessions",requirementSessionsSchema)),problemStatuses:problems(404)},
+  {method:"get",path:"/threads/{threadId}/requirement-sessions",operationId:"listRequirementSessions",query:cursorPageQuery,response:response(200,"Current principal's sessions",named("RequirementSessions",requirementSessionsSchema)),problemStatuses:problems(404)},
   {method:"post",path:"/threads/{threadId}/requirement-sessions",operationId:"createRequirementSession",requestHeaders:["idempotencyKey"],requestBody:named("CreateRequirementSessionRequest",createRequirementSessionRequestSchema),response:response(201,"Discussion session; no generation Run",named("RequirementSession",requirementSessionSchema),["etag"]),problemStatuses:problems(400,404,409)},
   {method:"get",path:"/requirement-sessions/{sessionId}",operationId:"getRequirementSession",response:response(200,"Recoverable requirement snapshot",named("RequirementSession",requirementSessionSchema),["etag"]),problemStatuses:problems(404)},
   {method:"post",path:"/requirement-sessions/{sessionId}/messages",operationId:"postRequirementMessage",requestHeaders:["idempotencyKey","ifMatch"],requestBody:named("PostRequirementMessageRequest",postRequirementMessageRequestSchema),response:response(202,"Requirement snapshot",named("RequirementSession",requirementSessionSchema),["etag"]),problemStatuses:problems(400,404,409,412,428,429,503)},

@@ -166,7 +166,7 @@ const server = createServer(async (req, res) => {
     res.end(JSON.stringify(data));
   };
 
-  if (path.endsWith("/requirement-sessions")) return json({ items: [] });
+  if (path.endsWith("/requirement-sessions")) return json({ items: [], nextCursor: null });
   if (path.endsWith("/entries")) return json({ items: [], nextAfterSequence: null });
 
   if (path.endsWith("/events")) {

@@ -13,6 +13,7 @@ const mocks = vi.hoisted(() => ({
   create: vi.fn(),
   message: vi.fn(),
   confirm: vi.fn(),
+  retryConfirmation: vi.fn(),
   turn: vi.fn(),
   prepare: vi.fn(),
   listThreadEntries: vi.fn(),
@@ -88,6 +89,19 @@ const ready = () =>
       preserved: ["登录"],
     },
   });
+const receipt = (extra = {}) => ({
+  id: "confirmation-one",
+  summaryVersion: 2,
+  summaryChecksum: "a".repeat(64),
+  status: "started",
+  failureCode: null,
+  acceptedAssumptionIds: ["a-one"],
+  acceptedPlatformChanges: false,
+  confirmedAt: now,
+  planId: "plan-one",
+  runId: "run-one",
+  ...extra,
+});
 const versioned = (value = session()) => ({
   value,
   etag: `"${value.revision}"`,
@@ -126,14 +140,16 @@ function setup(extra = {}) {
 beforeEach(() => {
   sessionStorage.clear();
   Object.values(mocks).forEach((fn) => fn.mockReset());
-  mocks.list.mockResolvedValue({ items: [] });
+  mocks.list.mockResolvedValue({ items: [], nextCursor: null });
   mocks.get.mockResolvedValue(versioned());
   mocks.create.mockResolvedValue(versioned());
   mocks.message.mockResolvedValue(
     versioned(session({ revision: 2, state: "analyzing" })),
   );
   mocks.confirm.mockResolvedValue(
-    versioned(session({ revision: 3, state: "generating" })),
+    versioned(
+      session({ revision: 3, state: "generating", confirmation: receipt() }),
+    ),
   );
   mocks.prepare.mockResolvedValue(request);
   mocks.listThreadEntries.mockResolvedValue({
@@ -377,7 +393,7 @@ it("reads new thread messages after the bootstrap sequence and labels older pagi
     ).toEqual([1, 500, 501]),
   );
 });
-it("viewer and unsupported draft contexts cannot start analysis", async () => {
+it("viewer and unrestored input contexts cannot start analysis", async () => {
   const viewer = setup();
   viewer.rerender({ contextKey: "new", canEdit: false });
   await act(async () => {
@@ -409,6 +425,7 @@ it("retains the frozen generation receipt when later discussion clears the sessi
     summaryVersion: 2,
     summaryChecksum: "a".repeat(64),
     status: "started",
+    failureCode: null,
     acceptedAssumptionIds: ["a-one"],
     acceptedPlatformChanges: false,
     confirmedAt: now,
@@ -452,4 +469,226 @@ it("checks a stored recovery command against its authorized project and source b
     );
   });
   expect(mocks.message).toHaveBeenCalledTimes(1);
+});
+
+it("scans beyond 100 unrelated discussions and restores the matching source without a duplicate", async () => {
+  const unrelated = Array.from({ length: 100 }, (_, i) =>
+    session({
+      id: `unrelated-${i}`,
+      context: {
+        kind: "revision",
+        revisionId: `revision-${i}`,
+        feedbackIds: [],
+        anchor: null,
+      },
+    }),
+  );
+  mocks.list.mockImplementation(async (_thread, query) =>
+    query.cursor
+      ? { items: [session()], nextCursor: null }
+      : { items: unrelated, nextCursor: "bound-cursor" },
+  );
+  const hook = setup();
+  await waitFor(() =>
+    expect(hook.result.current.snapshot?.id).toBe("session-one"),
+  );
+  expect(mocks.list).toHaveBeenCalledWith("thread-one", {
+    cursor: "bound-cursor",
+    limit: 100,
+  });
+  await act(async () => {
+    await hook.result.current.send(input);
+  });
+  expect(mocks.create).not.toHaveBeenCalled();
+  expect(mocks.message).toHaveBeenCalledTimes(1);
+});
+it("creates a draft discussion from the exact original input and sends adjustments only in its message", async () => {
+  const context = {
+    kind: "plan" as const,
+    planId: "draft-one",
+    expectedRevision: 7,
+  };
+  const original = {
+    ...request,
+    prompt: "原始草稿",
+    modelId: "original-model",
+    sourceIds: ["pinned-source"],
+  };
+  mocks.create.mockResolvedValue(
+    versioned(session({ context, generationRequest: original })),
+  );
+  mocks.message.mockResolvedValue(versioned(session({ context, revision: 2 })));
+  const hook = setup({ context, initialGenerationRequest: original });
+  await waitFor(() => expect(hook.result.current.loading).toBe(false));
+  await act(async () => {
+    await hook.result.current.send(input);
+  });
+  expect(mocks.create.mock.calls[0][1]).toEqual({
+    context,
+    generationRequest: original,
+  });
+  expect(mocks.message.mock.calls[0][1].generationRequest).toEqual(request);
+});
+it("recovers dispatch after refresh without the original confirmation key and replays a lost retry exactly", async () => {
+  const pending = session({
+    state: "confirmed",
+    revision: 8,
+    confirmation: receipt({
+      status: "pending",
+      failureCode: "DISPATCH_UNAVAILABLE",
+      planId: null,
+      runId: null,
+    }),
+  });
+  mocks.list.mockResolvedValue({ items: [pending], nextCursor: null });
+  mocks.get.mockResolvedValue(versioned(pending));
+  mocks.retryConfirmation
+    .mockRejectedValueOnce(failure(503))
+    .mockResolvedValueOnce(
+      versioned(
+        session({ state: "generating", revision: 9, confirmation: receipt() }),
+      ),
+    );
+  const first = setup();
+  await waitFor(() => expect(first.result.current.snapshot?.revision).toBe(8));
+  await act(async () => {
+    await expect(first.result.current.retryGeneration()).rejects.toThrow();
+  });
+  const sent = mocks.retryConfirmation.mock.calls[0];
+  expect(sent).toEqual([
+    "session-one",
+    "confirmation-one",
+    '\"8\"',
+    expect.any(String),
+  ]);
+  first.unmount();
+  const second = setup();
+  await waitFor(() =>
+    expect(second.result.current.command?.kind).toBe("dispatch"),
+  );
+  await act(async () => {
+    await second.result.current.recover();
+  });
+  expect(mocks.retryConfirmation.mock.calls[1]).toEqual(sent);
+  expect(mocks.confirm).not.toHaveBeenCalled();
+  expect(second.result.current.generationResult?.id).toBe("confirmation-one");
+});
+it("does not open a later confirmation from another tab while waiting for an earlier one", async () => {
+  mocks.list.mockResolvedValue({ items: [ready()], nextCursor: null });
+  mocks.get.mockResolvedValue(versioned(ready()));
+  mocks.confirm.mockResolvedValue(
+    versioned(
+      session({
+        state: "confirmed",
+        confirmation: receipt({ status: "pending", planId: null, runId: null }),
+      }),
+    ),
+  );
+  const hook = setup();
+  await waitFor(() =>
+    expect(hook.result.current.snapshot?.state).toBe("ready_to_confirm"),
+  );
+  await act(async () => {
+    await hook.result.current.confirm({
+      id: "session-one",
+      version: 2,
+      acceptPlatformChanges: false,
+    });
+  });
+  mocks.get.mockResolvedValue(
+    versioned(
+      session({
+        state: "generating",
+        confirmation: receipt({ id: "someone-elses-confirmation" }),
+      }),
+    ),
+  );
+  await act(async () => {
+    await hook.result.current.refresh();
+  });
+  expect(hook.result.current.awaitingResult).toBe(true);
+  expect(hook.result.current.generationResult).toBeUndefined();
+});
+it("keeps the original confirmation command if its response carries a different frozen summary", async () => {
+  mocks.list.mockResolvedValue({ items: [ready()], nextCursor: null });
+  mocks.get.mockResolvedValue(versioned(ready()));
+  mocks.confirm.mockResolvedValue(
+    versioned(session({ confirmation: receipt({ summaryVersion: 99 }) })),
+  );
+  const hook = setup();
+  await waitFor(() =>
+    expect(hook.result.current.snapshot?.state).toBe("ready_to_confirm"),
+  );
+  await act(async () => {
+    await expect(
+      hook.result.current.confirm({
+        id: "session-one",
+        version: 2,
+        acceptPlatformChanges: false,
+      }),
+    ).rejects.toThrow("不匹配");
+  });
+  expect(hook.result.current.command?.kind).toBe("confirm");
+  expect(hook.result.current.generationResult).toBeUndefined();
+});
+it("clears automatic opening when ordinary follow-up supersedes an earlier confirmed task", async () => {
+  mocks.list.mockResolvedValue({ items: [ready()], nextCursor: null });
+  mocks.get.mockResolvedValue(versioned(ready()));
+  const hook = setup();
+  await waitFor(() =>
+    expect(hook.result.current.snapshot?.state).toBe("ready_to_confirm"),
+  );
+  await act(async () => {
+    await hook.result.current.confirm({
+      id: "session-one",
+      version: 2,
+      acceptPlatformChanges: false,
+    });
+  });
+  await act(async () => {
+    await hook.result.current.send(input);
+  });
+  expect(hook.result.current.awaitingResult).toBe(false);
+  expect(hook.result.current.generationBaseline?.id).toBe("confirmation-one");
+});
+it("migrates the old private baseline without guessing which result a legacy boolean was awaiting", async () => {
+  const { failureCode: _legacyMissing, ...baseline } = receipt();
+  sessionStorage.setItem(
+    "workbench:studio:actor-one:project-one:requirement-discussion:thread-one:new",
+    JSON.stringify({
+      version: 1,
+      sessionId: "session-one",
+      baseline,
+      awaitingResult: true,
+    }),
+  );
+  mocks.get.mockResolvedValue(versioned(session({ confirmation: receipt() })));
+  const hook = setup();
+  await waitFor(() =>
+    expect(hook.result.current.snapshot?.confirmation).toBeTruthy(),
+  );
+  expect(hook.result.current.storageError).toBe("");
+  expect(hook.result.current.generationBaseline?.failureCode).toBeNull();
+  expect(hook.result.current.generationResult).toBeUndefined();
+});
+it("switches only among loaded matching sessions and blocks switching with an unknown receipt", async () => {
+  const second = session({ id: "session-two" });
+  mocks.list.mockResolvedValue({
+    items: [session(), second],
+    nextCursor: null,
+  });
+  mocks.get.mockImplementation(async (id) => versioned(session({ id })));
+  const hook = setup();
+  await waitFor(() => expect(hook.result.current.directory).toHaveLength(2));
+  act(() => hook.result.current.selectSession("session-two"));
+  await waitFor(() =>
+    expect(hook.result.current.snapshot?.id).toBe("session-two"),
+  );
+  mocks.message.mockRejectedValueOnce(failure(503));
+  await act(async () => {
+    await expect(hook.result.current.send(input)).rejects.toThrow();
+  });
+  expect(() => hook.result.current.selectSession("session-one")).toThrow(
+    "先核实",
+  );
 });

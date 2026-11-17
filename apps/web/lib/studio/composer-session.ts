@@ -344,6 +344,7 @@ export function useStudioComposerSession(userId: string, projectId: string) {
               conflict: undefined,
               context: {
                 ...current.context,
+                input: current.conflict,
                 target: {
                   ...current.context.target,
                   etag: `"${current.conflict.plan.revision}"`,
@@ -361,7 +362,11 @@ export function useStudioComposerSession(userId: string, projectId: string) {
           sourceIds: [...new Set([...current.draft.sourceIds, sourceId])],
         },
       })),
-    complete: (entryKey: string, submitted: ComposerDraft, keepContext = false) =>
+    complete: (
+      entryKey: string,
+      submitted: ComposerDraft,
+      keepContext = false,
+    ) =>
       update((current) => {
         const original = current.entries[entryKey];
         if (!original) return current;
