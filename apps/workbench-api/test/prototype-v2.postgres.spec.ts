@@ -10,6 +10,7 @@ import { DesignPresetsService } from "../src/modules/design-presets/design-prese
 import { RunEventStore } from "../src/modules/runs/run-event.store.js";
 import { RunsService } from "../src/modules/runs/runs.service.js";
 import { PrototypeV2Service, type PrototypeWorkflowClientPort } from "../src/modules/prototypes/prototype-v2.service.js";
+import { requirementFlow } from './fixtures/requirement-flow.js';
 const databaseUrl = process.env.WORKBENCH_TEST_DATABASE_URL;
 const describePg = databaseUrl ? describe : describe.skip;
 const hash = (v: string) => createHash("sha256").update(v).digest("hex");
@@ -21,7 +22,7 @@ const config = { get: (key: string) => ({ WORKBENCH_PREVIEW_TOKEN_SECRET: "local
 describePg("Prototype V2 durable PostgreSQL lifecycle (workflow transport simulated)", () => {
   let db: PrismaClient, ownerId: string, workspaceId: string, projectId: string;
   let workflows: PrototypeWorkflowClientPort & { startPlan: ReturnType<typeof vi.fn>; startExport: ReturnType<typeof vi.fn>; cancelPlan: ReturnType<typeof vi.fn>; cancelExport: ReturnType<typeof vi.fn> };
-  let service: PrototypeV2Service;
+  let service: PrototypeV2Service,runs:RunsService;
   const frozenArtifacts = new Map<string, string>();
   const storage = { getObject: vi.fn(async (key: string) => {
     const html = frozenArtifacts.get(key);
@@ -29,8 +30,11 @@ describePg("Prototype V2 durable PostgreSQL lifecycle (workflow transport simula
     return { body: Readable.from(html), byteSize: Buffer.byteLength(html), sha256: hash(html), mediaType: "text/html; charset=utf-8" };
   }) };
   const principal = () => ({ id: ownerId }) as never;
-  const recreate = () => new PrototypeV2Service(db as never, workflows, config as never, storage as never, new RunsService(db as never, new AccessService(db as never), new RunEventStore(), { sendInTransaction: vi.fn() } as never, { assertAvailable: vi.fn() } as never, new DesignPresetsService()));
-  const makePlan = () => service.createPlan(principal(), projectId, { title: "Review", prompt: "Create a reviewable prototype", generationRequest: generationRequest("Create a reviewable prototype") }, `create-${randomUUID()}`);
+  const recreate = () => {runs=new RunsService(db as never,new AccessService(db as never),new RunEventStore(),{sendInTransaction:vi.fn()} as never,{assertAvailable:vi.fn()} as never,new DesignPresetsService());return new PrototypeV2Service(db as never,workflows,config as never,storage as never,runs);};
+  // Existing saved plans seed history/feedback/share/export tests. New generation
+  // below uses actual discussion and single confirmation, never old approval.
+  const makePlan = () => db.prototypePlan.create({data:{projectId,createdById:ownerId,title:'Historical review',prompt:'Historical saved input',generationRequest:generationRequest('Historical saved input') as never,idempotencyKey:randomUUID(),requestHash:hash('historical-fixture')}});
+  const flow=()=>requirementFlow(db,runs,service,ownerId,projectId);
   const due = () => db.prototypeWorkflowCommand.updateMany({ where: { projectId, deliveredAt: null }, data: { availableAt: new Date(0), leaseUntil: null } });
   const makeRevision = (planId: string, version = 1, sourceRevisionId?: string, document?: PrototypeDocument) => db.prototypeRevision.create({ data: { id: `revision_${randomUUID()}`, projectId, planId, createdById: ownerId, version, sourceRevisionId, revision: 0, status: "ready", title: "Review", sourceDocument: document as never, pages: document ? document.screens.map((screen,index)=>({...page,id:screen.id,route:screen.route,order:index})) : [page], documentSha256: hash(JSON.stringify([page])), idempotencyKey: `seed-${randomUUID()}`, requestHash: hash("seed") } });
 
@@ -62,6 +66,9 @@ describePg("Prototype V2 durable PostgreSQL lifecycle (workflow transport simula
   });
   afterEach(async () => {
     service?.onModuleDestroy();
+    await db.requirementConfirmation.deleteMany({where:{projectId}});
+    await db.threadEntry.deleteMany({where:{requirementSession:{projectId}}});
+    await db.requirementSession.deleteMany({where:{projectId}});
     await db.prototypePlan.deleteMany({ where: { projectId } });
     await db.project.delete({ where: { id: projectId } });
     await db.workspace.delete({ where: { id: workspaceId } });
@@ -70,8 +77,7 @@ describePg("Prototype V2 durable PostgreSQL lifecycle (workflow transport simula
   });
 
   it("recovers bounded latest previews from only the bound Run and current attempt", async () => {
-    const plan = await makePlan();
-    await service.approvePlan(principal(), projectId, plan.id, "progress-approve", '\"0\"', {});
+    const plan=(await flow().create(generationRequest('Create a reviewable prototype'))).plan!;
     const row = await db.prototypePlan.findUniqueOrThrow({ where: { id: plan.id } });
     const runId = row.runtimeRunId!;
     const store = new RunEventStore();
@@ -100,7 +106,9 @@ describePg("Prototype V2 durable PostgreSQL lifecycle (workflow transport simula
   });
 
   it("serializes simultaneous creates, rejects changed hashes and replays the original snapshot", async () => {
-    const request = { title: "Plan", prompt: "A prototype", generationRequest: generationRequest("A prototype") };
+    const discussion=await flow().prepare(generationRequest('A prototype')),analysis=await discussion.analyze(),confirmed=await analysis.confirm();
+    const frozen=await db.requirementConfirmation.findUniqueOrThrow({where:{id:confirmed.confirmation!.id}}),generation=startRunRequestSchema.parse(frozen.generationRequest);
+    const request = { title: "Plan", prompt: generation.prompt, generationRequest: generation };
     const results = await Promise.all(Array.from({ length: 6 }, () => service.createPlan(principal(), projectId, request, "create-concurrent")));
     for (const result of results) expect(result).toEqual(results[0]);
     expect(await db.prototypePlan.count({ where: { projectId } })).toBe(1);
@@ -109,19 +117,19 @@ describePg("Prototype V2 durable PostgreSQL lifecycle (workflow transport simula
     await expect(service.createPlan(principal(), projectId, { ...request, prompt: "Changed" }, "create-concurrent")).rejects.toMatchObject({ status: 409 });
   });
 
-  it("survives approval acknowledgement loss and API restart without a false failed state", async () => {
-    const plan = await makePlan(); workflows.startPlan.mockRejectedValueOnce(new Error("ack lost"));
-    const accepted = await service.approvePlan(principal(), projectId, plan.id, "approve-lost-ack", '"0"', {});
-    expect(accepted.status).toBe("approved");
-    expect(await db.prototypePlan.findUnique({ where: { id: plan.id } })).toMatchObject({ status: "approved", failureCode: null });
+  it("survives confirmed generation acknowledgement loss and API restart without a false failed state", async () => {
+    const harness=flow(),discussion=await harness.prepare(generationRequest('Reviewable incremental prototype')),analysis=await discussion.analyze();
+    const accepted=await analysis.confirm('confirm-lost-ack');workflows.startPlan.mockRejectedValueOnce(new Error('ack lost'));await analysis.processor.tick(accepted.id);
+    const started=await harness.sessions.get(ownerId,accepted.id),planId=started.confirmation!.planId!;
+    expect(await db.prototypePlan.findUnique({ where: { id: planId } })).toMatchObject({ status: "approved", failureCode: null });
     const pending = await db.prototypeWorkflowCommand.findFirstOrThrow({ where: { projectId, kind: "plan_start" } });
     expect(pending).toMatchObject({ deliveredAt: null, attempts: 1, lastErrorCode: "TEMPORAL_DELIVERY_PENDING" });
     service = recreate(); await due(); await service.dispatchPendingCommands(projectId);
     expect(workflows.startPlan).toHaveBeenCalledTimes(2);
     expect(workflows.startPlan.mock.calls[0]).toEqual(workflows.startPlan.mock.calls[1]);
     expect(await db.prototypeWorkflowCommand.findUnique({ where: { id: pending.id } })).toMatchObject({ attempts: 2, deliveredAt: expect.any(Date) });
-    await expect(service.approvePlan(principal(), projectId, plan.id, "approve-lost-ack", '"0"', {})).resolves.toEqual(accepted);
-    await expect(service.approvePlan(principal(), projectId, plan.id, "approve-lost-ack", '"0"', { reason: "different" })).rejects.toMatchObject({ status: 409 });
+    expect((await analysis.confirm('confirm-lost-ack')).confirmation?.runId).toBe(started.confirmation!.runId);
+    await expect(harness.sessions.confirm(ownerId,accepted.id,'confirm-lost-ack',analysis.ready.revision,{summaryVersion:analysis.ready.summaryVersion,summaryChecksum:analysis.ready.summaryChecksum!,acceptedAssumptionIds:[],acceptedPlatformChanges:true})).rejects.toMatchObject({status:409});
   });
 
   it("keeps content versions independent of CAS and rejects changes to ready content", async () => {

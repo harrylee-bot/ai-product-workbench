@@ -186,6 +186,8 @@ export class PrototypeV2Service implements OnModuleInit, OnModuleDestroy {
       if(!request.generationRequest||request.generationRequest.prompt!==request.prompt)throw requirementProblem("REQUIREMENT_CONFIRMATION_REQUIRED");
       if(!this.runs||!this.workflows.configured)throw temporalUnavailable();
       const confirmation=await lockRequirementConfirmation(tx,principal.id,projectId,request.generationRequest);
+      const card=(confirmation.baseline as {card:{goal:string;changes:string[]}}).card;
+      const displayPrompt=[card.goal,...card.changes.filter(change=>change!==card.goal)].join('\n').slice(0,20_000);
       const context=(confirmation.baseline as {context:{kind:string;revisionId?:string;feedbackIds?:string[];planId?:string;expectedRevision?:number}}).context;
       let feedbackIds=context.feedbackIds??[];
       let rootPlanId:string|null=null,sourceRevisionId:string|null=null,contentVersion=1;
@@ -202,7 +204,7 @@ export class PrototypeV2Service implements OnModuleInit, OnModuleDestroy {
         const latest=await tx.prototypePlan.aggregate({where:{projectId,OR:[{id:rootPlanId},{rootPlanId}]},_max:{contentVersion:true}});
         contentVersion=(latest._max.contentVersion??source.contentVersion)+1;
       }
-      const row=await tx.prototypePlan.create({data:{id:`plan_${randomBytes(12).toString("hex")}`,projectId,createdById:principal.id,title:request.title,prompt:request.prompt,generationRequest:request.generationRequest as Prisma.InputJsonValue,inputSnapshot:confirmation.inputSnapshot as Prisma.InputJsonValue,status:"approved",rootPlanId,sourceRevisionId,contentVersion,feedbackIds,revision:0,idempotencyKey,requestHash}});
+      const row=await tx.prototypePlan.create({data:{id:`plan_${randomBytes(12).toString("hex")}`,projectId,createdById:principal.id,title:request.title,prompt:displayPrompt,generationRequest:request.generationRequest as Prisma.InputJsonValue,inputSnapshot:confirmation.inputSnapshot as Prisma.InputJsonValue,status:"approved",rootPlanId,sourceRevisionId,contentVersion,feedbackIds,revision:0,idempotencyKey,requestHash}});
       await this.prepareRun(tx,row);
       await enqueuePrototypeCommand(tx,projectId,row.id,"plan_start",{principalId:principal.id});
       return toPlan(await tx.prototypePlan.findUniqueOrThrow({where:{id:row.id}}));

@@ -125,6 +125,9 @@ export class RunsService {
       }
       if (versions[0]!.artifact.currentVersionId !== versions[0]!.id) throw new ProblemException({ title: "Prototype base version changed", status: 409, detail: "Select the current prototype version before requesting a revision", code: "PROTOTYPE_BASE_VERSION_CONFLICT" });
       const editingRequest = { ...request }; delete editingRequest.prdScreenPlan;
+      // Public modification input is a fresh requirement intent. Only the
+      // internal confirmed preparation path retains its own authorization ID.
+      if(!preserveOutputKinds)delete editingRequest.requirementConfirmationId;
       return startRunRequestSchema.parse({ ...editingRequest, workflow: "edit", generationIntent: null,
         requestedArtifactKinds: preserveOutputKinds?request.requestedArtifactKinds:["prototype"], canvasSnapshot: null,
         artifactTargets: [{ artifactId: versions[0]!.artifactId, artifactVersionId: versions[0]!.id, screenIds: [] }],

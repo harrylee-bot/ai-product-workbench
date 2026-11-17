@@ -36,11 +36,44 @@ describeWithPostgres("Run retry PostgreSQL request invariant", () => {
       await db.$disconnect();
     }
   }, 120_000);
+  it.each(["cancelled", "failed"] as const)("requires an exact approved Prototype lineage to retry a %s non-retryable Run", async (status) => {
+    const db = new PrismaClient({ datasourceUrl: databaseUrl! });
+    const fixture = await seedRetryFixture(db, status, false);
+    try {
+      const exact = retryData(fixture, "prototype", fixture.request);
+      await expect(db.run.create({data: exact})).rejects.toThrow(/RUN_RETRY_SOURCE_INVALID/);
+      const original = await db.prototypePlan.create({data:{projectId:fixture.projectId,createdById:fixture.principalId,title:"Terminal prototype",prompt:fixture.request.prompt,status,runtimeRunId:fixture.sourceRunId,generationRequest:fixture.request as Prisma.InputJsonValue,idempotencyKey:`original:${fixture.suffix}`,requestHash:sha256(fixture.request)}});
+      const derived = await db.prototypePlan.create({data:{projectId:fixture.projectId,createdById:fixture.principalId,title:original.title,prompt:original.prompt,status:"approved",retryOfPlanId:original.id,rootPlanId:original.id,contentVersion:2,generationRequest:fixture.request as Prisma.InputJsonValue,idempotencyKey:`derived:${fixture.suffix}`,requestHash:sha256(fixture.request)}});
+      // An unrelated key cannot borrow a retry Plan, and pinned context cannot drift.
+      await expect(db.run.create({data: exact})).rejects.toThrow(/RUN_RETRY_SOURCE_INVALID/);
+      const authorized = {...exact,idempotencyKey:`prototype:${derived.id}`};
+      const otherKnowledgeReleaseId=await db.$transaction(tx=>seedReadyKnowledge(tx),{timeout:60000});
+      for (const changed of [
+        {...authorized,knowledgeReleaseId:otherKnowledgeReleaseId},
+        {...authorized,designStyleSnapshotSha256:"f".repeat(64)},
+        {...authorized,request:{...fixture.request,canvasSnapshot:null} as Prisma.InputJsonValue},
+      ]) await expect(db.run.create({data:changed})).rejects.toThrow(/RUN_RETRY_SOURCE_INVALID/);
+      const retry = await db.run.create({data:authorized});
+      expect(retry).toMatchObject({retryOfRunId:fixture.sourceRunId,request:fixture.request,knowledgeReleaseId:fixture.knowledgeReleaseId});
+      await db.prototypePlan.update({where:{id:derived.id},data:{runtimeRunId:retry.id}});
+      await expect(db.run.update({where:{id:retry.id},data:{retryOfRunId:null}})).rejects.toThrow(/RUN_IDENTITY_IMMUTABLE/);
+      // A consumed Plan cannot authorize a second Run even if its key is repeated.
+      await expect(db.run.create({data:{...authorized,id:`second_${fixture.suffix}`}})).rejects.toThrow(/RUN_RETRY_SOURCE_INVALID/);
+    } finally {
+      await db.prototypePlan.deleteMany({where:{projectId:fixture.projectId}});
+      await db.run.deleteMany({where:{retryOfRunId:fixture.sourceRunId}});
+      await db.run.deleteMany({where:{id:fixture.sourceRunId}});
+      await db.workspace.deleteMany({where:{id:fixture.workspaceId}});
+      await db.principal.deleteMany({where:{id:fixture.principalId}});
+      await db.$disconnect();
+    }
+  }, 120_000);
+
 });
 
 type RetryFixture = Awaited<ReturnType<typeof seedRetryFixture>>;
 
-async function seedRetryFixture(db: PrismaClient) {
+async function seedRetryFixture(db: PrismaClient, status: "failed" | "cancelled" = "failed", retryable = true) {
   const suffix = randomUUID().replaceAll("-", "");
   const principalId = `principal_${suffix}`;
   const workspaceId = `workspace_${suffix}`;
@@ -133,12 +166,12 @@ async function seedRetryFixture(db: PrismaClient) {
     await tx.run.update({
       where: { id: sourceRunId },
       data: {
-        status: "failed",
+        status,
         startedAt: finishedAt,
         finishedAt,
-        errorCode: "RUNTIME_UNAVAILABLE",
-        errorDetail: "Provider unavailable",
-        errorRetryable: true,
+        errorCode: status === "failed" ? "RUNTIME_UNAVAILABLE" : null,
+        errorDetail: status === "failed" ? "Provider unavailable" : null,
+        errorRetryable: status === "failed" ? retryable : null,
       },
     });
     return knowledgeReleaseId;

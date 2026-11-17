@@ -48,7 +48,7 @@
 
 待审批计划调整进入下述 `context.kind=plan` 的需求交流，以原 planId/expectedRevision 和固定输入为起点。需求、模型、终端、输出、资料与设计可在讨论消息中明确调整；artifactTargets、generationIntent、workflow、prdScreenPlan 与来源身份保持绑定。旧 `POST P/plans/:planId/input` 不接受新增调整，返回 REQUIREMENT_CONFIRMATION_REQUIRED；原计划审批不能绕过需求确认。412/409 后保留本地调整，读取最新输入并由用户重新核对。
 
-`GET P/revisions/:revisionId/input` 读取生成所选内容版本的实际计划/Run，而非始终取根计划。历史 `request` 原样保留；另返回服务归一化的 `modificationRequest`，明确 edit 操作与精确源产物目标。Composer 按该操作筛选模型，不改写历史输入，也不自动替换原模型；不兼容时保留并提示用户选择支持编辑的模型。刷新恢复保留操作上下文，旧缓存缺少操作上下文时须重新载入源版本。
+`GET P/revisions/:revisionId/input` 读取生成所选内容版本的实际计划/Run，而非始终取根计划。历史 `request` 原样保留；另返回服务归一化的 `modificationRequest`，明确 edit 操作与精确源产物目标，并移除旧 `requirementConfirmationId`；新意图须重新讨论确认。Composer 按该操作筛选模型，不改写历史输入，也不自动替换原模型；不兼容时保留并提示用户选择支持编辑的模型。刷新恢复保留操作上下文，旧缓存缺少操作上下文时须重新载入源版本。
 
 针对固定修订提出新改动，使用 `context.kind=revision` 进入需求交流，固定 sourceRevisionId、选定反馈及页面/节点锚点。明确确认后创建已审批的派生计划，不再进行第二次审批。旧 `POST P/revisions/:revisionId/plans` 和 revise 返回 REQUIREMENT_CONFIRMATION_REQUIRED。新增资料须就绪且属于当前项目；已固定的资料/设计及源产物版本不会换成最新版本。服务将修改绑定为 edit，保持用户明确选择的 PRD/原型输出；基准变化时返回冲突。
 
@@ -179,3 +179,8 @@ roles 字段同样区分未知与明确不涉及：讨论可省略；完整的�
 后台对同一冻结确认执行最多12次、有界间隔的派发尝试。达到上限仍保留 pending、failureCode、原输入和确认，不重新分析需求。页面提供“重试派发”：`POST /requirement-sessions/{sessionId}/confirmations/{confirmationId}/retry`，无正文，使用当前 If-Match 与新的 Idempotency-Key。服务重新校验身份、当前确认及基线，恢复同一确认的派发预算；进程重启继续读取持久记录。若已经 started，返回同一 planId/runId。刷新后可仅依靠服务端会话和 confirmationId 恢复，不依赖找回浏览器原确认键。
 
 仍持有原确认命令时，重放 `POST .../confirm` 的同一动作也能恢复失败的 pending 派发，使用原摘要、正文和幂等键；重放先核对回执，不因旧 ETag 重建确认。确认失效或需求已改变时，重试端点拒绝恢复旧输入。两个入口均不会创建第二个逻辑生成任务，也不要求用户再次回答需求问题。
+
+
+原型计划的公开 `prompt` 展示已确认卡片的目标与本次改动；完整生成指令、批注身份、证据及机器上下文留在不可变 `generationRequest`/Run 请求中。重试沿用该展示文本和原冻结请求，不把机器 JSON 当正文显示。
+
+第95迁移 `20261117020000_prototype_retry_run_lineage` 衔接第94迁移，保留旧迁移和历史行。原型计划重试可使用其已失败或已取消的 Run，包括未标为普通可重试的失败；必须存在同项目、同请求、准确源计划/Run 关联的 approved 派生计划，并保留知识与设计快照，Run 记录 `retryOfRunId`。普通 Run 重试仍仅接受 failed 且 `errorRetryable=true`。成功生成后仅构建失败继续复用原成功 Run，不再请求模型。
