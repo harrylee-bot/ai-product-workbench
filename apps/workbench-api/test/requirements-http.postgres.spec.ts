@@ -52,11 +52,12 @@ suite('New generation flow over actual HTTP and PostgreSQL',()=>{
  const queue={sendInTransaction:vi.fn(async()=>randomUUID())};
  const models={assertAvailable:vi.fn(async()=>undefined)};
  const workflows={configured:true,startPlan:vi.fn(),cancelPlan:vi.fn(),startExport:vi.fn(),cancelExport:vi.fn()};
- const model={analyze:vi.fn(async(input:any)=>{
+ const answer=async(input:any)=>{
   const evidence=input.context.evidence[0];if(!evidence)throw Error('INDEXED_EVIDENCE_REQUIRED');
   const request=input.context.configuration;
   return {value:{reply:'保留原平台，确认本次渠道筛选增量。',card:{goal:'活动列表增加渠道筛选',platform:'产品工作台',modules:['活动管理'],roles:['已有业务用户'],existingCapabilities:[{description:evidence.quote,scope:evidence.scope,evidenceIds:[evidence.id]}],reuse:['原活动列表'],changes:['仅增加渠道筛选'],affectedPages:['活动列表'],affectedFlows:['列表筛选'],targetSurface:request.targetSurface,designConstraints:['保留原导航'],outputKinds:request.requestedArtifactKinds,assumptions:[],issues:[],platformChanges:[],preserved:['原权限和其他页面']}},inputTokens:10,outputTokens:10};
- })};
+ };
+ const model={analyze:vi.fn(answer)};
  const storage={
   createMultipartUpload:vi.fn(async({key,mediaType}:{key:string;mediaType:string})=>{const uploadId=randomUUID();uploads.set(uploadId,{key,mediaType,parts:new Map()});return {uploadId};}),
   signMultipartPart:async({uploadId,partNumber,contentLength}:any)=>({url:`${objectOrigin}/${uploadId}/${partNumber}`,headers:{'content-length':String(contentLength)},expiresAt:new Date(Date.now()+60000)}),
@@ -263,6 +264,52 @@ suite('New generation flow over actual HTTP and PostgreSQL',()=>{
   await http('POST',turnPath+'/retry',{key:retryKey,etag:replay.etag!,status:202});await processor.tick(created.value.id);
   const ready=await http('GET',path);expect(ready.value.state).toBe('ready_to_confirm');expect(ready.value.activeTurn.id).toBe(message.value.activeTurn.id);expect(model.analyze).toHaveBeenCalledTimes(calls+1);
   expect(await db.threadEntry.count({where:{requirementSessionId:created.value.id,role:'user'}})).toBe(1);expect(await db.run.count({where:{threadId:thread.id}})).toBe(0);
+ });
+ it.each([true,false])('limits scoped citation correction to one call in the persisted turn (repaired=%s)',async repaired=>{
+  const {thread,generationRequest,created,path}=await createDiscussion();
+  const submitted=await http('POST',path+'/messages',{body:{text:generationRequest.prompt},key:randomUUID(),etag:created.etag!,status:202});
+  const turnId=submitted.value.activeTurn.id;
+  const initial=await db.requirementTurn.findUniqueOrThrow({where:{id:turnId}});
+  const invalid=async(input:any)=>{
+   const response=await answer(input);
+   response.value.card.existingCapabilities[0]!.scope=input.context.evidence[0].scope==='regional'?'platform':'regional';
+   return response;
+  };
+  const statesDuringCalls: Array<{id:string;status:string;attempt:number;requestHash:string}>=[];
+  const observe=(respond:typeof answer)=>async (input:any)=>{
+   const turn=await db.requirementTurn.findUniqueOrThrow({where:{id:turnId},select:{id:true,status:true,attempt:true,requestHash:true}});
+   statesDuringCalls.push(turn);
+   return respond(input);
+  };
+  const before=model.analyze.mock.calls.length;
+  model.analyze.mockImplementationOnce(observe(invalid)).mockImplementationOnce(observe(repaired?answer:invalid));
+  await processor.tick(created.value.id);
+  const [first,second]=model.analyze.mock.calls.slice(before);
+  expect(model.analyze).toHaveBeenCalledTimes(before+2);
+  const {citationCorrection,...secondInput}=second![0];
+  expect(citationCorrection).toBe('evidence_scope');
+  expect(secondInput).toEqual(first![0]);
+  expect(statesDuringCalls).toEqual(Array.from({length:2},()=>({id:turnId,status:'running',attempt:1,requestHash:initial.requestHash})));
+  const result=await http('GET',path);
+  expect(result.value.generationRequest.sourceIds).toEqual([sourceId]);
+  expect(result.value.activeTurn).toMatchObject({id:turnId,attempt:1,status:repaired?'succeeded':'failed'});
+  expect(await db.threadEntry.count({where:{requirementSessionId:created.value.id,role:'user'}})).toBe(1);
+  expect(await db.requirementTurn.count({where:{sessionId:created.value.id}})).toBe(1);
+  expect(await db.run.count({where:{threadId:thread.id}})).toBe(0);
+  const summaries=await db.requirementSummary.findMany({where:{sessionId:created.value.id}});
+  expect(summaries).toHaveLength(repaired?1:0);
+  if(repaired){
+   const [published]=result.value.evidence;
+   expect(published.id).not.toBe(first![0].context.evidence[0].id);
+   expect(result.value.state).toBe('ready_to_confirm');
+   expect(result.value.activeTurn).toMatchObject({failureCode:null,inputTokens:20,outputTokens:20});
+   expect(summaries[0]?.card).toMatchObject({existingCapabilities:[{evidenceIds:[published.id]}]});
+   expect(result.value.card.existingCapabilities[0].evidenceIds).toEqual([published.id]);
+  }else{
+   expect(result.value.state).toBe('discussing');
+   expect(result.value.activeTurn.failureCode).toBe('REQUIREMENT_EVIDENCE_SCOPE_MISMATCH');
+   expect(result.value.confirmation).toBeNull();
+  }
  });
  it('rejects an obsolete confirmation card after a new message and only confirms the latest summary',async()=>{
   const {thread,generationRequest,created,path}=await createDiscussion();
