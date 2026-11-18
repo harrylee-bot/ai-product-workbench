@@ -649,7 +649,7 @@ export const workbenchHttpRoutes = [
   {
     method: "post", path: "/exports/{exportId}/cancel", operationId: "cancelExportJob",
     requestHeaders: ["ifMatch"],
-    response: response(200, "Queued or running Export job cancelled", named("ExportJob", exportJobSchema), ["etag"]),
+    response: response(200, "Cancellation accepted for a queued or running Export job", named("ExportJob", exportJobSchema), ["etag"]),
     problemStatuses: problems(400, 404, 409, 412, 428),
   },
   {
