@@ -48,7 +48,7 @@ export async function attachStudioActivityContract({ page, webOrigin, projectId,
   assert.equal(row.extraction_status, "ready");
   assert.match(row.parser_version, /docling-serve/u);
   await page.goto(studio);
-  await page.getByRole("button", { name: "资料", exact: true }).click();
+  await page.getByLabel("需求输入").getByRole("button", { name: "资料", exact: true }).click();
   await page.getByRole("checkbox", { name: name + " · ready", exact: true }).check();
   return { name, sourceId: row.source_id, blobId: row.blob_id, sha256: row.checksum, scanner: row.scanner, parser: row.parser_version };
 }
