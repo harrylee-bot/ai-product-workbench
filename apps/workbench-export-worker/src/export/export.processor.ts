@@ -58,7 +58,7 @@ export class ExportProcessor {
       const reservation = await this.store.reserveOutput(identity);
       try {
         await this.storage.putVerified({
-          storageKey: reservation.canonicalStorageKey,
+          storageKey: reservation.storageKey,
           ...identity,
         }, output.bytes, signal);
       } catch (error) {

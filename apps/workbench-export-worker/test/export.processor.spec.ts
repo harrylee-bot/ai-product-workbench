@@ -75,7 +75,7 @@ function harness() {
   const store = {
     start: vi.fn(async () => ({ kind: "run" as const, command: command() })),
     status: vi.fn(async () => "running"),
-    reserveOutput: vi.fn(async (identity) => ({ ...identity, blobId: "blob-1", generation: 1, canonicalStorageKey: "blobs/aa/output/g1" })),
+    reserveOutput: vi.fn(async (identity) => ({ ...identity, storageKey: "blobs/aa/output/g1", blobId: "blob-1", generation: 1, canonicalStorageKey: "blobs/aa/output/g1" })),
     publishSucceeded: vi.fn(async () => "succeeded" as const),
     abandonOutput: vi.fn(async () => undefined),
     fail: vi.fn(async () => undefined),

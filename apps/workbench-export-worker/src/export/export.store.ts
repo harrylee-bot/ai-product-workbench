@@ -15,6 +15,7 @@ export type OutputIdentity = {
 };
 
 export type OutputReservation = OutputIdentity & {
+  storageKey: string;
   blobId: string;
   generation: number;
   canonicalStorageKey: string;
@@ -144,7 +145,11 @@ export class PrismaExportStore {
           throw new Error("EXPORT_OUTPUT_DIGEST_IDENTITY_CONFLICT");
         }
         if (active.status === "ready") return reservation(active, identity, this.config.canonicalBlobPrefix);
-        if (active.status === "pending" && active.storageKey.startsWith(`${this.config.pendingBlobPrefix}/`)) {
+        if (
+          active.status === "pending"
+          && (active.storageKey.startsWith(`${this.config.pendingBlobPrefix}/`)
+            || active.storageKey.startsWith(`${this.config.canonicalBlobPrefix}/`))
+        ) {
           return reservation(active, identity, this.config.canonicalBlobPrefix);
         }
         throw new Error("EXPORT_OUTPUT_DIGEST_BUSY");
@@ -158,7 +163,7 @@ export class PrismaExportStore {
           id: `blob_${randomUUID()}`,
           sha256: identity.sha256,
           generation,
-          storageKey: stableKey(this.config.pendingBlobPrefix, identity.sha256, generation),
+          storageKey: stableKey(this.config.canonicalBlobPrefix, identity.sha256, generation),
           mediaType: identity.mediaType,
           byteSize: BigInt(identity.byteSize),
           status: "pending",
@@ -239,8 +244,9 @@ export class PrismaExportStore {
       await tx.blob.updateMany({
         where: { id: output.blobId, status: "pending" },
         data: {
-          storageKey: output.canonicalStorageKey,
-          gcEligibleAt: new Date(Date.now() + 60_000),
+          // Leave enough time for another exporter to finish verification
+          // before the normal Blob GC pass considers the shared key.
+          gcEligibleAt: new Date(Date.now() + 15 * 60_000),
         },
       });
     }, { maxWait: 10_000, timeout: 30_000 });
@@ -317,6 +323,7 @@ function reservation(
 ): OutputReservation {
   return {
     ...identity,
+    storageKey: blob.storageKey,
     blobId: blob.id,
     generation: blob.generation,
     canonicalStorageKey: blob.status === "ready"

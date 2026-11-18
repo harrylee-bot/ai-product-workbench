@@ -126,6 +126,7 @@ describe("PrismaExportStore", () => {
     const store = new PrismaExportStore({ $transaction: vi.fn(async (callback) => callback(tx)) } as never, prefixes());
     await expect(store.reserveOutput(identity)).resolves.toMatchObject({
       blobId: "blob-existing",
+      storageKey: "legacy-canonical/custom-key",
       generation: 7,
       canonicalStorageKey: "legacy-canonical/custom-key",
     });
@@ -166,6 +167,7 @@ describe("PrismaExportStore", () => {
     const store = new PrismaExportStore(db as never, prefixes());
     await expect(store.publishSucceeded("export-1", {
       ...identity,
+      storageKey: "pending/exports/aa/output/g1",
       blobId: "blob-1",
       generation: 1,
       canonicalStorageKey: "blobs/aa/output/g1",
@@ -188,10 +190,10 @@ describe("PrismaExportStore", () => {
       },
     };
     const store = new PrismaExportStore({ $transaction: vi.fn(async (callback) => callback(tx)) } as never, prefixes());
-    await expect(store.abandonOutput({ ...identity, blobId: "blob-1", generation: 1, canonicalStorageKey: "blobs/aa/output/g1" })).resolves.toBeUndefined();
+    await expect(store.abandonOutput({ ...identity, storageKey: "blobs/aa/output/g1", blobId: "blob-1", generation: 1, canonicalStorageKey: "blobs/aa/output/g1" })).resolves.toBeUndefined();
     expect(tx.blob.updateMany).toHaveBeenCalledWith(expect.objectContaining({
       where: { id: "blob-1", status: "pending" },
-      data: expect.objectContaining({ storageKey: "blobs/aa/output/g1", gcEligibleAt: expect.any(Date) }),
+      data: expect.objectContaining({ gcEligibleAt: expect.any(Date) }),
     }));
   });
 });
