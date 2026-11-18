@@ -216,7 +216,7 @@ export async function runStudioLiveScenarios({ page, browser, webOrigin, outDir,
     const directory = await mkdtemp(path.join(tmpdir(), "studio-export-run-"));
     try {
       const entries = unzipSync(await readFile(downloads.react.path));
-      assert.ok(entries["package.json"] && entries["src/main.jsx"]);
+      assert.ok(entries["package.json"] && entries["index.html"], "React export must include an installable project and its browser entry");
       for (const [name, bytes] of Object.entries(entries)) {
         const destination = path.resolve(directory, name);
         assert.ok(destination.startsWith(directory + path.sep), "ZIP path must remain inside extraction root");
@@ -226,10 +226,10 @@ export async function runStudioLiveScenarios({ page, browser, webOrigin, outDir,
       assert.ok(npmCli, "Provide the existing npm CLI for export installation");
       const environment = { PATH: `${path.dirname(process.execPath)}:/usr/bin:/bin`, NPM_CONFIG_USERCONFIG: "/dev/null", NPM_CONFIG_CACHE: path.join(directory, ".npm-cache") };
       await runCmd("react-install", [npmCli, "install", "--ignore-scripts", "--no-audit", "--no-fund"], directory, environment);
-      await runCmd("react-build", [npmCli, "run", "build", "--", "--base=./"], directory, environment);
+      await runCmd("react-build", [npmCli, "run", "build", "--", "--base=./", "--outDir", "acceptance-build"], directory, environment);
       await withStaticServer(directory, async origin => {
         const standalone = await browser.newPage();
-        try { await standalone.goto(`${origin}/dist/index.html`); await verifyActivityInteraction(standalone); }
+        try { await standalone.goto(`${origin}/acceptance-build/index.html`); await verifyActivityInteraction(standalone); }
         finally { await standalone.close(); }
       });
       await withStaticServer(outDir, async origin => {
