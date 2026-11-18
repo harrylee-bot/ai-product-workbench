@@ -2753,5 +2753,33 @@ class WorkbenchToolScopeMiddlewareAsyncTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("WORKBENCH_PRD_REFERENCE_CONTENT_MISMATCH", mismatch.content)
 
 
+class PrdToolJsonTests(unittest.TestCase):
+    def test_recover_only_missing_section_closings(self):
+        from deerflow_workbench_tools.prd_draft_json import decode_prd_draft_sections
+        sections = {"introduction": {"quoted": 'literal "degradation": {'}, "businessRequirements": {"blocks": [{"text": "原始正文"}]}, "degradation": {}, "safetyBaseline": {}}
+        args = {"artifact_index": 0, "draft": {"kind": "prd", "schemaVersion": 3, "content": {"protocol": "workbench.prd.v3", "sections": sections}}}
+        valid = json.dumps(args, ensure_ascii=False)
+        self.assertIsNone(decode_prd_draft_sections(valid))
+        bad = valid.replace('}]}, "degradation"', '}, "degradation"')
+        decoded, edits = decode_prd_draft_sections(bad)
+        self.assertEqual(decoded, args)
+        self.assertEqual([edit["closing"] for edit in edits], ["]}"])
+        for invalid in [bad.replace('"artifact_index": 0', '"artifact_index": 1'), bad.replace('"kind": "prd"', '"kind": "prototype"'), bad.replace('"kind":', '"kind": null, "kind":'), bad[:-1], bad.replace('"degradation": {}','"different": {}')]:
+            self.assertIsNone(decode_prd_draft_sections(invalid))
+
+    @unittest.skipIf(USING_IMPORT_STUBS, "requires the real prefixed LangChain response")
+    def test_invalid_draft_is_actually_routed_with_its_original_call_id(self):
+        raw = '{"artifact_index":0,"draft":{"kind":"prd","schemaVersion":3,"content":{"protocol":"workbench.prd.v3","sections":{"introduction":{"a":1,"businessRequirements":{},"degradation":{},"safetyBaseline":{}}}}}'
+        msg = middleware_module.AIMessage(content="", invalid_tool_calls=[{"id":"declared","name":"workbench_artifact_draft_publish","args":raw}], response_metadata={"finish_reason":"tool_calls"})
+        recovered = middleware_module._decode_prd_draft_call(msg)
+        self.assertEqual(recovered.tool_calls[0]["id"], "declared")
+        self.assertEqual(recovered.tool_calls[0]["args"]["draft"]["content"]["sections"]["introduction"], {"a":1})
+        self.assertFalse(recovered.invalid_tool_calls)
+        self.assertTrue(msg.invalid_tool_calls)
+        for reason in ("length", "content_filter", "stop"):
+            terminal = msg.model_copy(update={"response_metadata":{"finish_reason":reason}})
+            self.assertIs(middleware_module._decode_prd_draft_call(terminal), terminal)
+
+
 if __name__ == "__main__":
     unittest.main()

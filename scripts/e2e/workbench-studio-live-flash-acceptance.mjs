@@ -31,10 +31,11 @@ import {
 const root = path.resolve(fileURLToPath(new URL("../../", import.meta.url)));
 const runId = String(Date.now());
 const phase = process.env.WORKBENCH_STUDIO_LIVE_PHASE ?? "generation";
-assert.ok(["generation", "access", "files", "delivery"].includes(phase));
-const usesModelFixture = phase === "generation" || phase === "access";
-const needsTemporal = phase === "generation" || phase === "delivery";
-const suiteDirectory = { files: "file-delivery", delivery: "artifact-delivery" }[phase] ?? "studio-live-flash";
+assert.ok(["generation", "prd", "access", "files", "delivery"].includes(phase));
+const generates = phase === "generation" || phase === "prd";
+const usesModelFixture = generates || phase === "access";
+const needsTemporal = generates || phase === "delivery";
+const suiteDirectory = { prd: "studio-live-prd", files: "file-delivery", delivery: "artifact-delivery" }[phase] ?? "studio-live-flash";
 const auditRoot = path.join(root, "output/audit/1.0.0");
 const outDir = path.join(auditRoot, suiteDirectory, runId);
 await mkdir(outDir, { recursive: true });
@@ -75,7 +76,7 @@ const evidence = {
   runId,
   phase,
   evidenceLevel:
-    phase === "generation" ? "isolated-real-studio-stack-model-retrieval-and-object-storage" : phase === "delivery" ? "isolated-real-export-workers-with-fixed-versioned-inputs" : phase === "files" ? "isolated-real-studio-file-upload-scan-and-extraction" : "isolated-real-studio-authentication-and-project-permissions",
+    generates ? "isolated-real-studio-stack-model-retrieval-and-object-storage" : phase === "delivery" ? "isolated-real-export-workers-with-fixed-versioned-inputs" : phase === "files" ? "isolated-real-studio-file-upload-scan-and-extraction" : "isolated-real-studio-authentication-and-project-permissions",
   browserApiInterception: false,
   allowedModelId: "deepseek-flash",
   forbiddenModelIds: ["deepseek-pro", "deepseek-v4-pro"],
@@ -311,6 +312,7 @@ function parseEnvFile(content) {
 }
 
 try {
+  evidence.frontendCommit = execFileSync("git", ["rev-parse", "HEAD"], { cwd: root, encoding: "utf8" }).trim();
   evidence.backendCommit = execFileSync("git", ["rev-parse", "HEAD"], { cwd: serviceRoot, encoding: "utf8" }).trim();
   assert.equal(evidence.backendCommit, expectedBackendCommit, "Use the fixed backend checkout");
   const modifiedServiceFiles = execFileSync("git", ["diff", "--name-only", "HEAD", "--", "apps/*/src", "packages/*/src", "packages/workbench-db/prisma"], { cwd: serviceRoot, encoding: "utf8" }).trim();
@@ -334,7 +336,7 @@ try {
     "Only deepseek-flash is permitted for live testing",
   );
 
-  if (phase === "generation") {
+  if (generates) {
   step("Check every live dependency before provisioning or model requests");
   const checks = [
     ["provider", `${providerEnv.V2_PROVIDER_GATEWAY_URL}/api/models`, { "X-DeerFlow-Internal-Token": providerEnv.V2_PROVIDER_TOKEN }],
@@ -355,7 +357,14 @@ try {
   assert.equal(missing.length, 0, `Live dependency unavailable: ${missing.join(", ")}`);
   // The runtime is independently deployed. Require its deployment owner's
   // inspection receipt; a model catalog alone cannot prove tool compatibility.
-  evidence.runtimeDeploymentAttestation = await verifyStudioRuntime(serviceRoot, expectedBackendCommit, requiredEnv("WORKBENCH_STUDIO_LIVE_RUNTIME_PROOF"));
+  const proofPath = requiredEnv("WORKBENCH_STUDIO_LIVE_RUNTIME_PROOF");
+  if (phase === "prd") {
+    const { verifyPrdRuntime } = await import("./studio-live-prd-runtime.mjs");
+    evidence.runtimeDeploymentAttestation = await verifyPrdRuntime({ serviceRoot, backendCommit: expectedBackendCommit,
+      runtimeCommit: requiredEnv("WORKBENCH_STUDIO_LIVE_RUNTIME_COMMIT"), proofPath, gatewayUrl: providerEnv.V2_PROVIDER_GATEWAY_URL });
+  } else {
+    evidence.runtimeDeploymentAttestation = await verifyStudioRuntime(serviceRoot, expectedBackendCommit, proofPath);
+  }
 
   // Verify DeerFlow model catalog exposes ONLY deepseek-flash
   const catalogRes = await fetch(`${providerEnv.V2_PROVIDER_GATEWAY_URL}/api/models`, {
@@ -415,7 +424,7 @@ try {
   evidence.checks.migrationsApplied = migrations;
 
   let knowledge = { environment: {} };
-  if (phase === "generation") {
+  if (generates) {
   step("Seed real knowledge release with live TEI embedding and BGE reranker");
   process.env.V2_INFERENCE_ENV_FILE = inferenceEnvFile;
   knowledge = await startLiveKnowledgeFixture({ serviceRoot, publishedPath });
@@ -441,7 +450,7 @@ try {
     freePort(),
     freePort(),
   ]);
-  const apiTlsPort = phase === "generation" ? Number(providerEnv.V2_CAPABILITY_TLS_PORT) : await freePort();
+  const apiTlsPort = generates ? Number(providerEnv.V2_CAPABILITY_TLS_PORT) : await freePort();
   assert.ok(apiTlsPort > 0 && apiTlsPort < 65536, "Provider callback port is required");
   const capabilityBase = `https://127.0.0.1:${apiTlsPort}/api/v1`;
   const webOrigin = `https://127.0.0.1:${webPort}`;
@@ -542,7 +551,7 @@ try {
       s3Env.V2_S3_SECRET_ACCESS_KEY;
   }
 
-  step(phase === "generation" ? "Start API, Temporal V3 Worker (deepseek-flash), and Preview service" : "Start real API and Preview without model workers");
+  step(generates ? "Start API, Temporal V3 Worker (deepseek-flash), and Preview service" : "Start real API and Preview without model workers");
   startService(
     "api",
     [path.join(serviceRoot, "apps/workbench-api/dist/main.js")],
@@ -573,7 +582,7 @@ try {
     },
     outDir,
   );
-  if (phase === "generation") {
+  if (generates) {
     startService("runtime-worker", [path.join(serviceRoot, "apps/workbench-worker/dist/main.js")], common, serviceRoot);
   }
   if (needsTemporal) {
@@ -637,7 +646,7 @@ try {
     path.join(root, "apps/web"),
   );
   await health(`${webOrigin}/login`);
-  if (phase === "generation") await health(`${apiBase}/system/ready`);
+  if (generates) await health(`${apiBase}/system/ready`);
   else if (phase === "access") evidence.generationReadiness = "Not asserted in account/permission phase; external model, retrieval and storage remain unavailable.";
 
   browser = await chromium.launch({
@@ -678,6 +687,10 @@ try {
   });
 
   if (phase === "generation") await runStudioLiveScenarios({ page, browser, webOrigin, outDir, runId, dbUrl, sql, waitUntil, evidence, step, runCmd });
+  if (phase === "prd") {
+    const { runStudioPrd } = await import("./studio-live-prd-scenarios.mjs");
+    await runStudioPrd({ page, webOrigin, outDir, runId, dbUrl, sql, waitUntil, evidence, step });
+  }
   if (phase === "delivery") {
     const { runStudioDeliveryFixture } = await import("./studio-live-delivery-scenarios.mjs");
     await runStudioDeliveryFixture({ page, browser, webOrigin, previewOrigin, outDir, runId, dbUrl, waitUntil, evidence, step, s3, bucket, chromiumPath, runCmd });
@@ -696,13 +709,13 @@ try {
 
   assert.equal(evidence.forbiddenModelAttempted, false);
   assert.deepEqual(evidence.failures, []);
-  if (phase === "generation") assert.deepEqual(evidence.networkErrors, []);
+  if (generates) assert.deepEqual(evidence.networkErrors, []);
   else {
     evidence.unavailableGenerationDependencies = evidence.networkErrors.filter(item => item.path === "/api/v1/runtime/models" && item.status === 502);
     assert.deepEqual(evidence.networkErrors.filter(item => !evidence.unavailableGenerationDependencies.includes(item)), []);
   }
   evidence.status = "passed";
-  step(phase === "generation" ? "Completed Studio real-stack deepseek-flash acceptance scenario" : phase === "delivery" ? "Completed fixed-source artifact delivery" : phase === "files" ? "Completed real Studio file delivery" : "Completed real local account and permission checks; no generation or storage acceptance");
+  step(phase === "prd" ? "Completed real Studio PRD-only delivery" : phase === "generation" ? "Completed Studio real-stack deepseek-flash acceptance scenario" : phase === "delivery" ? "Completed fixed-source artifact delivery" : phase === "files" ? "Completed real Studio file delivery" : "Completed real local account and permission checks; no generation or storage acceptance");
 } catch (error) {
   evidence.status = "failed";
   evidence.failure = error.stack || String(error);
