@@ -14,6 +14,7 @@ import {
 const digest = bytes => createHash("sha256").update(bytes).digest("hex");
 const increment = "在云溪营销极速发布平台现有活动管理列表中，为策划人员增加渠道类型筛选。只筛当前角色已授权区域内活动，已有登录、导航、审核发布和报表保持不变。筛选项为全部、企微、短信，默认全部；与现有分页联动，改变筛选重置第一页，空结果提示无匹配活动，失败保留条件可重试。复用当前活动列表查询能力，仅扩展筛选参数，不接新外部系统，不改业务流程。目标为Web端，沿用原设计规范。";
 const interactionSpec = "原型交互验收：列表页包含标签为渠道类型的原生select、全部/企微/短信三个选项，和占位文字搜索活动的搜索框。提供企微活动与短信活动各两条，切换渠道后真实隐藏其他渠道的行。输入搜索词真实按活动名称过滤，不存在的名称显示无匹配活动；清空搜索恢复列表。点击活动旁查看详情打开第二个活动详情页，详情提供返回列表按钮，点击后可返回。两页均可实际操作，不新增登录页或报表页。";
+const prototypeFilterRules = " 渠道与活动名称条件必须同时满足。详情返回时恢复默认「全部」、清空搜索词并回到第1页。";
 
 export async function runStudioLiveScenarios({ page, browser, webOrigin, outDir, runId, dbUrl, sql, waitUntil, evidence, step, runCmd, jointOnly = false, activityContract = false }) {
   const query = async (text, values = []) => (await sql(text, values, dbUrl)).rows;
@@ -117,6 +118,8 @@ export async function runStudioLiveScenarios({ page, browser, webOrigin, outDir,
       await checkpoint();
     }
     if (analysis.state !== "ready_to_confirm") {
+      result.status = analysis.state;
+      result.ordinarySendCreatedNoRun = Number((await query("SELECT count(*) AS n FROM workbench.runs WHERE project_id=$1", [projectId]))[0].n) === beforeRuns;
       result.discussionText = await page.getByRole("region", { name: "需求交流", exact: true }).innerText().catch(() => "");
       throw new Error(`Sufficient request was not ready: ${analysis.state}`);
     }
@@ -233,7 +236,7 @@ export async function runStudioLiveScenarios({ page, browser, webOrigin, outDir,
   const ids = [];
   if (scope === "all" || scope === "prototype") {
     const prototypeProject = await createProject("原型");
-    const prototype = await discussAndGenerate(prototypeProject, "prototype", increment + "只输出交互原型。" + interactionSpec, "prototype");
+    const prototype = await discussAndGenerate(prototypeProject, "prototype", increment + "只输出交互原型。" + interactionSpec + prototypeFilterRules, "prototype");
     step("Save real anchored feedback and generate a derived revision through discussion");
     const [sourceRevision] = await query("SELECT id FROM workbench.prototype_revisions WHERE plan_id=$1 ORDER BY created_at DESC LIMIT 1", [prototype.planId]);
     const canvas = page.frameLocator(".visual-paper iframe");
@@ -270,7 +273,7 @@ export async function runStudioLiveScenarios({ page, browser, webOrigin, outDir,
       releaseInput.resolve();
     }
     await page.getByText("已将所选批注带入需求讨论，尚未启动生成", { exact: true }).waitFor();
-    const revision = await discussAndGenerate(prototypeProject, "prototype", "按照所选批注，仅在渠道筛选区域增加说明文字：仅显示当前授权区域内的活动。保持已有页面、功能和样式，不更改权限逻辑，不新增平台能力。" + interactionSpec, "revision", { expectedRevision: { id: sourceRevision.id, feedbackId: feedback.id } });
+    const revision = await discussAndGenerate(prototypeProject, "prototype", "按照所选批注，仅在渠道筛选区域增加说明文字：仅显示当前授权区域内的活动。保持已有页面、功能和样式，不更改权限逻辑，不新增平台能力。" + interactionSpec + prototypeFilterRules, "revision", { expectedRevision: { id: sourceRevision.id, feedbackId: feedback.id } });
     const [child] = await query("SELECT source_revision_id FROM workbench.prototype_plans WHERE id=$1", [revision.planId]);
     assert.equal(child.source_revision_id, sourceRevision.id);
     const [session] = await query("SELECT context FROM workbench.requirement_sessions WHERE id=$1", [revision.sessionId]);
