@@ -1450,16 +1450,19 @@ class WorkbenchToolScopeMiddleware(AgentMiddleware[AgentState]):
             raise ValueError("WORKBENCH_PRD_TOOL_JSON_RETRY_STATE_INVALID")
         return marker
 
-    def _malformed_draft_target(self, state: Any, runtime: Any) -> tuple[str, int] | None:
+    def _malformed_draft_target(self, state: Any, runtime: Any) -> tuple[str, int, str | None] | None:
         if self._prd_tool_json_retry_scope(runtime):
             references, reference_invalid = _reference_progress(state, self._run_id, self._runtime_attempt_id)
             stages, stage_invalid = _stage_progress(state, self._run_id, self._runtime_attempt_id)
             drafts, draft_invalid = _successful_prd_drafts(state, self._run_id, self._runtime_attempt_id)
             if (
                 not reference_invalid and not stage_invalid and not draft_invalid and not drafts
-                and not _missing_reference_indexes(references) and stages == len(PRD_STAGE_SEQUENCE)
+                and not _missing_reference_indexes(references)
             ):
-                return "prd", 0
+                if stages == len(PRD_STAGE_SEQUENCE):
+                    return "prd", 0, None
+                if stages == len(PRD_STAGE_SEQUENCE) - 1:
+                    return "prd", 0, PRD_STAGE_SEQUENCE[-1]
         if not self._prototype_transport_ready(state, runtime):
             return None
         linked = self._requested_artifact_kinds == frozenset({"prd", "prototype"})
@@ -1468,7 +1471,7 @@ class WorkbenchToolScopeMiddleware(AgentMiddleware[AgentState]):
         )
         draft, _, draft_invalid = _successful_prototype_draft(state, self._run_id, self._runtime_attempt_id)
         if not stage_invalid and not draft_invalid and draft is None and stages == len(PROTOTYPE_STAGE_SEQUENCE):
-            return "prototype", int(linked)
+            return "prototype", int(linked), None
         return None
 
     def _recover_draft_tool_json(self, state: AgentState, runtime: Any) -> dict[str, Any] | None:
@@ -1519,7 +1522,7 @@ class WorkbenchToolScopeMiddleware(AgentMiddleware[AgentState]):
         target = self._malformed_draft_target(history, runtime)
         if target is None:
             return None
-        kind, artifact_index = target
+        kind, artifact_index, next_stage = target
         marker = self._prd_tool_json_retry_marker(state)
         draft_kinds = ("prototype",) if kind == "prototype" and artifact_index == 0 else ("prd", "prototype")
         rejected = _unrepaired_draft(history, self._run_id, self._runtime_attempt_id, draft_kinds)
@@ -1530,7 +1533,11 @@ class WorkbenchToolScopeMiddleware(AgentMiddleware[AgentState]):
         count = marker["count"] if same_candidate else 0
         total = marker.get("totalAttempts", marker["count"]) if marker else 0
         replay = same_candidate and marker["taskId"] == task_id
-        if not replay and (count >= _PRD_TOOL_JSON_RETRY_LIMIT or total >= _DRAFT_TOOL_JSON_TOTAL_RETRY_LIMIT):
+        stage_retry_exhausted = next_stage is not None and count >= 1
+        if not replay and (
+            stage_retry_exhausted or count >= _PRD_TOOL_JSON_RETRY_LIMIT
+            or total >= _DRAFT_TOOL_JSON_TOTAL_RETRY_LIMIT
+        ):
             return {"jump_to": "end"}
         # The reducer replaces the malformed declaration using the same ID.
         # Neither wire arguments nor an unanswered tool call go back to the model.
@@ -1553,7 +1560,16 @@ class WorkbenchToolScopeMiddleware(AgentMiddleware[AgentState]):
         target = self._malformed_draft_target(request.state, request.runtime)
         if target is None or target[0] != marker.get("kind", "prd"):
             return None
-        kind, artifact_index = target
+        kind, artifact_index, next_stage = target
+        if next_stage is not None:
+            return (
+                "<workbench_prd_tool_json_retry>\n"
+                "The malformed Draft arrived before the final PRD stage. "
+                f"Call workbench_generation_stage_update with stage='{next_stage}' as the only next tool call. "
+                "Wait for the successful stage ACK before submitting the initial PRD v3 draft with "
+                "actual document-level fields and an empty sections object.\n"
+                "</workbench_prd_tool_json_retry>"
+            )
         if kind == "prototype":
             next_call = (
                 "Send one small repair against the latest rejected Draft ACK's baseCandidateChecksum."

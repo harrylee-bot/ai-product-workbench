@@ -792,6 +792,54 @@ class DraftRepairScopeTests(unittest.IsolatedAsyncioTestCase):
 
 
     @unittest.skipIf(USING_IMPORT_STUBS, "requires LangChain message fields")
+    def test_malformed_prd_after_drafting_redrives_only_to_validation(self):
+        history = automatic_prd_request().state["messages"][:-4]
+        malformed = middleware_module.AIMessage(
+            id="premature-draft", content="",
+            invalid_tool_calls=[{"id": "bad-call", "name": "workbench_artifact_draft_publish", "args": "}"}],
+            response_metadata={"finish_reason": "tool_calls"},
+        )
+        key = middleware_module._PRD_TOOL_JSON_RETRY_KEY
+        for kinds in (["prd"], ["prd", "prototype"]):
+            with self.subTest(kinds=kinds):
+                middleware = self.middleware(kinds)
+                scope = {"runId": "run-auto", "runtimeAttemptId": "attempt-auto", "requestedArtifactKinds": kinds}
+                runtime = types.SimpleNamespace(
+                    context={"workbench": scope}, execution_info=types.SimpleNamespace(task_id="first-model"),
+                )
+                state = {"messages": [*history, malformed]}
+                recovered = middleware.after_model(state, runtime)
+                self.assertEqual(recovered["jump_to"], "model")
+                self.assertEqual(recovered["messages"][0].id, malformed.id)
+                self.assertFalse(recovered["messages"][0].invalid_tool_calls)
+                self.assertEqual(recovered[key]["totalAttempts"], 1)
+                request = types.SimpleNamespace(
+                    state={"messages": [*history, *recovered["messages"]], key: recovered[key]},
+                    runtime=runtime,
+                )
+                self.assertIn(
+                    "workbench_generation_stage_update with stage='validating-prd' as the only next tool call",
+                    middleware._draft_tool_json_retry_policy(request),
+                )
+                self.assertEqual(middleware.after_model({**state, key: recovered[key]}, runtime)[key], recovered[key])
+                runtime.execution_info.task_id = "second-model"
+                self.assertEqual(middleware.after_model({**state, key: recovered[key]}, runtime), {"jump_to": "end"})
+
+                self.assertIsNone(middleware.after_model({"messages": [*history[:-2], malformed]}, runtime))
+                missing_ref = [
+                    message for message in history if message.get("tool_call_id") != "reference-3"
+                ]
+                self.assertIsNone(middleware.after_model({"messages": [*missing_ref, malformed]}, runtime))
+                foreign = types.SimpleNamespace(
+                    context={"workbench": {**scope, "runId": "unrelated"}}, execution_info=runtime.execution_info,
+                )
+                self.assertIsNone(middleware.after_model(state, foreign))
+                validated_history = automatic_prd_request().state["messages"][:-2]
+                self.assertEqual(middleware.after_model(
+                    {"messages": [*validated_history, malformed], key: recovered[key]}, runtime,
+                )[key]["totalAttempts"], 2)
+
+    @unittest.skipIf(USING_IMPORT_STUBS, "requires LangChain message fields")
     async def test_malformed_prd_retry_rejects_other_tools_and_stops_at_budget(self):
         messages = automatic_prd_request().state["messages"][:-2]
         middleware = self.middleware(["prd"])
