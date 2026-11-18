@@ -152,6 +152,66 @@ for (const tool of ["ssh", "scp"]) {
   });
 }
 
+test("direct release passes the Runtime opt-in as an explicit SSH argument", (t) => {
+  for (const value of [undefined, "0", "1"]) {
+    const fixture = releaseFixture(t);
+    const result = fixture.run({ WORKBENCH_DIRECT_MANAGE_DEERFLOW_RUNTIME: value });
+    assert.equal(result.status, 0, result.stderr);
+    const remote = fixture.calls().find((call) => call.tool === "ssh" && call.args.includes("bash"));
+    assert(remote);
+    assert.deepEqual(remote.args.slice(-2), ["0", value ?? "0"]);
+  }
+});
+
+test("invalid Runtime opt-in is rejected before transport", (t) => {
+  for (const value of ["", "2", "true", "1;exit"]) {
+    const fixture = releaseFixture(t);
+    const result = fixture.run({ WORKBENCH_DIRECT_MANAGE_DEERFLOW_RUNTIME: value });
+    assert.equal(result.status, 64, result.stderr);
+    assert.match(result.stderr, /WORKBENCH_DIRECT_MANAGE_DEERFLOW_RUNTIME must be 0 or 1/u);
+    assert(!fixture.calls().some((call) => ["ssh", "scp", "curl"].includes(call.tool)));
+  }
+});
+
+test("remote Runtime opt-in forces full planning and reaches server deploy with the pinned image", (t) => {
+  const fixture = releaseFixture(t);
+  const source = readFileSync(script, "utf8");
+  const remote = source.split("<<'REMOTE'\n")[1].split("\nREMOTE")[0];
+  const root = join(fixture.sandbox, "release");
+  const privateDir = join(fixture.sandbox, "private");
+  const deployment = join(root, "source", "deploy");
+  const bin = join(fixture.sandbox, "remote-bin");
+  const image = `registry.example.test/deerflow@sha256:${"f".repeat(64)}`;
+  for (const path of [deployment, join(privateDir, "current"), join(root, "incoming"), bin]) {
+    mkdirSync(path, { recursive: true });
+  }
+  writeFileSync(join(privateDir, "current", "workbench.env"), `WORKBENCH_DEERFLOW_IMAGE_REF=${image}\n`);
+  writeFileSync(join(deployment, "workbench-disk-preflight.mjs"), "");
+  writeFileSync(join(deployment, "workbench-release-plan.mjs"), `
+    import { copyFileSync, writeFileSync } from "node:fs";
+    const [, , , , base, output] = process.argv;
+    const mode = process.env.WORKBENCH_FORCE_FULL_RELEASE === "1" ? "all" : "none";
+    writeFileSync(output + "/release-plan.json", JSON.stringify({ mode, services: [] }));
+    copyFileSync(base, output + "/direct.env");
+  `);
+  writeFileSync(join(deployment, "server-deploy.sh"),
+    'printf "%s %s\\n" "$DEPLOY_TARGET" "$WORKBENCH_MANAGE_DEERFLOW_RUNTIME"\ncat "$WORKBENCH_ENV_FILE"\n');
+  for (const name of ["docker", "flock", "npm", "tar"]) {
+    writeFileSync(join(bin, name), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+  }
+  writeFileSync(join(bin, "curl"), '#!/bin/sh\ncase " $* " in *" -w "*) printf 307;; esac\n', { mode: 0o755 });
+  const result = spawnSync("/bin/bash", ["-s", "--", root, privateDir, "a".repeat(40), "direct-a", "https://example.test", "0", "1"], {
+    input: remote, encoding: "utf8", timeout: 10_000,
+    env: {
+      PATH: `${bin}:${process.env.PATH}`,
+      WORKBENCH_DIRECT_MANAGE_DEERFLOW_RUNTIME: "0",
+    },
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /^all 1$/mu);
+  assert(result.stdout.includes(`WORKBENCH_DEERFLOW_IMAGE_REF=${image}\n`));
+});
+
 test("a missing remote application directory fails the real preflight before mkdir or upload", (t) => {
   const fixture = releaseFixture(t);
   const privateDir = join(fixture.sandbox, "private");

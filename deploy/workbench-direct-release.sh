@@ -31,7 +31,12 @@ SSH_BIND_INTERFACE="${WORKBENCH_SSH_BIND_INTERFACE-}"
 ALLOW_DIRTY="${WORKBENCH_ALLOW_DIRTY:-0}"
 HEALTH_RETRIES="${WORKBENCH_DIRECT_HEALTH_RETRIES:-10}"
 FORCE_FULL="${WORKBENCH_FORCE_FULL_RELEASE:-0}"
+MANAGE_DEERFLOW_RUNTIME="${WORKBENCH_DIRECT_MANAGE_DEERFLOW_RUNTIME-0}"
 case "$FORCE_FULL" in 0|1) ;; *) fail 'WORKBENCH_FORCE_FULL_RELEASE must be 0 or 1' ;; esac
+case "$MANAGE_DEERFLOW_RUNTIME" in
+  0|1) ;;
+  *) fail 'WORKBENCH_DIRECT_MANAGE_DEERFLOW_RUNTIME must be 0 or 1' ;;
+esac
 
 printf '%s' "$HOST" | grep -Eq '^[A-Za-z0-9][A-Za-z0-9.-]*$' || fail 'production host is invalid'
 printf '%s' "$USER_NAME" | grep -Eq '^[A-Za-z0-9._-]+$' || fail 'production user is invalid'
@@ -112,7 +117,7 @@ if [ -n "$KNOWLEDGE_ARCHIVE" ]; then
   scp "${SSH_OPTS[@]}" "$KNOWLEDGE_ARCHIVE" "$TARGET:$REMOTE_ROOT/incoming/knowledge.tar.gz"
 fi
 
-ssh "${SSH_OPTS[@]}" "$TARGET" bash -s -- "$REMOTE_ROOT" "$PRIVATE_DIR" "$SOURCE_COMMIT" "$REMOTE_SHORT" "$WEB_ORIGIN" "$FORCE_FULL" <<'REMOTE'
+ssh "${SSH_OPTS[@]}" "$TARGET" bash -s -- "$REMOTE_ROOT" "$PRIVATE_DIR" "$SOURCE_COMMIT" "$REMOTE_SHORT" "$WEB_ORIGIN" "$FORCE_FULL" "$MANAGE_DEERFLOW_RUNTIME" <<'REMOTE'
 # Parse the entire script before executing it. Compose's interactive migration
 # command must not consume the health/promotion commands from SSH stdin.
 {
@@ -124,6 +129,16 @@ source_commit="$3"
 image_tag="$4"
 web_origin="$5"
 export WORKBENCH_FORCE_FULL_RELEASE="$6"
+manage_deerflow_runtime="${7-0}"
+case "$manage_deerflow_runtime" in
+  0) ;;
+  1)
+    # Selected and no-op plans do not deploy DeerFlow. The full plan uses
+    # the verified Runtime image pinned in the remote private environment.
+    export WORKBENCH_FORCE_FULL_RELEASE=1
+    ;;
+  *) echo 'Invalid direct release Runtime opt-in' >&2; exit 64 ;;
+esac
 source_root="$remote_root/source"
 base_env="$private_dir/current/workbench.env"
 direct_env="$remote_root/direct.env"
@@ -174,7 +189,7 @@ if [ "$release_mode" != none ]; then
   WORKBENCH_BUILD_RESERVE_MIB="${WORKBENCH_BUILD_RESERVE_MIB:-1024}" \
   WORKBENCH_BUILD_CPUS="${WORKBENCH_BUILD_CPUS:-2}" \
   WORKBENCH_TYPES_PREVALIDATED=0 \
-  WORKBENCH_MANAGE_DEERFLOW_RUNTIME="${WORKBENCH_DIRECT_MANAGE_DEERFLOW_RUNTIME:-0}" \
+  WORKBENCH_MANAGE_DEERFLOW_RUNTIME="$manage_deerflow_runtime" \
   WORKBENCH_DEPLOY_SERVICES="$release_services" \
   DEPLOY_TARGET="$release_mode" \
   bash "$source_root/deploy/server-deploy.sh"
