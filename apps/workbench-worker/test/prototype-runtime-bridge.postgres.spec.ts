@@ -7,10 +7,7 @@ import { knowledgeToolResponseSchema, startRunRequestSchema, type RuntimeArtifac
 import { Prisma, PrismaClient } from "@workbench/workbench-db";
 import { canonicalSha256, verifyKnowledgeToolGrant } from "@workbench/workbench-knowledge";
 import { KnowledgeToolLedgerService } from "../../workbench-api/src/modules/knowledge/knowledge-tool-ledger.service.js";
-import { AccessService } from "../../workbench-api/src/modules/access/access.service.js";
-import { DesignPresetsService } from "../../workbench-api/src/modules/design-presets/design-presets.service.js";
-import { RunEventStore as ApiRunEventStore } from "../../workbench-api/src/modules/runs/run-event.store.js";
-import { RunsService } from "../../workbench-api/src/modules/runs/runs.service.js";
+import { workerRequirementFlow } from "./confirmed-run.fixture.js";
 import { prototypeDocumentFixture, prototypeFrameNodeFixture } from "../../../packages/workbench-contracts/test/prototype-fixture.js";
 import { seedReadyKnowledge } from "../../../scripts/test-support/knowledge-fixture.mjs";
 import { preparePrototypeRuntime, PrototypeRuntimeBridge } from "../src/prototypes/prototype-runtime-bridge.js";
@@ -52,6 +49,9 @@ describeWithPostgres("Prototype runtime bridge PostgreSQL integration", () => {
   afterEach(async () => {
     for (const fixture of fixtures.splice(0)) {
       await db.knowledgeToolBudget.deleteMany({ where: { runtimeAttempt: { run: { projectId: fixture.projectId } } } });
+      await db.requirementConfirmation.deleteMany({ where: { projectId: fixture.projectId } });
+      await db.threadEntry.deleteMany({ where: { requirementSession: { projectId: fixture.projectId } } });
+      await db.requirementSession.deleteMany({ where: { projectId: fixture.projectId } });
       await db.prototypePlan.deleteMany({ where: { projectId: fixture.projectId } });
       await db.workspace.delete({ where: { id: fixture.workspaceId } });
       await db.principal.delete({ where: { id: fixture.principalId } });
@@ -62,7 +62,7 @@ describeWithPostgres("Prototype runtime bridge PostgreSQL integration", () => {
   afterAll(async () => { await db?.$disconnect(); });
 
   async function fixture(bindRun = true) {
-    const result = await seedFixture(db, knowledgeReleaseId, bindRun);
+    const result = await seedFixture(db, bindRun);
     fixtures.push(result);
     return result;
   }
@@ -112,60 +112,53 @@ describeWithPostgres("Prototype runtime bridge PostgreSQL integration", () => {
     return { ...ids, planId, request, runId: run.id, version, artifact, asset };
   }
 
-  it.each([1, 20])("runs a delayed initial plan from %s fixed Canvas screens and image pins without a live capability", async capturedScreenCount => {
+
+  // Existing records can be inspected. A pre-confirmation request cannot pass
+  // generation, even if its Plan and Run are already bound in the database.
+  function historicalProjection(ids: Awaited<ReturnType<typeof historicalFixture>>) {
+    const runtime = fakeRuntime(async () => { throw Error("PROVIDER_MUST_NOT_EXECUTE"); });
+    const bridge = new PrototypeRuntimeBridge(db, runtime, issuer);
+    const input = { projectId: ids.projectId, threadId: ids.request.canvasSnapshot!.threadId, request: ids.request };
+    return bridge["loadHistoricalCanvas"](input as RuntimeExecution, ids.principalId);
+  }
+
+  it.each([1, 20])("reads %s archived Canvas screens and pinned images without restarting the old Run", async capturedScreenCount => {
     const ids = await historicalFixture(undefined, capturedScreenCount);
-    const input = await preparePrototypeRuntime(db, ids);
-    const liveIssue = vi.spyOn(PrismaCanvasToolGrantIssuer.prototype, "issue");
-    const runtime = fakeRuntime(async (execution, observer) => {
-      expect(execution.request).toEqual(ids.request);
-      expect(execution.canvasTool).toBeNull();
-      expect(execution.historicalCanvasSnapshot).toEqual(ids.request.canvasSnapshot);
-      expect(execution.artifactTargets).toEqual([]);
-      expect(execution.historicalCanvasArtifacts).toHaveLength(Math.ceil(capturedScreenCount / 12));
-      expect(execution.historicalCanvasArtifacts!.flatMap(source => source.screenIds)).toEqual(ids.request.canvasSnapshot!.screens.map(item => item.reference.screenId));
-      expect(execution.historicalCanvasArtifacts!.every(source => source.screenIds.length <= 12)).toBe(true);
-      const source = execution.historicalCanvasArtifacts![0]!;
-      expect(source).toMatchObject({ artifactId: ids.artifact.id, artifactVersionId: ids.version.id, checksum: ids.version.checksum, content: { mode: "inline" } });
-      if (source.content.mode !== "inline") throw new Error("expected inline source");
-      const projection = source.content.value as { screens: Array<{ id: string }>; nodes: Array<{ id: string }> };
-      expect(projection.screens.map(screen => screen.id)).toEqual(source.screenIds);
-      expect(projection.nodes.some(node => node.id === "historical-image-node")).toBe(true);
-      if (capturedScreenCount === 1) expect(projection.nodes.some(node => node.id === "node-b")).toBe(false);
-      expect(source.assets).toMatchObject([{ assetId: ids.asset.id, sha256: ids.asset.sha256, metadata: ids.asset }]);
-      await observer.onSubmissionStarted();
-      await observer.onExternalRunCreated(`external-${execution.runId}`);
-      const response = await retrieve(db, execution);
-      return publishPrototype(execution, observer, response.items.map(item => item.citation));
-    });
-    try {
-      const bridge = new PrototypeRuntimeBridge(db, runtime, issuer);
-      await expect(bridge.generate(input, new AbortController().signal, vi.fn())).resolves.toMatchObject({ title: "Retrieved prototype" });
-      expect(liveIssue).not.toHaveBeenCalled();
-      expect(await db.canvasAgentSession.count({ where: { runId: ids.runId } })).toBe(0);
-      expect(await db.canvasToolGrant.count({ where: { agentSession: { runId: ids.runId } } })).toBe(0);
-      expect(await db.run.findUniqueOrThrow({ where: { id: ids.runId } })).toMatchObject({ status: "succeeded", request: ids.request });
-      // Rebuilding an already successful Run reads its result, not live Canvas
-      // references or permissions that may since have changed.
-      await db.principal.update({ where: { id: ids.principalId }, data: { status: "disabled" } });
-      await expect(bridge.generate(input, new AbortController().signal, vi.fn())).resolves.toMatchObject({ title: "Retrieved prototype" });
-      expect(runtime.execute).toHaveBeenCalledTimes(1);
-    } finally { liveIssue.mockRestore(); }
+    const { prototypes } = workerRequirementFlow(db, ids.principalId, ids.projectId);
+    const archived = await prototypes.getPlanInput({ id: ids.principalId } as never, ids.projectId, ids.planId);
+    expect(archived.request).toEqual(ids.request);
+    expect(Date.parse(archived.request.canvasSnapshot!.expiresAt)).toBeLessThan(Date.now());
+    const artifacts = await historicalProjection(ids);
+    expect(artifacts).toHaveLength(Math.ceil(capturedScreenCount / 12));
+    expect(artifacts.flatMap(source => source.screenIds)).toEqual(ids.request.canvasSnapshot!.screens.map(item => item.reference.screenId));
+    expect(artifacts.every(source => source.screenIds.length <= 12)).toBe(true);
+    const source = artifacts[0]!;
+    expect(source).toMatchObject({ artifactId: ids.artifact.id, artifactVersionId: ids.version.id, checksum: ids.version.checksum, content: { mode: "inline" } });
+    if (source.content.mode !== "inline") throw Error("expected inline source");
+    const projection = source.content.value as { screens: Array<{ id: string }>; nodes: Array<{ id: string }> };
+    expect(projection.screens.map(screen => screen.id)).toEqual(source.screenIds);
+    expect(projection.nodes.some(node => node.id === "historical-image-node")).toBe(true);
+    if (capturedScreenCount === 1) expect(projection.nodes.some(node => node.id === "node-b")).toBe(false);
+    expect(source.assets).toMatchObject([{ assetId: ids.asset.id, sha256: ids.asset.sha256, metadata: ids.asset }]);
+    await expect(preparePrototypeRuntime(db, ids)).rejects.toThrow("REQUIREMENT_CONFIRMATION_REQUIRED");
+    expect(await db.runtimeAttempt.count({ where: { runId: ids.runId } })).toBe(0);
+    expect(await db.canvasAgentSession.count({ where: { runId: ids.runId } })).toBe(0);
+    expect(await db.canvasToolGrant.count({ where: { agentSession: { runId: ids.runId } } })).toBe(0);
   }, 90_000);
 
-  it.each(["foreign-version", "missing-screen", "checksum", "access-revoked"] as const)("rejects %s historical Canvas before model execution", async failure => {
+  it.each(["foreign-version", "missing-screen", "checksum", "access-revoked"] as const)("rejects %s while resolving fixed historical Canvas references", async failure => {
     const ids = await historicalFixture(failure === "access-revoked" ? undefined : failure);
-    const input = await preparePrototypeRuntime(db, ids);
     if (failure === "access-revoked") await db.principal.update({ where: { id: ids.principalId }, data: { status: "disabled" } });
-    const runtime = fakeRuntime(async () => { throw new Error("PROVIDER_MUST_NOT_EXECUTE"); });
     const code = { "foreign-version": "PROTOTYPE_CANVAS_REFERENCE_INVALID", "missing-screen": "RUNTIME_ARTIFACT_TARGET_SCREEN_INVALID", checksum: "RUNTIME_ARTIFACT_TARGET_CHECKSUM_INVALID", "access-revoked": "PROTOTYPE_CANVAS_REFERENCE_ACCESS_REVOKED" }[failure];
-    await expect(new PrototypeRuntimeBridge(db, runtime, issuer).generate(input, new AbortController().signal, vi.fn())).rejects.toThrow(code);
-    expect(runtime.execute).not.toHaveBeenCalled();
+    await expect(historicalProjection(ids)).rejects.toThrow(code);
+    expect(await db.runtimeAttempt.count({ where: { runId: ids.runId } })).toBe(0);
   }, 90_000);
 
   it("pins one Run and release across concurrent preparation and activity replay", async () => {
     const ids = await fixture();
     const seeded = await db.prototypePlan.findUniqueOrThrow({ where: { id: ids.planId } });
     const preparedRun = await db.run.findUniqueOrThrow({ where: { id: seeded.runtimeRunId! } });
+    const entriesBeforeReplay = await db.threadEntry.count({ where: { threadId: preparedRun.threadId } });
     const inputs = await Promise.all(Array.from({ length: 4 }, () => preparePrototypeRuntime(db, ids)));
     expect(inputs.every((input) => JSON.stringify(input) === JSON.stringify(inputs[0]))).toBe(true);
     const plan = await db.prototypePlan.findUniqueOrThrow({ where: { id: ids.planId } });
@@ -178,7 +171,7 @@ describeWithPostgres("Prototype runtime bridge PostgreSQL integration", () => {
     });
     await expect(db.run.count({ where: { projectId: ids.projectId } })).resolves.toBe(1);
     await expect(db.thread.count({ where: { projectId: ids.projectId } })).resolves.toBe(1);
-    await expect(db.threadEntry.count({ where: { threadId: run.threadId } })).resolves.toBe(1);
+    await expect(db.threadEntry.count({ where: { threadId: run.threadId } })).resolves.toBe(entriesBeforeReplay);
     await expect(db.prototypeRevision.findUniqueOrThrow({ where: { id: inputs[0]!.revisionId } })).resolves.toMatchObject({ status: "ready" });
     await expect(db.prototypePlan.update({ where: { id: ids.planId }, data: { runtimeRunId: null } })).rejects.toThrow("PROTOTYPE_RUNTIME_RUN_IMMUTABLE");
     expect(JSON.stringify(inputs[0])).not.toContain("wbkg1.");
@@ -232,6 +225,9 @@ describeWithPostgres("Prototype runtime bridge PostgreSQL integration", () => {
     const artifact = await db.artifactVersion.findFirstOrThrow({ where: { createdByRunId: first.runId, status: "ready" } });
     expect(artifact.citations).toEqual([citation!]);
     await expect(db.knowledgeToolBudget.findUniqueOrThrow({ where: { runtimeAttemptId: first.runtimeAttemptId } })).resolves.toMatchObject({ totalStarts: 1 });
+    await db.principal.update({ where: { id: ids.principalId }, data: { status: "disabled" } });
+    await expect(preparePrototypeRuntime(db, ids)).rejects.toThrow("PROTOTYPE_PROJECT_ACCESS_REVOKED");
+    // An already prepared activity replay reads the published result.
     await expect(bridge.generate(input, new AbortController().signal, vi.fn())).resolves.toEqual(result);
     expect(runtime.execute).toHaveBeenCalledTimes(2);
     expect(runtime.createThread).toHaveBeenCalledTimes(1);
@@ -255,43 +251,21 @@ describeWithPostgres("Prototype runtime bridge PostgreSQL integration", () => {
     });
     const bridge = new PrototypeRuntimeBridge(db, runtime, issuer);
     await expect(bridge.generate(input, new AbortController().signal, vi.fn())).rejects.toThrow(
-      failure === "missing receipt" ? "KNOWLEDGE_RETRIEVAL_REQUIRED" : "KNOWLEDGE_CITATION_NOT_RETRIEVED",
+      failure === "missing receipt" ? "KNOWLEDGE_RETRIEVAL_REQUIRED" : "KNOWLEDGE_CITATION_CURRENT_REQUIRED",
     );
     const plan = await db.prototypePlan.findUniqueOrThrow({ where: { id: ids.planId } });
     await expect(db.run.findUniqueOrThrow({ where: { id: plan.runtimeRunId! } })).resolves.toMatchObject({ status: "failed" });
     await expect(db.artifactVersion.count({ where: { projectId: ids.projectId, status: "ready" } })).resolves.toBe(0);
   }, 90_000);
 
-  it.each(["failed", "cancelled"] as const)("retries a %s provider Run with expired Canvas context without minting a live capability", async (terminalStatus) => {
-    const ids = await fixture(false);
-    const board = await db.board.findUniqueOrThrow({ where: { projectId: ids.projectId } });
-    const thread = await db.thread.create({ data: { projectId: ids.projectId, createdById: ids.principalId, title: "Historical Canvas retry" } });
-    const capturedAt = Date.now() - 120_000;
-    const request = startRunRequestSchema.parse({
-      prompt: "Build two prototype screens", modelId: "quality", workflow: "generate", generationIntent: null,
-      targetSurface: "web", designStyle: { kind: "automatic" }, sourceIds: [], artifactTargets: [], requestedArtifactKinds: ["prototype"],
-      canvasSnapshot: { protocol: "workbench.canvas-snapshot.v1", projectId: ids.projectId, threadId: thread.id, runId: null, boardId: board.id,
-        clientSessionId: `canvas-${randomUUID()}`, projectSessionGeneration: 1, boardRevision: board.revision, canvasStateRevision: 0,
-        capturedAt: new Date(capturedAt).toISOString(), expiresAt: new Date(capturedAt + 60_000).toISOString(),
-        viewport: { x: 23, y: 41, zoom: 1.25 }, screens: [], visibleScreens: [], selectedScreens: [] },
-    });
-    const runs = new RunsService(db as never, new AccessService(db as never), new ApiRunEventStore(), { sendInTransaction: vi.fn() } as never,
-      { assertAvailable: vi.fn(async () => undefined) } as never, new DesignPresetsService());
-    const sourcePlanId = `bridge-source-${randomUUID()}`;
-    // Validate the original approval at capture time, then let the real clock
-    // expose the expired immutable snapshot. Prisma/timers stay on real time.
-    const approvalClock = vi.spyOn(Date, "now").mockReturnValue(capturedAt);
-    let sourceRunId: string;
-    try {
-      sourceRunId = await db.$transaction(async (tx) => {
-        await tx.prototypePlan.create({ data: { id: sourcePlanId, projectId: ids.projectId, createdById: ids.principalId,
-          title: "Historical Canvas retry", prompt: request.prompt, generationRequest: request as Prisma.InputJsonValue,
-          status: "approved", idempotencyKey: randomUUID(), requestHash: canonicalSha256(request) } });
-        const runId = await runs.preparePrototypeRun(tx, { projectId: ids.projectId, principalId: ids.principalId, planId: sourcePlanId, title: "Historical Canvas retry", request });
-        await tx.prototypePlan.update({ where: { id: sourcePlanId }, data: { runtimeRunId: runId } });
-        return runId;
-      });
-    } finally { approvalClock.mockRestore(); }
+  it.each(["failed", "cancelled"] as const)("retries a %s confirmed provider Run with the original request and no live Canvas capability", async terminalStatus => {
+    const ids = await fixture();
+    const sourcePlanId = ids.planId;
+    const sourcePlan = await db.prototypePlan.findUniqueOrThrow({ where: { id: sourcePlanId } });
+    const sourceRunId = sourcePlan.runtimeRunId!;
+    const request = startRunRequestSchema.parse(sourcePlan.generationRequest);
+    const { prototypes } = workerRequirementFlow(db, ids.principalId, ids.projectId);
+    expect(request.requirementConfirmationId).toBeTruthy();
     const sourceInput = await preparePrototypeRuntime(db, { projectId: ids.projectId, planId: sourcePlanId });
     const controller = new AbortController();
     const sourceRuntime = fakeRuntime(async (execution, observer) => {
@@ -307,19 +281,11 @@ describeWithPostgres("Prototype runtime bridge PostgreSQL integration", () => {
     await expect(new PrototypeRuntimeBridge(db, sourceRuntime, issuer).generate(sourceInput, controller.signal, vi.fn())).rejects.toThrow();
     expect(await db.run.findUniqueOrThrow({ where: { id: sourceRunId } })).toMatchObject({ status: terminalStatus });
     expect(await db.runtimeAttempt.findFirstOrThrow({ where: { runId: sourceRunId } })).toMatchObject({ status: terminalStatus, externalRunId: `external-${sourceRunId}` });
-    await db.prototypePlan.update({ where: { id: sourcePlanId }, data: { status: terminalStatus } });
-    await db.board.update({ where: { id: board.id }, data: { revision: { increment: 1 } } });
-    const retryPlanId = `bridge-retry-${randomUUID()}`;
-    const retryRunId = await db.$transaction(async (tx) => {
-      await tx.prototypePlan.create({ data: { id: retryPlanId, projectId: ids.projectId, createdById: ids.principalId,
-        rootPlanId: sourcePlanId, retryOfPlanId: sourcePlanId, contentVersion: 2,
-        title: "Historical Canvas retry", prompt: request.prompt, generationRequest: request as Prisma.InputJsonValue,
-        status: "approved", idempotencyKey: randomUUID(), requestHash: canonicalSha256(request) } });
-      const runId = await runs.preparePrototypeRun(tx, { projectId: ids.projectId, principalId: ids.principalId, planId: retryPlanId,
-        title: "Historical Canvas retry", request, pinnedRunId: sourceRunId });
-      await tx.prototypePlan.update({ where: { id: retryPlanId }, data: { runtimeRunId: runId } });
-      return runId;
-    });
+    const stopped = await db.prototypePlan.update({ where: { id: sourcePlanId }, data: { status: terminalStatus } });
+    await db.board.update({ where: { projectId: ids.projectId }, data: { revision: { increment: 1 } } });
+    const retry = await prototypes.retryPlan({ id: ids.principalId } as never, ids.projectId, sourcePlanId, randomUUID(), '"' + stopped.revision + '"', {});
+    const retryPlanId = retry.id;
+    const retryRunId = (await db.prototypePlan.findUniqueOrThrow({ where: { id: retryPlanId } })).runtimeRunId!;
     expect(retryRunId).not.toBe(sourceRunId);
     const issueLiveCanvas = vi.spyOn(PrismaCanvasToolGrantIssuer.prototype, "issue");
     const executions: RuntimeExecution[] = [];
@@ -327,8 +293,7 @@ describeWithPostgres("Prototype runtime bridge PostgreSQL integration", () => {
       executions.push(execution);
       expect(execution.request).toEqual(request);
       expect(execution.canvasTool).toBeNull();
-      expect(execution.historicalCanvasSnapshot).toEqual(request.canvasSnapshot);
-      expect(Date.parse(execution.historicalCanvasSnapshot!.expiresAt)).toBeLessThan(Date.now());
+      expect(execution.historicalCanvasSnapshot ?? null).toBeNull();
       await observer.onSubmissionStarted();
       await observer.onExternalRunCreated(`external-${execution.runId}`);
       const response = await retrieve(db, execution);
@@ -518,7 +483,7 @@ describeWithPostgres("Prototype runtime bridge PostgreSQL integration", () => {
 
 type Fixture = { principalId: string; workspaceId: string; projectId: string; planId: string };
 
-async function seedFixture(db: PrismaClient, knowledgeReleaseId: string, bindRun: boolean): Promise<Fixture> {
+async function seedFixture(db: PrismaClient, bindRun: boolean): Promise<Fixture> {
   const suffix = randomUUID();
   const ids = { principalId: `bridge-principal-${suffix}`, workspaceId: `bridge-workspace-${suffix}`, projectId: `bridge-project-${suffix}`, planId: `bridge-plan-${suffix}` };
   await db.$transaction(async (tx) => {
@@ -528,19 +493,15 @@ async function seedFixture(db: PrismaClient, knowledgeReleaseId: string, bindRun
     await tx.project.create({ data: { id: ids.projectId, workspaceId: ids.workspaceId, createdById: ids.principalId, title: "Bridge integration test" } });
     await tx.projectMember.create({ data: { projectId: ids.projectId, workspaceId: ids.workspaceId, principalId: ids.principalId, role: "owner" } });
     await tx.board.create({ data: { projectId: ids.projectId, viewport: { x: 0, y: 0, zoom: 1 } } });
-    // Simulate API approval's pinned request+Run transaction, never worker-side
-    // context synthesis. The release and model are deliberately chosen here.
-    const request = startRunRequestSchema.parse({ prompt: "Build two prototype screens", modelId: "quality", workflow: "generate", generationIntent: null, targetSurface: "web", designStyle: { kind: "automatic" }, sourceIds: [], artifactTargets: [], requestedArtifactKinds: ["prototype"], canvasSnapshot: null });
-    let runId: string | null = null;
-    if (bindRun) {
-      const thread = await tx.thread.create({ data: { projectId: ids.projectId, createdById: ids.principalId, title: "Bridge prototype", entrySequence: 1, revision: 1 } });
-      await tx.threadEntry.create({ data: { threadId: thread.id, sequence: 1, role: "user", kind: "message", content: { protocol: "workbench.entry.v1", type: "user.prompt", text: request.prompt, sourceIds: [] } } });
-      const run = await tx.run.create({ data: { projectId: ids.projectId, threadId: thread.id, createdById: ids.principalId, knowledgeReleaseId, idempotencyKey: `prototype:${ids.planId}`, requestHash: canonicalSha256(request), request: request as Prisma.InputJsonValue, requestId: randomUUID(), traceId: randomUUID(), status: "queued", modelId: request.modelId } });
-      runId = run.id;
-      await new RunEventStore().append(tx, run.id, "run.queued", { position: null });
-    }
-    await tx.prototypePlan.create({ data: { id: ids.planId, projectId: ids.projectId, createdById: ids.principalId, title: "Bridge prototype", prompt: request.prompt, generationRequest: request as Prisma.InputJsonValue, runtimeRunId: runId, status: "approved", idempotencyKey: suffix, requestHash: "b".repeat(64) } });
   });
+  const request = startRunRequestSchema.parse({ prompt: "Build two prototype screens", modelId: "quality", workflow: "generate", targetSurface: "web", designStyle: { kind: "automatic" }, requestedArtifactKinds: ["prototype"] });
+  if (bindRun) {
+    const flow = workerRequirementFlow(db, ids.principalId, ids.projectId);
+    const { plan } = await flow.create(request);
+    ids.planId = plan!.id;
+  } else {
+    await db.prototypePlan.create({ data: { id: ids.planId, projectId: ids.projectId, createdById: ids.principalId, title: "Unbound archived plan", prompt: request.prompt, generationRequest: request as Prisma.InputJsonValue, status: "approved", idempotencyKey: suffix, requestHash: canonicalSha256(request) } });
+  }
   return ids;
 }
 
