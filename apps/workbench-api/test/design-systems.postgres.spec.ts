@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { ConfigService } from "@nestjs/config";
 import {
   canonicalJson,
   runtimeDesignStyleSnapshotSchema,
@@ -8,8 +9,10 @@ import { Prisma, PrismaClient } from "@workbench/workbench-db";
 import { AccessService } from "../src/modules/access/access.service.js";
 import { DesignSystemImportsService } from "../src/modules/design-systems/design-system-imports.service.js";
 import { DesignSystemsService } from "../src/modules/design-systems/design-systems.service.js";
+import { PrototypeV2Service } from "../src/modules/prototypes/prototype-v2.service.js";
 import { RunEventStore } from "../src/modules/runs/run-event.store.js";
 import { RunsService } from "../src/modules/runs/runs.service.js";
+import { requirementFlow } from "./fixtures/requirement-flow.js";
 
 import { seedReadyKnowledge } from "../../../scripts/test-support/knowledge-fixture.mjs";
 
@@ -165,8 +168,21 @@ describeWithPostgres("Design System PostgreSQL vertical slice", () => {
           artifactTargets: [],
           requestedArtifactKinds: ["prototype" as const],
         };
-        const normalizedRequest = startRunRequestSchema.parse(request);
-        const run = await runs.start(owner.id, thread.id, `run:design:${suffix}`, request);
+        const workflows = {
+          configured: true, startPlan: vi.fn(), cancelPlan: vi.fn(), startExport: vi.fn(), cancelExport: vi.fn(),
+        };
+        const prototypes = new PrototypeV2Service(transactionalDb as never, workflows, new ConfigService(), {} as never, runs);
+        const flow = requirementFlow(transactionalDb as never, runs, prototypes, owner.id, targetProject.id);
+        const { session, plan, run } = await flow.create(startRunRequestSchema.parse(request), { kind: "new" }, thread.id);
+        const confirmation = await tx.requirementConfirmation.findUniqueOrThrow({ where: { id: session.confirmation!.id } });
+        expect(confirmation).toMatchObject({ status: "started", runId: run.id, planId: plan!.id });
+        expect(await tx.run.count({ where: { threadId: thread.id } })).toBe(1);
+        const normalizedRequest = startRunRequestSchema.parse(confirmation.generationRequest);
+        expect(normalizedRequest).toMatchObject({
+          ...request,
+          prompt: expect.stringContaining(request.prompt),
+          requirementConfirmationId: confirmation.id,
+        });
         const persistedRun = await tx.run.findUniqueOrThrow({ where: { id: run.id } });
         expect(persistedRun.request).toEqual(normalizedRequest);
         const snapshot = runtimeDesignStyleSnapshotSchema.parse(persistedRun.designStyleSnapshot);
@@ -183,6 +199,9 @@ describeWithPostgres("Design System PostgreSQL vertical slice", () => {
           ],
         });
         const snapshotSha = createHash("sha256").update(canonicalJson(snapshot)).digest("hex");
+        expect(confirmation.inputSnapshot).toMatchObject({
+          designStyle: { artifactVersionId: imported.targetArtifactVersionId, snapshot, snapshotSha256: snapshotSha },
+        });
         expect(persistedRun.designStyleSnapshotSha256).toBe(snapshotSha);
         expect(persistedRun.requestHash).toBe(createHash("sha256").update(canonicalJson({
           request: normalizedRequest,
