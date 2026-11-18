@@ -78,6 +78,7 @@ export type RequirementDiscussionView = {
   reviewCurrent: boolean;
   confirmationPending: boolean;
   generationStarting?: boolean;
+  generationOutcome?: "succeeded" | "failed" | "cancelled";
   generationIssue?: string;
   hasEarlierMessages: boolean;
   currentGeneration?: { label: string; baseline: string };

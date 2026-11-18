@@ -102,6 +102,15 @@ function show(view = ready(), extras = {}) {
 }
 afterEach(cleanup);
 
+it("replaces the generating status after the confirmed run stops", () => {
+  const view = { ...ready(), status: "generating" as const, canConfirm: false };
+  const { update } = show(view);
+  expect(screen.getByText("生成中，可继续讨论")).toBeVisible();
+  update({ view: { ...view, generationOutcome: "cancelled" } });
+  expect(screen.getByText("本次生成已停止")).toBeVisible();
+  expect(screen.queryByText("生成中，可继续讨论")).not.toBeInTheDocument();
+});
+
 it("distinguishes an accepted generation waiting to start from an unknown confirmation receipt", async () => {
   const retry = vi.fn().mockResolvedValue(undefined);
   const view = {

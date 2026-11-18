@@ -109,6 +109,12 @@ type RequirementDiscussionProps = {
 export function RequirementDiscussion(props: RequirementDiscussionProps) {
   return <DiscussionBody key={props.view.scopeKey} {...props} />;
 }
+
+const generationOutcomeLabels = {
+  succeeded: "本次生成已完成",
+  failed: "本次生成失败",
+  cancelled: "本次生成已停止",
+};
 function DiscussionBody({
   view,
   canEdit,
@@ -187,7 +193,9 @@ function DiscussionBody({
               : view.generationStarting
                 ? "已确认，等待生成"
                 : view.status === "generating"
-                  ? "生成中，可继续讨论"
+                  ? view.generationOutcome
+                    ? generationOutcomeLabels[view.generationOutcome]
+                    : "生成中，可继续讨论"
                   : "梳理本次增量"}
         </span>
       </header>

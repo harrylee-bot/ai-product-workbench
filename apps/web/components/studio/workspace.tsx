@@ -454,6 +454,15 @@ export function StudioWorkspace({
   const running = Boolean(
     plan && ["approved", "generating"].includes(plan.status),
   );
+  const baseline = discussion.generationBaseline;
+  if (discussionView.status === "generating" && baseline?.status === "started") {
+    const outcome = baseline.planId
+      ? plan?.id === baseline.planId ? plan.status : undefined
+      : direct.run?.id === baseline.runId ? direct.run?.status : undefined;
+    if (outcome === "ready") discussionView.generationOutcome = "succeeded";
+    else if (outcome === "succeeded" || outcome === "failed" || outcome === "cancelled")
+      discussionView.generationOutcome = outcome;
+  }
   const previousRevision = revisions.find(
     (revision) => revision.id === selectedRevision?.sourceRevisionId,
   );
@@ -702,7 +711,7 @@ export function StudioWorkspace({
           });
           setFollowRun(true);
           setView("pages");
-          setPanel(null);
+          setPanel((current) => current === "plan" ? current : null);
           void queryClient.invalidateQueries({
             queryKey: workbenchQueryKeys.prototypeV2(projectId),
           });
