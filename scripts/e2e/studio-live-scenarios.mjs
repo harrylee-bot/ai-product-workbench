@@ -12,7 +12,7 @@ const digest = bytes => createHash("sha256").update(bytes).digest("hex");
 const increment = "在云溪营销极速发布平台现有活动管理列表中，为策划人员增加渠道类型筛选。只筛当前角色已授权区域内活动，已有登录、导航、审核发布和报表保持不变。筛选项为全部、企微、短信，默认全部；与现有分页联动，改变筛选重置第一页，空结果提示无匹配活动，失败保留条件可重试。复用当前活动列表查询能力，仅扩展筛选参数，不接新外部系统，不改业务流程。目标为Web端，沿用原设计规范。";
 const interactionSpec = "原型交互验收：列表页包含标签为渠道类型的原生select、全部/企微/短信三个选项，和占位文字搜索活动的搜索框。提供企微活动与短信活动各两条，切换渠道后真实隐藏其他渠道的行。输入搜索词真实按活动名称过滤，不存在的名称显示无匹配活动；清空搜索恢复列表。点击活动旁查看详情打开第二个活动详情页，详情提供返回列表按钮，点击后可返回。两页均可实际操作，不新增登录页或报表页。";
 
-export async function runStudioLiveScenarios({ page, browser, webOrigin, outDir, runId, dbUrl, sql, waitUntil, evidence, step, runCmd }) {
+export async function runStudioLiveScenarios({ page, browser, webOrigin, outDir, runId, dbUrl, sql, waitUntil, evidence, step, runCmd, jointOnly = false }) {
   const query = async (text, values = []) => (await sql(text, values, dbUrl)).rows;
   const api = async (method, url, body) => page.evaluate(async ({ method, url, body, key }) => {
     const response = await fetch(`/api/v1${url}`, { method, headers: { "content-type": "application/json", "Idempotency-Key": key }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
@@ -87,7 +87,9 @@ export async function runStudioLiveScenarios({ page, browser, webOrigin, outDir,
     result.ordinarySendCreatedNoRun = true;
     const review = page.getByRole("article", { name: "本次改动确认", exact: true });
     await review.waitFor();
-    result.confirmationCard = await review.innerText();
+    const reviewText = await review.innerText();
+    if (jointOnly) result.confirmationCardSha256 = digest(reviewText);
+    else result.confirmationCard = reviewText;
     assert.equal(await page.getByRole("checkbox", { name: "我同意将以上平台级改造纳入本次范围" }).count(), 0, "Increment must not unexpectedly add platform changes");
     const reply = page.waitForResponse(r => r.request().method() === "POST" && new URL(r.url()).pathname === `/api/v1/requirement-sessions/${session.id}/confirm`);
     await review.getByRole("button", { name: "确认需求并生成", exact: true }).click();
@@ -158,7 +160,7 @@ export async function runStudioLiveScenarios({ page, browser, webOrigin, outDir,
     assert.equal(confirmations.length, 1, "Exactly one confirmation for this scenario");
     const [after] = await query("SELECT baseline FROM workbench.requirement_confirmations WHERE id=$1", [receipt.id]);
     assert.equal(digest(JSON.stringify(after.baseline)), result.baselineChecksum);
-    result.outputs = outputs;
+    result.outputs = jointOnly ? outputs.map(({ citations, ...version }) => ({ ...version, citationIds: citations.map(c => c.id) })) : outputs;
     for (const item of ready) {
       assert.equal(item.knowledge_release_id, frozen.input_snapshot.knowledgeReleaseId);
       assert.ok(item.citations.length, "Every delivered output retains knowledge citations");
@@ -177,7 +179,7 @@ export async function runStudioLiveScenarios({ page, browser, webOrigin, outDir,
     return result;
   }
 
-  const scope = process.env.WORKBENCH_STUDIO_LIVE_GENERATION_SCOPE ?? "all";
+  const scope = jointOnly ? "joint" : process.env.WORKBENCH_STUDIO_LIVE_GENERATION_SCOPE ?? "all";
   assert.ok(["all", "prototype", "prd", "joint"].includes(scope), "Unknown Studio generation scope");
   evidence.generationScope = scope;
   const ids = [];
@@ -212,8 +214,11 @@ export async function runStudioLiveScenarios({ page, browser, webOrigin, outDir,
   }
   if (scope === "all" || scope === "joint") {
     const jointProject = await createProject("联合");
-    await discussAndGenerate(jointProject, "both", increment + "同时输出需求文档和交互原型，范围与术语一致。" + interactionSpec, "joint");
-    await verifyDocumentDelivery(jointProject, "joint");
+    const joint = await discussAndGenerate(jointProject, "both", increment + "同时输出需求文档和交互原型，范围与术语一致。" + interactionSpec, "joint");
+    const { auditJointOutputs } = await import("./studio-live-joint-outputs.mjs");
+    evidence.joint = await auditJointOutputs(query, joint, page.frameLocator(".visual-paper iframe"));
+    await checkpoint();
+    if (!jointOnly) await verifyDocumentDelivery(jointProject, "joint");
     ids.push(jointProject);
   }
   const runs = await query("SELECT id,status,request->>'modelId' AS model_id FROM workbench.runs WHERE project_id=ANY($1::text[])", [ids]);

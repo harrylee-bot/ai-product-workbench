@@ -31,11 +31,11 @@ import {
 const root = path.resolve(fileURLToPath(new URL("../../", import.meta.url)));
 const runId = String(Date.now());
 const phase = process.env.WORKBENCH_STUDIO_LIVE_PHASE ?? "generation";
-assert.ok(["generation", "prd", "access", "files", "delivery"].includes(phase));
-const generates = phase === "generation" || phase === "prd";
+assert.ok(["generation", "prd", "joint", "access", "files", "delivery"].includes(phase));
+const generates = ["generation", "prd", "joint"].includes(phase);
 const usesModelFixture = generates || phase === "access";
 const needsTemporal = generates || phase === "delivery";
-const suiteDirectory = { prd: "studio-live-prd", files: "file-delivery", delivery: "artifact-delivery" }[phase] ?? "studio-live-flash";
+const suiteDirectory = { joint: "studio-live-joint", prd: "studio-live-prd", files: "file-delivery", delivery: "artifact-delivery" }[phase] ?? "studio-live-flash";
 const auditRoot = path.join(root, "output/audit/1.0.0");
 const outDir = path.join(auditRoot, suiteDirectory, runId);
 await mkdir(outDir, { recursive: true });
@@ -358,7 +358,7 @@ try {
   // The runtime is independently deployed. Require its deployment owner's
   // inspection receipt; a model catalog alone cannot prove tool compatibility.
   const proofPath = requiredEnv("WORKBENCH_STUDIO_LIVE_RUNTIME_PROOF");
-  if (phase === "prd") {
+  if (phase === "prd" || phase === "joint") {
     const { verifyPrdRuntime } = await import("./studio-live-prd-runtime.mjs");
     evidence.runtimeDeploymentAttestation = await verifyPrdRuntime({ serviceRoot, backendCommit: expectedBackendCommit,
       runtimeCommit: requiredEnv("WORKBENCH_STUDIO_LIVE_RUNTIME_COMMIT"), proofPath, gatewayUrl: providerEnv.V2_PROVIDER_GATEWAY_URL });
@@ -686,7 +686,7 @@ try {
     }
   });
 
-  if (phase === "generation") await runStudioLiveScenarios({ page, browser, webOrigin, outDir, runId, dbUrl, sql, waitUntil, evidence, step, runCmd });
+  if (phase === "generation" || phase === "joint") await runStudioLiveScenarios({ page, browser, webOrigin, outDir, runId, dbUrl, sql, waitUntil, evidence, step, runCmd, jointOnly: phase === "joint" });
   if (phase === "prd") {
     const { runStudioPrd } = await import("./studio-live-prd-scenarios.mjs");
     await runStudioPrd({ page, webOrigin, outDir, runId, dbUrl, sql, waitUntil, evidence, step });
@@ -715,7 +715,7 @@ try {
     assert.deepEqual(evidence.networkErrors.filter(item => !evidence.unavailableGenerationDependencies.includes(item)), []);
   }
   evidence.status = "passed";
-  step(phase === "prd" ? "Completed real Studio PRD-only delivery" : phase === "generation" ? "Completed Studio real-stack deepseek-flash acceptance scenario" : phase === "delivery" ? "Completed fixed-source artifact delivery" : phase === "files" ? "Completed real Studio file delivery" : "Completed real local account and permission checks; no generation or storage acceptance");
+  step(phase === "joint" ? "Completed real linked PRD and interactive prototype generation" : phase === "prd" ? "Completed real Studio PRD-only delivery" : phase === "generation" ? "Completed Studio real-stack deepseek-flash acceptance scenario" : phase === "delivery" ? "Completed fixed-source artifact delivery" : phase === "files" ? "Completed real Studio file delivery" : "Completed real local account and permission checks; no generation or storage acceptance");
 } catch (error) {
   evidence.status = "failed";
   evidence.failure = error.stack || String(error);

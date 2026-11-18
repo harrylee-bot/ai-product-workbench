@@ -3,6 +3,7 @@ import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
+import { setTimeout as delay } from "node:timers/promises";
 
 // Copies explicitly supplied published source chunks into a new local test database.
 // Embeddings, reranking, retrieval and model inference remain real; production is read-only.
@@ -25,10 +26,16 @@ export async function startLiveKnowledgeFixture({ serviceRoot, publishedPath } =
     const origin = kind === "embedding" ? env.V2_INFERENCE_EMBEDDING_URL : env.V2_INFERENCE_RERANKER_URL;
     assert.equal(new URL(origin).hostname, "127.0.0.1");
     const token = kind === "embedding" ? env.V2_INFERENCE_TOKEN : (env.V2_RERANKER_TOKEN ?? env.V2_INFERENCE_TOKEN);
-    const response = await fetch(origin + route, { method: body ? "POST" : "GET", signal: AbortSignal.timeout(35000),
-      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" }, ...(body ? { body: JSON.stringify(body) } : {}) });
-    assert.equal(response.status, 200, `Live ${kind} ${route} HTTP ${response.status}`);
-    return response.json();
+    for (let attempt = 0; ; attempt++) {
+      const response = await fetch(origin + route, { method: body ? "POST" : "GET", signal: AbortSignal.timeout(35000),
+        headers: { authorization: `Bearer ${token}`, "content-type": "application/json" }, ...(body ? { body: JSON.stringify(body) } : {}) });
+      if (response.status !== 429 || attempt === 5) {
+        assert.equal(response.status, 200, `Live ${kind} ${route} HTTP ${response.status}`);
+        return response.json();
+      }
+      await response.body?.cancel();
+      await delay(500 * 2 ** attempt);
+    }
   }
   const embeddingMeta = metadata.embedding, rerankerMeta = metadata.reranker;
   const { parseTeiRuntimeInfo } = await import(pathToFileURL(path.join(serviceRoot, "apps/workbench-api/dist/modules/knowledge/tei-runtime-info.js")).href);
