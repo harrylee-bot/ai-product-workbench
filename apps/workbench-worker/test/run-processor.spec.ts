@@ -1,3 +1,9 @@
+// Runtime orchestration uses a verified confirmation collaborator. Its integrity
+// boundary is tested in confirmed-requirement-baseline.spec.ts and real PG tests.
+vi.mock("../src/runs/confirmed-requirement-baseline.js", () => ({
+  confirmedRequirementBaseline: vi.fn(async () => ({confirmationId:"fixture-confirmation",summaryVersion:1,checksum:"a".repeat(64),baseline:{sourceContents:{readings:[]}}})),
+  freezeConfirmedSources: vi.fn(async (_tx, _confirmed, sources) => sources),
+}));
 import { persistArtifactDraft, persistDelta } from "./run-persistence.fixture.js";
 import {
   boardNodeProtocol,
@@ -816,6 +822,7 @@ function durableExecutionPrepared() {
       sourceIds: [],
       artifactTargets: [],
       requestedArtifactKinds: [],
+      outputOperations: [],
     },
     artifactTargets: [],
     prototypePatchBaselines: [],
@@ -1441,6 +1448,7 @@ describe("Runtime Artifact publication operations", () => {
     sourceIds: [],
     artifactTargets: [target],
     requestedArtifactKinds: ["prototype" as const],
+    outputOperations: [{kind:"prototype" as const,operation:{kind:"revise" as const,target}}],
   };
   const revision = {
     protocol: "workbench.runtime.result.v1" as const,
@@ -1455,19 +1463,19 @@ describe("Runtime Artifact publication operations", () => {
     }],
   };
 
-  it("requires edit results to revise every exact requested target", () => {
+  it("matches every output to its frozen revision operation", () => {
     expect(() => validateRuntimeArtifactOperations(editRequest, revision)).not.toThrow();
     expect(() => validateRuntimeArtifactOperations(editRequest, {
       ...revision,
       artifacts: [],
-    })).toThrow("RUNTIME_ARTIFACT_REVISION_TARGETS_INCOMPLETE");
+    })).toThrow("RUNTIME_ARTIFACTS_INCOMPLETE:prototype");
     expect(() => validateRuntimeArtifactOperations(editRequest, {
       ...revision,
       artifacts: [{
         ...revision.artifacts[0]!,
         operation: { kind: "revise", target: { ...target, screenIds: ["screen-success"] } },
       }],
-    })).toThrow("RUNTIME_ARTIFACT_REVISION_TARGET_INVALID");
+    })).toThrow("RUNTIME_OUTPUT_OPERATION_MISMATCH");
   });
 
   it("rejects revision output from non-edit workflows", () => {
@@ -1479,7 +1487,7 @@ describe("Runtime Artifact publication operations", () => {
 
   it("requires one fixed-PRD Prototype with the exact planned screen ids and order in terminal results", () => {
     const content = prototypeDocument();
-    const request = { ...editRequest, workflow: "generate" as const, generationIntent: "prd-flow" as const,
+    const request = { ...editRequest, outputOperations:[{kind:"prototype" as const,operation:{kind:"create" as const}}], workflow: "generate" as const, generationIntent: "prd-flow" as const,
       artifactTargets: [{ artifactId: "prd", artifactVersionId: "prd-v1", screenIds: [] }],
       prdScreenPlan: content.screens.map(screen => ({ id: screen.id, title: screen.name })) };
     const draft = { ...revision.artifacts[0]!, operation: { kind: "create" as const } };
@@ -1499,6 +1507,7 @@ describe("Runtime Artifact publication operations", () => {
       workflow: "generate",
       artifactTargets: [],
       requestedArtifactKinds: ["prd"],
+        outputOperations: [{kind: "prd", operation: {kind: "create"}}],
     }, {
       ...revision,
       artifacts: [{
@@ -1597,7 +1606,7 @@ describe("Runtime Artifact revision publication", () => {
   }
 
   function prdRevisionHarness(baseSchemaVersion = 3) {
-    const baseContent = prdDocumentV3Example;
+    const baseContent = {...prdDocumentV3Example,citations:runtimePrdResultFixture.artifacts[0]!.citations};
     const nextContent = {
       ...baseContent,
       revision: {
@@ -1643,7 +1652,7 @@ describe("Runtime Artifact revision publication", () => {
           content: nextContent,
           contentBlobId: null,
           checksum: sha256Canonical(nextContent),
-          citations: [],
+          citations: nextContent.citations,
           runtimeDraftIndex: 0,
           runtimeDraftTitle: nextContent.title,
           artifact: {
@@ -1675,7 +1684,7 @@ describe("Runtime Artifact revision publication", () => {
       kind: "prd" as const,
       schemaVersion: 3 as const,
       title: nextContent.title,
-      citations: [],
+      citations: nextContent.citations,
       operation: { kind: "revise" as const, target },
       content: nextContent,
     };
@@ -1959,6 +1968,7 @@ describe("Runtime Artifact draft staging and publication", () => {
         sourceIds: ["file-1"],
         artifactTargets: [],
         requestedArtifactKinds: ["prototype"],
+        outputOperations: [{kind: "prototype", operation: {kind: "create"}}],
       },
       knowledgeReleaseId: "knowledge-release-1",
     });
@@ -2093,6 +2103,7 @@ describe("Runtime Artifact draft staging and publication", () => {
         sourceIds: ["file-1"],
         artifactTargets: [],
         requestedArtifactKinds: ["prototype"],
+        outputOperations: [{kind: "prototype", operation: {kind: "create"}}],
       },
     });
     Object.assign(tx, {
@@ -2218,6 +2229,7 @@ describe("Runtime Artifact draft staging and publication", () => {
         sourceIds: ["file-1"],
         artifactTargets: [],
         requestedArtifactKinds: ["prd"],
+        outputOperations: [{kind: "prd", operation: {kind: "create"}}],
       },
       knowledgeReleaseId: "knowledge-release-1",
     });
@@ -2247,7 +2259,7 @@ describe("Runtime Artifact draft staging and publication", () => {
     const { processor, tx } = draftStagingHarness(existing);
     const run = await tx.run.findUniqueOrThrow();
     tx.run.findUniqueOrThrow.mockResolvedValue({
-      ...run, request: { ...run.request, requestedArtifactKinds: ["prd", "prototype"] },
+      ...run, request: { ...run.request, requestedArtifactKinds: ["prd", "prototype"], outputOperations: [{kind:"prd",operation:{kind:"create"}},{kind:"prototype",operation:{kind:"create"}}] },
     });
     tx.artifactVersion.update.mockResolvedValue(existing as never);
     tx.runEvent.findMany.mockResolvedValue([{ payload: { attempt: 1, stage: "summarizing" } }]);
@@ -2269,7 +2281,7 @@ describe("Runtime Artifact draft staging and publication", () => {
     const { processor, tx } = draftStagingHarness();
     const run = await tx.run.findUniqueOrThrow();
     tx.run.findUniqueOrThrow.mockResolvedValue({
-      ...run, request: { ...run.request, requestedArtifactKinds: ["prd", "prototype"] },
+      ...run, request: { ...run.request, requestedArtifactKinds: ["prd", "prototype"], outputOperations: [{kind:"prd",operation:{kind:"create"}},{kind:"prototype",operation:{kind:"create"}}] },
     });
     const findFirst = vi.fn().mockResolvedValue({ id: "version-prd" });
     Object.assign(tx.artifactVersion, { findFirst });
@@ -2314,7 +2326,7 @@ describe("Runtime Artifact draft staging and publication", () => {
     const target = { artifactId: "artifact-new", artifactVersionId: "version-base", screenIds: ["screen-home"] };
     const run = await tx.run.findUniqueOrThrow();
     tx.run.findUniqueOrThrow.mockResolvedValue({
-      ...run, request: { ...run.request, workflow: "edit", sourceIds: [], artifactTargets: [target] },
+      ...run, request: { ...run.request, workflow: "edit", sourceIds: [], artifactTargets: [target], outputOperations:[{kind:"prototype",operation:{kind:"revise",target}}] },
     });
     const query = tx.$queryRaw.getMockImplementation()!;
     tx.$queryRaw.mockImplementation((statement: unknown) => rawSqlText(statement).includes('FROM "artifacts"')
@@ -2362,6 +2374,7 @@ describe("Runtime Artifact draft staging and publication", () => {
         sourceIds: [],
         artifactTargets: [sourceTarget],
         requestedArtifactKinds: ["prototype"],
+        outputOperations: [{kind: "prototype", operation: {kind: "create"}}],
       },
       knowledgeReleaseId: "knowledge-release-1",
     });
@@ -2623,6 +2636,7 @@ describe("Runtime Artifact draft staging and publication", () => {
         sourceIds: [],
         artifactTargets: [],
         requestedArtifactKinds: ["prd"],
+        outputOperations: [{kind: "prd", operation: {kind: "create"}}],
       },
       knowledgeReleaseId: "knowledge-release-1",
     });
@@ -3276,6 +3290,7 @@ function publishableRun() {
       sourceIds: [],
       artifactTargets: [],
       requestedArtifactKinds: [],
+      outputOperations: [],
     },
   };
 }
@@ -3329,6 +3344,7 @@ function canvasDirectPublishHarness() {
       sourceIds: [],
       artifactTargets: [target],
       requestedArtifactKinds: ["prototype"],
+      outputOperations: [{kind: "prototype", operation: {kind: "revise",target}}],
     },
   });
   tx.canvasAgentSession.findUnique.mockResolvedValue({ id: "canvas-session-1" });
@@ -4671,6 +4687,7 @@ describe("Run durable snapshots", () => {
     };
     const prepared = durableExecutionPrepared();
     prepared.request.requestedArtifactKinds = ["prd"];
+    prepared.request.outputOperations=[{kind:"prd",operation:{kind:"create"}}];
     const persistProgress = vi.fn(async () => undefined);
     const publishResult = vi.fn(async () => undefined);
     Object.assign(internals, {
@@ -4986,6 +5003,7 @@ describe("Run durable snapshots", () => {
           sourceIds: [],
           artifactTargets: [],
           requestedArtifactKinds: [],
+      outputOperations: [],
         },
         artifactTargets: [],
         sources: [],
@@ -5707,6 +5725,7 @@ describe("Run durable snapshots", () => {
         sourceIds: [],
         artifactTargets: [],
         requestedArtifactKinds: [],
+      outputOperations: [],
       },
     });
     Object.assign(tx, {
@@ -5766,6 +5785,7 @@ describe("Run durable snapshots", () => {
         sourceIds: [],
         artifactTargets: [],
         requestedArtifactKinds: [],
+      outputOperations: [],
       },
     });
     Object.assign(tx.run, {

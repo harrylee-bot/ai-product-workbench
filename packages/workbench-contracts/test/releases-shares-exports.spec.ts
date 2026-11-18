@@ -6,6 +6,9 @@ import {
   exportCapabilitiesSchema,
   exportBuildJobSchema,
   exportBuildQueue,
+  exportCancelJobSchema,
+  exportCancelQueue,
+  exportCancelQueueOptions,
   exportSelectionSchema,
   projectReleaseProtocol,
   projectReleaseSchema,
@@ -349,6 +352,14 @@ describe("export contracts", () => {
 
   it("uses one strict pg-boss command envelope", () => {
     expect(exportBuildQueue).toBe("export.build");
+    expect(exportCancelQueue).toBe("export.cancel");
+    expect(exportCancelQueueOptions).toMatchObject({
+      policy: "short",
+      retryLimit: 5,
+      expireInSeconds: 60,
+      deleteAfterSeconds: 86_400,
+    });
+    expect(exportCancelJobSchema.parse({ exportJobId: "export-1" })).toEqual({ exportJobId: "export-1" });
     expect(exportBuildJobSchema.parse({ exportJobId: "export-1" })).toEqual({ exportJobId: "export-1" });
     expect(exportBuildJobSchema.safeParse({ exportJobId: "export-1", releaseId: "release-1" }).success).toBe(false);
   });

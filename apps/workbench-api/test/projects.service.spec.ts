@@ -194,7 +194,7 @@ describe("Projects service", () => {
     const bootstrap = await service.bootstrap("principal_1", project.id);
 
     expect(findEntries).toHaveBeenCalledWith({
-      where: { threadId: thread.id },
+      where: { threadId: thread.id, OR: [{ audiencePrincipalId: null }, { audiencePrincipalId: "principal_1" }] },
       orderBy: { sequence: "desc" },
       take: 500,
     });

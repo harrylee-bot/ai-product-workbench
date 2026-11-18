@@ -261,6 +261,8 @@ describe("ExportJob API invariants", () => {
     const result = await service.list("principal_1", "project_1");
     expect(result.items).toHaveLength(2);
     expect(result.items[0]).toMatchObject({ id: "export_broken", status: "failed", output: null, failure: { code: "EXPORT_OUTPUT_BLOB_NOT_READABLE" } });
+    expect(result.items[0]?.revision).toBe(1);
+    expect(result.items[1]?.revision).toBe(0);
     expect(result.items[1]).toMatchObject({ id: "export_1", status: "succeeded", output: { blobId: "blob_1" }, failure: null });
     await expect(service.get("principal_1", "export_broken")).resolves.toEqual(result.items[0]);
     await expect(service.getContent("principal_1", "export_broken")).rejects.toMatchObject({ status: 409 });
@@ -270,6 +272,37 @@ describe("ExportJob API invariants", () => {
     expect(Reflect.getMetadata(HTTP_CODE_METADATA, ExportsController.prototype.create)).toBe(202);
     expect(Reflect.getMetadata(HTTP_CODE_METADATA, ExportsController.prototype.cancel)).toBe(200);
     expect(Reflect.getMetadata(HTTP_CODE_METADATA, ExportsController.prototype.createPreviewToken)).toBe(200);
+  });
+
+  it("accepts cancellation before executor cleanup and publishes the cancel command transactionally", async () => {
+    let job = queuedJob();
+    const tx = {
+      $queryRaw: vi.fn().mockResolvedValue([{ id: "project_1", revision: 0 }]),
+      projectMember: { findUnique: vi.fn().mockResolvedValue({ role: "editor" }) },
+      exportJob: {
+        updateMany: vi.fn().mockImplementation(async () => {
+          job = { ...job, status: "cancelling", revision: job.revision + 1 };
+          return { count: 1 };
+        }),
+        findUnique: vi.fn().mockImplementation(async () => job),
+      },
+    };
+    const db = {
+      exportJob: { findFirst: vi.fn().mockResolvedValue(job) },
+      projectRelease: { findUnique: vi.fn().mockResolvedValue({ projectId: "project_1" }) },
+      $transaction: vi.fn().mockImplementation((callback) => callback(tx)),
+    };
+    const queue = { sendInTransaction: vi.fn().mockResolvedValue("cancel-job-1") };
+
+    const result = await serviceWith(db, queue).cancel("principal_1", "export_1", 0);
+
+    expect(result).toMatchObject({ id: "export_1", status: "cancelling", revision: 1, finishedAt: null, output: null, failure: null });
+    expect(queue.sendInTransaction).toHaveBeenCalledWith(
+      tx,
+      "export.cancel",
+      { exportJobId: "export_1" },
+      { singletonKey: "export_1" },
+    );
   });
 
   it("reports the fixed official-importer Figma capability without a deployment secret", () => {

@@ -18,7 +18,7 @@ test("an API edit builds API alone", () => {
 test("shared package changes propagate to every Docker consumer", () => {
   const result = plan({ "packages/workbench-export-core/src/index.ts": "b" });
   assert.equal(result.mode, "selected");
-  assert.deepEqual(result.services, ["workbench-api", "workbench-export-worker", "workbench-temporal-worker", "workbench-worker"]);
+  assert.deepEqual(result.services, ["workbench-api", "workbench-export-worker", "workbench-preview", "workbench-temporal-worker", "workbench-worker"]);
 });
 test("the Temporal executor image tracks its own Dockerfile and build-worker inputs", () => {
   const result = plan({ "apps/workbench-build-worker/src/main.ts": "b" });

@@ -20,7 +20,6 @@ import {
   idempotencyConflictProblem,
   notFoundProblem,
   revisionConflictProblem,
-  submissionIntentStateConflictProblem,
   validationProblem,
 } from "../../common/problem-details.js";
 import { WorkbenchDbService } from "../../platform/database/workbench-db.service.js";
@@ -98,18 +97,7 @@ const uploadBundleSelect = {
 } as const;
 
 type UploadBundle = Prisma.FileUploadSessionGetPayload<{ select: typeof uploadBundleSelect }>;
-type SubmissionIntentUploadSlot = Readonly<{
-  intentId: string;
-  projectId: string;
-  createdById: string;
-  status: string;
-  kind: string;
-  fileAssetId: string | null;
-  clientFingerprint: string | null;
-  fileName: string | null;
-  declaredMediaType: string | null;
-  byteSize: bigint | null;
-}>;
+
 
 @Injectable()
 export class FileUploadsService {
@@ -134,7 +122,6 @@ export class FileUploadsService {
       select: uploadBundleSelect,
     });
     if (existing) {
-      await this.assertUploadBindingReplay(principalId, projectId, request, existing.fileAssetId);
       return this.resumeCreate(principalId, existing, requestHash);
     }
 
@@ -155,7 +142,6 @@ export class FileUploadsService {
           if (duplicate.requestHash !== requestHash) throw idempotencyConflictProblem();
           return false;
         }
-        await this.lockSubmissionIntentUploadSlot(tx, principalId, projectId, request);
         await tx.fileAsset.create({
           data: {
             id: fileAssetId,
@@ -182,24 +168,6 @@ export class FileUploadsService {
             expiresAt,
           },
         });
-        if (request.submissionIntent) {
-          const bound = await tx.submissionIntentAttachment.updateMany({
-            where: {
-              submissionIntentId: request.submissionIntent.submissionIntentId,
-              position: request.submissionIntent.attachmentPosition,
-              kind: "upload",
-              fileAssetId: null,
-              clientFingerprint: request.submissionIntent.clientFingerprint,
-            },
-            data: { fileAssetId },
-          });
-          if (bound.count !== 1) {
-            throw submissionIntentStateConflictProblem(
-              "The SubmissionIntent upload slot could not be bound",
-              "SUBMISSION_INTENT_UPLOAD_BINDING_CONFLICT",
-            );
-          }
-        }
         return true;
       });
       if (!created) {
@@ -208,7 +176,6 @@ export class FileUploadsService {
           select: uploadBundleSelect,
         });
         if (!raced) throw new Error("Idempotent upload receipt disappeared");
-        await this.assertUploadBindingReplay(principalId, projectId, request, raced.fileAssetId);
         return this.resumeCreate(principalId, raced, requestHash);
       }
     } catch (error) {
@@ -218,7 +185,6 @@ export class FileUploadsService {
         select: uploadBundleSelect,
       });
       if (raced) {
-        await this.assertUploadBindingReplay(principalId, projectId, request, raced.fileAssetId);
         return this.resumeCreate(principalId, raced, requestHash);
       }
       throw error;
@@ -640,99 +606,6 @@ export class FileUploadsService {
     });
   }
 
-  private async lockSubmissionIntentUploadSlot(
-    tx: Prisma.TransactionClient,
-    principalId: string,
-    projectId: string,
-    request: CreateFileUploadRequest,
-  ) {
-    const binding = request.submissionIntent;
-    if (!binding) return;
-    const rows = await tx.$queryRaw<SubmissionIntentUploadSlot[]>(Prisma.sql`
-      SELECT
-        intent."id" AS "intentId",
-        intent."project_id" AS "projectId",
-        intent."created_by_id" AS "createdById",
-        intent."status"::text AS "status",
-        attachment."kind"::text AS "kind",
-        attachment."file_asset_id" AS "fileAssetId",
-        attachment."client_fingerprint" AS "clientFingerprint",
-        attachment."file_name" AS "fileName",
-        attachment."declared_media_type" AS "declaredMediaType",
-        attachment."byte_size" AS "byteSize"
-      FROM "submission_intents" AS intent
-      JOIN "submission_intent_attachments" AS attachment
-        ON attachment."submission_intent_id" = intent."id"
-       AND attachment."project_id" = intent."project_id"
-      WHERE intent."id" = ${binding.submissionIntentId}
-        AND attachment."position" = ${binding.attachmentPosition}
-      FOR UPDATE OF intent, attachment
-    `);
-    const slot = rows[0];
-    if (
-      !slot
-      || slot.projectId !== projectId
-      || slot.createdById !== principalId
-      || slot.status !== "pending"
-    ) throw notFoundProblem("Submission intent upload slot");
-    this.assertUploadSlotMatches(slot, request, null);
-  }
-
-  private async assertUploadBindingReplay(
-    principalId: string,
-    projectId: string,
-    request: CreateFileUploadRequest,
-    fileAssetId: string,
-  ) {
-    const binding = request.submissionIntent;
-    if (!binding) return;
-    const rows = await this.db.$queryRaw<SubmissionIntentUploadSlot[]>(Prisma.sql`
-      SELECT
-        intent."id" AS "intentId",
-        intent."project_id" AS "projectId",
-        intent."created_by_id" AS "createdById",
-        intent."status"::text AS "status",
-        attachment."kind"::text AS "kind",
-        attachment."file_asset_id" AS "fileAssetId",
-        attachment."client_fingerprint" AS "clientFingerprint",
-        attachment."file_name" AS "fileName",
-        attachment."declared_media_type" AS "declaredMediaType",
-        attachment."byte_size" AS "byteSize"
-      FROM "submission_intents" AS intent
-      JOIN "submission_intent_attachments" AS attachment
-        ON attachment."submission_intent_id" = intent."id"
-       AND attachment."project_id" = intent."project_id"
-      WHERE intent."id" = ${binding.submissionIntentId}
-        AND attachment."position" = ${binding.attachmentPosition}
-    `);
-    const slot = rows[0];
-    if (!slot || slot.projectId !== projectId || slot.createdById !== principalId) {
-      throw notFoundProblem("Submission intent upload slot");
-    }
-    this.assertUploadSlotMatches(slot, request, fileAssetId);
-  }
-
-  private assertUploadSlotMatches(
-    slot: SubmissionIntentUploadSlot,
-    request: CreateFileUploadRequest,
-    expectedFileAssetId: string | null,
-  ) {
-    const binding = request.submissionIntent;
-    if (!binding) throw new Error("SubmissionIntent upload binding is missing");
-    if (
-      slot.kind !== "upload"
-      || slot.fileAssetId !== expectedFileAssetId
-      || slot.clientFingerprint !== binding.clientFingerprint
-      || slot.fileName !== request.fileName
-      || slot.declaredMediaType !== request.declaredMediaType
-      || slot.byteSize !== BigInt(request.byteSize)
-    ) {
-      throw submissionIntentStateConflictProblem(
-        "The upload request does not match the durable SubmissionIntent slot",
-        "SUBMISSION_INTENT_UPLOAD_BINDING_MISMATCH",
-      );
-    }
-  }
 
 }
 

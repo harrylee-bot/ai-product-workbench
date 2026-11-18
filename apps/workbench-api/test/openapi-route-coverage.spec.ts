@@ -23,14 +23,15 @@ describe("OpenAPI route registry coverage", () => {
     expect(actual).toEqual(declared);
   });
 
-  it("does not expose direct Run creation outside SubmissionIntent submission", () => {
+  it("exposes one confirmation flow and no retired generation or approval routes", () => {
     const actual = collectNestRoutes(AppModule);
     const declared = workbenchHttpRoutes.map((route) => `${route.method} ${route.path}`);
 
     expect(actual).not.toContain("post /threads/{threadId}/runs");
     expect(declared).not.toContain("post /threads/{threadId}/runs");
-    expect(actual).toContain("post /submission-intents/{intentId}/submit");
-    expect(declared).toContain("post /submission-intents/{intentId}/submit");
+    expect(actual).toContain("post /requirement-sessions/{sessionId}/confirm");
+    for(const route of actual.filter(x=>x.startsWith("post ")))expect(route).not.toMatch(/submission-intents|prototype-v2\/plans$|prototype-v2\/plans\/\{planId\}\/(approve|input)$|prototype-v2\/revisions\/\{revisionId\}\/(revise|plans)$/);
+
   });
 });
 

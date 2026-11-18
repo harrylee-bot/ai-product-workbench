@@ -1,6 +1,7 @@
 export function runtimePrdResultGuidance(
   requestedArtifactKinds: readonly string[],
   workflow: "generate" | "redesign" | "ideate" | "edit" = "generate",
+  prdOperation: "create" | "revise" = workflow === "edit" ? "revise" : "create",
 ): string | null {
   if (!requestedArtifactKinds.includes("prd")) return null;
   const linkedPrototype = requestedArtifactKinds.includes("prototype");
@@ -10,7 +11,7 @@ export function runtimePrdResultGuidance(
     linkedPrototype
       ? "This linked Run must produce a PRD and its Prototype. Complete all PRD stages and publish the PRD at artifact_index 0 before beginning Prototype stages. Base the Prototype on that exact PRD. Publish the Prototype at artifact_index 1, then explicitly call workbench_runtime_result_submit with a candidate envelope containing protocol, message, and artifacts. Copy each latest accepted ACK's finalSubmissionArtifact unchanged into candidate.artifacts: PRD at index 0 and Prototype at index 1. The trusted tool resolves and fully validates one complete Result containing both unchanged drafts. Do not rewrite accepted bodies. PRD draft publication does not complete this Run."
       : "This PRD-only Canvas Run has no free-form clarification resume path. Never call ask_clarification and never end with a question instead of a result. Keep unsupported high-risk behavior out of committed scope, record only conservative typed assumptions and acceptance boundaries, and still complete the requested PRD through complete Draft publication; the trusted Runtime submits the successful Draft as the Result.",
-    "Before authoring, successfully retrieve pinned Knowledge with workbench_knowledge_retrieve. Every Artifact must contain nonempty citations copied exactly from this attempt's retrieval results. Empty results are not evidence; request additional knowledge or fail instead of inventing citations.",
+    "Before authoring, successfully retrieve pinned Knowledge with workbench_knowledge_retrieve. Every Artifact must include at least one exact citation from this attempt's retrieval results. PRD revisions also retain their exact authorized base citations; every added citation must come from this attempt. Empty results are not evidence; request additional knowledge or fail instead of inventing citations.",
     "Artifact and workflow constraints such as PRD-only or no Prototype/code are Runtime metadata, not business scope, and must never appear in the PRD body. Do not invent default values, category members, enabled states, or other business facts that the request and authorized sources do not supply.",
     "Preserve generic delivery-channel labels literally. Never translate or expand 端内 or 端内渠道 into an affirmative APP, app, native app, APP端内Web, 客户端, or mini-program loading, publication, operation, or enabled-surface claim. Add such an affirmative claim only when the current request or an authorized source explicitly supplies it; preserve explicit negative or excluded APP/mini-program facts verbatim. Candidate-authored prose, channel:inApp, and every Runtime targetSurface value, including app and web, are not source evidence and cannot activate safety row 12. Without affirmative authorized input, row 12 must be 不涉及 with null remarks.",
     "When no physical page URL or route is supplied, keep the logical entry generic and put unresolved navigation in typed assumptions. Do not invent a concrete menu hierarchy or claim that an invented hierarchy is irrelevant to acceptance.",
@@ -19,13 +20,13 @@ export function runtimePrdResultGuidance(
     "Every requirement.acceptanceCriterionIds entry must be the ID of a typed acceptanceCriterion block, never an acceptance-table row ID. Each PrdTextInline.text is limited to 10,000 characters; split long prose into meaningful blocks and never paste Runtime JSON into a text field during repair.",
   ];
   const requiredReferenceReads = "Immediately after collecting-prd-context succeeds and before structuring-prd, use the PRD-only read_file capability to read each required reference exactly once in this order: /mnt/skills/public/requirement-doc-template/SKILL.md, /mnt/skills/public/requirement-doc-template/references/structure.md, /mnt/skills/public/requirement-doc-template/references/quality-standards.md, and /mnt/skills/public/workbench/references/prd-runtime-result.schema.json. Read the complete files without ranges; a summary, prompt quotation, cached memory, another path, or arbitrary filesystem access is not evidence.";
-  if (workflow === "edit") {
+  if (prdOperation === "revise") {
     return [
       "<workbench_prd_result_contract>",
       requiredReferenceReads,
       ...sourceBoundProfile,
       "Use the installed requirement-doc-template skill as the canonical authoring source. Apply every current content rule: keep concrete source-backed content, remove placeholders and unrelated business content, preserve citations and valid existing references, and keep the current function-section structure.",
-      "Revise the complete targeted PRD using workbench.prd.v3 and Artifact schemaVersion 3. Retain documentId, advance revision.number, preserve citations, and publish the complete next document with workbench_artifact_draft_publish at artifact_index 0.",
+      "Revise the complete targeted PRD using workbench.prd.v3 and Artifact schemaVersion 3. Retain documentId, advance revision.number, and preserve every base citation's exact ID and fields. Append at least one exact citation from this attempt's pinned Knowledge retrieval, deduplicating unchanged citations; never replace historical citations when the Knowledge release advances. Keep Artifact citations equal to content citations. Publish the complete next document with workbench_artifact_draft_publish at artifact_index 0.",
       linkedPrototype
         ? "After the revised PRD Draft succeeds, keep it immutable, complete the linked Prototype at artifact_index 1, and submit both accepted ACKs' finalSubmissionArtifact references together. A revised PRD alone does not complete this linked Run."
         : "After that Draft succeeds, do not call a Draft or Result tool; the trusted Runtime submits the exact normalized Draft once. If automatic Result validation fails, keep the Draft immutable and repair only the reported paths in one complete manual Result.",

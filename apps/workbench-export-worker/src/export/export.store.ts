@@ -15,10 +15,19 @@ export type OutputIdentity = {
 };
 
 export type OutputReservation = OutputIdentity & {
+  storageKey: string;
   blobId: string;
   generation: number;
   canonicalStorageKey: string;
 };
+
+export type ExecutionLease = {
+  owner: string;
+  id: string;
+  expiresAt: Date;
+};
+
+const executionLeaseDurationMs = 15_000;
 
 export class PrismaExportStore {
   constructor(
@@ -26,20 +35,27 @@ export class PrismaExportStore {
     private readonly config: Pick<ExportWorkerConfig, "pendingBlobPrefix" | "canonicalBlobPrefix">,
   ) {}
 
-  async start(exportJobId: string): Promise<
+  async start(exportJobId: string, executionOwner = "export-worker"): Promise<
     | { kind: "missing" }
     | { kind: "terminal"; status: string }
-    | { kind: "run"; command: ExportCommand }
+    | { kind: "leased"; status: "running" }
+    | { kind: "run"; command: ExportCommand; lease: ExecutionLease }
   > {
     const current = await this.db.exportJob.findUnique({
       where: { id: exportJobId },
-      select: { status: true },
+      select: {
+        status: true,
+        executionOwner: true,
+        executionLeaseId: true,
+        executionLeaseExpiresAt: true,
+      },
     });
     if (!current) return { kind: "missing" as const };
-    if (["succeeded", "failed", "cancelled"].includes(current.status)) {
+    if (["succeeded", "failed", "cancelling", "cancelled"].includes(current.status)) {
       return { kind: "terminal" as const, status: current.status };
     }
     if (current.status === "queued") {
+      const lease = newLease(executionOwner);
       const claimed = await this.db.exportJob.updateMany({
         where: { id: exportJobId, status: "queued", outputBlobId: null, finishedAt: null },
         data: {
@@ -47,17 +63,54 @@ export class PrismaExportStore {
           startedAt: new Date(),
           failureCode: null,
           failureDetail: null,
+          executionOwner: lease.owner,
+          executionLeaseId: lease.id,
+          executionLeaseExpiresAt: lease.expiresAt,
           revision: { increment: 1 },
         },
       });
       if (claimed.count === 0) {
-        const status = await this.status(exportJobId);
+        const status = await this.db.exportJob.findUnique({
+          where: { id: exportJobId },
+          select: { status: true },
+        });
         if (!status) return { kind: "missing" };
-        if (["succeeded", "failed", "cancelled"].includes(status)) return { kind: "terminal", status };
-        if (status !== "running") throw new Error("EXPORT_JOB_CLAIM_STATE_INVALID");
+        if (["succeeded", "failed", "cancelling", "cancelled"].includes(status.status)) {
+          return { kind: "terminal", status: status.status };
+        }
+        if (status.status !== "running") throw new Error("EXPORT_JOB_CLAIM_STATE_INVALID");
+      } else {
+        return { kind: "run", command: await this.loadRunning(exportJobId), lease };
       }
     }
-    return { kind: "run" as const, command: await this.loadRunning(exportJobId) };
+    const now = new Date();
+    if (
+      current.executionOwner !== null
+      && current.executionLeaseId !== null
+      && current.executionLeaseExpiresAt !== null
+      && current.executionLeaseExpiresAt > now
+    ) {
+      return { kind: "leased", status: "running" };
+    }
+    const lease = newLease(executionOwner);
+    const claimed = await this.db.exportJob.updateMany({
+      where: {
+        id: exportJobId,
+        status: "running",
+        OR: [
+          { executionOwner: null },
+          { executionLeaseId: null },
+          { executionLeaseExpiresAt: { lte: now } },
+        ],
+      },
+      data: {
+        executionOwner: lease.owner,
+        executionLeaseId: lease.id,
+        executionLeaseExpiresAt: lease.expiresAt,
+      },
+    });
+    if (claimed.count !== 1) return { kind: "leased", status: "running" };
+    return { kind: "run", command: await this.loadRunning(exportJobId), lease };
   }
 
   async loadRunning(exportJobId: string) {
@@ -131,6 +184,32 @@ export class PrismaExportStore {
     return (await this.db.exportJob.findUnique({ where: { id: exportJobId }, select: { status: true } }))?.status ?? null;
   }
 
+  async pulseExecutionLease(exportJobId: string, lease: ExecutionLease): Promise<"running" | "cancelling" | "lost"> {
+    const updated = await this.db.exportJob.updateMany({
+      where: {
+        id: exportJobId,
+        status: { in: ["running", "cancelling"] },
+        executionOwner: lease.owner,
+        executionLeaseId: lease.id,
+      },
+      data: { executionLeaseExpiresAt: new Date(Date.now() + executionLeaseDurationMs) },
+    });
+    if (updated.count !== 1) return "lost";
+    const current = await this.db.exportJob.findUnique({ where: { id: exportJobId }, select: { status: true } });
+    return current?.status === "running" || current?.status === "cancelling" ? current.status : "lost";
+  }
+
+  async releaseExecutionLease(exportJobId: string, lease: ExecutionLease): Promise<void> {
+    await this.db.exportJob.updateMany({
+      where: { id: exportJobId, executionOwner: lease.owner, executionLeaseId: lease.id },
+      data: {
+        executionOwner: null,
+        executionLeaseId: null,
+        executionLeaseExpiresAt: null,
+      },
+    });
+  }
+
   async reserveOutput(identity: OutputIdentity): Promise<OutputReservation> {
     return this.db.$transaction(async (tx) => {
       await advisoryShaLock(tx, identity.sha256);
@@ -144,7 +223,11 @@ export class PrismaExportStore {
           throw new Error("EXPORT_OUTPUT_DIGEST_IDENTITY_CONFLICT");
         }
         if (active.status === "ready") return reservation(active, identity, this.config.canonicalBlobPrefix);
-        if (active.status === "pending" && active.storageKey.startsWith(`${this.config.pendingBlobPrefix}/`)) {
+        if (
+          active.status === "pending"
+          && (active.storageKey.startsWith(`${this.config.pendingBlobPrefix}/`)
+            || active.storageKey.startsWith(`${this.config.canonicalBlobPrefix}/`))
+        ) {
           return reservation(active, identity, this.config.canonicalBlobPrefix);
         }
         throw new Error("EXPORT_OUTPUT_DIGEST_BUSY");
@@ -158,7 +241,7 @@ export class PrismaExportStore {
           id: `blob_${randomUUID()}`,
           sha256: identity.sha256,
           generation,
-          storageKey: stableKey(this.config.pendingBlobPrefix, identity.sha256, generation),
+          storageKey: stableKey(this.config.canonicalBlobPrefix, identity.sha256, generation),
           mediaType: identity.mediaType,
           byteSize: BigInt(identity.byteSize),
           status: "pending",
@@ -176,7 +259,7 @@ export class PrismaExportStore {
         if (job.outputBlobId !== output.blobId) throw new Error("EXPORT_OUTPUT_PUBLICATION_CONFLICT");
         return "succeeded" as const;
       }
-      if (job.status === "cancelled") return "cancelled" as const;
+      if (job.status === "cancelled" || job.status === "cancelling") return "cancelled" as const;
       if (job.status !== "running" || job.outputBlobId !== null) throw new Error("EXPORT_PUBLICATION_STATE_INVALID");
 
       const blob = await tx.blob.findUnique({ where: { id: output.blobId } });
@@ -211,12 +294,82 @@ export class PrismaExportStore {
           failureCode: null,
           failureDetail: null,
           finishedAt: new Date(),
+          executionOwner: null,
+          executionLeaseId: null,
+          executionLeaseExpiresAt: null,
           revision: { increment: 1 },
         },
       });
       if (updated.count !== 1) throw new Error("EXPORT_PUBLICATION_LOST");
       return "succeeded" as const;
     }, { maxWait: 10_000, timeout: 30_000 });
+  }
+
+  /** Move an unreferenced pending reservation to the canonical key so Blob GC
+   * owns cleanup. Never delete the object here: another producer may have
+   * verified the same shared digest and may publish it concurrently. */
+  async abandonOutput(output: OutputReservation): Promise<void> {
+    await this.db.$transaction(async (tx) => {
+      await tx.$queryRaw(Prisma.sql`SELECT "id" FROM "blobs" WHERE "id" = ${output.blobId} FOR UPDATE`);
+      const blob = await tx.blob.findUnique({
+        where: { id: output.blobId },
+        select: { status: true, sha256: true, generation: true, byteSize: true, mediaType: true },
+      });
+      if (!blob || blob.status !== "pending") return;
+      if (
+        blob.sha256 !== output.sha256
+        || blob.generation !== output.generation
+        || safeByteSize(blob.byteSize) !== output.byteSize
+        || blob.mediaType !== output.mediaType
+      ) return;
+      await tx.blob.updateMany({
+        where: { id: output.blobId, status: "pending" },
+        data: {
+          // Leave enough time for another exporter to finish verification
+          // before the normal Blob GC pass considers the shared key.
+          gcEligibleAt: new Date(Date.now() + 15 * 60_000),
+        },
+      });
+    }, { maxWait: 10_000, timeout: 30_000 });
+  }
+
+  async acknowledgeCancellation(exportJobId: string, lease?: ExecutionLease): Promise<"cancelled" | "pending" | "terminal"> {
+    const now = new Date();
+    const updated = await this.db.exportJob.updateMany({
+      where: {
+        id: exportJobId,
+        status: "cancelling",
+        outputBlobId: null,
+        finishedAt: null,
+        ...(lease
+          ? { executionOwner: lease.owner, executionLeaseId: lease.id }
+          : {
+              OR: [
+                {
+                  executionOwner: null,
+                  executionLeaseId: null,
+                  executionLeaseExpiresAt: null,
+                },
+                { executionLeaseExpiresAt: { lte: now } },
+              ],
+            }),
+      },
+      data: {
+        status: "cancelled",
+        finishedAt: new Date(),
+        cancellationAcknowledgedAt: new Date(),
+        executionOwner: null,
+        executionLeaseId: null,
+        executionLeaseExpiresAt: null,
+        revision: { increment: 1 },
+      },
+    });
+    if (updated.count === 1) return "cancelled";
+    const current = await this.db.exportJob.findUnique({
+      where: { id: exportJobId },
+      select: { status: true },
+    });
+    return current?.status === "cancelling" ? "pending" : "terminal";
   }
 
   async fail(exportJobId: string, code: string, detail: string) {
@@ -227,12 +380,15 @@ export class PrismaExportStore {
         failureCode: code.slice(0, 120),
         failureDetail: detail.slice(0, 4_000),
         finishedAt: new Date(),
+        executionOwner: null,
+        executionLeaseId: null,
+        executionLeaseExpiresAt: null,
         revision: { increment: 1 },
       },
     });
     if (updated.count === 0) {
       const status = await this.status(exportJobId);
-      if (!status || !["succeeded", "failed", "cancelled"].includes(status)) throw new Error("EXPORT_FAILURE_PUBLICATION_LOST");
+      if (!status || !["succeeded", "failed", "cancelling", "cancelled"].includes(status)) throw new Error("EXPORT_FAILURE_PUBLICATION_LOST");
     }
   }
 
@@ -242,11 +398,12 @@ export class PrismaExportStore {
         OR: [
           { status: "queued" },
           { status: "running", startedAt: { lt: staleBefore } },
+          { status: "cancelling" },
         ],
       },
       orderBy: { updatedAt: "asc" },
       take: limit,
-      select: { id: true },
+      select: { id: true, status: true },
     });
   }
 }
@@ -290,6 +447,7 @@ function reservation(
 ): OutputReservation {
   return {
     ...identity,
+    storageKey: blob.storageKey,
     blobId: blob.id,
     generation: blob.generation,
     canonicalStorageKey: blob.status === "ready"
@@ -304,6 +462,14 @@ async function advisoryShaLock(tx: Prisma.TransactionClient, sha256: string) {
 
 function stableKey(prefix: string, sha256: string, generation: number) {
   return `${prefix}/${sha256.slice(0, 2)}/${sha256.slice(2, 4)}/${sha256}/g${generation}`;
+}
+
+function newLease(owner: string): ExecutionLease {
+  return {
+    owner,
+    id: randomUUID(),
+    expiresAt: new Date(Date.now() + executionLeaseDurationMs),
+  };
 }
 
 function safeByteSize(value: bigint) {

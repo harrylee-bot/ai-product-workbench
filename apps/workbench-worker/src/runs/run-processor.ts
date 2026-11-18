@@ -1,3 +1,4 @@
+import { confirmedRequirementBaseline,freezeConfirmedSources } from "./confirmed-requirement-baseline.js";
 import { createHash, randomUUID } from "node:crypto";
 import {
   approvalOptionsSchema,
@@ -390,6 +391,7 @@ export class RunProcessor {
         runtimeTransportOwnerId,
         externalThreadId: binding.externalThreadId,
         request: prepared.request,
+        ...(prepared.confirmedRequirement?{confirmedRequirement:prepared.confirmedRequirement}:{}),
         artifactTargets: prepared.artifactTargets,
         prototypePatchBaselines: prepared.prototypePatchBaselines,
         sources: prepared.sources,
@@ -984,6 +986,7 @@ export class RunProcessor {
       if (!recovering && run.status !== "queued") return null;
       if (recovering && run.attempt < 1) throw new Error("RUNTIME_ATTEMPT_INVALID");
       const request = startRunRequestSchema.parse(run.request);
+      const confirmedRequirement=await confirmedRequirementBaseline(tx,run,request);
       const artifactTargets = await loadRuntimeArtifactTargets(
         tx,
         run.projectId,
@@ -1058,11 +1061,12 @@ export class RunProcessor {
           project: run.thread.project,
           entryId: run.outputEntryId,
           request,
+          confirmedRequirement,
           artifactTargets,
           prototypePatchBaselines,
           designStyleSnapshot,
           designAssets,
-          sources: mapRuntimeSources(run.sourceSnapshots),
+          sources: await freezeConfirmedSources(tx,confirmedRequirement,mapRuntimeSources(run.sourceSnapshots)),
           resume,
           previousAssistantText: draftText(run.draft?.content),
         };
@@ -1129,11 +1133,12 @@ export class RunProcessor {
         project: run.thread.project,
         entryId,
         request,
+        confirmedRequirement,
         artifactTargets,
         prototypePatchBaselines,
         designStyleSnapshot,
         designAssets,
-        sources: mapRuntimeSources(run.sourceSnapshots),
+        sources: await freezeConfirmedSources(tx,confirmedRequirement,mapRuntimeSources(run.sourceSnapshots)),
         resume,
         previousAssistantText: draftText(run.draft?.content),
       };
@@ -1480,7 +1485,7 @@ export class RunProcessor {
       }
       const request = startRunRequestSchema.parse(run.request);
       const checksum = sha256Canonical(event.draft.content);
-      validateRuntimeArtifactDraftOperation(request, event.draft);
+      validateRuntimeArtifactDraftOperation(request, event.draft, event.artifactIndex);
       const sourcePrd = event.draft.kind === "prototype" && request.requestedArtifactKinds.includes("prd")
         ? await tx.artifactVersion.findFirst({
             where: { createdByRunId: runId, projectId: run.projectId, runtimeDraftIndex: 0, artifact: { kind: "prd" } },
@@ -2901,37 +2906,11 @@ export function validateRuntimeArtifactOperations(
     if (result.artifacts.length !== 1) throw new Error("RUNTIME_PRD_PROTOTYPE_COUNT_MISMATCH");
     validatePrdPrototypeScreenPlan(request, result.artifacts[0]!);
   }
-  if (request.workflow !== "edit") {
-    const missing = [...requestedKinds].filter((kind) => !result.artifacts.some((draft) => draft.kind === kind));
-    if (missing.length) throw new Error(`RUNTIME_ARTIFACTS_INCOMPLETE:${missing.join(",")}`);
-    if (requestedKinds.has("prd") && requestedKinds.has("prototype")
-      && (result.artifacts[0]?.kind !== "prd"
-        || result.artifacts.filter((draft) => draft.kind === "prd").length !== 1)) {
-      throw new Error("RUNTIME_LINKED_PRD_REQUIRED_FIRST");
-    }
-  }
-  const revisions = result.artifacts.filter((draft) => draft.operation.kind === "revise");
-  if (request.workflow !== "edit") {
-    if (revisions.length > 0) throw new Error("RUNTIME_ARTIFACT_REVISION_NOT_ALLOWED");
-    return;
-  }
-  if (revisions.length !== result.artifacts.length) {
-    throw new Error("RUNTIME_ARTIFACT_EDIT_MUST_REVISE");
-  }
-  const requestedByVersion = new Map(
-    request.artifactTargets.map((target) => [target.artifactVersionId, target]),
-  );
-  if (revisions.length !== requestedByVersion.size) {
-    throw new Error("RUNTIME_ARTIFACT_REVISION_TARGETS_INCOMPLETE");
-  }
-  for (const draft of revisions) {
-    const operation = draft.operation;
-    if (operation.kind !== "revise") continue;
-    const requested = requestedByVersion.get(operation.target.artifactVersionId);
-    if (!requested || canonicalJson(requested) !== canonicalJson(operation.target)) {
-      throw new Error("RUNTIME_ARTIFACT_REVISION_TARGET_INVALID");
-    }
-  }
+  const missing = [...requestedKinds].filter(kind => !result.artifacts.some(draft => draft.kind === kind));
+  if (missing.length) throw new Error(`RUNTIME_ARTIFACTS_INCOMPLETE:${missing.join(",")}`);
+  if (!request.outputOperations) throw new Error("RUNTIME_OUTPUT_OPERATIONS_REQUIRED");
+  if (result.artifacts.length !== request.outputOperations.length) throw new Error("RUNTIME_OUTPUT_OPERATIONS_INCOMPLETE");
+  for (const [index,draft] of result.artifacts.entries()) validateRuntimeArtifactDraftOperation(request,draft,index);
 }
 
 function validatePrdPrototypeScreenPlan(
@@ -2949,27 +2928,18 @@ function validatePrdPrototypeScreenPlan(
 function validateRuntimeArtifactDraftOperation(
   request: StartRunRequest,
   draft: RuntimeArtifactDraft,
+  artifactIndex: number,
 ) {
   validatePrdPrototypeScreenPlan(request, draft);
-  if (!request.requestedArtifactKinds.includes(draft.kind)) {
-    throw new Error("RUNTIME_ARTIFACT_KIND_NOT_REQUESTED");
+  if (!request.requestedArtifactKinds.includes(draft.kind)) throw new Error("RUNTIME_ARTIFACT_KIND_NOT_REQUESTED");
+  if (!request.outputOperations) throw new Error("RUNTIME_OUTPUT_OPERATIONS_REQUIRED");
+  if(draft.operation.kind==='revise'&&request.workflow!=='edit')throw new Error("RUNTIME_ARTIFACT_REVISION_NOT_ALLOWED");
+  const expected=request.outputOperations[artifactIndex];
+  if (!expected || expected.kind!==draft.kind || canonicalJson(expected.operation)!==canonicalJson(draft.operation)) {
+    throw new Error("RUNTIME_OUTPUT_OPERATION_MISMATCH");
   }
-  if (request.workflow !== "edit") {
-    if (draft.operation.kind !== "create") {
-      throw new Error("RUNTIME_ARTIFACT_REVISION_NOT_ALLOWED");
-    }
-    return;
-  }
-  if (draft.operation.kind !== "revise") {
-    throw new Error("RUNTIME_ARTIFACT_EDIT_MUST_REVISE");
-  }
-  const target = draft.operation.target;
-  const requested = request.artifactTargets.find(
-    (candidate) => candidate.artifactVersionId === target.artifactVersionId,
-  );
-  if (!requested || canonicalJson(requested) !== canonicalJson(target)) {
-    throw new Error("RUNTIME_ARTIFACT_REVISION_TARGET_INVALID");
-  }
+  const operation=draft.operation;
+  if(operation.kind==='revise'&&!request.artifactTargets.some(target=>canonicalJson(target)===canonicalJson(operation.target)))throw new Error("RUNTIME_ARTIFACT_REVISION_NOT_ALLOWED");
 }
 
 async function lockRuntimeArtifactDraftTarget(
@@ -3276,7 +3246,8 @@ function assertRuntimeArtifactRevisionContent(
     if (next.documentId !== base.documentId || next.revision.number <= base.revision.number) {
       throw new Error("RUNTIME_ARTIFACT_REVISION_CONTINUITY_INVALID");
     }
-    if (canonicalJson(next.citations) !== canonicalJson(base.citations)) {
+    const nextCitations=new Set(next.citations.map(citation=>canonicalJson(citation)));
+    if (base.citations.some(citation=>!nextCitations.has(canonicalJson(citation)))) {
       throw new Error("RUNTIME_ARTIFACT_REVISION_CITATIONS_INVALID");
     }
     return;

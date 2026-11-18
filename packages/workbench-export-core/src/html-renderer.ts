@@ -746,7 +746,7 @@ function renderNode(node: PrototypeNode, context: RenderContext): string {
     const asset = context.assets.get(typeof assetId === "string" ? assetId : node.assetId);
     if (!asset || asset.kind !== "image") throw new TerminalExportError("EXPORT_IMAGE_ASSET_MISSING", `Image node ${node.id} has no valid asset`);
     const blob = requireAssetBlob(asset, context.blobs);
-    return `<img ${attributes} src="${escapeHtml(dataUri(blob.mediaType, blob.bytes))}" alt="${escapeHtml(node.alt)}" style="${escapeHtml(`${nodeStyle(node, context.tokens, node.style, context.nodes)};object-fit:${node.fit}`)}">`;
+    return `<img ${attributes} src="${escapeHtml(dataUri(blob.mediaType, blob.bytes))}" alt="${escapeHtml(node.alt)}">`;
   }
   if (node.kind === "icon") {
     const asset = context.assets.get(node.assetId);
@@ -826,6 +826,7 @@ function nodeStyle(
     ...(layout.display === "grid" && layout.gridColumns ? [`grid-template-columns:repeat(${layout.gridColumns},minmax(0,1fr))`] : []),
     `overflow:${layout.overflow}`,
     ...styleDeclarations(style, tokens, node.kind),
+    ...(node.kind === "image" ? [`object-fit:${node.fit}`] : []),
     ...(node.kind === "button" || node.kind === "input" ? [
       ...(!style.typography?.color ? [`color:${controlTextColor(node, style, tokens, nodes, stateStyles)}`] : []),
       ...(!style.fill ? ["background-color:transparent"] : []),

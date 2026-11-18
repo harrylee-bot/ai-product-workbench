@@ -28,6 +28,12 @@ const leadSource = readFileSync(fileURLToPath(new URL(
 )), "utf8");
 
 describe("runtimePrdResultGuidance", () => {
+  it("authors a new PRD in an edit only when the frozen operation declares create",()=>{
+    const guidance=runtimePrdResultGuidance(["prd","prototype"],"edit","create");
+    expect(guidance).toContain("For every newly created PRD");
+    expect(guidance).not.toContain("Retain documentId, advance revision.number");
+    expect(guidance).toContain("PRD at artifact_index 0");
+  });
   it("routes new PRDs to the installed v3 reference without injecting sample business content", () => {
     const guidance = runtimePrdResultGuidance(["prd"], "generate");
 

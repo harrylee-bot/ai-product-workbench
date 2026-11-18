@@ -13,7 +13,7 @@ describe("PrismaExportStore", () => {
     };
     const store = new PrismaExportStore(db as never, prefixes());
     vi.spyOn(store, "loadRunning").mockResolvedValue({ id: "export-1" } as never);
-    await expect(store.start("export-1")).resolves.toEqual({ kind: "run", command: { id: "export-1" } });
+    await expect(store.start("export-1")).resolves.toMatchObject({ kind: "run", command: { id: "export-1" }, lease: { owner: "export-worker" } });
     expect(db.exportJob.updateMany).toHaveBeenCalledWith(expect.objectContaining({
       where: expect.objectContaining({ id: "export-1", status: "queued" }),
       data: expect.objectContaining({ status: "running", revision: { increment: 1 } }),
@@ -126,6 +126,7 @@ describe("PrismaExportStore", () => {
     const store = new PrismaExportStore({ $transaction: vi.fn(async (callback) => callback(tx)) } as never, prefixes());
     await expect(store.reserveOutput(identity)).resolves.toMatchObject({
       blobId: "blob-existing",
+      storageKey: "legacy-canonical/custom-key",
       generation: 7,
       canonicalStorageKey: "legacy-canonical/custom-key",
     });
@@ -166,6 +167,7 @@ describe("PrismaExportStore", () => {
     const store = new PrismaExportStore(db as never, prefixes());
     await expect(store.publishSucceeded("export-1", {
       ...identity,
+      storageKey: "pending/exports/aa/output/g1",
       blobId: "blob-1",
       generation: 1,
       canonicalStorageKey: "blobs/aa/output/g1",
@@ -177,6 +179,36 @@ describe("PrismaExportStore", () => {
       where: expect.objectContaining({ status: "running", outputBlobId: null }),
       data: expect.objectContaining({ status: "succeeded", outputBlobId: "blob-1", revision: { increment: 1 } }),
     }));
+  });
+
+  it("marks a pending shared reservation for GC without deleting its canonical object", async () => {
+    const tx = {
+      $queryRaw: vi.fn(async () => [{ id: "blob-1" }]),
+      blob: {
+        findUnique: vi.fn(async () => ({ status: "pending", ...identity, byteSize: BigInt(identity.byteSize), generation: 1 })),
+        updateMany: vi.fn(async () => ({ count: 1 })),
+      },
+    };
+    const store = new PrismaExportStore({ $transaction: vi.fn(async (callback) => callback(tx)) } as never, prefixes());
+    await expect(store.abandonOutput({ ...identity, storageKey: "blobs/aa/output/g1", blobId: "blob-1", generation: 1, canonicalStorageKey: "blobs/aa/output/g1" })).resolves.toBeUndefined();
+    expect(tx.blob.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: { id: "blob-1", status: "pending" },
+      data: expect.objectContaining({ gcEligibleAt: expect.any(Date) }),
+    }));
+  });
+
+  it("confirms a cancellation only after executor cleanup", async () => {
+    const exportJob = {
+      updateMany: vi.fn(async () => ({ count: 1 })),
+      findUnique: vi.fn(),
+    };
+    const store = new PrismaExportStore({ exportJob } as never, prefixes());
+    await expect(store.acknowledgeCancellation("export-1")).resolves.toBe("cancelled");
+    expect(exportJob.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({ id: "export-1", status: "cancelling", outputBlobId: null, finishedAt: null, OR: expect.any(Array) }),
+      data: expect.objectContaining({ status: "cancelled", finishedAt: expect.any(Date), revision: { increment: 1 } }),
+    }));
+    expect(exportJob.findUnique).not.toHaveBeenCalled();
   });
 });
 

@@ -319,7 +319,11 @@ function hash(value) { return createHash("sha256").update(value).digest("hex"); 
 // These are verifier regressions in a real browser, not substitutes for production/model acceptance.
 test("browser verifier observes real home input and rejects broken generated controls", async (t) => {
   const { chromium } = await import("playwright");
-  const browser = await chromium.launch({ headless: true });
+  const executablePath = process.env.WORKBENCH_EXPORT_CHROMIUM_PATH?.trim();
+  const browser = await chromium.launch({
+    headless: true,
+    ...(executablePath ? { executablePath } : {}),
+  });
   t.after(() => browser.close());
   for (const scenario of [
     { name: "arbitrary generated names support a persistent toggle and round-trip navigation" },

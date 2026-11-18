@@ -1,0 +1,11 @@
+import { afterEach,describe,it,expect,vi } from 'vitest';
+import { ConfigService } from '@nestjs/config';
+import { RequirementModel } from '../src/modules/requirements/requirement-model.js';
+const values={WORKBENCH_REQUIREMENTS_BASE_URL:'https://model.example.test',WORKBENCH_REQUIREMENTS_API_KEY:'fixture-credential',WORKBENCH_REQUIREMENTS_MODEL:'deepseek-4.1-flash'};
+afterEach(()=>vi.unstubAllGlobals());
+describe('Requirement model transport (fixture HTTP responses)',()=>{
+ it('uses only the configured internal Flash model without overriding generation selection',async()=>{const call=vi.fn().mockResolvedValue(new Response(JSON.stringify({model:'deepseek-flash',choices:[{message:{content:'{"reply":"请说明模块","card":null}'}}],usage:{prompt_tokens:30,completion_tokens:10}}),{status:200}));vi.stubGlobal('fetch',call);const result=await new RequirementModel(new ConfigService(values)).analyze({messages:[{role:'user',content:'帮我想想'}],context:{generationModel:'user-selected'}},new AbortController().signal);expect(result.value).toMatchObject({card:null});const input=JSON.parse(call.mock.calls[0][1].body);expect(input.model).toBe('deepseek-flash');expect(input.messages[1].content).toContain('user-selected');});
+ it('fails closed with no model fallback on a provider failure',async()=>{const call=vi.fn().mockResolvedValue(new Response('{}',{status:402}));vi.stubGlobal('fetch',call);await expect(new RequirementModel(new ConfigService(values)).analyze({messages:[],context:{}},new AbortController().signal)).rejects.toMatchObject({status:503});expect(call).toHaveBeenCalledTimes(1);});
+ it('does not call Pro even if misconfigured',async()=>{const call=vi.fn();vi.stubGlobal('fetch',call);await expect(new RequirementModel(new ConfigService({...values,WORKBENCH_REQUIREMENTS_MODEL:'deepseek-v4-pro'})).analyze({messages:[],context:{}},new AbortController().signal)).rejects.toMatchObject({status:503});expect(call).not.toHaveBeenCalled();});
+ it('rejects malformed model JSON',async()=>{vi.stubGlobal('fetch',vi.fn().mockResolvedValue(new Response(JSON.stringify({choices:[{message:{content:'not-json'}}]}))));await expect(new RequirementModel(new ConfigService(values)).analyze({messages:[],context:{}},new AbortController().signal)).rejects.toMatchObject({status:503});});
+});

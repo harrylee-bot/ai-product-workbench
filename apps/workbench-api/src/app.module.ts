@@ -1,3 +1,4 @@
+import { RequirementsModule } from "./modules/requirements/requirements.module.js";
 import { SourcePrototypePreviewModule } from "./modules/source-prototype-preview/source-prototype-preview.module.js";
 import { Module } from "@nestjs/common";
 import { ConfigModule } from "@nestjs/config";
@@ -20,7 +21,6 @@ import { SystemModule } from "./modules/system/system.module.js";
 import { SharesModule } from "./modules/shares/shares.module.js";
 import { ThreadsModule } from "./modules/threads/threads.module.js";
 import { WorkspacesModule } from "./modules/workspaces/workspaces.module.js";
-import { SubmissionIntentsModule } from "./modules/submission-intents/submission-intents.module.js";
 import { CanvasAgentModule } from "./modules/canvas-agent/canvas-agent.module.js";
 import { PrototypePatchesModule } from "./modules/prototype-patches/prototype-patches.module.js";
 import { ImportSourcesModule } from "./modules/import-sources/import-sources.module.js";
@@ -28,6 +28,7 @@ import { PrototypesModule } from "./modules/prototypes/prototypes.module.js";
 
 @Module({
   imports: [
+    RequirementsModule,
     ConfigModule.forRoot({
       isGlobal: true,
       envFilePath: [".env", "../../.env"],
@@ -55,7 +56,6 @@ import { PrototypesModule } from "./modules/prototypes/prototypes.module.js";
     SharesModule,
     SourcePrototypePreviewModule,
     ThreadsModule,
-    SubmissionIntentsModule,
     WorkspacesModule,
   ],
 })

@@ -75,8 +75,10 @@ function harness() {
   const store = {
     start: vi.fn(async () => ({ kind: "run" as const, command: command() })),
     status: vi.fn(async () => "running"),
-    reserveOutput: vi.fn(async (identity) => ({ ...identity, blobId: "blob-1", generation: 1, canonicalStorageKey: "blobs/aa/output/g1" })),
+    reserveOutput: vi.fn(async (identity) => ({ ...identity, storageKey: "blobs/aa/output/g1", blobId: "blob-1", generation: 1, canonicalStorageKey: "blobs/aa/output/g1" })),
     publishSucceeded: vi.fn(async () => "succeeded" as const),
+    abandonOutput: vi.fn(async () => undefined),
+    acknowledgeCancellation: vi.fn(async () => "cancelled" as const),
     fail: vi.fn(async () => undefined),
   };
   const loader = { load: vi.fn(async () => source()) };
@@ -113,6 +115,14 @@ describe("ExportProcessor", () => {
     expect(identity.byteSize).toBe(bytes.byteLength);
     expect(identity.sha256).toBe(createHash("sha256").update(bytes).digest("hex"));
     expect(test.store.publishSucceeded).toHaveBeenCalledWith("export-1", expect.objectContaining({ blobId: "blob-1" }));
+  });
+
+  it("coordinates a failed shared-object verification through Blob GC", async () => {
+    const test = harness();
+    test.storage.putVerified.mockRejectedValueOnce(new Error("OBJECT_STORAGE_SHA256_MISMATCH"));
+    await expect(test.processor.process("export-1", undefined, { retryCount: 5, retryLimit: 5 })).resolves.toEqual({ kind: "failed", code: "EXPORT_RETRY_EXHAUSTED" });
+    expect(test.store.abandonOutput).toHaveBeenCalledWith(expect.objectContaining({ blobId: "blob-1", canonicalStorageKey: "blobs/aa/output/g1" }));
+    expect(test.store.fail).toHaveBeenCalledWith("export-1", "EXPORT_RETRY_EXHAUSTED", "OBJECT_STORAGE_SHA256_MISMATCH");
   });
 
   it("builds the versioned Figma importer package without a browser or clipboard converter", async () => {
@@ -165,6 +175,16 @@ describe("ExportProcessor", () => {
     await expect(test.processor.process("export-1")).resolves.toEqual({ kind: "terminal", status: "succeeded" });
     expect(test.loader.load).not.toHaveBeenCalled();
     expect(test.storage.putVerified).not.toHaveBeenCalled();
+  });
+
+  it("confirms cancellation before publishing when the database is already cancelling", async () => {
+    const test = harness();
+    test.store.status.mockResolvedValue("cancelling");
+    await expect(test.processor.process("export-1", undefined, { retryCount: 0, retryLimit: 5 }))
+      .resolves.toEqual({ kind: "terminal", status: "cancelled" });
+    expect(test.store.acknowledgeCancellation).toHaveBeenCalledWith("export-1", undefined);
+    expect(test.storage.putVerified).not.toHaveBeenCalled();
+    expect(test.store.publishSucceeded).not.toHaveBeenCalled();
   });
 
   it("persists explicit terminal failures and only exhausts retryable failures at the retry limit", async () => {

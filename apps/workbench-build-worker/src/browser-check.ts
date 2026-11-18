@@ -4,15 +4,22 @@ export type BrowserCheckOptions = {
   executablePath?: string;
   timeoutMs?: number;
   onProgress?: (details: string) => void;
+  signal?: AbortSignal;
 };
 
 export async function checkFrozenPrototypeHtml(html: string, options: BrowserCheckOptions = {}): Promise<void> {
+  options.signal?.throwIfAborted();
   const executablePath = options.executablePath || process.env.WORKBENCH_EXPORT_CHROMIUM_PATH || chromium.executablePath();
   options.onProgress?.("chromium:launch");
   const browser = await chromium.launch({ executablePath, headless: true, chromiumSandbox: false, args: ["--no-sandbox"] }).catch((error) => {
     throw new Error(`BUILD_BROWSER_EXECUTABLE_REQUIRED: ${error instanceof Error ? error.message : "Chromium launch failed"}`);
   });
+  let closing:Promise<void>|undefined;
+  const close=()=>closing??=browser.close();
+  const abort=()=>{void close().catch(()=>undefined);};
+  options.signal?.addEventListener('abort',abort,{once:true});
   try {
+    options.signal?.throwIfAborted();
     const page = await browser.newPage({ javaScriptEnabled: true });
     const externalRequests: string[] = [];
     const scriptErrors: string[] = [];
@@ -36,7 +43,12 @@ export async function checkFrozenPrototypeHtml(html: string, options: BrowserChe
       await page.waitForFunction(() => Boolean(document.querySelector('[data-wb-runtime-installed="true"] [data-wb-screen]:not([hidden])')), undefined, { timeout: options.timeoutMs ?? 15_000 });
     }
     if (scriptErrors.length > 0) throw new Error(`BUILD_BROWSER_SCRIPT_ERROR: ${scriptErrors[0]}`);
+  } catch(error) {
+    options.signal?.throwIfAborted();
+    throw error;
   } finally {
-    await browser.close();
+    options.signal?.removeEventListener('abort',abort);
+    await close();
   }
+  options.signal?.throwIfAborted();
 }

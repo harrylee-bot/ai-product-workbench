@@ -311,7 +311,7 @@ const prdReferencePins = [
   ],
   [
     "/mnt/skills/public/workbench/references/prd-runtime-result.schema.json",
-    "25d95c16c5577408807a70cf8371cbafb857f648f649555f8e2abe46b4a2593f",
+    "c4354f95efa0eac1bc0cefc54a161498a09b336dd497cad954018b1d619281f1",
   ],
 ];
 const canonicalPrdReferenceReader = {
@@ -602,7 +602,8 @@ assert(
     && normalizedWorkbenchSkillSource.includes("never call `ask_clarification`")
     && normalizedWorkbenchSkillSource.includes("still complete the PRD")
     && normalizedWorkbenchSkillSource.includes("Missing knowledge is a blocker")
-    && normalizedWorkbenchSkillSource.includes("Every artifact requires nonempty citations")
+    && normalizedWorkbenchSkillSource.includes("Every artifact requires at least one exact citation")
+    && normalizedWorkbenchSkillSource.includes("A revised PRD also retains every exact base citation")
     && normalizedWorkbenchSkillSource.includes("Do not stop after the PRD Draft in a linked Run")
     && !normalizedWorkbenchSkillSource.includes("otherwise request input")
     && !normalizedWorkbenchSkillSource.includes("or use clarification where"),

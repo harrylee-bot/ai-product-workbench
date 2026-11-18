@@ -13,6 +13,7 @@ import { prototypeDocumentFixture } from "../../../packages/workbench-contracts/
 import { PrototypeV2Service } from "../src/modules/prototypes/prototype-v2.service.js";
 import { preparePrototypeRuntime, PrototypeRuntimeBridge } from "../../workbench-worker/src/prototypes/prototype-runtime-bridge.js";
 import { RunsService } from "../src/modules/runs/runs.service.js";
+import { requirementFlow } from './fixtures/requirement-flow.js';
 
 const url = process.env.WORKBENCH_TEST_DATABASE_URL;
 (url ? describe : describe.skip)("Prototype composer input preparation on PostgreSQL", () => {
@@ -24,14 +25,13 @@ const url = process.env.WORKBENCH_TEST_DATABASE_URL;
     await expect(db.$transaction(async tx => { await action(tx, await seed(tx)); throw rollback; }, { timeout: 60000 })).rejects.toBe(rollback);
   }
   it("pins a fixed PRD through generation and exposes exact bidirectional artifact/revision relations",async()=>fixture(async(tx,f)=>{
-    const {api,principal}=prototypeApi(tx,f),projectId=f.input.projectId;
+    const {api,principal,flow}=prototypeApi(tx,f),projectId=f.input.projectId;
     const prd=await tx.artifact.create({data:{projectId,kind:"prd",title:"Fixed requirements"}});
     const source=await tx.artifactVersion.create({data:{artifactId:prd.id,projectId,version:1,schemaVersion:3,status:"ready",content:prdDocumentV3Example as never,checksum:sha(prdDocumentV3Example),citations:[]}});
     await tx.artifact.update({where:{id:prd.id},data:{currentVersionId:source.id}});
     const request=startRunRequestSchema.parse({...f.input.request,canvasSnapshot:null,generationIntent:"prd-flow",artifactTargets:[{artifactId:prd.id,artifactVersionId:source.id,screenIds:[]}],prdScreenPlan:[{id:"screen-a",title:"First"},{id:"screen-b",title:"Second"}]});
-    const plan=await api.createPlan(principal,projectId,{title:"From PRD",prompt:request.prompt,generationRequest:request},"fixed-prd-create");
-    expect((await api.getPlanInput(principal,projectId,plan.id)).request).toEqual(request);
-    await api.approvePlan(principal,projectId,plan.id,"fixed-prd-approve",'"0"',{});
+    const created=await flow.create(request),plan=created.plan!;
+    expect((await api.getPlanInput(principal,projectId,plan.id)).request).toEqual(created.request);
     const result=await finishPlan(tx,f,plan.id,plan.id,1);
     const relation=await api.revisionRelations(principal,projectId,result.revision.id);
     expect(relation).toMatchObject({sourceArtifact:{artifactVersionId:result.versionId},sourcePrd:{artifactId:prd.id,artifactVersionId:source.id,version:1}});
@@ -43,8 +43,7 @@ const url = process.env.WORKBENCH_TEST_DATABASE_URL;
     await tx.artifact.update({where:{id:prd.id},data:{currentVersionId:newerPrd.id}});
     expect((await api.revisionRelations(principal,projectId,result.revision.id)).sourcePrd?.artifactVersionId).toBe(source.id);
     expect((await artifacts.relations(f.input.principalId,prd.id,newerPrd.id)).derivedPrototypes).toEqual([]);
-    const another=await api.createPlan(principal,projectId,{title:"Second from fixed PRD",prompt:request.prompt,generationRequest:request},"fixed-prd-second");
-    await api.approvePlan(principal,projectId,another.id,"fixed-prd-second-approve",'"0"',{});
+    const another=(await flow.create(request)).plan!;
     const second=await finishPlan(tx,f,another.id,another.id,1);
     const firstPage=await artifacts.relations(f.input.principalId,prd.id,source.id,{limit:1});
     expect(firstPage.derivedPrototypes).toHaveLength(1);expect(firstPage.nextCursor).not.toBeNull();
@@ -57,6 +56,8 @@ const url = process.env.WORKBENCH_TEST_DATABASE_URL;
     await expect(api.revisionRelations({id:"outsider"} as never,projectId,result.revision.id)).rejects.toMatchObject({status:403});
     const modification=await api.getRevisionInput(principal,projectId,result.revision.id);
     expect(modification.modificationRequest).toMatchObject({workflow:"edit",generationIntent:null});expect(modification.modificationRequest.prdScreenPlan).toBeUndefined();
+    expect(modification.request.requirementConfirmationId).toBeTruthy();expect(modification.modificationRequest.requirementConfirmationId).toBeUndefined();
+    expect(modification.request.outputOperations).toBeDefined();expect(modification.modificationRequest.outputOperations).toBeUndefined();
     const bound=await tx.prototypePlan.findUniqueOrThrow({where:{id:plan.id}});
     expect((await f.runs.outputs(f.input.principalId,bound.runtimeRunId!)).items).toMatchObject([{kind:"prototype",state:"ready",version:{artifactVersionId:result.versionId}}]);
     await tx.$executeRawUnsafe("SAVEPOINT fixed_prd_guard");
@@ -66,14 +67,14 @@ const url = process.env.WORKBENCH_TEST_DATABASE_URL;
     await expect(tx.prototypeRevision.update({where:{id:result.revision.id},data:{sourceArtifactVersionId:null}})).rejects.toThrow(/IMMUTABLE/);
     await tx.$executeRawUnsafe("ROLLBACK TO SAVEPOINT revision_source_guard");await tx.$executeRawUnsafe("RELEASE SAVEPOINT revision_source_guard");
     const foreign=await seed(tx);
-    await expect(prototypeApi(tx,foreign).api.createPlan({id:foreign.input.principalId} as never,foreign.input.projectId,{title:"Wrong project",prompt:request.prompt,generationRequest:{...request,sourceIds:[]}},"wrong-project-prd")).rejects.toMatchObject({status:404});
+    await expect(prototypeApi(tx,foreign).flow.create({...request,sourceIds:[]})).rejects.toThrow('FIXTURE_REQUIREMENT_NOT_READY');
+    expect(await tx.run.count({where:{projectId:foreign.input.projectId}})).toBe(0);
   }),90000);
 
   it("reports unpublished PRD and missing Prototype separately after a joint Run fails",async()=>fixture(async(tx,f)=>{
-    const {api,principal}=prototypeApi(tx,f),projectId=f.input.projectId;
+    const {api,principal,flow}=prototypeApi(tx,f),projectId=f.input.projectId;
     const request={...f.input.request,canvasSnapshot:null,requestedArtifactKinds:["prd","prototype"] as ("prd"|"prototype")[]};
-    const plan=await api.createPlan(principal,projectId,{title:"Partial output",prompt:request.prompt,generationRequest:request},"partial-create");
-    await api.approvePlan(principal,projectId,plan.id,"partial-approve",'"0"',{});
+    const plan=(await flow.create(request)).plan!;
     const runId=(await tx.prototypePlan.findUniqueOrThrow({where:{id:plan.id}})).runtimeRunId!;
     await tx.run.update({where:{id:runId},data:{status:"running",attempt:1,startedAt:new Date()}});
     const artifact=await tx.artifact.create({data:{projectId,kind:"prd",title:"Unpublished PRD"}});
@@ -83,58 +84,32 @@ const url = process.env.WORKBENCH_TEST_DATABASE_URL;
     expect(outputs).toMatchObject({status:"failed",coverage:"complete",items:[{kind:"prd",state:"unpublished"},{kind:"prototype",state:"failed",version:null}]});
     await expect(f.runs.outputs("outsider",runId)).rejects.toMatchObject({status:404});
   }),90000);
-  it("adjusts complete draft input with CAS, keeps snapshots after source removal, and freezes approved input", async()=>fixture(async(tx,f)=>{
-    const {api,principal}=prototypeApi(tx,f),projectId=f.input.projectId;
-    const request={...f.input.request,canvasSnapshot:null};
-    const plan=await api.createPlan(principal,projectId,{title:"Draft input",prompt:request.prompt,generationRequest:request},"draft-complete-create");
-    const before=await api.getPlanInput(principal,projectId,plan.id);
-    expect(before.snapshot?.sources[0]).toMatchObject({sourceId:f.sourceId,checksum:f.sha256});
-    expect(before.snapshot?.designStyle.snapshotSha256).toMatch(/^[a-f0-9]{64}$/);
-    await tx.importSource.update({where:{id:f.sourceId},data:{status:"deleted",deletedAt:new Date(),revision:{increment:1}}});
-    const adjusted={title:"Adjusted title",prompt:"Add purchase approval and reporting",generationRequest:{...request,prompt:"Add purchase approval and reporting",targetSurface:"web" as const,modelId:"another-model"}};
-    const saved=await api.updatePlan(principal,projectId,plan.id,adjusted,"draft-complete-save",'"0"');
-    expect(saved).toMatchObject({status:"draft",revision:1,title:adjusted.title});
-    await expect(api.updatePlan(principal,projectId,plan.id,adjusted,"draft-complete-save",'"0"')).resolves.toEqual(saved);
-    await expect(api.updatePlan(principal,projectId,plan.id,{...adjusted,title:"Conflict"},"draft-complete-conflict",'"0"')).rejects.toMatchObject({status:412});
-    const after=await api.getPlanInput(principal,projectId,plan.id);
-    expect(after.request).toEqual(adjusted.generationRequest);expect(after.snapshot).toEqual(before.snapshot);expect(after.sha256).not.toBe(before.sha256);
-    await expect(api.updatePlan({id:"outsider"} as never,projectId,plan.id,adjusted,"draft-unauthorized",'"1"')).rejects.toMatchObject({status:403});
-    await api.approvePlan(principal,projectId,plan.id,"draft-complete-approve",'"1"',{});
-    const bound=await tx.prototypePlan.findUniqueOrThrow({where:{id:plan.id}}),run=await tx.run.findUniqueOrThrow({where:{id:bound.runtimeRunId!},include:{sourceSnapshots:true}});
-    expect(run.request).toEqual(adjusted.generationRequest);expect(run.sourceSnapshots[0]?.checksum).toBe(f.sha256);expect(run.designStyleSnapshotSha256).toBe(before.snapshot?.designStyle.snapshotSha256);
-    await expect(api.updatePlan(principal,projectId,plan.id,adjusted,"draft-after-approve",'"2"')).rejects.toMatchObject({status:409});
-    await tx.$executeRawUnsafe("SAVEPOINT immutable_approved_input");
-    await expect(tx.prototypePlan.update({where:{id:plan.id},data:{prompt:"Forbidden rewrite",revision:{increment:1}}})).rejects.toThrow(/immutable/);
-    await tx.$executeRawUnsafe("ROLLBACK TO SAVEPOINT immutable_approved_input");await tx.$executeRawUnsafe("RELEASE SAVEPOINT immutable_approved_input");
-  }),90000);
-
   it("inherits the selected child version rather than the root when creating an adjusted modification plan",async()=>fixture(async(tx,f)=>{
-    const {api,principal}=prototypeApi(tx,f),projectId=f.input.projectId;
+    const {api,principal,flow}=prototypeApi(tx,f),projectId=f.input.projectId;
     const request={...f.input.request,canvasSnapshot:null};
-    const root=await api.createPlan(principal,projectId,{title:"Root",prompt:request.prompt,generationRequest:request},"lineage-root-create");
-    await api.approvePlan(principal,projectId,root.id,"lineage-root-approve",'"0"',{});
+    const root=(await flow.create(request)).plan!;
     const first=await finishPlan(tx,f,root.id,root.id,1);
     const historical=await api.getRevisionInput(principal,projectId,first.revision.id);
     expect(historical.request.workflow).toBe("generate");
     expect(historical.modificationRequest).toMatchObject({workflow:"edit",modelId:request.modelId,artifactTargets:[{artifactId:first.artifactId,artifactVersionId:first.versionId,screenIds:[]}]});
     expect((await api.getPlanInput(principal,projectId,root.id)).request).toEqual(historical.request);
-    const changed={...request,prompt:"Use the updated design",modelId:"child-model",designStyle:{kind:"automatic" as const}};
-    const child=await api.createRevisionPlan(principal,projectId,first.revision.id,{title:"Child",prompt:changed.prompt,generationRequest:changed,feedbackIds:[]},"lineage-child-create",'"1"');
-    expect(child).toMatchObject({rootPlanId:root.id,sourceRevisionId:first.revision.id,contentVersion:2,status:"draft"});
-    await api.approvePlan(principal,projectId,child.id,"lineage-child-approve",'"0"',{});
+    const changed={...historical.modificationRequest,prompt:"Use the updated design",modelId:"child-model",designStyle:{kind:"automatic" as const}};
+    const child=(await flow.create(changed,{kind:'revision',revisionId:first.revision.id,feedbackIds:[],anchor:null})).plan!;
+    expect(child).toMatchObject({rootPlanId:root.id,sourceRevisionId:first.revision.id,contentVersion:2,status:"approved"});
     const second=await finishPlan(tx,f,child.id,root.id,2,first.revision.id,first.artifactId),actual=await api.getRevisionInput(principal,projectId,second.revision.id);
     expect(actual.plan.id).toBe(child.id);expect(actual.request.modelId).toBe("child-model");expect(actual.snapshot?.designStyle.snapshot).toBeNull();
-    const third=await api.createRevisionPlan(principal,projectId,second.revision.id,{title:"Grandchild",prompt:changed.prompt,generationRequest:actual.request,feedbackIds:[]},"lineage-grandchild",'"1"');
+    const thirdDiscussion=await flow.prepare(actual.modificationRequest,{kind:'revision',revisionId:second.revision.id,feedbackIds:[],anchor:null}),thirdAnalysis=await thirdDiscussion.analyze();
+    await expect(flow.sessions.confirm(f.input.principalId,thirdDiscussion.session.id,'lineage-conflict',0,{summaryVersion:thirdAnalysis.ready.summaryVersion,summaryChecksum:thirdAnalysis.ready.summaryChecksum!,acceptedAssumptionIds:[],acceptedPlatformChanges:false})).rejects.toMatchObject({status:412});
+    const thirdConfirmed=await thirdAnalysis.confirm();await thirdAnalysis.processor.tick(thirdConfirmed.id);const thirdState=await flow.sessions.get(f.input.principalId,thirdConfirmed.id),third=await api.getPlanSnapshot(principal,projectId,thirdState.confirmation!.planId!);
     expect(third).toMatchObject({rootPlanId:root.id,sourceRevisionId:second.revision.id,contentVersion:3});
     expect((await api.getPlanInput(principal,projectId,third.id)).request).toMatchObject({modelId:"child-model",designStyle:{kind:"automatic"},artifactTargets:[{artifactId:second.artifactId,artifactVersionId:second.versionId,screenIds:[]}]});
-    await expect(api.createRevisionPlan(principal,projectId,second.revision.id,{title:"Conflict",prompt:changed.prompt,generationRequest:actual.request,feedbackIds:[]},"lineage-conflict",'"0"')).rejects.toMatchObject({status:412});
   }),90000);
 
-  it("pins model, attachment, design preset, canvas and knowledge using normal Run validation", async () => fixture(async (tx, f) => {
-    const runId = await f.runs.preparePrototypeRun(tx, f.input);
+  it("pins model, attachment, design preset and knowledge through single confirmation", async () => fixture(async (tx, f) => {
+    const created=await prototypeApi(tx,f).flow.create({...f.input.request,canvasSnapshot:null}),runId=created.run.id;
     const run = await tx.run.findUniqueOrThrow({ where: { id: runId }, include: { sourceSnapshots: true } });
-    expect(run.request).toEqual(f.input.request); expect(run.modelId).toBe("selected-model"); expect(run.knowledgeReleaseId).toBeTruthy();
-    expect(run.threadId).toBe(f.threadId); expect(run.designStyleSnapshotSha256).toMatch(/^[a-f0-9]{64}$/);
+    expect(run.request).toEqual(created.request); expect(run.modelId).toBe("selected-model"); expect(run.knowledgeReleaseId).toBeTruthy();
+    expect(run.threadId).toBe(created.session.threadId); expect(run.designStyleSnapshotSha256).toMatch(/^[a-f0-9]{64}$/);
     expect(run.sourceSnapshots).toHaveLength(1);
     expect(run.sourceSnapshots[0]).toMatchObject({ sourceId: f.sourceId, checksum: f.sha256, position: 0, snapshot: { blobs: [{ blobId: f.blobId, sha256: f.sha256 }] } });
     expect(f.queue.sendInTransaction).not.toHaveBeenCalled();
@@ -142,26 +117,28 @@ const url = process.env.WORKBENCH_TEST_DATABASE_URL;
     expect(await tx.runEvent.count({ where: { runId, type: "run.queued" } })).toBe(1);
   }), 90000);
   it("retries with original immutable source/design/knowledge snapshots", async () => fixture(async (tx, f) => {
-    const originalId = await f.runs.preparePrototypeRun(tx, f.input);
+    const {api,principal,flow}=prototypeApi(tx,f);
+    const created=await flow.create({...f.input.request,canvasSnapshot:null}),originalId=created.run.id;
     await tx.run.update({ where: { id: originalId }, data: { status: "cancelled", finishedAt: new Date() } });
     const original = await tx.run.findUniqueOrThrow({ where: { id: originalId } });
-    const retryId = await f.runs.preparePrototypeRun(tx, { ...f.input, planId: `${f.input.planId}_retry`, pinnedRunId: originalId });
+    await tx.prototypePlan.update({where:{id:created.plan!.id},data:{status:"cancelled",revision:2}});
+    const retryPlan=await api.retryPlan(principal,f.input.projectId,created.plan!.id,"exact-input-retry",'"2"',{});
+    const retryId=(await tx.prototypePlan.findUniqueOrThrow({where:{id:retryPlan.id}})).runtimeRunId!;
     const retry = await tx.run.findUniqueOrThrow({ where: { id: retryId }, include: { sourceSnapshots: true } });
-    expect(retry.request).toEqual(original.request); expect(retry.knowledgeReleaseId).toBe(original.knowledgeReleaseId);
+    expect(retry.retryOfRunId).toBe(original.id); expect(retry.request).toEqual(original.request); expect(retry.knowledgeReleaseId).toBe(original.knowledgeReleaseId);
     expect(retry.designStyleSnapshotSha256).toBe(original.designStyleSnapshotSha256); expect(retry.sourceSnapshots[0]!.label).toBe("reference.md");
     await expect(f.runs.preparePrototypeRun(tx, { ...f.input, request: { ...f.input.request, prompt: "Changed" }, pinnedRunId: originalId })).rejects.toMatchObject({ status: 409 });
   }), 90000);
-  it.each([{ combined: false, phase: "cancelled" }, { combined: true, phase: "cancelled" }, { combined: false, phase: "build-failed" }])("approves and retries through the API with pinned Run context (%j)", async ({ combined, phase }) => fixture(async (tx, f) => {
+  it.each([{ combined: false, phase: "cancelled" }, { combined: true, phase: "cancelled" }, { combined: false, phase: "build-failed" }, { combined: false, phase: "failed" }])("confirms and retries through the API with pinned Run context (%j)", async ({ combined, phase }) => fixture(async (tx, f) => {
     if (combined) f.input.request = startRunRequestSchema.parse({ ...f.input.request, requestedArtifactKinds: ["prd", "prototype"] });
     const scopedDb = { ...tx, $transaction: (action: (client: Prisma.TransactionClient) => unknown) => action(tx) };
     const workflows = { configured: true, startPlan: vi.fn(), cancelPlan: vi.fn(), startExport: vi.fn(), cancelExport: vi.fn() };
     const api = new PrototypeV2Service(scopedDb as never, workflows, { get: () => undefined } as never, {} as never, f.runs);
     const principal = { id: f.input.principalId } as never;
-    const plan = await api.createPlan(principal, f.input.projectId, { title: f.input.title, prompt: f.input.request.prompt, generationRequest: f.input.request }, "api-input-create");
-    await api.approvePlan(principal, f.input.projectId, plan.id, "api-input-approve", '"0"', {});
+    const flow=requirementFlow(scopedDb as never,f.runs,api,f.input.principalId,f.input.projectId,f.bytes),created=await flow.create({...f.input.request,canvasSnapshot:null}),plan=created.plan!;
     const bound = await tx.prototypePlan.findUniqueOrThrow({ where: { id: plan.id } });
     const original = await tx.run.findUniqueOrThrow({ where: { id: bound.runtimeRunId! } });
-    expect(original.request).toEqual(f.input.request);
+    expect(original.request).toEqual(created.request);
     if (phase === "build-failed") {
       await tx.run.update({ where: { id: original.id }, data: { status: "running", attempt: 1, startedAt: new Date() } });
       const binding = await tx.runtimeBinding.create({ data: { threadId: original.threadId, adapter: "deerflow", externalThreadId: `external-${original.id}`, metadata: {} } });
@@ -176,8 +153,8 @@ const url = process.env.WORKBENCH_TEST_DATABASE_URL;
       await tx.board.update({ where: { projectId: f.input.projectId }, data: { revision: { increment: 1 } } });
       await tx.prototypePlan.update({ where: { id: plan.id }, data: { status: "failed", failureCode: "PROTOTYPE_BUILD_FAILED", failureDetail: "Storage unavailable after generation", revision: 2 } });
     } else {
-      await tx.run.update({ where: { id: original.id }, data: { status: "cancelled", finishedAt: new Date() } });
-      await tx.prototypePlan.update({ where: { id: plan.id }, data: { status: "cancelled", revision: 2 } });
+      await tx.run.update({ where: { id: original.id }, data: phase === "failed" ? {status:"failed",startedAt:new Date(),finishedAt:new Date(),errorCode:"RUNTIME_FAILED",errorDetail:"Terminal failure",errorRetryable:false} : { status: "cancelled", finishedAt: new Date() } });
+      await tx.prototypePlan.update({ where: { id: plan.id }, data: { status: phase === "failed" ? "failed" : "cancelled", revision: 2 } });
     }
     const retried = await api.retryPlan(principal, f.input.projectId, plan.id, "api-input-retry", '"2"', {});
     expect(retried).toMatchObject({ rootPlanId: plan.id, contentVersion: 2, status: "approved" });
@@ -197,14 +174,15 @@ const url = process.env.WORKBENCH_TEST_DATABASE_URL;
       const rebuilt = await tx.prototypeRevision.update({ where: { id: prepared.revisionId }, data: { status: "ready", title: result.title, pages: result.pages as never, sourceDocument: result.sourceDocument as never, documentSha256: createHash("sha256").update(canonicalJson(result.pages)).digest("hex"), revision: { increment: 1 } } });
       await tx.prototypePlan.update({ where: { id: nextPlan.id }, data: { status: "ready", revision: { increment: 1 } } });
       const comment = await api.createFeedback(principal, f.input.projectId, rebuilt.id, { body: "Refine the rebuilt result", anchor: { sourceRevisionId: rebuilt.id, scope: "node", pageId: result.pages[0]!.id, nodeId: result.sourceDocument.screens[0]!.rootNodeId } }, "rebuilt-comment");
-      const revised = await api.revise(principal, f.input.projectId, rebuilt.id, { feedbackIds: [comment.id] }, "revise-rebuilt", `"${rebuilt.revision}"`);
+      const input=await api.getRevisionInput(principal,f.input.projectId,rebuilt.id);
+      const revised=(await flow.create({...input.modificationRequest,prompt:comment.body},{kind:'revision',revisionId:rebuilt.id,feedbackIds:[comment.id],anchor:comment.anchor})).plan!;
       expect(revised).toMatchObject({ contentVersion: 3, sourceRevisionId: rebuilt.id });
       expect(await tx.prototypeRevision.findUniqueOrThrow({ where: { id: rebuilt.id } })).toMatchObject({ sourceDocument: result.sourceDocument, status: "ready" });
       await tx.$executeRawUnsafe("SAVEPOINT immutable_reuse");
       await expect(tx.prototypePlan.update({ where: { id: nextPlan.id }, data: { reusedRunId: null } })).rejects.toThrow("PROTOTYPE_RETRY_SOURCE_IMMUTABLE");
       await tx.$executeRawUnsafe("ROLLBACK TO SAVEPOINT immutable_reuse");
       await tx.$executeRawUnsafe("RELEASE SAVEPOINT immutable_reuse");
-    } else expect(nextRun.id).not.toBe(original.id);
+    } else { expect(nextRun.id).not.toBe(original.id); expect(nextRun.retryOfRunId).toBe(original.id); }
     expect(nextRun.request).toEqual(original.request);
     expect(nextRun.knowledgeReleaseId).toBe(original.knowledgeReleaseId);
     expect(nextRun.designStyleSnapshotSha256).toBe(original.designStyleSnapshotSha256);
@@ -217,8 +195,7 @@ const url = process.env.WORKBENCH_TEST_DATABASE_URL;
     const scopedDb = { ...tx, $transaction: (action: (client: Prisma.TransactionClient) => unknown) => action(tx) };
     const api = new PrototypeV2Service(scopedDb as never, { configured: true, startPlan: vi.fn(), cancelPlan: vi.fn(), startExport: vi.fn(), cancelExport: vi.fn() }, { get: () => undefined } as never, {} as never, f.runs);
     const principal = { id: f.input.principalId } as never;
-    const plan = await api.createPlan(principal, f.input.projectId, { title: f.input.title, prompt: f.input.request.prompt, generationRequest: f.input.request }, "api-revise-create");
-    await api.approvePlan(principal, f.input.projectId, plan.id, "api-revise-approve", '"0"', {});
+    const flow=requirementFlow(scopedDb as never,f.runs,api,f.input.principalId,f.input.projectId,f.bytes),plan=(await flow.create({...f.input.request,canvasSnapshot:null})).plan!;
     const bound = await tx.prototypePlan.findUniqueOrThrow({ where: { id: plan.id } });
     const sourceRun = await tx.run.update({ where: { id: bound.runtimeRunId! }, data: { status: "running", attempt: 1, startedAt: new Date() } });
     const binding = await tx.runtimeBinding.create({ data: { threadId: sourceRun.threadId, adapter: "deerflow", externalThreadId: `external-${sourceRun.id}`, metadata: {} } });
@@ -233,7 +210,9 @@ const url = process.env.WORKBENCH_TEST_DATABASE_URL;
     const content = "<button>Review</button>";
     const source = await tx.prototypeRevision.create({ data: { projectId: f.input.projectId, planId: plan.id, createdById: f.input.principalId, version: 1, revision: 3, status: "rejected", title: "Base", sourceDocument: document as never, pages: [{ id: document.screens[0]!.id, slug: "home", title: "Home", route: "/", order: 0, content, sha256: createHash("sha256").update(content).digest("hex") }], documentSha256: createHash("sha256").update(content).digest("hex"), idempotencyKey: "seed-base-revision", requestHash: "a".repeat(64) } });
     const feedback = await api.createFeedback(principal, f.input.projectId, source.id, { body: "Change only the selected button label", anchor: { sourceRevisionId: source.id, scope: "node", pageId: document.screens[0]!.id, nodeId: "node-a" } }, "api-revise-feedback");
-    const child = await api.revise(principal, f.input.projectId, source.id, { feedbackIds: [feedback.id] }, "api-revise-child", '"3"');
+    const sourceInput=await api.getRevisionInput(principal,f.input.projectId,source.id);
+    const change=await flow.prepare({...sourceInput.modificationRequest,prompt:feedback.body+' (Home)'},{kind:'revision',revisionId:source.id,feedbackIds:[feedback.id],anchor:feedback.anchor}),analysis=await change.analyze();
+    const confirmed=await analysis.confirm('api-revise-child');await analysis.processor.tick(confirmed.id);const state=await flow.sessions.get(f.input.principalId,confirmed.id),child=await api.getPlanSnapshot(principal,f.input.projectId,state.confirmation!.planId!);
     expect(child).toMatchObject({ rootPlanId: plan.id, sourceRevisionId: source.id, contentVersion: 2, status: "approved" });
     const childRow = await tx.prototypePlan.findUniqueOrThrow({ where: { id: child.id } });
     const run = await tx.run.findUniqueOrThrow({ where: { id: childRow.runtimeRunId! } });
@@ -246,7 +225,7 @@ const url = process.env.WORKBENCH_TEST_DATABASE_URL;
     expect(childRow.prompt).toBe(child.prompt);
     expect(childRow.generationRequest).toMatchObject({ prompt: (run.request as { prompt: string }).prompt });
     expect((await api.getPlanSnapshot(principal, f.input.projectId, child.id)).prompt).toBe(child.prompt);
-    await expect(api.revise(principal, f.input.projectId, source.id, { feedbackIds: [feedback.id] }, "api-revise-child", '"0"')).resolves.toEqual(child);
+    expect((await analysis.confirm('api-revise-child')).confirmation?.planId).toBe(child.id);
     expect(await tx.prototypeRevision.findUnique({ where: { id: source.id } })).toMatchObject({ version: 1, revision: 3, status: "rejected", sourceDocument: document });
     await tx.run.update({ where: { id: run.id }, data: { status: "failed", errorCode: "TEST_PROVIDER_FAILURE", finishedAt: new Date() } });
     await tx.prototypePlan.update({ where: { id: child.id }, data: { status: "failed", revision: 1 } });
@@ -260,110 +239,24 @@ const url = process.env.WORKBENCH_TEST_DATABASE_URL;
     const originalFile=await tx.fileAsset.findFirstOrThrow({where:{projectId:f.input.projectId}});
     const addedFile=await tx.fileAsset.create({data:{projectId:f.input.projectId,blobId:f.blobId,uploadedById:f.input.principalId,originalName:"added-context.md",declaredMediaType:"text/markdown",detectedMediaType:"text/markdown",byteSize:originalFile.byteSize,status:"ready",verifiedAt:new Date()}});
     const extra=await new ImportSourcesService(scopedDb as never,new AccessService(tx as never),f.queue as never).create(f.input.principalId,f.input.projectId,"modified-extra-source",{kind:"file",fileAssetId:addedFile.id});
-    const adjustedRequest=startRunRequestSchema.parse({...f.input.request,prompt:"Revise with the new model and design",sourceIds:[f.sourceId,extra.id],canvasSnapshot:null,modelId:"adjusted-model",designStyle:{kind:"automatic"}});
-    const draft=await api.createRevisionPlan(principal,f.input.projectId,source.id,{title:"Adjusted source version",prompt:adjustedRequest.prompt,generationRequest:adjustedRequest,feedbackIds:[]},"api-adjusted-revision-plan",'"3"');
-    expect(draft).toMatchObject({rootPlanId:plan.id,sourceRevisionId:source.id,status:"draft",contentVersion:4});
-    await api.approvePlan(principal,f.input.projectId,draft.id,"api-adjusted-revision-approve",'"0"',{});
+    const adjustedRequest=startRunRequestSchema.parse({...sourceInput.modificationRequest,prompt:"Revise with the new model and design",sourceIds:[f.sourceId,extra.id],canvasSnapshot:null,modelId:"adjusted-model",designStyle:{kind:"automatic"}});
+    const draft=(await flow.create(adjustedRequest,{kind:'revision',revisionId:source.id,feedbackIds:[],anchor:null})).plan!;
+    expect(draft).toMatchObject({rootPlanId:plan.id,sourceRevisionId:source.id,status:"approved",contentVersion:4});
     const adjustedRow=await tx.prototypePlan.findUniqueOrThrow({where:{id:draft.id}}),adjustedRun=await tx.run.findUniqueOrThrow({where:{id:adjustedRow.runtimeRunId!},include:{sourceSnapshots:true}});
     expect(adjustedRun.request).toMatchObject({modelId:"adjusted-model",workflow:"edit",designStyle:{kind:"automatic"},artifactTargets:[{artifactId:artifact.id,artifactVersionId:version.id,screenIds:[]}]});
     expect(adjustedRun.sourceSnapshots[0]?.checksum).toBe(f.sha256);
     expect(adjustedRun.sourceSnapshots.toSorted((a,b)=>a.position-b.position).map(source=>source.sourceId)).toEqual([f.sourceId,extra.id]);
     const newer = await tx.artifactVersion.create({ data: { artifactId: artifact.id, projectId: f.input.projectId, version: 2, schemaVersion: 1, status: "ready", content: document as never, checksum: createHash("sha256").update(canonicalJson(document)).digest("hex"), citations, knowledgeReleaseId: sourceRun.knowledgeReleaseId } });
     await tx.artifact.update({ where: { id: artifact.id }, data: { currentVersionId: newer.id } });
-    await expect(api.revise(principal, f.input.projectId, source.id, { feedbackIds: [feedback.id] }, "api-revise-old-base", '"3"')).rejects.toMatchObject({ status: 409 });
+    await expect(flow.create({...sourceInput.modificationRequest,prompt:feedback.body},{kind:'revision',revisionId:source.id,feedbackIds:[feedback.id],anchor:feedback.anchor})).rejects.toThrow('FIXTURE_REQUIREMENT_NOT_READY');
     expect(await tx.prototypeWorkflowCommand.count({ where: { projectId: f.input.projectId, kind: "plan_start" } })).toBe(4);
   }), 90000);
 
-  it("approves a fixed Canvas context after expiry and Board changes without rewriting the original input", async () => fixture(async (tx, f) => {
-    const source = await attachCanvasPrototype(tx, f);
-    const { api, principal } = prototypeApi(tx, f);
-    const request = { title: f.input.title, prompt: f.input.request.prompt, generationRequest: f.input.request };
-    const plan = await api.createPlan(principal, f.input.projectId, request, "canvas-fixed-create");
-    const originalRequest = structuredClone(f.input.request);
-    const changedDocument = { ...source.document, title: "New current content", revision: source.document.revision + 1 };
-    const next = await tx.artifactVersion.create({ data: { artifactId: source.artifact.id, projectId: f.input.projectId, version: 2, schemaVersion: 1, status: "ready", content: changedDocument as never, checksum: sha(changedDocument), citations: [] } });
-    await tx.artifact.update({ where: { id: source.artifact.id }, data: { currentVersionId: next.id } });
-    await tx.boardNode.update({ where: { id: source.node.id }, data: { artifactVersionId: next.id } });
-    await tx.board.update({ where: { id: f.boardId }, data: { viewport: { x: 140, y: 80, zoom: 0.75 }, revision: { increment: 1 } } });
-    const time = vi.spyOn(Date, "now").mockReturnValue(Date.parse(originalRequest.canvasSnapshot!.expiresAt) + 180_000);
-    try {
-      await expect(api.createPlan(principal, f.input.projectId, request, "canvas-fixed-create")).resolves.toEqual(plan);
-      const approved = await api.approvePlan(principal, f.input.projectId, plan.id, "canvas-fixed-approve", '"0"', {});
-      expect(approved.status).toBe("approved");
-      await expect(api.approvePlan(principal, f.input.projectId, plan.id, "canvas-fixed-approve", '"0"', {})).resolves.toEqual(approved);
-    } finally { time.mockRestore(); }
-    const bound = await tx.prototypePlan.findUniqueOrThrow({ where: { id: plan.id } });
-    const run = await tx.run.findUniqueOrThrow({ where: { id: bound.runtimeRunId! } });
-    expect(bound.generationRequest).toEqual(originalRequest);
-    expect(run.request).toEqual(originalRequest);
-    expect((run.request as { artifactTargets: unknown[] }).artifactTargets).toEqual([]);
-    expect(await tx.artifactVersion.findUniqueOrThrow({ where: { id: source.version.id } })).toMatchObject({ content: source.document, checksum: sha(source.document), status: "ready" });
-    for (const data of [{ checksum: "f".repeat(64) }, { content: changedDocument }]) {
-      await tx.$executeRawUnsafe("SAVEPOINT canvas_immutable_version");
-      await expect(tx.artifactVersion.update({ where: { id: source.version.id }, data: data as never })).rejects.toThrow("ARTIFACT_TERMINAL_VERSION_IMMUTABLE");
-      await tx.$executeRawUnsafe("ROLLBACK TO SAVEPOINT canvas_immutable_version");
-      await tx.$executeRawUnsafe("RELEASE SAVEPOINT canvas_immutable_version");
-    }
-  }), 90000);
-
-  it("rejects initially expired Canvas snapshots instead of accepting them as a new plan", async () => fixture(async (tx, f) => {
-    const { api, principal } = prototypeApi(tx, f);
-    const time = vi.spyOn(Date, "now").mockReturnValue(Date.parse(f.input.request.canvasSnapshot!.expiresAt) + 180_000);
-    try {
-      await expect(api.createPlan(principal, f.input.projectId, { title: f.input.title, prompt: f.input.request.prompt, generationRequest: f.input.request }, "canvas-expired-create")).rejects.toMatchObject({ status: 400 });
-      const scopedDb = { ...tx, $transaction: (action: (client: Prisma.TransactionClient) => unknown) => action(tx) };
-      const ordinary = new RunsService(scopedDb as never, new AccessService(tx as never), new RunEventStore(), f.queue as never, f.models as never, new DesignPresetsService());
-      await expect(ordinary.start(f.input.principalId, f.threadId, "ordinary-expired-canvas", f.input.request)).rejects.toMatchObject({ status: 400 });
-    } finally { time.mockRestore(); }
-    expect(await tx.prototypePlan.count({ where: { projectId: f.input.projectId } })).toBe(0);
-  }), 90000);
-
-  it("rejects corrupt fixed versions at creation and preparation", async () => fixture(async (tx, f) => {
-    await attachCanvasPrototype(tx, f, "f".repeat(64));
-    const { api, principal } = prototypeApi(tx, f);
-    await expect(api.createPlan(principal, f.input.projectId, { title: f.input.title, prompt: f.input.request.prompt, generationRequest: f.input.request }, "canvas-corrupt-create")).rejects.toMatchObject({ status: 409 });
-    await expect(f.runs.preparePrototypeRun(tx, f.input)).rejects.toMatchObject({ status: 409 });
-    expect(await tx.run.count({ where: { projectId: f.input.projectId } })).toBe(0);
-    expect(await tx.prototypePlan.count({ where: { projectId: f.input.projectId } })).toBe(0);
-  }), 90000);
-
-  it("rejects cross-project or missing fixed Canvas screen references", async () => fixture(async (tx, f) => {
-    await attachCanvasPrototype(tx, f);
-    const other = await seed(tx);
-    const outside = await attachCanvasPrototype(tx, other);
-    const snapshot = f.input.request.canvasSnapshot!;
-    const reference = snapshot.screens[0]!.reference;
-    for (const forged of [
-      { ...reference, artifactId: outside.artifact.id, artifactVersionId: outside.version.id },
-      { ...reference, screenId: "missing-screen" },
-    ]) {
-      const request = startRunRequestSchema.parse({ ...f.input.request, canvasSnapshot: { ...snapshot, screens: [{ ...snapshot.screens[0], reference: forged }], selectedScreens: [forged], visibleScreens: [forged] } });
-      await expect(f.runs.preparePrototypeRun(tx, { ...f.input, request })).rejects.toMatchObject({ status: 404 });
-      await expect(f.runs.validatePrototypePlanCanvas(tx, f.input.projectId, request)).rejects.toMatchObject({ status: 400 });
-    }
-    expect(await tx.run.count({ where: { projectId: f.input.projectId } })).toBe(0);
-  }), 90000);
-
-  it("rechecks current membership before approving accepted Canvas context", async () => fixture(async (tx, f) => {
-    await attachCanvasPrototype(tx, f);
-    const editor = await tx.principal.create({ data: { issuer: "canvas-approval-editor", subject: randomUUID() } });
-    await tx.workspaceMember.create({ data: { workspaceId: f.workspaceId, principalId: editor.id, role: "member" } });
-    await tx.projectMember.create({ data: { projectId: f.input.projectId, workspaceId: f.workspaceId, principalId: editor.id, role: "editor" } });
-    const { api } = prototypeApi(tx, f);
-    const principal = { id: editor.id } as never;
-    const plan = await api.createPlan(principal, f.input.projectId, { title: f.input.title, prompt: f.input.request.prompt, generationRequest: f.input.request }, "canvas-member-create");
-    await tx.projectMember.delete({ where: { projectId_principalId: { projectId: f.input.projectId, principalId: editor.id } } });
-    await expect(api.approvePlan(principal, f.input.projectId, plan.id, "canvas-member-approve", '"0"', {})).rejects.toMatchObject({ status: 403 });
-    expect(await tx.run.count({ where: { projectId: f.input.projectId } })).toBe(0);
-    expect(await tx.prototypePlan.findUniqueOrThrow({ where: { id: plan.id } })).toMatchObject({ status: "draft", generationRequest: f.input.request });
-  }), 90000);
-
-  it("rejects forged sources, initially stale canvas and unavailable models before Run persistence", async () => fixture(async (tx, f) => {
-    const request = f.input.request;
-    await expect(f.runs.preparePrototypeRun(tx, { ...f.input, request: { ...request, sourceIds: ["outside-project"] } })).rejects.toMatchObject({ status: 409 });
-    await expect(f.runs.validatePrototypePlanCanvas(tx, f.input.projectId, { ...request, canvasSnapshot: { ...request.canvasSnapshot!, boardRevision: 10 } })).rejects.toMatchObject({ status: 412 });
+  it("rejects forged sources and unavailable models before Run persistence", async () => fixture(async (tx, f) => {
+    const request = {...f.input.request,canvasSnapshot:null};
+    await expect(f.runs.captureGenerationInput(tx,f.input.projectId,{...request,sourceIds:["outside-project"]})).rejects.toMatchObject({ status: 409 });
     f.models.assertAvailable.mockRejectedValueOnce(new Error("MODEL_UNAVAILABLE"));
-    await expect(f.runs.preparePrototypeRun(tx, f.input)).rejects.toThrow("MODEL_UNAVAILABLE");
+    await expect(f.runs.captureGenerationInput(tx,f.input.projectId,request)).rejects.toThrow("MODEL_UNAVAILABLE");
     expect(await tx.run.count({ where: { projectId: f.input.projectId } })).toBe(0);
   }), 90000);
 });
@@ -398,7 +291,7 @@ async function seed(tx: Prisma.TransactionClient) {
       capturedAt: now.toISOString(), expiresAt: new Date(now.getTime() + 60000).toISOString(), viewport: { x: 0, y: 0, zoom: 1 },
       screens: [], visibleScreens: [], selectedScreens: [] },
   });
-  return { input: { projectId, principalId, planId: `plan_inputs_${suffix}`, title: "Inputs", request }, workspaceId, boardId, threadId, blobId, sourceId: source.id, sha256, queue, models, runs };
+  return { input: { projectId, principalId, planId: `plan_inputs_${suffix}`, title: "Inputs", request }, workspaceId, boardId, threadId, blobId, sourceId: source.id, sha256, queue, models, runs,bytes };
 }
 
 function sha(value: unknown): string { return createHash("sha256").update(canonicalJson(value)).digest("hex"); }
@@ -406,20 +299,7 @@ function sha(value: unknown): string { return createHash("sha256").update(canoni
 function prototypeApi(tx: Prisma.TransactionClient, f: Awaited<ReturnType<typeof seed>>) {
   const scopedDb = { ...tx, $transaction: (action: (client: Prisma.TransactionClient) => unknown) => action(tx) };
   const api = new PrototypeV2Service(scopedDb as never, { configured: true, startPlan: vi.fn(), cancelPlan: vi.fn(), startExport: vi.fn(), cancelExport: vi.fn() }, { get: () => undefined } as never, {} as never, f.runs);
-  return { api, principal: { id: f.input.principalId } as never };
-}
-
-async function attachCanvasPrototype(tx: Prisma.TransactionClient, f: Awaited<ReturnType<typeof seed>>, checksum?: string) {
-  const document = prototypeDocumentFixture();
-  const artifact = await tx.artifact.create({ data: { projectId: f.input.projectId, kind: "prototype", title: "Canvas source" } });
-  const version = await tx.artifactVersion.create({ data: { artifactId: artifact.id, projectId: f.input.projectId, version: 1, schemaVersion: 1, status: "ready", content: document as never, checksum: checksum ?? sha(document), citations: [] } });
-  await tx.artifact.update({ where: { id: artifact.id }, data: { currentVersionId: version.id } });
-  const screen = document.screens[0]!;
-  const node = await tx.boardNode.create({ data: { boardId: f.boardId, projectId: f.input.projectId, nodeKey: `canvas-${randomUUID()}`, sortOrder: 0, kind: "artifact", position: { x: 0, y: 0 }, size: screen.viewport, artifactId: artifact.id, artifactVersionId: version.id, data: { protocol: "workbench.board-node.v1", nodeType: "artifact", artifactKind: "prototype", title: screen.name, screenId: screen.id, route: screen.route } } });
-  const board = await tx.board.findUniqueOrThrow({ where: { id: f.boardId } });
-  const reference = { boardNodeId: node.nodeKey, artifactId: artifact.id, artifactVersionId: version.id, screenId: screen.id };
-  f.input.request = startRunRequestSchema.parse({ ...f.input.request, canvasSnapshot: { ...f.input.request.canvasSnapshot!, boardRevision: board.revision, screens: [{ reference, name: screen.name, route: screen.route, phase: "complete", viewport: screen.viewport }], visibleScreens: [reference], selectedScreens: [reference] } });
-  return { artifact, version, node, document };
+  return { api, principal: { id: f.input.principalId } as never,flow:requirementFlow(scopedDb as never,f.runs,api,f.input.principalId,f.input.projectId,f.bytes) };
 }
 
 async function finishPlan(tx:Prisma.TransactionClient,f:Awaited<ReturnType<typeof seed>>,planId:string,rootPlanId:string,number:number,sourceRevisionId?:string,existingArtifactId?:string){

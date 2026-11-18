@@ -5,6 +5,8 @@ import { traceQueuePublish } from "@workbench/workbench-telemetry";
 import {
   assertImportSourceProcessQueueConfiguration,
   createAndAssertRuntimeQueues,
+  exportCancelQueue,
+  exportCancelQueueOptions,
   exportBuildQueue,
   exportBuildQueueOptions,
   fileExtractQueue,
@@ -54,6 +56,7 @@ export class WorkbenchQueueService implements OnModuleInit, OnModuleDestroy {
     });
     await this.boss.createQueue(fileExtractQueue, fileExtractQueueOptions);
     await this.boss.createQueue(exportBuildQueue, exportBuildQueueOptions);
+    await this.boss.createQueue(exportCancelQueue, exportCancelQueueOptions);
     await this.boss.createQueue(knowledgeReleaseBuildQueue, knowledgeReleaseBuildQueueOptions);
   }
 

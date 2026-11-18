@@ -98,7 +98,6 @@ function database() {
       updateMany: vi.fn(),
     },
     fileAsset: { create: vi.fn(), updateMany: vi.fn() },
-    submissionIntentAttachment: { updateMany: vi.fn() },
   };
   const db = {
     project: { findFirst: vi.fn() },
@@ -166,116 +165,6 @@ describe("FileUploadsService", () => {
       byteSize: 1_024,
     })).rejects.toMatchObject({ status: 404 });
     expect(db.fileUploadSession.findUnique).not.toHaveBeenCalled();
-    expect(storage.createMultipartUpload).not.toHaveBeenCalled();
-  });
-
-  it("locks and atomically binds an opaque SubmissionIntent upload slot", async () => {
-    const { db, tx } = database();
-    const storage = objectStorage();
-    db.project.findFirst.mockResolvedValue({ id: "project_1" });
-    db.fileUploadSession.findUnique.mockResolvedValue(null);
-    db.fileUploadSession.findFirst.mockResolvedValue({
-      ...uploadBundle(),
-      file: {
-        ...fileRecord(),
-        originalName: "中文 需求稿.pdf",
-      },
-    });
-    tx.$queryRaw
-      .mockResolvedValueOnce([{ id: "project_1", revision: 0 }])
-      .mockResolvedValueOnce([{
-        intentId: "intent_1",
-        projectId: "project_1",
-        createdById: "principal_1",
-        status: "pending",
-        kind: "upload",
-        fileAssetId: null,
-        clientFingerprint: "submission-file:slot_1",
-        fileName: "中文 需求稿.pdf",
-        declaredMediaType: "application/pdf",
-        byteSize: 1_024n,
-      }])
-      .mockResolvedValue([]);
-    tx.fileUploadSession.findUnique
-      .mockResolvedValueOnce(null)
-      .mockResolvedValueOnce({
-        ...uploadBundle("initiating"),
-        file: {
-          ...fileRecord(),
-          originalName: "中文 需求稿.pdf",
-        },
-      });
-    tx.fileUploadSession.updateMany.mockResolvedValue({ count: 1 });
-    tx.submissionIntentAttachment.updateMany.mockResolvedValue({ count: 1 });
-    const service = new FileUploadsService(
-      db as never,
-      storage,
-      { sendInTransaction: vi.fn() } as never,
-      config(),
-    );
-    const request = {
-      fileName: "中文 需求稿.pdf",
-      declaredMediaType: "application/pdf",
-      byteSize: 1_024,
-      submissionIntent: {
-        submissionIntentId: "intent_1",
-        attachmentPosition: 0,
-        clientFingerprint: "submission-file:slot_1",
-      },
-    };
-
-    await expect(service.create("principal_1", "project_1", "binding-key-1", request))
-      .resolves.toMatchObject({ file: { originalName: "中文 需求稿.pdf" } });
-    expect(tx.submissionIntentAttachment.updateMany).toHaveBeenCalledWith({
-      where: {
-        submissionIntentId: "intent_1",
-        position: 0,
-        kind: "upload",
-        fileAssetId: null,
-        clientFingerprint: "submission-file:slot_1",
-      },
-      data: { fileAssetId: expect.stringMatching(/^file_/) },
-    });
-    expect(tx.fileAsset.create).toHaveBeenCalledBefore(tx.submissionIntentAttachment.updateMany);
-    expect(storage.createMultipartUpload).toHaveBeenCalledTimes(1);
-  });
-
-  it("rejects an upload whose metadata does not match the durable slot", async () => {
-    const { db, tx } = database();
-    const storage = objectStorage();
-    db.project.findFirst.mockResolvedValue({ id: "project_1" });
-    db.fileUploadSession.findUnique.mockResolvedValue(null);
-    tx.fileUploadSession.findUnique.mockResolvedValue(null);
-    tx.$queryRaw
-      .mockResolvedValueOnce([{ id: "project_1", revision: 0 }])
-      .mockResolvedValueOnce([{
-        intentId: "intent_1",
-        projectId: "project_1",
-        createdById: "principal_1",
-        status: "pending",
-        kind: "upload",
-        fileAssetId: null,
-        clientFingerprint: "submission-file:slot_1",
-        fileName: "expected.pdf",
-        declaredMediaType: "application/pdf",
-        byteSize: 1_024n,
-      }]);
-    const service = new FileUploadsService(db as never, storage, {} as never, config());
-
-    await expect(service.create("principal_1", "project_1", "binding-key-2", {
-      fileName: "different.pdf",
-      declaredMediaType: "application/pdf",
-      byteSize: 1_024,
-      submissionIntent: {
-        submissionIntentId: "intent_1",
-        attachmentPosition: 0,
-        clientFingerprint: "submission-file:slot_1",
-      },
-    })).rejects.toMatchObject({
-      status: 409,
-      response: expect.objectContaining({ code: "SUBMISSION_INTENT_UPLOAD_BINDING_MISMATCH" }),
-    });
-    expect(tx.fileAsset.create).not.toHaveBeenCalled();
     expect(storage.createMultipartUpload).not.toHaveBeenCalled();
   });
 

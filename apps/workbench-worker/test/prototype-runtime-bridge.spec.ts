@@ -8,8 +8,11 @@ import { prototypeDocumentFixture } from "../../../packages/workbench-contracts/
 const input = { projectId: "project-1", planId: "plan-1", revisionId: "revision_plan-1", prompt: "Create signup", title: "Signup", createdById: "owner-1" };
 function harness() {
   const plan = { id: input.planId, projectId: input.projectId, createdById: input.createdById, title: input.title, prompt: input.prompt, status: "approved", runtimeRunId: "run-1" as string | null, contentVersion: 1, rootPlanId: null, sourceRevisionId: null, requestHash: "a".repeat(64) };
-  let run: Record<string, any> = { id: "run-1", projectId: input.projectId, threadId: "thread-1", requestId: "request-1", traceId: "trace-1", eventSequence: 0, status: "queued", errorCode: null, createdById: input.createdById, modelId: "first-model", knowledgeReleaseId: "release-original", request: startRunRequestSchema.parse({ prompt: input.prompt, modelId: "first-model", workflow: "generate", generationIntent: null, targetSurface: "web", designStyle: { kind: "automatic" }, sourceIds: [], artifactTargets: [], requestedArtifactKinds: ["prototype"], canvasSnapshot: null }) };
+  let run: Record<string, any> = { id: "run-1", projectId: input.projectId, threadId: "thread-1", requestId: "request-1", traceId: "trace-1", eventSequence: 0, status: "queued", errorCode: null, createdById: input.createdById, modelId: "first-model", knowledgeReleaseId: "release-original", request: startRunRequestSchema.parse({ prompt: input.prompt, modelId: "first-model", workflow: "generate", generationIntent: null, targetSurface: "web", designStyle: { kind: "automatic" }, sourceIds: [], artifactTargets: [], requestedArtifactKinds: ["prototype"], canvasSnapshot: null,requirementConfirmationId:"confirmation-1",outputOperations:[{kind:'prototype',operation:{kind:'create'}}] }) };
+  const baseline={summaryChecksum:"a".repeat(64),card:{goal:input.prompt},evidence:[],analysisContext:{},sourceContents:{readings:[]}};
   const tx = {
+    requirementConfirmation:{findFirst:vi.fn(async()=>({id:"confirmation-1",principalId:input.createdById,sessionId:"session-1",summaryVersion:1,runId:run.id,generationRequest:run.request,baseline,inputSnapshot:{sources:[],designStyle:{artifactVersionId:null,snapshot:null,snapshotSha256:null},knowledgeReleaseId:run.knowledgeReleaseId}}))},
+    requirementSummary:{findUnique:vi.fn(async()=>({version:1,checksum:baseline.summaryChecksum,card:baseline.card,evidence:baseline.evidence,contextSnapshot:baseline.analysisContext}))},
     $queryRaw: vi.fn(async () => [{ id: plan.id }]),
     prototypePlan: {
       findFirst: vi.fn(async () => plan), findUnique: vi.fn(async () => plan),
@@ -23,6 +26,7 @@ function harness() {
     thread: { create: vi.fn(async () => ({ id: "thread-1" })) },
     threadEntry: { create: vi.fn(async () => ({ id: "entry-1" })) },
     run: {
+      findFirst:vi.fn(async()=>run),
       create: vi.fn(async ({ data }: any) => { run = { ...run, ...data }; return run; }),
       update: vi.fn(async ({ data }: any) => { run.eventSequence += data.eventSequence.increment; return run; }),
       updateMany: vi.fn(async ({ data }: any) => { Object.assign(run, data); return { count: 1 }; }),
@@ -70,6 +74,7 @@ describe("Prototype Runtime bridge preparation", () => {
     await expect(preparePrototypeRuntime(h.db as never, input)).rejects.toThrow("PROTOTYPE_PLAN_NOT_ACTIVE");
     expect(h.tx.prototypeRevision.upsert).not.toHaveBeenCalled();
   });
+  it("rejects an unconfirmed stored Run before creating a revision",async()=>{const h=harness();delete h.run.request.requirementConfirmationId;await expect(preparePrototypeRuntime(h.db as never,input)).rejects.toThrow("REQUIREMENT_CONFIRMATION_REQUIRED");expect(h.tx.prototypeRevision.upsert).not.toHaveBeenCalled();});
   it("rechecks editor access before starting generation", async () => {
     const h = harness(); h.tx.projectMember.findFirst.mockResolvedValue(null as never);
     await expect(preparePrototypeRuntime(h.db as never, input)).rejects.toThrow("PROTOTYPE_PROJECT_ACCESS_REVOKED");
@@ -83,6 +88,7 @@ describe("Prototype Runtime bridge preparation", () => {
 });
 
 describe("Prototype Runtime bridge execution", () => {
+  it("refuses an unconfirmed Run even when resuming past preparation",async()=>{const h=harness();delete h.run.request.requirementConfirmationId;const execute=vi.fn();const bridge=new PrototypeRuntimeBridge(h.db as never,runtime(),{issue:vi.fn()},factory(execute));await expect(bridge.generate(input,new AbortController().signal,vi.fn())).rejects.toThrow("REQUIREMENT_CONFIRMATION_REQUIRED");expect(execute).not.toHaveBeenCalled();expect(h.tx.artifactVersion.findMany).not.toHaveBeenCalled();});
   it("projects only the successful run's ready artifact during recovery", async () => {
     const h = harness(); h.plan.runtimeRunId = "run-1"; h.run.status = "succeeded";
     const provider = runtime(); const execute = vi.fn(async () => ({ runId: "run-1", artifactCount: 1 }));

@@ -1,3 +1,4 @@
+import { confirmedRequirementBaseline } from "../runs/confirmed-requirement-baseline.js";
 import { createHash } from "node:crypto";
 import { canonicalJson, prototypeDocumentSchema, startRunRequestSchema } from "@workbench/workbench-contracts";
 import { Prisma, type PrismaClient } from "@workbench/workbench-db";
@@ -34,6 +35,7 @@ export async function preparePrototypeRuntime(
     if (run.projectId !== project.id || (!plan.reusedRunId && run.createdById !== plan.createdById) || run.modelId !== request.modelId || !request.requestedArtifactKinds.includes("prototype")) {
       throw new Error("PROTOTYPE_PREPARED_RUN_SCOPE_INVALID");
     }
+    await confirmedRequirementBaseline(tx,run,request);
     const revisionId = `revision_${plan.id}`;
     // An activity replay may observe a ready revision. Never regress it to generating.
     await tx.prototypeRevision.upsert({ where: { id: revisionId }, create: {
@@ -61,6 +63,10 @@ export class PrototypeRuntimeBridge {
     if (!plan || !(plan.runtimeRunId ?? plan.reusedRunId)) throw new Error("PROTOTYPE_RUNTIME_RUN_MISSING");
     if (!["approved", "generating", "ready"].includes(plan.status)) throw new Error("PROTOTYPE_PLAN_NOT_ACTIVE");
     const runId = (plan.runtimeRunId ?? plan.reusedRunId)!;
+    await this.db.$transaction(async tx=>{
+      const source=await tx.run.findUniqueOrThrow({where:{id:runId}});
+      await confirmedRequirementBaseline(tx,source,startRunRequestSchema.parse(source.request));
+    });
     const rebuilding = Boolean(plan.reusedRunId);
     const processor = this.createProcessor(this.observedRuntime(heartbeat, input.createdById));
     let cancellation: Promise<void> | undefined;

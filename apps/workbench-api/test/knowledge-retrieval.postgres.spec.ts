@@ -1,4 +1,5 @@
-import { createHash } from "node:crypto";
+import { seedFixture,embeddingSpec,retrievalSpec,integrationSegmenter,segmenterIdentity } from "./fixtures/knowledge-retrieval.js";
+import { createHash,randomBytes } from "node:crypto";
 import { canonicalJson, type KnowledgeToolResponse, type RuntimeResult } from "@workbench/workbench-contracts";
 import { assertGenerationKnowledgeEvidence } from "../../workbench-worker/src/runs/generation-knowledge-evidence.js";
 import { ConfigService } from "@nestjs/config";
@@ -13,7 +14,7 @@ import {
   type JsonValue,
   type RetrievalProfileV1,
 } from "@workbench/workbench-knowledge";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it,vi } from "vitest";
 import { AccessService } from "../src/modules/access/access.service.js";
 import { KnowledgeRetrievalService } from "../src/modules/knowledge/knowledge-retrieval.service.js";
 import { KnowledgeRetrievalConfig } from "../src/modules/knowledge/knowledge-retrieval.config.js";
@@ -487,6 +488,62 @@ describeWithPostgres("Knowledge retrieval PostgreSQL boundaries", () => {
     } finally { await db.$disconnect(); }
   }, 30_000);
 
+  it('rejects signed capability requests and successful replay while disabled, then permits restored account access',async()=>{
+    const db=new PrismaClient({datasourceUrl:databaseUrl});
+    try{
+      const fixture=await db.$transaction(tx=>seedFixture(tx),{timeout:60000}),h=await createLedgerHarness(db,fixture,'disabled-account');
+      const {tool,authorization,embedding}=signedTool(db,fixture,h),request={protocol:'workbench.knowledge-retrieval-request.v1' as const,query:'产品 工作台 用户 规则'};
+      const key=invocationKey('active-before-disable'),result=await tool.retrieve(authorization,key,request);expect(result.items).toHaveLength(2);
+      const budget=await db.knowledgeToolBudget.findUniqueOrThrow({where:{runtimeAttemptId:h.grant.runtimeAttemptId}}),calls=embedding.mock.calls.length;
+      await db.principal.update({where:{id:fixture.ownerId},data:{status:'disabled'}});
+      for(const action of [key,invocationKey('disabled-new')])await expect(tool.retrieve(authorization,action,request)).rejects.toMatchObject({status:404});
+      expect(embedding).toHaveBeenCalledTimes(calls);expect(await db.knowledgeToolBudget.findUniqueOrThrow({where:{runtimeAttemptId:h.grant.runtimeAttemptId}})).toEqual(budget);
+      expect(await db.knowledgeRetrievalInvocation.count({where:{runtimeAttemptId:h.grant.runtimeAttemptId,status:'succeeded'}})).toBe(1);
+      await db.principal.update({where:{id:fixture.ownerId},data:{status:'active'}});
+      expect(await tool.retrieve(authorization,key,request)).toEqual(result);expect(embedding).toHaveBeenCalledTimes(calls);
+      expect((await tool.retrieve(authorization,invocationKey('restored-new'),request)).items).toHaveLength(2);
+    }finally{await db.$disconnect();}
+  });
+
+  it('discards an in-flight indexed retrieval when the account is disabled before settlement',async()=>{
+    const db=new PrismaClient({datasourceUrl:databaseUrl});const entered=deferred<void>(),resume=deferred<void>();
+    try{
+      const fixture=await db.$transaction(tx=>seedFixture(tx),{timeout:60000}),h=await createLedgerHarness(db,fixture,'disable-during-provider');
+      const {tool,authorization,embedding}=signedTool(db,fixture,h),request={protocol:'workbench.knowledge-retrieval-request.v1' as const,query:'产品 工作台 用户 规则'};
+      embedding.mockImplementationOnce(async()=>{entered.resolve();await resume.promise;return [1,0,0];});
+      const key=invocationKey('disable-in-flight'),pending=tool.retrieve(authorization,key,request);const result=pending.then(value=>({value}),error=>({error}));await entered.promise;
+      await db.principal.update({where:{id:fixture.ownerId},data:{status:'disabled'}});resume.resolve();
+      expect(await result).toMatchObject({error:{status:404}});
+      const receipt=await db.knowledgeRetrievalInvocation.findUniqueOrThrow({where:{runtimeAttemptId_invocationId:{runtimeAttemptId:h.grant.runtimeAttemptId,invocationId:key}}});
+      expect(receipt).toMatchObject({status:'discarded',response:null,responseSha256:null,leaseToken:null,lastErrorCode:'KNOWLEDGE_CAPABILITY_SCOPE_REVOKED'});
+      await db.principal.update({where:{id:fixture.ownerId},data:{status:'active'}});await expect(tool.retrieve(authorization,key,request)).rejects.toMatchObject({status:404});
+      expect((await tool.retrieve(authorization,invocationKey('after-in-flight-restored'),request)).items).toHaveLength(2);
+    }finally{resume.resolve();await db.$disconnect();}
+  });
+
+  it.each(['settlement-first','deactivation-first'] as const)('serializes account deactivation with capability settlement: %s',async order=>{
+    const db=new PrismaClient({datasourceUrl:databaseUrl}),peer=new PrismaClient({datasourceUrl:databaseUrl});const held=deferred<number>(),release=deferred<void>(),otherEntered=deferred<number>();
+    try{
+      const fixture=await db.$transaction(tx=>seedFixture(tx),{timeout:60000}),h=await createLedgerHarness(db,fixture,'account-lock-'+order);
+      const key=invocationKey('account-lock-'+order),reservation=reserved(await h.ledger.reserve(h.grant,key,'account lock query'));
+      const proxied=new Proxy(db,{get(target,method){if(method==='$transaction')return (operation:any)=>db.$transaction(async tx=>{
+        const [{pid}]=await tx.$queryRaw<{pid:number}[]>`SELECT pg_backend_pid() AS pid`;
+        if(order==='deactivation-first')otherEntered.resolve(pid!);
+        const scoped=new Proxy(tx,{get(t,k){if(k==='knowledgeRetrievalInvocation')return new Proxy(t.knowledgeRetrievalInvocation,{get(delegate,name){if(name==='updateMany')return async(args:any)=>{if(order==='settlement-first'&&args.data.status==='succeeded'){held.resolve(pid!);await release.promise;}return delegate.updateMany(args);};const value=Reflect.get(delegate,name);return typeof value==='function'?value.bind(delegate):value;}});const value=Reflect.get(t,k);return typeof value==='function'?value.bind(t):value;}});
+        return operation(scoped);
+      },{timeout:15000});const value=Reflect.get(target,method);return typeof value==='function'?value.bind(target):value;}});
+      const settle=()=>new KnowledgeToolLedgerService(proxied as never).commit(h.grant,reservation,ledgerResponse(fixture));
+      const deactivate=()=>peer.$transaction(async tx=>{const [{pid}]=await tx.$queryRaw<{pid:number}[]>`SELECT pg_backend_pid() AS pid`;if(order==='settlement-first')otherEntered.resolve(pid!);await tx.principal.update({where:{id:fixture.ownerId},data:{status:'disabled'}});if(order==='deactivation-first'){held.resolve(pid!);await release.promise;}},{timeout:15000});
+      const first=order==='settlement-first'?settle():deactivate();const firstPid=await held.promise;
+      const other=order==='settlement-first'?deactivate():settle(),outcome=other.then(value=>({value}),error=>({error}));
+      try{const otherPid=await otherEntered.promise;await vi.waitFor(async()=>{const [{pids}]=await db.$queryRaw<{pids:number[]}[]>`SELECT pg_blocking_pids(${otherPid}::int) AS pids`;expect(pids).toContain(firstPid);},{timeout:3000,interval:20});}finally{release.resolve();}
+      await first;const result=await outcome;
+      if(order==='deactivation-first')expect(result).toMatchObject({error:{status:404}});else expect(result).toHaveProperty('value');
+      expect(await db.knowledgeRetrievalInvocation.findUniqueOrThrow({where:{id:reservation.id}})).toMatchObject({status:order==='settlement-first'?'succeeded':'discarded'});
+      await expect(h.ledger.reserve(h.grant,key,'account lock query')).rejects.toMatchObject({status:404});
+    }finally{release.resolve();await peer.$disconnect();await db.$disconnect();}
+  });
+
   it("settles a failed receipt with the database clock when the API clock is behind", async () => {
     const db = new PrismaClient({ datasourceUrl: databaseUrl });
     try {
@@ -924,315 +981,6 @@ describeWithPostgres("Knowledge retrieval PostgreSQL boundaries", () => {
   }, 120_000);
 });
 
-async function seedFixture(tx: Prisma.TransactionClient) {
-  const suffix =
-    `${Date.now()}_${Math.random().toString(36).slice(2)}`.toLowerCase();
-  const owner = await tx.principal.create({
-    data: { issuer: `knowledge-${suffix}`, subject: `owner-${suffix}` },
-  });
-  const outsider = await tx.principal.create({
-    data: { issuer: `knowledge-${suffix}`, subject: `outsider-${suffix}` },
-  });
-  await tx.knowledgeProfileOperatorEvent.create({
-    data: {
-      principalId: owner.id,
-      action: "grant",
-      authorizedBy: "knowledge-retrieval.postgres.fixture",
-      changeReference: `knowledge-retrieval/${suffix}`,
-    },
-  });
-  const workspace = await tx.workspace.create({
-    data: {
-      slug: `knowledge-${suffix}`,
-      name: "Knowledge retrieval",
-      createdById: owner.id,
-    },
-  });
-  const outsiderWorkspace = await tx.workspace.create({
-    data: {
-      slug: `knowledge-outsider-${suffix}`,
-      name: "Other workspace",
-      createdById: outsider.id,
-    },
-  });
-  await tx.workspaceMember.createMany({
-    data: [
-      { workspaceId: workspace.id, principalId: owner.id, role: "owner" },
-      {
-        workspaceId: outsiderWorkspace.id,
-        principalId: outsider.id,
-        role: "owner",
-      },
-    ],
-  });
-  const project = await tx.project.create({
-    data: {
-      workspaceId: workspace.id,
-      createdById: owner.id,
-      title: "Knowledge project",
-    },
-  });
-  const outsiderProject = await tx.project.create({
-    data: {
-      workspaceId: outsiderWorkspace.id,
-      createdById: outsider.id,
-      title: "Other project",
-    },
-  });
-  await tx.projectMember.createMany({
-    data: [
-      {
-        projectId: project.id,
-        workspaceId: workspace.id,
-        principalId: owner.id,
-        role: "owner",
-      },
-      {
-        projectId: outsiderProject.id,
-        workspaceId: outsiderWorkspace.id,
-        principalId: outsider.id,
-        role: "owner",
-      },
-    ],
-  });
-
-  const profile = parseEmbeddingProfileV1(
-    embeddingSpec(`knowledge-retrieval-${suffix}`),
-  );
-  await tx.embeddingProfile.create({
-    data: {
-      id: profile.spec.id,
-      spec: profile.spec as unknown as Prisma.InputJsonValue,
-      specSha256: profile.specSha256,
-      dimension: profile.dimension,
-    },
-  });
-  await tx.embeddingProfile.update({
-    where: { id: profile.spec.id },
-    data: { status: "poc" },
-  });
-  await tx.embeddingProfile.update({
-    where: { id: profile.spec.id },
-    data: { status: "adopted" },
-  });
-  await tx.knowledgeProfileAdoptionReceipt.create({
-    data: {
-      id: `embedding-adoption-${suffix}`,
-      profileKind: "embedding",
-      embeddingProfileId: profile.spec.id,
-      embeddingProfileSpecSha256: profile.specSha256,
-      actorPrincipalId: owner.id,
-    },
-  });
-  const retrievalProfile = parseRetrievalProfileV1(
-    retrievalSpec(
-      `knowledge-retrieval-policy-${suffix}`,
-      profile.spec.id,
-      profile.specSha256,
-      profile.dimension,
-    ),
-  );
-  await tx.retrievalProfile.create({
-    data: {
-      id: retrievalProfile.spec.id,
-      spec: retrievalProfile.spec as unknown as Prisma.InputJsonValue,
-      specSha256: retrievalProfile.specSha256,
-      embeddingProfileId: retrievalProfile.embeddingProfileId,
-      embeddingProfileSpecSha256: retrievalProfile.embeddingProfileSpecSha256,
-      embeddingDimension: retrievalProfile.embeddingDimension,
-    },
-  });
-  await tx.retrievalProfile.update({
-    where: { id: retrievalProfile.spec.id },
-    data: { status: "poc" },
-  });
-  await tx.retrievalProfile.update({
-    where: { id: retrievalProfile.spec.id },
-    data: { status: "adopted" },
-  });
-  await tx.knowledgeProfileAdoptionReceipt.create({
-    data: {
-      id: `retrieval-adoption-${suffix}`,
-      profileKind: "retrieval",
-      retrievalProfileId: retrievalProfile.spec.id,
-      retrievalProfileSpecSha256: retrievalProfile.specSha256,
-      actorPrincipalId: owner.id,
-    },
-  });
-  const manifest = {
-    schema: "workbench.knowledge-release.v1",
-    releaseKey: `knowledge-${suffix}`,
-    profile: {
-      embedding: { id: profile.spec.id, specSha256: profile.specSha256 },
-      retrieval: {
-        id: retrievalProfile.spec.id,
-        specSha256: retrievalProfile.specSha256,
-      },
-      segmenter: {
-        id: segmenterIdentity.implementationId,
-        version: segmenterIdentity.version,
-        dictionaryChecksum: segmenterIdentity.dictionarySha256,
-        stopwordsChecksum: segmenterIdentity.stopwordsSha256,
-      },
-    },
-  };
-  const release = await tx.knowledgeRelease.create({
-    data: {
-      key: `knowledge-${suffix}`,
-      workspaceId: workspace.id,
-      version: 1,
-      embeddingProfileId: profile.spec.id,
-      embeddingProfileSpecSha256: profile.specSha256,
-      embeddingDimension: profile.dimension,
-      retrievalProfileId: retrievalProfile.spec.id,
-      retrievalProfileSpecSha256: retrievalProfile.specSha256,
-      manifest: manifest as Prisma.InputJsonValue,
-      manifestSha256: canonicalSha256(manifest as JsonValue),
-    },
-  });
-
-  const documents = [
-    {
-      id: `kdoc_production_${suffix}`,
-      path: "00-rules/product.md",
-      title: "产品规则",
-      route: "production" as const,
-    },
-    {
-      id: `kdoc_secondary_${suffix}`,
-      path: "00-rules/design.md",
-      title: "设计规范",
-      route: "production" as const,
-    },
-    {
-      id: `kdoc_source_${suffix}`,
-      path: "07-sources/internal.md",
-      title: "内部来源",
-      route: "source_lookup" as const,
-    },
-  ];
-  for (const document of documents) {
-    await tx.knowledgeDocument.create({
-      data: {
-        id: document.id,
-        releaseId: release.id,
-        sourceKind: "vault_markdown",
-        sourcePath: document.path,
-        title: document.title,
-        checksum: "a".repeat(64),
-        route: document.route,
-        metadata: { sourceLocator: `vault://knowledge-vault/${document.path}` },
-      },
-    });
-  }
-  const chunks = [
-    {
-      id: `kchunk_production_${suffix}`,
-      documentId: documents[0]!.id,
-      content: "产品 工作台 用户 规则",
-      vector: "[1,0,0]",
-    },
-    {
-      id: `kchunk_secondary_${suffix}`,
-      documentId: documents[1]!.id,
-      content: "设计 系统 规范",
-      vector: "[0.8,0.6,0]",
-    },
-    {
-      id: `kchunk_source_${suffix}`,
-      documentId: documents[2]!.id,
-      content: "内部 来源 原始 资料",
-      vector: "[1,0,0]",
-    },
-  ];
-  for (const [sequence, chunk] of chunks.entries()) {
-    await tx.knowledgeChunk.create({
-      data: {
-        id: chunk.id,
-        documentId: chunk.documentId,
-        releaseId: release.id,
-        sequence,
-        headingPath: ["规则"],
-        content: chunk.content,
-        tokenCount: 4,
-      },
-    });
-    const searchText = integrationSegmenter.segment(chunk.content).join(" ");
-    await tx.$executeRaw(Prisma.sql`
-      UPDATE "knowledge_chunks"
-      SET "search_vector" = to_tsvector('simple', ${searchText})
-      WHERE "id" = ${chunk.id}
-    `);
-  }
-  const batchId = `kbatch_${suffix}`;
-  await tx.knowledgeEmbeddingBatch.create({
-    data: {
-      id: batchId,
-      releaseId: release.id,
-      profileId: profile.spec.id,
-      profileSpecSha256: profile.specSha256,
-      dimension: profile.dimension,
-      sequence: 0,
-      chunkIds: chunks.map((chunk) => chunk.id),
-      inputCount: chunks.length,
-      inputSha256: "b".repeat(64),
-    },
-  });
-  const startedAt = new Date();
-  await tx.knowledgeEmbeddingBatch.update({
-    where: { id: batchId },
-    data: {
-      status: "running",
-      attemptCount: 1,
-      leaseToken: `lease-${suffix}`,
-      queueJobId: `job-${suffix}`,
-      queueRetryCount: 0,
-      startedAt,
-    },
-  });
-  for (const chunk of chunks) {
-    await tx.$executeRaw(Prisma.sql`
-      INSERT INTO "knowledge_chunk_embeddings" (
-        "chunk_id", "release_id", "profile_id", "profile_spec_sha256",
-        "dimension", "embedding", "embedding_sha256"
-      ) VALUES (
-        ${chunk.id}, ${release.id}, ${profile.spec.id}, ${profile.specSha256},
-        ${profile.dimension}, ${chunk.vector}::public.vector, ${"c".repeat(64)}
-      )
-    `);
-  }
-  await tx.knowledgeEmbeddingBatch.update({
-    where: { id: batchId },
-    data: {
-      status: "ready",
-      leaseToken: null,
-      tokenCount: 12,
-      outputSha256: "d".repeat(64),
-      finishedAt: new Date(),
-    },
-  });
-  await tx.knowledgeRelease.update({
-    where: { id: release.id },
-    data: { chunksReadyAt: new Date(), status: "ready", readyAt: new Date() },
-  });
-
-  return {
-    workspaceId: workspace.id,
-    ownerId: owner.id,
-    outsiderId: outsider.id,
-    projectId: project.id,
-    outsiderProjectId: outsiderProject.id,
-    releaseId: release.id,
-    profileId: profile.spec.id,
-    profileSpecSha256: profile.specSha256,
-    retrievalProfileId: retrievalProfile.spec.id,
-    retrievalProfileSpecSha256: retrievalProfile.specSha256,
-    productionChunkId: chunks[0]!.id,
-    secondaryChunkId: chunks[1]!.id,
-    sourceLookupChunkId: chunks[2]!.id,
-  };
-}
-
 async function seedRuntimeFixture(
   tx: Prisma.TransactionClient,
   fixture: Awaited<ReturnType<typeof seedFixture>>,
@@ -1389,8 +1137,9 @@ async function createLedgerHarness(
   attemptStatus: "pending" | "submitting" | "running" = "running",
 ) {
   const runtime = await seedRuntimeFixture(db as never, fixture, attemptStatus);
+  const [{now}]=await db.$queryRaw<Array<{now:Date}>>`SELECT clock_timestamp() AS now`;
   const issuedAt = new Date(
-    Math.floor((Date.now() + issuedAtOffsetMs) / 1_000) * 1_000,
+    Math.floor((now!.getTime() + issuedAtOffsetMs) / 1_000) * 1_000,
   );
   const grant: TestGrantPayload = {
     grantId: `grant_${label.replace(/-/gu, "_")}_${runtime.runId}`,
@@ -1432,6 +1181,17 @@ function ledgerResponse(fixture: Awaited<ReturnType<typeof seedFixture>>) {
     },
     items: [],
   };
+}
+
+/** Actual signed capability, ledger and indexed retrieval; only embedding and
+ * reranking transports are fixtures. No external model/provider requests. */
+function signedTool(db:PrismaClient,fixture:Awaited<ReturnType<typeof seedFixture>>,h:Awaited<ReturnType<typeof createLedgerHarness>>){
+  const secret=randomBytes(32),config={grantSecret:secret,grantMaximumTtlSeconds:900,providers:null as unknown};
+  const access=new AccessService(db as never),tool=new KnowledgeToolService(config as never,access,db as never,h.ledger);
+  const embedding=vi.fn(async()=>[1,0,0]);
+  const retrieval=new KnowledgeRetrievalService(access,new PrismaKnowledgeRetrievalStore(db),{segmenter:new JiebaQuerySegmenterAdapter(),queryEmbedding:{embedQuery:embedding},reranker:{identity:{id:'integration/reranker',revision:'commit-reranker-r1'},rerank:async({candidates})=>candidates.map((x,index)=>({chunkId:x.chunkId,score:1-index/10}))}});
+  config.providers={fixture:true};Object.assign(tool,{retrieval});
+  return {tool,embedding,authorization:'Bearer '+createKnowledgeToolGrant(h.grant,secret,{maximumTtlSeconds:900})};
 }
 
 async function seedExpiredInvocation(
@@ -1556,8 +1316,7 @@ function deferred<T>() {
   return { promise, resolve };
 }
 
-const integrationSegmenter = new JiebaQuerySegmenterAdapter();
-const segmenterIdentity = integrationSegmenter.identity;
+
 
 function embeddingRuntimeInfo() {
   return {
@@ -1580,100 +1339,5 @@ function rerankerRuntimeInfo() {
     max_batch_tokens: 8_192,
     max_client_batch_size: 24,
     auto_truncate: false,
-  };
-}
-
-function embeddingSpec(id: string): EmbeddingProfileV1 {
-  return {
-    schema: "workbench.embedding-profile.v1",
-    id,
-    protocol: "tei.embed.v1",
-    engine: {
-      id: "huggingface/text-embeddings-inference",
-      version: "1.8.3",
-      imageDigest: `sha256:${"1".repeat(64)}`,
-    },
-    model: {
-      id: "integration/model",
-      revision: "commit-r1",
-      artifactSha256: "2".repeat(64),
-    },
-    tokenizer: {
-      id: "integration/tokenizer",
-      revision: "commit-r1",
-      artifactSha256: "3".repeat(64),
-      modelMaximumTokens: 512,
-      chunkMaximumTokens: 256,
-      overflow: "reject",
-    },
-    input: {
-      queryPrefix: "",
-      documentPrefix: "",
-      normalization: "utf8-nfc-lf-v1",
-    },
-    output: {
-      dimension: 3,
-      dtype: "float32",
-      pooling: "cls",
-      normalization: "l2",
-      distance: "cosine",
-    },
-    batch: { maximumInputs: 32, maximumTokens: 8_192 },
-    conformanceProbeSha256: "4".repeat(64),
-  };
-}
-
-function retrievalSpec(
-  id: string,
-  embeddingProfileId: string,
-  embeddingProfileSpecSha256: string,
-  embeddingDimension: number,
-): RetrievalProfileV1 {
-  return {
-    schema: "workbench.retrieval-profile.v1",
-    id,
-    embedding: {
-      profileId: embeddingProfileId,
-      profileSpecSha256: embeddingProfileSpecSha256,
-      dimension: embeddingDimension,
-    },
-    segmenter: {
-      ...segmenterIdentity,
-      normalization: "utf8-nfc-lf-v1",
-    },
-    recall: {
-      lexical: {
-        algorithm: "plainto_tsquery-simple-ts_rank_cd-32-v1",
-        limit: 40,
-      },
-      dense: { distance: "cosine", limit: 40 },
-      fusion: { algorithm: "rrf", k: 60, tieBreak: "workbench-rrf-v1" },
-    },
-    reranker: {
-      protocol: "tei.rerank.v1",
-      engine: {
-        id: "huggingface/text-embeddings-inference",
-        version: "1.8.3",
-        imageDigest: `sha256:${"7".repeat(64)}`,
-      },
-      model: {
-        id: "integration/reranker",
-        revision: "commit-reranker-r1",
-        artifactSha256: "8".repeat(64),
-      },
-      tokenizer: {
-        id: "integration/reranker-tokenizer",
-        revision: "commit-reranker-r1",
-        artifactSha256: "9".repeat(64),
-        maximumInputTokens: 512,
-        overflow: "reject",
-      },
-      candidateLimit: 24,
-      finalResultLimit: 10,
-      failurePolicy: "degrade_to_rrf",
-      conformanceProbeSha256: "a".repeat(64),
-    },
-    routingPolicy: "workbench-knowledge-route-v1",
-    citationSchema: "workbench.knowledge-citation.v1",
   };
 }
