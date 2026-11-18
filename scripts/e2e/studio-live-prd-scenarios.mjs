@@ -4,6 +4,9 @@ import { writeFile } from "node:fs/promises";
 import path from "node:path";
 import { canonicalJson } from "@workbench/workbench-contracts";
 import { publishPrd, auditPrd } from "./studio-live-prd-artifacts.mjs";
+import {
+  attachStudioActivityContract, auditStudioActivityContract, auditStudioActivityDiscussion,
+} from "./studio-live-activity-contract.mjs";
 
 const prompt =
   "在云溪营销极速发布平台已有的 Web 端活动管理列表，为策划人员增加渠道类型筛选。复用已有列表查询和区域权限，只扩展查询参数；全部、企微、短信三个选项，默认全部。切换筛选时保留其他查询条件并回到第一页；无匹配活动时显示空状态；查询失败保留当前筛选，允许原地重试。沿用当前设计规范和登录、导航、审核发布、报表，不新增角色、页面、外部系统或审批流程。只输出本次增量的需求文档，写明字段、权限、状态和逐条可运行的验收标准。";
@@ -21,12 +24,13 @@ export async function runStudioPrd({
   waitUntil,
   evidence,
   step,
+  activityContract = false,
 }) {
   const query = async (stmt, values = []) =>
     (await sql(stmt, values, dbUrl)).rows;
   const prd = (evidence.prd = {
     startedAt: new Date().toISOString(),
-    prompt,
+    prompt: activityContract ? prompt + " 请按本次所选的项目附件核对活动列表现有接口及本次查询参数扩展。" : prompt,
     events: [],
   });
   const save = (name, value) =>
@@ -76,6 +80,11 @@ export async function runStudioPrd({
   const project = (prd.projectId = new URL(page.url()).pathname
     .split("/")
     .at(-1));
+  if (activityContract) {
+    step("Upload and select the local project activity query contract");
+    prd.activityContract = await attachStudioActivityContract({ page, webOrigin, projectId: project, query, waitUntil });
+    await checkpoint();
+  }
   await waitUntil(
     async () =>
       (await page
@@ -96,9 +105,10 @@ export async function runStudioPrd({
       response.request().postDataJSON().generationRequest.modelId,
       "deepseek-flash",
     );
+    if (activityContract) assert.deepEqual(response.request().postDataJSON().generationRequest.sourceIds, [prd.activityContract.sourceId]);
     return (await response.json()).id;
   }
-  const session = (prd.sessionId = await sendDiscussion(prompt));
+  const session = (prd.sessionId = await sendDiscussion(prd.prompt));
   await checkpoint();
   const supplemental =
     "确认本工单的业务决策：仅当前策划用户在现有区域授权范围内的活动管理 Web 列表。以活动发布时记录的渠道类型为准，不使用营销归因或外部系统。列表查询新增可选参数 channelType，全部时省略参数，企微对应 wecom，短信对应 sms。历史活动无渠道值时只在全部中显示。底层字段映射由既有活动查询实现负责，底表物理列名不影响本工单，无需新增数据源或角色。选项单选、即时查询，其余条件和权限保持，切换回第1页，失败保留条件原地重试。现有登录、导航、审核发布、报表只复用；未在本业务边界明确的实现选择记录为假设。仅 Web 文档，页面布局和设计沿用现有规范。";
@@ -117,6 +127,10 @@ export async function runStudioPrd({
       "Flash discussion analysis",
       240000,
     );
+    if (activityContract) {
+      prd.activityDiscussion = await auditStudioActivityDiscussion({ query, source: prd.activityContract, sessionId: session });
+      await checkpoint();
+    }
     if (state === "ready_to_confirm") break;
     assert.equal(state, "needs_clarification");
     assert.equal(
@@ -191,6 +205,7 @@ export async function runStudioPrd({
   assert.deepEqual(frozen.baseline.card.outputKinds, ["prd"]);
   assert.equal(frozen.plan_id, null);
   assert.ok(frozen.baseline.evidence.length && prd.frozenRelease);
+  if (activityContract) prd.activityContract = await auditStudioActivityContract({ query, source: prd.activityContract, frozen });
   await save("prd-confirmed-baseline.json", {
     card: frozen.baseline.card,
     evidence: frozen.baseline.evidence,
