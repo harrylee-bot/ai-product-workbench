@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { requirementAnalysisSchema } from '@workbench/workbench-contracts';
-import { requirementProblem, REQUIREMENT_SYSTEM_PROMPT } from './requirement-policy.js';
+import { RequirementModelOutputError, requirementProblem, REQUIREMENT_SYSTEM_PROMPT } from './requirement-policy.js';
 export type RequirementModelInput={messages:{role:'user'|'assistant';content:string}[];context:unknown};
 @Injectable()
 export class RequirementModel {
@@ -23,12 +23,16 @@ export class RequirementModel {
    throw requirementProblem('REQUIREMENT_MODEL_UNAVAILABLE',503);
   });
   if(!response.ok){await response.body?.cancel();throw requirementProblem('REQUIREMENT_MODEL_UNAVAILABLE',503);}
-  const reader=response.body?.getReader();if(!reader)throw requirementProblem('REQUIREMENT_MODEL_OUTPUT_INVALID',503);
+  const reader=response.body?.getReader();if(!reader)throw new RequirementModelOutputError('response_body');
   const buffers:Uint8Array[]=[];let bytes=0;
-  while(true){const part=await reader.read();if(part.done)break;bytes+=part.value.length;if(bytes>128*1024){await reader.cancel();throw requirementProblem('REQUIREMENT_MODEL_OUTPUT_INVALID',503);}buffers.push(part.value);}
-  let body;try{body=JSON.parse(Buffer.concat(buffers).toString());}catch{throw requirementProblem('REQUIREMENT_MODEL_OUTPUT_INVALID',503);}
+  while(true){const part=await reader.read();if(part.done)break;bytes+=part.value.length;if(bytes>128*1024){await reader.cancel();throw new RequirementModelOutputError('response_size');}buffers.push(part.value);}
+  let body;try{body=JSON.parse(Buffer.concat(buffers).toString());}catch{throw new RequirementModelOutputError('provider_envelope');}
+  if(!body||typeof body!=='object'||Array.isArray(body))throw new RequirementModelOutputError('provider_envelope');
   if(body.model&&body.model!=='deepseek-flash')throw requirementProblem('REQUIREMENT_MODEL_NOT_ALLOWED',503);
-  let value;try{value=JSON.parse(body.choices?.[0]?.message?.content);}catch{throw requirementProblem('REQUIREMENT_MODEL_OUTPUT_INVALID',503);}
+  const choice=body.choices?.[0];
+  let value;try{value=JSON.parse(choice?.message?.content);}catch{
+   throw new RequirementModelOutputError(choice?.finish_reason==='length'?'completion_truncated':'completion_json');
+  }
   const tokens=(n:unknown)=>Number.isSafeInteger(n)&&Number(n)>=0?Number(n):null;
   return {value,inputTokens:tokens(body.usage?.prompt_tokens),outputTokens:tokens(body.usage?.completion_tokens)};
  }

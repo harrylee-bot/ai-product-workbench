@@ -7,7 +7,7 @@ import { RequirementsService } from './requirements.service.js';
 import { RequirementModel } from './requirement-model.js';
 import { KnowledgeRetrievalError } from '../knowledge/knowledge-retrieval.types.js';
 import { RequirementKnowledge } from './requirement-knowledge.js';
-import { isReady, validateAnalysis, requirementProblem } from './requirement-policy.js';
+import { isReady, validateAnalysis, requirementProblem, RequirementModelOutputError } from './requirement-policy.js';
 import { RequirementContextReader } from './requirement-context-reader.js';
 import { RunsService } from '../runs/runs.service.js';
 import { PrototypeV2Service } from '../prototypes/prototype-v2.service.js';
@@ -102,7 +102,7 @@ export class RequirementsProcessor implements OnModuleInit,OnModuleDestroy {
    if(JSON.stringify(modelContext).length>100000)throw requirementProblem('REQUIREMENT_CONTEXT_LIMIT',429);
    const result=await this.model.analyze({messages,context:modelContext},controller.signal);
    const analysis=validateAnalysis(result.value,knowledge.evidence);
-   if(analysis.card?.targetSurface&&analysis.card.targetSurface!==request.targetSurface||analysis.card?.outputKinds&&hashRequest([...analysis.card.outputKinds].sort())!==hashRequest([...request.requestedArtifactKinds].sort()))throw requirementProblem('REQUIREMENT_MODEL_OUTPUT_INVALID',503);
+   if(analysis.card?.targetSurface&&analysis.card.targetSurface!==request.targetSurface||analysis.card?.outputKinds&&hashRequest([...analysis.card.outputKinds].sort())!==hashRequest([...request.requestedArtifactKinds].sort()))throw new RequirementModelOutputError('output_scope');
    const ready=isReady(analysis.card,knowledge.evidence);
    await this.sessions.transaction(turn.principalId,turn.sessionId,async(tx,s)=>{
     const current=await tx.requirementTurn.findUnique({where:{id:turn.id}});
@@ -125,7 +125,10 @@ export class RequirementsProcessor implements OnModuleInit,OnModuleDestroy {
    }
   }catch(error){
    const code=controller.signal.aborted?'REQUIREMENT_TURN_INTERRUPTED':safeFailure(error);
-   this.logger.warn({operation:'requirement-analysis',turnId:turn.id,code});
+   const modelDiagnostic = error instanceof RequirementModelOutputError
+    ? {modelOutputPhase:error.phase,validationIssues:error.validationIssues}
+    : {};
+   this.logger.warn({operation:'requirement-analysis',turnId:turn.id,code,...modelDiagnostic});
    await db.requirementTurn.updateMany({where:{id:turn.id,status:'running',leaseOwner:turn.leaseOwner},data:{status:'failed',failureCode:code,finishedAt:new Date(),leaseExpiresAt:null}});
    await db.requirementSession.updateMany({where:{id:turn.sessionId,currentTurnId:turn.id,revision:turn.inputRevision},data:{state:'discussing',revision:{increment:1}}});
   }finally{clearInterval(monitor);clearTimeout(deadline);this.controllers.delete(controller);}

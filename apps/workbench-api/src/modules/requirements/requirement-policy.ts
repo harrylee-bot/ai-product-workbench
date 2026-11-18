@@ -1,17 +1,34 @@
-import { requirementAnalysisSchema, requirementCardSchema, type RequirementAnalysis, type RequirementCard, type RequirementEvidence } from '@workbench/workbench-contracts';
+import { requirementAnalysisSchema, requirementCardSchema, requirementDiscussionCardSchema, type RequirementAnalysis, type RequirementCard, type RequirementEvidence } from '@workbench/workbench-contracts';
 import { ProblemException } from '../../common/problem-details.js';
 export function requirementProblem(code:string,status=409){return new ProblemException({title:'Requirement state unavailable',status,code});}
+export class RequirementModelOutputError extends ProblemException {
+ constructor(
+  readonly phase: 'response_body' | 'response_size' | 'provider_envelope' | 'completion_json' | 'completion_truncated'
+    | 'analysis_schema' | 'evidence_id' | 'question_id' | 'output_scope',
+  readonly validationIssues: ReadonlyArray<{code:string;field:string|null}> = [],
+ ){
+  super({title:'Requirement state unavailable',status:503,code:'REQUIREMENT_MODEL_OUTPUT_INVALID'});
+ }
+}
 export function validateAnalysis(value:unknown,evidence:RequirementEvidence[]):RequirementAnalysis {
- const result=requirementAnalysisSchema.safeParse(value);if(!result.success)throw requirementProblem('REQUIREMENT_MODEL_OUTPUT_INVALID',503);
+ const result=requirementAnalysisSchema.safeParse(value);
+ if(!result.success)throw new RequirementModelOutputError(
+  'analysis_schema',
+  result.error.issues.slice(0,8).map(issue=>{
+   const [root,field]=issue.path;
+   const knownCardField=root==='card'&&typeof field==='string'&&Object.hasOwn(requirementDiscussionCardSchema.shape,field);
+   return {code:issue.code,field:knownCardField?`card.${String(field)}`:root==='card'||root==='reply'?root:null};
+  }),
+ );
  const analysis=result.data, ids=new Map(evidence.map(x=>[x.id,x]));
  if(!analysis.card)return analysis;
  const references=[...(analysis.card.existingCapabilities??[]),...(analysis.card.assumptions??[]),...(analysis.card.issues??[])];
- for(const claim of references)for(const id of claim.evidenceIds)if(!ids.has(id))throw requirementProblem('REQUIREMENT_MODEL_OUTPUT_INVALID',503);
+ for(const claim of references)for(const id of claim.evidenceIds)if(!ids.has(id))throw new RequirementModelOutputError('evidence_id');
  for(const claim of analysis.card.existingCapabilities??[]){
   if(!hasScopeSupport(claim,evidence))throw requirementProblem('REQUIREMENT_EVIDENCE_SCOPE_MISMATCH',503);
  }
  const questionIds=[...(analysis.card.assumptions??[]),...(analysis.card.issues??[])].map(x=>x.id);
- if(new Set(questionIds).size!==questionIds.length)throw requirementProblem('REQUIREMENT_MODEL_OUTPUT_INVALID',503);
+ if(new Set(questionIds).size!==questionIds.length)throw new RequirementModelOutputError('question_id');
  return analysis;
 }
 export function isReady(value:unknown,evidence:RequirementEvidence[]){
