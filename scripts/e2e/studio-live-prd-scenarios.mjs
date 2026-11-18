@@ -113,6 +113,7 @@ export async function runStudioPrd({
   const supplemental =
     "确认本工单的业务决策：仅当前策划用户在现有区域授权范围内的活动管理 Web 列表。以活动发布时记录的渠道类型为准，不使用营销归因或外部系统。列表查询新增可选参数 channelType，全部时省略参数，企微对应 wecom，短信对应 sms。历史活动无渠道值时只在全部中显示。底层字段映射由既有活动查询实现负责，底表物理列名不影响本工单，无需新增数据源或角色。选项单选、即时查询，其余条件和权限保持，切换回第1页，失败保留条件原地重试。现有登录、导航、审核发布、报表只复用；未在本业务边界明确的实现选择记录为假设。仅 Web 文档，页面布局和设计沿用现有规范。";
   prd.clarifications = [];
+  prd.requirementRetries = [];
   const analyze = (previous) => waitUntil(
     async () => {
       const [row] = await query(
@@ -127,11 +128,12 @@ export async function runStudioPrd({
   );
   for (let attempt = 0; ; attempt++) {
     let analysis = await analyze();
-    if (analysis.status === "failed" &&
-        ["REQUIREMENT_MODEL_OUTPUT_INVALID", "REQUIREMENT_KNOWLEDGE_UNAVAILABLE"].includes(analysis.failure_code) &&
-        !prd.requirementRetry) {
+    while (analysis.status === "failed" &&
+           ["REQUIREMENT_MODEL_OUTPUT_INVALID", "REQUIREMENT_KNOWLEDGE_UNAVAILABLE"].includes(analysis.failure_code) &&
+           !prd.requirementRetries.some(({ failureCode }) => failureCode === analysis.failure_code)) {
       const previous = analysis;
-      prd.requirementRetry = { turnId: previous.id, failureCode: previous.failure_code, previousAttempt: previous.attempt };
+      const receipt = { turnId: previous.id, failureCode: previous.failure_code, previousAttempt: previous.attempt };
+      prd.requirementRetries.push(receipt);
       await checkpoint();
       const retry = post(new RegExp("/requirement-sessions/" + session + "/turns/" + previous.id + "/retry$"));
       await page.getByRole("button", { name: "重试需求分析", exact: true }).click();
@@ -139,7 +141,7 @@ export async function runStudioPrd({
       analysis = await analyze(previous);
       assert.equal(analysis.id, previous.id);
       assert.equal(analysis.request_hash, previous.request_hash);
-      Object.assign(prd.requirementRetry, { attempt: analysis.attempt, status: analysis.status });
+      Object.assign(receipt, { attempt: analysis.attempt, status: analysis.status });
       await checkpoint();
     }
     if (analysis.status === "failed") throw fatal("Requirement discussion failed: " + analysis.failure_code);
