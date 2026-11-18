@@ -14,7 +14,7 @@ import {
 const digest = bytes => createHash("sha256").update(bytes).digest("hex");
 const increment = "在云溪营销极速发布平台现有活动管理列表中，为策划人员增加渠道类型筛选。只筛当前角色已授权区域内活动，已有登录、导航、审核发布和报表保持不变。筛选项为全部、企微、短信，默认全部；与现有分页联动，改变筛选重置第一页，空结果提示无匹配活动，失败保留条件可重试。复用当前活动列表查询能力，仅扩展筛选参数，不接新外部系统，不改业务流程。目标为Web端，沿用原设计规范。";
 const interactionSpec = "原型交互验收：列表页包含标签为渠道类型的原生select、全部/企微/短信三个选项，和占位文字搜索活动的搜索框。提供企微活动与短信活动各两条，切换渠道后真实隐藏其他渠道的行。输入搜索词真实按活动名称过滤，不存在的名称显示无匹配活动；清空搜索恢复列表。点击活动旁查看详情打开第二个活动详情页，详情提供返回列表按钮，点击后可返回。两页均可实际操作，不新增登录页或报表页。";
-const prototypeFilterRules = " 渠道与活动名称条件必须同时满足。详情返回时恢复默认「全部」、清空搜索词并回到第1页。";
+const prototypeFilterRules = " 渠道与活动名称条件必须同时满足。企微和短信沿用已有的 wecom、sms 值。其他或未知渠道只在「全部」中显示，仍受区域授权限制。详情返回时恢复默认「全部」、清空搜索词并回到第1页。查询异常沿用原失败区，显示「加载失败，请重试」和「重试」按钮，保留渠道与搜索词，以同一条件重试。";
 
 export async function runStudioLiveScenarios({ page, browser, webOrigin, outDir, runId, dbUrl, sql, waitUntil, evidence, step, runCmd, jointOnly = false, activityContract = false }) {
   const query = async (text, values = []) => (await sql(text, values, dbUrl)).rows;
@@ -69,22 +69,26 @@ export async function runStudioLiveScenarios({ page, browser, webOrigin, outDir,
     const { projectId, output, label, activityContract: source } = result;
     const beforeRuns = Number((await query("SELECT count(*) AS n FROM workbench.runs WHERE project_id=$1", [projectId]))[0].n);
     await page.getByRole("combobox", { name: "输出类型", exact: true }).selectOption(output);
-    await page.getByRole("textbox", { name: "描述需求或修改" }).fill(prompt);
-    const messageReply = page.waitForResponse(r => r.request().method() === "POST" && /\/requirement-sessions\/[^/]+\/messages$/.test(new URL(r.url()).pathname));
-    await page.getByRole("button", { name: "发送需求", exact: true }).click();
-    const sent = await messageReply;
-    assert.ok(sent.ok(), `Discussion HTTP ${sent.status()}`);
-    const session = await sent.json();
-    result.sessionId = session.id;
-    if (expectedRevision) {
-      assert.equal(session.context.kind, "revision");
-      assert.equal(session.context.revisionId, expectedRevision.id);
-      assert.deepEqual(session.context.feedbackIds, [expectedRevision.feedbackId]);
+    async function sendDiscussionMessage(message) {
+      await page.getByRole("textbox", { name: "描述需求或修改" }).fill(message);
+      const reply = page.waitForResponse(r => r.request().method() === "POST" && /\/requirement-sessions\/[^/]+\/messages$/.test(new URL(r.url()).pathname));
+      await page.getByRole("button", { name: "发送需求", exact: true }).click();
+      const response = await reply;
+      assert.ok(response.ok(), `Discussion HTTP ${response.status()}`);
+      const session = await response.json();
+      if (expectedRevision) {
+        assert.equal(session.context.kind, "revision");
+        assert.equal(session.context.revisionId, expectedRevision.id);
+        assert.deepEqual(session.context.feedbackIds, [expectedRevision.feedbackId]);
+      }
+      const body = response.request().postDataJSON();
+      assert.equal(body.generationRequest.modelId, "deepseek-flash");
+      if (source) assert.deepEqual(body.generationRequest.sourceIds, [source.sourceId]);
+      assert.equal(Object.hasOwn(body.generationRequest, "outputOperations"), false, "Discussion must not submit server-resolved output operations");
+      return session;
     }
-    const discussionBody = sent.request().postDataJSON();
-    assert.equal(discussionBody.generationRequest.modelId, "deepseek-flash");
-    if (source) assert.deepEqual(discussionBody.generationRequest.sourceIds, [source.sourceId]);
-    assert.equal(Object.hasOwn(discussionBody.generationRequest, "outputOperations"), false, "Discussion must not submit server-resolved output operations");
+    const session = await sendDiscussionMessage(prompt);
+    result.sessionId = session.id;
     const analyze = () => waitUntil(async () => {
       const [state] = await query("SELECT s.state, t.id AS turn_id, t.status AS turn_status, t.request_hash, t.attempt, t.failure_code FROM workbench.requirement_sessions s LEFT JOIN workbench.requirement_turns t ON t.id=s.current_turn_id WHERE s.id=$1", [session.id]);
       return ["succeeded", "failed"].includes(state?.turn_status) ? state : false;
@@ -106,6 +110,20 @@ export async function runStudioLiveScenarios({ page, browser, webOrigin, outDir,
       assert.equal(analysis.attempt, previous.attempt + 1, "Retry must claim the persisted turn once");
       Object.assign(result.requirementRetry, { retryAttempt: analysis.attempt, status: analysis.turn_status });
       await checkpoint();
+    }
+    if ((label === "prototype" || label === "revision") && analysis.state === "needs_clarification") {
+      const [summary] = await query("SELECT card->'issues' AS issues FROM workbench.requirement_summaries WHERE session_id=$1 ORDER BY version DESC LIMIT 1", [session.id]);
+      const questions = summary?.issues ?? [];
+      // Answer only the decisions already fixed for this local acceptance scenario.
+      if (questions.length && questions.every(issue => issue.kind === "missing" && !issue.blocking
+          && /搜索|筛选|渠道|返回|失败|重试/u.test(issue.question))) {
+        const previous = analysis.turn_id;
+        assert.equal((await sendDiscussionMessage("补充明确本场景的交互决策：" + prototypeFilterRules)).id, session.id);
+        analysis = await analyze();
+        assert.notEqual(analysis.turn_id, previous, "A clarification is a new turn in the same session");
+        result.clarification = { previousTurn: previous, answeredTurn: analysis.turn_id, state: analysis.state };
+        await checkpoint();
+      }
     }
     if (analysis.turn_status === "failed") {
       result.status = "failed";
