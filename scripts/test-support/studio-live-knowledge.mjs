@@ -24,8 +24,9 @@ export async function startLiveKnowledgeFixture({ serviceRoot, publishedPath } =
   async function request(kind, route, body) {
     const origin = kind === "embedding" ? env.V2_INFERENCE_EMBEDDING_URL : env.V2_INFERENCE_RERANKER_URL;
     assert.equal(new URL(origin).hostname, "127.0.0.1");
+    const token = kind === "embedding" ? env.V2_INFERENCE_TOKEN : (env.V2_RERANKER_TOKEN ?? env.V2_INFERENCE_TOKEN);
     const response = await fetch(origin + route, { method: body ? "POST" : "GET", signal: AbortSignal.timeout(35000),
-      headers: { authorization: `Bearer ${env.V2_INFERENCE_TOKEN}`, "content-type": "application/json" }, ...(body ? { body: JSON.stringify(body) } : {}) });
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" }, ...(body ? { body: JSON.stringify(body) } : {}) });
     assert.equal(response.status, 200, `Live ${kind} ${route} HTTP ${response.status}`);
     return response.json();
   }
@@ -117,7 +118,7 @@ export async function startLiveKnowledgeFixture({ serviceRoot, publishedPath } =
     WORKBENCH_KNOWLEDGE_TOOL_SECRET: randomBytes(32).toString("base64url"), WORKBENCH_KNOWLEDGE_TOOL_MAX_TTL_SECONDS: "3600",
     WORKBENCH_KNOWLEDGE_EMBEDDING_PROFILE_ID: embedding.spec.id, WORKBENCH_KNOWLEDGE_EMBEDDING_PROFILE_SPEC_SHA256: embedding.specSha256,
     WORKBENCH_TEI_URL: env.V2_INFERENCE_EMBEDDING_URL, WORKBENCH_TEI_API_KEY: env.V2_INFERENCE_TOKEN, WORKBENCH_TEI_IMAGE_DIGEST: embedding.spec.engine.imageDigest,
-    WORKBENCH_KNOWLEDGE_RERANKER_URL: env.V2_INFERENCE_RERANKER_URL, WORKBENCH_KNOWLEDGE_RERANKER_API_KEY: env.V2_INFERENCE_TOKEN,
+    WORKBENCH_KNOWLEDGE_RERANKER_URL: env.V2_INFERENCE_RERANKER_URL, WORKBENCH_KNOWLEDGE_RERANKER_API_KEY: env.V2_RERANKER_TOKEN ?? env.V2_INFERENCE_TOKEN,
     WORKBENCH_KNOWLEDGE_RERANKER_IMAGE_DIGEST: retrieval.spec.reranker.engine.imageDigest,
     WORKBENCH_KNOWLEDGE_RERANKER_MODEL_ID: retrieval.spec.reranker.model.id, WORKBENCH_KNOWLEDGE_RERANKER_MODEL_REVISION: retrieval.spec.reranker.model.revision,
     WORKBENCH_KNOWLEDGE_RERANKER_TEI_VERSION: retrieval.spec.reranker.engine.version, WORKBENCH_KNOWLEDGE_RERANKER_MAX_INPUT_TOKENS: String(retrieval.spec.reranker.tokenizer.maximumInputTokens),

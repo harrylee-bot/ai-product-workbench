@@ -121,7 +121,7 @@ try {
   };
   await probe("provider", provider.V2_PROVIDER_GATEWAY_URL + "/api/models", { "X-DeerFlow-Internal-Token": provider.V2_PROVIDER_TOKEN });
   await probe("embedding", inference.V2_INFERENCE_EMBEDDING_URL + "/info", { authorization: `Bearer ${inference.V2_INFERENCE_TOKEN}` });
-  await probe("reranker", inference.V2_INFERENCE_RERANKER_URL + "/info", { authorization: `Bearer ${inference.V2_INFERENCE_TOKEN}` });
+  await probe("reranker", inference.V2_INFERENCE_RERANKER_URL + "/info", { authorization: `Bearer ${inference.V2_RERANKER_TOKEN ?? inference.V2_INFERENCE_TOKEN}` });
   await probe("object-storage", new URL("/minio/health/ready", s3.V2_S3_ENDPOINT).href);
   const structural = report.candidate.backendCommit.matches
     && report.candidate.runtimeSourcesClean

@@ -320,7 +320,7 @@ try {
   const checks = [
     ["provider", `${providerEnv.V2_PROVIDER_GATEWAY_URL}/api/models`, { "X-DeerFlow-Internal-Token": providerEnv.V2_PROVIDER_TOKEN }],
     ["embedding", `${inferenceEnv.V2_INFERENCE_EMBEDDING_URL}/info`, { Authorization: `Bearer ${inferenceEnv.V2_INFERENCE_TOKEN}` }],
-    ["reranker", `${inferenceEnv.V2_INFERENCE_RERANKER_URL}/info`, { Authorization: `Bearer ${inferenceEnv.V2_INFERENCE_TOKEN}` }],
+    ["reranker", `${inferenceEnv.V2_INFERENCE_RERANKER_URL}/info`, { Authorization: `Bearer ${inferenceEnv.V2_RERANKER_TOKEN ?? inferenceEnv.V2_INFERENCE_TOKEN}` }],
     ["object-storage", new URL("/minio/health/ready", s3Env.V2_S3_ENDPOINT).href, {}],
   ];
   evidence.preflight = await Promise.all(checks.map(async ([name, url, headers]) => {
