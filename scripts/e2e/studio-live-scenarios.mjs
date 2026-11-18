@@ -119,10 +119,17 @@ export async function runStudioLiveScenarios({ page, browser, webOrigin, outDir,
     result.outputOperations = outputOperations;
     assert.ok(frozen.input_snapshot.knowledgeReleaseId, "Confirmation pins a published knowledge release");
     assert.ok(frozen.baseline.evidence?.length, "Confirmation includes real authorized knowledge evidence");
+    await checkpoint();
     const seen = new Set();
     await waitUntil(async () => {
-      const [run] = await query("SELECT status, request, knowledge_release_id FROM workbench.runs WHERE id=$1", [frozen.run_id]);
-      if (["failed", "cancelled", "waiting_input"].includes(run?.status)) throw Object.assign(new Error(`Generation reached ${run.status}`), { fatal: true });
+      const [run] = await query("SELECT status, error_code FROM workbench.runs WHERE id=$1", [frozen.run_id]);
+      if (["failed", "cancelled", "waiting_input"].includes(run?.status)) {
+        result.status = run.status;
+        result.errorCode = run.error_code;
+        await checkpoint();
+        const detail = run.error_code ? ` (${run.error_code})` : "";
+        throw Object.assign(new Error(`Generation reached ${run.status}${detail}`), { fatal: true });
+      }
       if (run?.status !== "succeeded" && output !== "prd") {
         const nodes = await page.locator(".visual-draft [data-draft-node]").evaluateAll(elements => elements.flatMap(el => {
           const rect = el.getBoundingClientRect();
@@ -148,7 +155,10 @@ export async function runStudioLiveScenarios({ page, browser, webOrigin, outDir,
           if (!source) return false;
           seen.add(signature);
           result.intermediate.push({ at: observedAt, signature, nodeCount: nodes.length, pageId: nodes[0].page, eventSequence: source.sequence, attempt: source.attempt, eventAt: source.occurred_at });
-          if (result.intermediate.length <= 3) await page.screenshot({ path: path.join(outDir, `${label}-intermediate-${result.intermediate.length}.png`) });
+          if (result.intermediate.length <= 3) {
+            await checkpoint();
+            await page.screenshot({ path: path.join(outDir, `${label}-intermediate-${result.intermediate.length}.png`) });
+          }
         }
       }
       return run?.status === "succeeded" ? run : false;
