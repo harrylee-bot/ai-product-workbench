@@ -1568,6 +1568,13 @@ export function StudioWorkspace({
               />
             ) : (
               <ProjectViews
+                selectedSourceIds={composerEntry.draft.sourceIds}
+                onToggleSource={!composer.disabled && canEdit && composerSession.ready && !discussion.pending
+                  ? id => composerSession.updateDraft(current => ({
+                    ...current, sourceIds: current.sourceIds.includes(id)
+                      ? current.sourceIds.filter(sourceId => sourceId !== id)
+                      : [...current.sourceIds, id],
+                  })) : undefined}
                 activeRunId={directRunId}
                 previews={
                   directRunning

@@ -80,6 +80,32 @@ suite('Requirement discussions with actual PostgreSQL; fixture model and workflo
   if(kinds.includes('prototype')){const derived=await db.prototypePlan.findUniqueOrThrow({where:{id:done.confirmation!.planId!}});expect(derived.rootPlanId).toBeNull();expect(derived.contentVersion).toBe(1);expect(derived.status).toBe('approved');}else expect(done.confirmation?.planId).toBeNull();
   expect((await service.confirm(fixture.ownerId,s.id,'draft-confirm',reviewed.revision,accept(reviewed))).confirmation?.runId).toBe(run.id);
  });
+ it('keeps the confirmed run snapshot after a project file is replaced and removed', async () => {
+  const original = await discussionWithSource(['prd'], true);
+  const second = await discussionWithSource(['prd'], true);
+  const sources = new ImportSourcesService(db as never, access, queue as never);
+  const old = await sources.get(fixture.ownerId, original.request.sourceIds[0]!);
+  const next = await sources.get(fixture.ownerId, second.request.sourceIds[0]!);
+  if (next.descriptor?.kind !== 'file') throw new Error('Expected a file source');
+  await service.message(fixture.ownerId, original.s.id, randomUUID(), 0, { text: '保留原资料内容', intent: 'discuss' });
+  await original.job.tick(original.s.id);
+  const reviewed = await service.get(fixture.ownerId, original.s.id);
+  await service.confirm(fixture.ownerId, reviewed.id, randomUUID(), reviewed.revision, accept(reviewed));
+  await original.job.tick(reviewed.id);
+  await original.job.tick(reviewed.id);
+  const { confirmation } = await service.get(fixture.ownerId, reviewed.id);
+  const frozen = () => db.$transaction(tx => runs.prototypeInputFromRun(tx, fixture.projectId, confirmation!.runId!));
+  const before = await frozen();
+  expect(before.snapshot.sources[0]).toMatchObject({sourceId: old.id, checksum: old.checksum});
+  const key = randomUUID();
+  const request = {kind:'file' as const, fileAssetId:next.descriptor.fileAssetId, replaces:{sourceId:old.id,revision:old.revision}};
+  const created = await sources.create(fixture.ownerId,fixture.projectId,key,request);
+  expect(created.checksum).not.toBe(old.checksum);
+  expect(await sources.create(fixture.ownerId,fixture.projectId,key,request)).toEqual(created);
+  await expect(sources.create(fixture.ownerId,fixture.projectId,randomUUID(),request)).rejects.toMatchObject({status:412});
+  await sources.delete(fixture.ownerId,created.id,created.revision);
+  expect(await frozen()).toEqual(before);
+ });
  it('preserves stored unconfirmed input but refuses runtime execution or retry',async()=>{
   const s=await create(['prd']);
   const row=await db.run.create({data:{projectId:s.projectId,threadId:s.threadId,createdById:fixture.ownerId,knowledgeReleaseId:fixture.releaseId,idempotencyKey:randomUUID(),requestHash:'a'.repeat(64),requestId:randomUUID(),traceId:randomUUID(),modelId:s.generationRequest.modelId,request:s.generationRequest as never}});

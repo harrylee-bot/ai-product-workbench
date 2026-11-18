@@ -129,6 +129,11 @@ export class ImportSourcesService {
               checksum: null,
               blob: null,
             };
+        // Preserve the old manifest for frozen inputs. Roll back retirement if
+        // the new source or its manifest fails to commit.
+        if (request.kind === "file" && request.replaces) {
+          await this.retireSource(tx, projectId, request.replaces.sourceId, request.replaces.revision, "file");
+        }
         const created = await tx.importSource.create({
           data: {
             id: `source_${randomUUID()}`,
@@ -216,18 +221,18 @@ export class ImportSourcesService {
     const current = await this.requireForEdit(principalId, sourceId);
     await this.db.$transaction(async (tx) => {
       await lockActiveProject(tx, current.projectId, principalId, "edit");
-      const result = await tx.importSource.updateMany({
-        where: { id: sourceId, projectId: current.projectId, revision: expectedRevision, status: { not: "deleted" } },
-        data: {
-          status: "deleted",
-          deletedAt: new Date(),
-          failureCode: null,
-          failureDetail: null,
-          revision: { increment: 1 },
-        },
-      });
-      if (result.count !== 1) throw revisionConflictProblem();
+      await this.retireSource(tx, current.projectId, sourceId, expectedRevision);
     });
+  }
+
+  private async retireSource(
+    tx: Prisma.TransactionClient, projectId: string, sourceId: string, expectedRevision: number, kind?: "file",
+  ) {
+    const result = await tx.importSource.updateMany({
+      where: { id: sourceId, projectId, revision: expectedRevision, status: { not: "deleted" }, kind },
+      data: { status: "deleted", deletedAt: new Date(), failureCode: null, failureDetail: null, revision: { increment: 1 } },
+    });
+    if (result.count !== 1) throw revisionConflictProblem();
   }
 
   private async requireForEdit(principalId: string, sourceId: string) {

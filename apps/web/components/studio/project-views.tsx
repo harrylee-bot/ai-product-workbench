@@ -31,12 +31,14 @@ import { isActiveRun, projectedRun } from "@/lib/studio/run";
 import { ImageEditor } from "./image-editor";
 import { DocumentView } from "./document-view";
 import { RunOutputs, VariantSources } from "./relations";
+import { ResourceFileUpload } from "./resource-file-upload";
 import { ProjectMembers } from "./project-members";
 const uniqueItems = <T extends { id: string }>(items: T[]) => [
   ...new Map(items.map((item) => [item.id, item])).values(),
 ];
 const etag = (v: { revision: number }) => `"${v.revision}"`;
 export function ProjectViews({
+  selectedSourceIds, onToggleSource,
   activeRunId,
   previews = [],
   view,
@@ -44,6 +46,8 @@ export function ProjectViews({
   canEdit,
   onPrompt,
 }: {
+  selectedSourceIds: string[];
+  onToggleSource?: (id: string) => void;
   activeRunId?: string;
   previews?: GenerationPreview[];
   view: StudioView;
@@ -64,6 +68,8 @@ export function ProjectViews({
       ) : view === "resources" || view === "knowledge" ? (
         <>
           <Resources
+            key={bootstrap.project.id}
+            selectedSourceIds={selectedSourceIds} onToggleSource={onToggleSource}
             projectId={bootstrap.project.id}
             canEdit={canEdit}
             knowledge={view === "knowledge"}
@@ -89,6 +95,7 @@ export function ProjectViews({
   );
 }
 function Resources({
+  selectedSourceIds, onToggleSource,
   projectId,
   canEdit,
   knowledge,
@@ -96,6 +103,8 @@ function Resources({
   projectId: string;
   canEdit: boolean;
   knowledge: boolean;
+  selectedSourceIds: string[];
+  onToggleSource?: (id: string) => void;
 }) {
   const api = useWorkbenchImportSourcesApi(),
     client = useQueryClient(),
@@ -132,8 +141,9 @@ function Resources({
       <p>
         {knowledge
           ? "选择已解析的资料作为生成依据。每次运行固定资料快照，修改源文件不会悄悄改变既有版本。"
-          : "导入项目需要的资料，在输入框中选择引用。图片和文档可从底部附件上传。"}
+          : "上传文件或导入链接，然后选择本次需求引用的资料。"}
       </p>
+      {!knowledge && canEdit && <ResourceFileUpload projectId={projectId} sources={sources} />}
       {!knowledge && (
         <form
           className="studio-inline-form"
@@ -229,6 +239,15 @@ function Resources({
               )}
             </div>
             {!knowledge && (
+              <label>
+                <input type="checkbox" aria-label={`本次引用 ${source.label}`}
+                  checked={selectedSourceIds.includes(source.id)}
+                  disabled={!canEdit || !onToggleSource || source.status !== "ready"}
+                  onChange={() => onToggleSource?.(source.id)} />
+                本次引用
+              </label>
+            )}
+            {!knowledge && (
               <button
                 disabled={!canEdit || action.busy}
                 onClick={() =>
@@ -249,7 +268,7 @@ function Resources({
       {query.isPending && <p role="status">正在读取资料…</p>}
       {!query.isPending && !query.error && sources.length === 0 && (
         <p className="studio-empty-copy">
-          尚无项目资料。上传附件或导入链接开始。
+          尚无项目资料。
         </p>
       )}
       {query.hasNextPage && (
