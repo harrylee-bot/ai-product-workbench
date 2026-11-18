@@ -1,3 +1,4 @@
+import { setTimeout as delay } from "node:timers/promises";
 import type { KnowledgeRerankerProviderConfig } from "./knowledge-retrieval.config.js";
 import type {
   KnowledgeRerankerPort,
@@ -22,18 +23,29 @@ export class TeiRerankerAdapter implements KnowledgeRerankerPort {
   async rerank(input: KnowledgeRerankInput, signal?: AbortSignal): Promise<readonly KnowledgeRerankScore[]> {
     // TEI reserves one concurrency permit per query/document pair. A single
     // otherwise legal client batch can exceed the server's permit capacity.
-    const batchSize = await this.assertReady(input.candidates.length, signal);
+    let batchSize = await this.assertReady(input.candidates.length, signal);
     const scores: KnowledgeRerankScore[] = [];
-    for (let offset = 0; offset < input.candidates.length; offset += batchSize) {
+    let busyRetries = 0;
+    for (let offset = 0; offset < input.candidates.length;) {
       const candidates = input.candidates.slice(offset, offset + batchSize);
-      const response = await this.client.requestJson("/rerank", {
-        method: "POST",
-        body: JSON.stringify({
-          query: input.query, texts: candidates.map(candidate => candidate.content),
-          truncate: false, raw_scores: false, return_text: false,
-        }),
-      }, signal);
-      scores.push(...parseRerankerScores(response, candidates));
+      try {
+        const response = await this.client.requestJson("/rerank", {
+          method: "POST",
+          body: JSON.stringify({
+            query: input.query, texts: candidates.map(candidate => candidate.content),
+            truncate: false, raw_scores: false, return_text: false,
+          }),
+        }, signal);
+        scores.push(...parseRerankerScores(response, candidates));
+        offset += candidates.length;
+      } catch (error) {
+        if (!(error instanceof KnowledgeProviderError) || error.code !== "KNOWLEDGE_PROVIDER_HTTP_429" || busyRetries >= 3) throw error;
+        // Other API requests may already hold the advertised permits. Retry
+        // only the rejected batch; completed pairs retain their original scores.
+        batchSize = Math.max(1, Math.floor(batchSize / 2));
+        await delay(250 * 2 ** busyRetries, undefined, { signal });
+        busyRetries++;
+      }
     }
     return scores;
   }

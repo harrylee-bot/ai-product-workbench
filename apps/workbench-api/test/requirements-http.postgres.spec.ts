@@ -192,6 +192,23 @@ suite('New generation flow over actual HTTP and PostgreSQL',()=>{
   const retry=await db.run.findUniqueOrThrow({where:{id:retryRunId},include:{sourceSnapshots:true}});expect(retry.retryOfRunId).toBe(run.id);expect(retry.request).toEqual(run.request);expect(retry.knowledgeReleaseId).toBe(run.knowledgeReleaseId);expect(retry.sourceSnapshots.map(x=>x.snapshot)).toEqual(run.sourceSnapshots.map(x=>x.snapshot));
   expect(await db.run.count({where:{threadId:thread.id}})).toBe(2);await expect(db.$transaction(tx=>confirmedRequirementBaseline(tx,retry,startRunRequestSchema.parse(retry.request)))).resolves.toMatchObject({confirmationId:started.value.confirmation.id});
  },90000);
+ it('keeps foreign and unknown source IDs indistinguishable and out of the model context',async()=>{
+  const principal=fixture.outsiderId;
+  const thread=await db.thread.create({data:{projectId:fixture.outsiderProjectId,createdById:principal,title:'Source isolation'}});
+  const calls=model.analyze.mock.calls.length;
+  for(const selected of [sourceId,randomUUID()]){
+   const request=startRunRequestSchema.parse({prompt:'请核查我选择的资料',modelId:'deepseek-flash',workflow:'generate',targetSurface:'web',designStyle:{kind:'automatic'},sourceIds:[selected],requestedArtifactKinds:['prd']});
+   const session=await http('POST',`/threads/${thread.id}/requirement-sessions`,{principal,body:{generationRequest:request},key:randomUUID(),status:201});
+   const url='/requirement-sessions/'+session.value.id;
+   await http('POST',url+'/messages',{principal,body:{text:request.prompt},key:randomUUID(),etag:session.etag!,status:202});
+   await processor.tick(session.value.id);
+   const {value}=await http('GET',url,{principal});
+   expect(value.activeTurn).toMatchObject({status:'failed',failureCode:'REQUIREMENT_SOURCE_UNAVAILABLE',inputTokens:null});
+   expect(value.evidence).toEqual([]);
+   expect(await db.requirementSummary.count({where:{sessionId:value.id}})).toBe(0);
+  }
+  expect(model.analyze).toHaveBeenCalledTimes(calls);
+ });
  it('cancels and retries the same discussion turn across an API restart without duplicating the user entry',async()=>{
   const {thread,generationRequest,created,path}=await createDiscussion();
   const messageKey=randomUUID(),messageBody={text:generationRequest.prompt};
