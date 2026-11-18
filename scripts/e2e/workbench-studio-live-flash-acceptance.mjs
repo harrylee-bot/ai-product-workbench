@@ -360,7 +360,7 @@ try {
   // The runtime is independently deployed. Require its deployment owner's
   // inspection receipt; a model catalog alone cannot prove tool compatibility.
   const proofPath = requiredEnv("WORKBENCH_STUDIO_LIVE_RUNTIME_PROOF");
-  if (phase === "prd" || phase === "joint") {
+  if (phase === "prd" || phase === "joint" || process.env.WORKBENCH_STUDIO_LIVE_RUNTIME_COMMIT) {
     const { verifyPrdRuntime } = await import("./studio-live-prd-runtime.mjs");
     evidence.runtimeDeploymentAttestation = await verifyPrdRuntime({ serviceRoot, backendCommit: expectedBackendCommit,
       runtimeCommit: requiredEnv("WORKBENCH_STUDIO_LIVE_RUNTIME_COMMIT"), proofPath, gatewayUrl: providerEnv.V2_PROVIDER_GATEWAY_URL });
