@@ -193,6 +193,9 @@ class ArtifactDraftRepairTests(unittest.TestCase):
         intro = sections_to_write["introduction"]
         usage_path = f"{intro_path}/usageScenarios"
         usage = intro["usageScenarios"]
+        business_path = "/content/sections/businessRequirements"
+        business = sections_to_write["businessRequirements"]
+        page_links = business["pageLinks"]
         ordered_steps = [
             (intro_path, {"title": intro["title"]}),
             (f"{intro_path}/background", intro["background"]),
@@ -200,20 +203,21 @@ class ArtifactDraftRepairTests(unittest.TestCase):
             (usage_path, {"title": usage["title"]}),
             (f"{usage_path}/blocks", usage["blocks"]),
             (f"{usage_path}/channelTable", usage["channelTable"]),
-            ("/content/sections/businessRequirements", sections_to_write["businessRequirements"]),
-            *[("/content/sections/businessRequirements/functionSections/-", section) for section in parts],
+            (business_path, {"title": business["title"]}),
+            (f"{business_path}/summary", business["summary"]),
+            (f"{business_path}/pageLinks", {"title": page_links["title"]}),
+            (f"{business_path}/pageLinks/blocks", page_links["blocks"]),
+            (f"{business_path}/functionSections", []),
+            *[(f"{business_path}/functionSections/-", section) for section in parts],
             ("/content/sections/degradation", sections_to_write["degradation"]),
             ("/content/sections/safetyBaseline", sections_to_write["safetyBaseline"]),
         ]
         for index, (path, value) in enumerate(ordered_steps):
-            if index and path.endswith("/-") and ordered_steps[index - 1][0] == path:
-                self.assertNotIn(path, ack["prdAssembly"]["missingPaths"])
-            else:
-                expected = {"op": "add", "path": path}
-                if path in (intro_path, usage_path):
-                    expected["value"] = value
-                self.assertEqual(ack["prdAssembly"]["nextOperation"], expected)
-                self.assertIn("one small complete value", ack["repairInstruction"])
+            expected = {"op": "add", "path": path}
+            if path in (intro_path, usage_path, business_path, f"{business_path}/pageLinks", f"{business_path}/functionSections"):
+                expected["value"] = value
+            self.assertEqual(ack["prdAssembly"]["nextOperation"], expected)
+            self.assertIn("one small complete value", ack["repairInstruction"])
             ack, artifact = self.publish(f"add_{index}", repair=self.repair(ack, [
                 {"op": "add", "path": path, "value": value},
             ]))
@@ -225,6 +229,26 @@ class ArtifactDraftRepairTests(unittest.TestCase):
         self.assertEqual(latest_accepted_artifact_draft(
             self.runtime.state, run_id="run_1", runtime_attempt_id="attempt_1", artifact_index=0,
         ), self.draft)
+
+    def test_function_title_and_blocks_take_priority_over_missing_later_sections(self):
+        baseline = copy.deepcopy(self.draft)
+        sections = baseline["content"]["sections"]
+        sections.pop("degradation")
+        first = sections["businessRequirements"]["functionSections"][0]
+        title = first["title"]
+        first["title"] = title.replace("2.2 ", "2.2", 1)
+        first["blocks"] = []
+        ack, artifact = self.publish("initial", draft=baseline)
+        self.assertFalse(ack["ok"])
+        self.assertNotIn("draft", artifact)
+        path = "/content/sections/businessRequirements/functionSections/0"
+        expected = {"op": "replace", "path": f"{path}/title", "value": title}
+        self.assertEqual(ack["prdAssembly"]["nextOperation"], expected)
+        self.assertIn("ASCII space", ack["repairInstruction"])
+        revised, artifact = self.publish("repair", repair=self.repair(ack, [expected]))
+        self.assertFalse(revised["ok"])
+        self.assertNotIn("draft", artifact)
+        self.assertEqual(revised["prdAssembly"]["nextOperation"], {"op": "add", "path": f"{path}/blocks/-"})
 
     def test_reconstructs_multiple_failed_repairs_then_accepts_final_repair(self):
         ack,_=self.reject()

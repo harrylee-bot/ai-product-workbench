@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from typing import Any
 
 from langchain.tools import tool
@@ -161,16 +162,9 @@ def workbench_artifact_draft_publish(
             response["prdAssembly"] = assembly
             response["repairInstruction"] = (
                 "Continue assembling this PRD with separate, small repairs. Use one JSON Pointer "
-                "add for prdAssembly.nextOperation with the latest candidateChecksum. Copy the fixed value "
-                "when supplied. Otherwise write one small complete value at that path. Add the introduction "
-                "title, background, scope, and usageScenarios in separate calls. Add the usageScenarios title, "
-                "blocks, and channelTable separately. When authoring businessRequirements, start with its "
-                "title, summary, pageLinks and an empty functionSections. "
-                "Append one complete function section at a time at "
-                "/content/sections/businessRequirements/functionSections/-. If a section is large, "
-                "start with its header and append blocks individually. Add the remaining functions "
-                "from the confirmation before adding safetyBaseline. After all sections exist, "
-                "address the remaining validation issues."
+                "operation from prdAssembly.nextOperation with the latest candidateChecksum. Copy the "
+                "supplied value exactly. Otherwise write one small complete value at that path. "
+                + assembly.get("instruction", "")
             )
         envelope_operations = prd_envelope_duplicate_removals(draft, validation["issues"])
         if envelope_operations:
@@ -224,6 +218,9 @@ def _prd_assembly_progress(candidate: dict[str, Any], issues: list[Any]) -> dict
     base = "/content/sections"
     introduction_path = f"{base}/introduction"
     usage_path = f"{introduction_path}/usageScenarios"
+    business_path = f"{base}/businessRequirements"
+    page_links_path = f"{business_path}/pageLinks"
+    functions_path = f"{business_path}/functionSections"
     introduction = sections.get("introduction")
     missing = []
     if "introduction" not in sections:
@@ -241,14 +238,28 @@ def _prd_assembly_progress(candidate: dict[str, Any], issues: list[Any]) -> dict
             )
     business = sections.get("businessRequirements")
     if "businessRequirements" not in sections:
-        missing.append(f"{base}/businessRequirements")
+        missing.append(business_path)
     elif isinstance(business, dict):
-        functions = f"{base}/businessRequirements/functionSections"
+        missing.extend(
+            f"{business_path}/{key}" for key in ("title", "summary", "pageLinks")
+            if key not in business
+        )
+        page_links = business.get("pageLinks")
+        if isinstance(page_links, dict):
+            missing.extend(f"{page_links_path}/{key}" for key in ("title", "blocks") if key not in page_links)
         if "functionSections" not in business:
-            missing.append(functions)
-        elif business["functionSections"] == []:
-            missing.append(f"{functions}/-")
+            missing.append(functions_path)
+    function_operation, function_instruction = _prd_function_assembly_operation(document, issues)
+    function_is_next = function_operation is not None and not missing
+    if function_operation is not None and function_operation["op"] == "add":
+        missing.append(function_operation["path"])
     missing.extend(f"{base}/{key}" for key in section_keys[2:] if key not in sections)
+    if function_is_next:
+        return {
+            "missingPaths": missing,
+            "nextOperation": function_operation,
+            "instruction": function_instruction,
+        }
     if not missing:
         return None
     next_path = missing[0]
@@ -258,10 +269,91 @@ def _prd_assembly_progress(candidate: dict[str, Any], issues: list[Any]) -> dict
         f"{introduction_path}/title": "1 引言",
         usage_path: {"title": "1.3使用场景（必填）"},
         f"{usage_path}/title": "1.3使用场景（必填）",
+        business_path: {"title": "2 业务需求"},
+        f"{business_path}/title": "2 业务需求",
+        page_links_path: {"title": "2.1页面链接"},
+        f"{page_links_path}/title": "2.1页面链接",
+        functions_path: [],
     }
     if next_path in fixed_values:
         operation["value"] = fixed_values[next_path]
-    return {"missingPaths": missing, "nextOperation": operation}
+    guidance = {
+        f"{business_path}/summary": (
+            'Write the confirmed business summary as an inline array of typed text objects, such as '
+            '[{type:"text",text:string,marks:[]}].'
+        ),
+        f"{page_links_path}/blocks": (
+            "Write a blocks array with complete typed blocks for the approved page links or the confirmed page scope."
+        ),
+    }
+    progress = {"missingPaths": missing, "nextOperation": operation}
+    if next_path in guidance:
+        progress["instruction"] = guidance[next_path]
+    return progress
+
+
+def _prd_function_assembly_operation(
+    document: dict[str, Any], issues: list[Any],
+) -> tuple[dict[str, Any] | None, str]:
+    issue_path = ["content", "sections", "businessRequirements", "functionSections"]
+    pointer = "/" + "/".join(issue_path)
+    functions = _candidate_value({"content": document}, issue_path)
+    if not isinstance(functions, list) or len(functions) > 50:
+        return None, ""
+
+    for index, section in enumerate(functions):
+        if not isinstance(section, dict):
+            continue
+        title = section.get("title")
+        number = f"2.{index + 2}"
+        title_path = f"{pointer}/{index}/title"
+        if isinstance(title, str) and any(
+            isinstance(issue, dict) and issue.get("path") == [*issue_path, index, "title"]
+            and issue.get("message") in (
+                "business section title must use 2.2+ numbering",
+                f"business section title must start with {number} ",
+            )
+            for issue in issues
+        ):
+            operation: dict[str, Any] = {"op": "replace", "path": title_path}
+            if match := re.fullmatch(re.escape(number) + r"(?![\d.])([\s\S]+)", title):
+                remainder = match[1].lstrip()
+                if remainder:
+                    operation["value"] = f"{number} {remainder}"
+            return operation, f"Start the function title with {number} followed by one ASCII space. Keep the authored title text."
+        if section.get("blocks") == []:
+            return {"op": "add", "path": f"{pointer}/{index}/blocks/-"}, (
+                "Append a complete typed block for this function using the confirmed behavior and testable acceptance. "
+                "Complete the function before adding later sections."
+            )
+
+    entries = _candidate_value(document, ["tableOfContents", "entries"])
+    next_index = len(functions) + 6
+    number = f"2.{len(functions) + 2}"
+    planned_title = entries[next_index] if isinstance(entries, list) and len(entries) > next_index else None
+    if not functions or (
+        len(functions) < 50 and isinstance(planned_title, str)
+        and re.fullmatch(re.escape(number) + r"(?![\d.])\s*\S[\s\S]*", planned_title)
+    ):
+        return {"op": "add", "path": f"{pointer}/-"}, (
+            f"Append the next confirmed function section with an id, a title starting with {number} "
+            "followed by one ASCII space, typed blocks and diagrams. For large sections, send a header "
+            "with empty arrays, then append one complete block at a time."
+        )
+
+    if (
+        len(functions) == 1 and isinstance(functions[0], dict) and isinstance(functions[0].get("blocks"), list)
+        and any(
+            isinstance(issue, dict) and issue.get("path") == issue_path
+            and issue.get("message") == "functional requirements must include testable acceptance criteria, embedded or in a later section"
+            for issue in issues
+        )
+    ):
+        return {"op": "add", "path": f"{pointer}/0/blocks/-"}, (
+            "Add a typed acceptance criterion for an existing confirmed requirement here. "
+            "Use its stable requirement ID, a concrete Given/When condition and an observable Then result."
+        )
+    return None, ""
 
 
 def _artifact_draft_repair_instruction(candidate: Any, issues: list[Any]) -> str:
