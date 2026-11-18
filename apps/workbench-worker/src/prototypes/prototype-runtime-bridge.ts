@@ -1,5 +1,6 @@
 import { confirmedRequirementBaseline } from "../runs/confirmed-requirement-baseline.js";
 import { createHash } from "node:crypto";
+import { setTimeout as delay } from "node:timers/promises";
 import { canonicalJson, prototypeDocumentSchema, startRunRequestSchema } from "@workbench/workbench-contracts";
 import { Prisma, type PrismaClient } from "@workbench/workbench-db";
 import { RunProcessor, mapRuntimeArtifactTarget } from "../runs/run-processor.js";
@@ -72,7 +73,9 @@ export class PrototypeRuntimeBridge {
     let cancellation: Promise<void> | undefined;
     const cancel = () => {
       if (rebuilding) return;
-      cancellation ??= this.cancelRun(runId, processor);
+      cancellation ??= this.hasCancellationIntent(input.planId, runId).then(async (requested) => {
+        if (requested) await this.cancelRun(runId, processor);
+      });
       // Awaited below; suppress an unhandled rejection while execute unwinds.
       void cancellation.catch(() => undefined);
     };
@@ -84,7 +87,17 @@ export class PrototypeRuntimeBridge {
     timer.unref();
     try {
       heartbeat("deerflow:starting");
-      if (!signal.aborted && !rebuilding) await processor.execute(runId, [], signal, retry);
+      if (!signal.aborted && !rebuilding) {
+        const leaseWaitDeadline = performance.now() + 60_000;
+        while (!signal.aborted) {
+          let claimBusy = false;
+          await processor.execute(runId, [], signal, retry, { onExecutionClaimBusy: () => { claimBusy = true; } });
+          if (!claimBusy || !retry.retryCount || performance.now() >= leaseWaitDeadline) break;
+          // The replacement activity may start before the previous one sees
+          // its heartbeat cancellation or its execution lease expires.
+          await delay(250, undefined, { signal });
+        }
+      }
       if (cancellation) await cancellation;
       if (signal.aborted) throw signal.reason ?? new DOMException("Workflow cancelled", "AbortError");
       const run = await this.db.run.findUniqueOrThrow({ where: { id: runId }, select: { status: true, errorCode: true } });
@@ -110,7 +123,29 @@ export class PrototypeRuntimeBridge {
 
   async cancelPlan(planId: string): Promise<void> {
     const plan = await this.db.prototypePlan.findUnique({ where: { id: planId }, select: { runtimeRunId: true } });
-    if (plan?.runtimeRunId) await this.cancelRun(plan.runtimeRunId, this.createProcessor(this.runtime));
+    if (plan?.runtimeRunId && await this.hasCancellationIntent(planId, plan.runtimeRunId)) {
+      await this.cancelRun(plan.runtimeRunId, this.createProcessor(this.runtime));
+    }
+  }
+
+  async settlePlanFailure(planId: string): Promise<"cancelled" | "failed"> {
+    const plan = await this.db.prototypePlan.findUnique({ where: { id: planId }, select: { runtimeRunId: true } });
+    const runId = plan?.runtimeRunId ?? null;
+    const processor = this.createProcessor(this.runtime);
+    if (await this.hasCancellationIntent(planId, runId)) {
+      if (runId) await this.cancelRun(runId, processor);
+      return "cancelled";
+    }
+    if (runId) await processor.failPrototypeWorkflow(runId);
+    return "failed";
+  }
+
+  private async hasCancellationIntent(planId: string, runId: string | null): Promise<boolean> {
+    const [command, run] = await Promise.all([
+      this.db.prototypeWorkflowCommand.findFirst({ where: { targetId: planId, kind: "plan_cancel" }, select: { id: true } }),
+      runId ? this.db.run.findUnique({ where: { id: runId }, select: { cancelRequestedAt: true, status: true } }) : null,
+    ]);
+    return Boolean(command || run?.cancelRequestedAt || run?.status === "cancelling" || run?.status === "cancelled");
   }
 
   private createProcessor(runtime: RuntimePort): RunProcessor {

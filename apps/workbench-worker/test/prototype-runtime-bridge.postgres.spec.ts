@@ -3,6 +3,7 @@ import { Client, Connection } from "@temporalio/client";
 import { NativeConnection, Worker } from "@temporalio/worker";
 import { createTemporalSdkActivities } from "../src/prototypes/temporal-sdk-activities.js";
 import { createHash, randomUUID } from "node:crypto";
+import { setTimeout as delay } from "node:timers/promises";
 import { knowledgeToolResponseSchema, startRunRequestSchema, type RuntimeArtifactDraft } from "@workbench/workbench-contracts";
 import { Prisma, PrismaClient } from "@workbench/workbench-db";
 import { canonicalSha256, verifyKnowledgeToolGrant } from "@workbench/workbench-knowledge";
@@ -185,10 +186,11 @@ describeWithPostgres("Prototype runtime bridge PostgreSQL integration", () => {
     expect(await db.prototypeRevision.count({ where: { projectId: ids.projectId } })).toBe(0);
   });
 
-  it("publishes retrieved citations and resumes the same provider attempt after transport failure", async () => {
+  it.each(["transport failure", "activity heartbeat timeout"])("publishes retrieved citations and resumes the same provider attempt after %s", async (interruption) => {
     const ids = await fixture();
     const input = await preparePrototypeRuntime(db, ids);
     const executions: RuntimeExecution[] = [];
+    const controller = new AbortController();
     let citation: Awaited<ReturnType<typeof retrieve>>["items"][number]["citation"];
     const runtime = fakeRuntime(async (execution, observer) => {
       executions.push(execution);
@@ -199,6 +201,10 @@ describeWithPostgres("Prototype runtime bridge PostgreSQL integration", () => {
         await observer.onExternalRunCreated(`external-${execution.runId}`);
         const response = await retrieve(db, execution);
         citation = response.items[0]!.citation;
+        if (interruption === "activity heartbeat timeout") {
+          controller.abort(new Error("SIMULATED_ACTIVITY_HEARTBEAT_TIMEOUT"));
+          throw controller.signal.reason;
+        }
         throw new Error("SIMULATED_TRANSPORT_DISCONNECT");
       }
       expect(execution.submission.mode).toBe("join");
@@ -206,9 +212,16 @@ describeWithPostgres("Prototype runtime bridge PostgreSQL integration", () => {
       return publishPrototype(execution, observer, [citation!]);
     });
     const bridge = new PrototypeRuntimeBridge(db, runtime, issuer);
-    await expect(bridge.generate(input, new AbortController().signal, vi.fn(), { retryCount: 0, retryLimit: 1 })).rejects.toThrow("SIMULATED_TRANSPORT_DISCONNECT");
+    const code = interruption === "activity heartbeat timeout" ? "SIMULATED_ACTIVITY_HEARTBEAT_TIMEOUT" : "SIMULATED_TRANSPORT_DISCONNECT";
+    await expect(bridge.generate(input, controller.signal, vi.fn(), { retryCount: 0, retryLimit: 1 })).rejects.toThrow(code);
     const first = executions[0]!;
     await expect(db.run.findUniqueOrThrow({ where: { id: first.runId } })).resolves.toMatchObject({ status: "running", attempt: 1 });
+    await expect(db.runtimeAttempt.findUniqueOrThrow({ where: { id: first.runtimeAttemptId } })).resolves.toMatchObject({
+      status: "running", externalRunId: `external-${first.runId}`, executionOwnerId: null,
+    });
+    expect(runtime.cancel).not.toHaveBeenCalled();
+    await expect(db.runEvent.count({ where: { runId: first.runId, type: "run.cancel.requested" } })).resolves.toBe(0);
+    await expect(db.prototypeWorkflowCommand.count({ where: { targetId: ids.planId, kind: "plan_cancel" } })).resolves.toBe(0);
     const heartbeat = vi.fn();
     const result = await bridge.generate(input, new AbortController().signal, heartbeat, { retryCount: 1, retryLimit: 1 });
     expect(result.pages.map((page) => page.route)).toEqual(["/a", "/b"]);
@@ -272,6 +285,7 @@ describeWithPostgres("Prototype runtime bridge PostgreSQL integration", () => {
       await observer.onSubmissionStarted();
       await observer.onExternalRunCreated(`external-${execution.runId}`);
       if (terminalStatus === "cancelled") {
+        await requestPrototypeStop(db, ids);
         controller.abort(new DOMException("Original generation cancelled", "AbortError"));
         throw controller.signal.reason;
       }
@@ -322,6 +336,7 @@ describeWithPostgres("Prototype runtime bridge PostgreSQL integration", () => {
     await preparePrototypeRuntime(db, ids);
     const runtime = fakeRuntime(async () => { throw new Error("UNEXPECTED_PROVIDER_EXECUTION"); });
     const bridge = new PrototypeRuntimeBridge(db, runtime, issuer);
+    await requestPrototypeStop(db, ids);
     await bridge.cancelPlan(ids.planId);
     await bridge.cancelPlan(ids.planId);
     const plan = await db.prototypePlan.findUniqueOrThrow({ where: { id: ids.planId } });
@@ -329,6 +344,76 @@ describeWithPostgres("Prototype runtime bridge PostgreSQL integration", () => {
     await expect(db.runEvent.count({ where: { runId: plan.runtimeRunId!, type: "run.cancel.requested" } })).resolves.toBe(1);
     expect(runtime.createThread).not.toHaveBeenCalled();
     expect(runtime.cancel).not.toHaveBeenCalled();
+  });
+
+  it("fails an exhausted activity and reconciles the same provider without recording a user stop", async () => {
+    const ids = await fixture();
+    const input = await preparePrototypeRuntime(db, ids);
+    const controller = new AbortController();
+    const runtime = fakeRuntime(async (execution, observer) => {
+      await observer.onSubmissionStarted();
+      await observer.onExternalRunCreated(`external-${execution.runId}`);
+      controller.abort(new Error("SIMULATED_ACTIVITY_HEARTBEAT_TIMEOUT"));
+      throw controller.signal.reason;
+    });
+    runtime.cancel.mockImplementation(async scope => ({
+      disposition: "cancelled", externalRunId: scope.externalRunId!, externalStatus: "interrupted",
+    }));
+    const bridge = new PrototypeRuntimeBridge(db, runtime, issuer);
+    await expect(bridge.generate(input, controller.signal, vi.fn(), { retryCount: 2, retryLimit: 2 })).rejects.toThrow("SIMULATED_ACTIVITY_HEARTBEAT_TIMEOUT");
+    const execution = runtime.execute.mock.calls[0]![0];
+    await expect(bridge.settlePlanFailure(ids.planId)).resolves.toBe("failed");
+    await expect(bridge.settlePlanFailure(ids.planId)).resolves.toBe("failed");
+    await expect(db.run.findUniqueOrThrow({ where: { id: execution.runId } })).resolves.toMatchObject({
+      status: "failed", cancelRequestedAt: null, cancellationReason: null,
+    });
+    await expect(db.runtimeAttempt.findUniqueOrThrow({ where: { id: execution.runtimeAttemptId }, include: { providerCancellationResolution: true } })).resolves.toMatchObject({
+      status: "failed", providerCancellationResolution: { externalRunId: `external-${execution.runId}` },
+    });
+    expect(runtime.cancel).toHaveBeenCalledTimes(1);
+    const events = await db.runEvent.findMany({ where: { runId: execution.runId, type: { in: ["run.cancel.requested", "run.cancelled", "run.failed"] } }, select: { type: true } });
+    expect(events).toEqual([{ type: "run.failed" }]);
+  });
+
+  it("lets the replacement activity wait for the previous activity's execution lease", async () => {
+    const ids = await fixture();
+    const input = await preparePrototypeRuntime(db, ids);
+    const entered = deferred<void>();
+    const controller = new AbortController();
+    let citation: Awaited<ReturnType<typeof retrieve>>["items"][number]["citation"];
+    const runtime = fakeRuntime(async (execution, observer, signal) => {
+      if (execution.submission.mode === "join") return publishPrototype(execution, observer, [citation!]);
+      expect(execution.submission.mode).toBe("submit");
+      await observer.onSubmissionStarted();
+      await observer.onExternalRunCreated(`external-${execution.runId}`);
+      citation = (await retrieve(db, execution)).items[0]!.citation;
+      return new Promise<never>((_resolve, reject) => {
+        signal!.addEventListener("abort", () => reject(signal!.reason), { once: true });
+        entered.resolve();
+      });
+    });
+    const bridge = new PrototypeRuntimeBridge(db, runtime, issuer);
+    const first = bridge.generate(input, controller.signal, vi.fn()).catch(error => error);
+    try {
+      await entered.promise;
+      const replacement = bridge.generate(input, new AbortController().signal, vi.fn(), { retryCount: 1, retryLimit: 2 });
+      const completed = expect(replacement).resolves.toMatchObject({ sourceArtifactVersionId: expect.any(String) });
+      await delay(500);
+      expect(runtime.execute).toHaveBeenCalledTimes(1);
+      controller.abort(new Error("SIMULATED_ACTIVITY_HEARTBEAT_TIMEOUT"));
+      expect(await first).toMatchObject({ message: "SIMULATED_ACTIVITY_HEARTBEAT_TIMEOUT" });
+      await completed;
+      const [initial, resumed] = runtime.execute.mock.calls.map(call => call[0]);
+      expect(resumed).toMatchObject({
+        runId: initial!.runId,
+        runtimeAttemptId: initial!.runtimeAttemptId,
+        submission: { mode: "join", externalRunId: `external-${initial!.runId}` },
+      });
+      expect(runtime.cancel).not.toHaveBeenCalled();
+    } finally {
+      controller.abort();
+      await first;
+    }
   });
 
   it("commits cancelling before provider cleanup and awaits its acknowledgement on abort", async () => {
@@ -360,6 +445,7 @@ describeWithPostgres("Prototype runtime bridge PostgreSQL integration", () => {
     );
     try {
       await entered.promise;
+      await requestPrototypeStop(db, ids);
       controller.abort(new DOMException("Temporal activity cancelled", "AbortError"));
       await cancelling.promise;
       expect(settled).toBe(false);
@@ -482,6 +568,13 @@ describeWithPostgres("Prototype runtime bridge PostgreSQL integration", () => {
 });
 
 type Fixture = { principalId: string; workspaceId: string; projectId: string; planId: string };
+
+async function requestPrototypeStop(db: PrismaClient, ids: Fixture) {
+  const plan = await db.prototypePlan.findUniqueOrThrow({ where: { id: ids.planId } });
+  const { prototypes } = workerRequirementFlow(db, ids.principalId, ids.projectId);
+  await prototypes.cancelPlan({ id: ids.principalId } as never, ids.projectId, ids.planId, randomUUID(), `"${plan.revision}"`, {});
+  expect(await db.prototypeWorkflowCommand.count({ where: { targetId: ids.planId, kind: "plan_cancel" } })).toBe(1);
+}
 
 async function seedFixture(db: PrismaClient, bindRun: boolean): Promise<Fixture> {
   const suffix = randomUUID();

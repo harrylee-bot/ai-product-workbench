@@ -14,6 +14,7 @@ function harness() {
     requirementConfirmation:{findFirst:vi.fn(async()=>({id:"confirmation-1",principalId:input.createdById,sessionId:"session-1",summaryVersion:1,runId:run.id,generationRequest:run.request,baseline,inputSnapshot:{sources:[],designStyle:{artifactVersionId:null,snapshot:null,snapshotSha256:null},knowledgeReleaseId:run.knowledgeReleaseId}}))},
     requirementSummary:{findUnique:vi.fn(async()=>({version:1,checksum:baseline.summaryChecksum,card:baseline.card,evidence:baseline.evidence,contextSnapshot:baseline.analysisContext}))},
     $queryRaw: vi.fn(async () => [{ id: plan.id }]),
+    prototypeWorkflowCommand: { findFirst: vi.fn(async (): Promise<{ id: string } | null> => null) },
     prototypePlan: {
       findFirst: vi.fn(async () => plan), findUnique: vi.fn(async () => plan),
       update: vi.fn(async ({ data }: any) => Object.assign(plan, data)),
@@ -27,6 +28,7 @@ function harness() {
     threadEntry: { create: vi.fn(async () => ({ id: "entry-1" })) },
     run: {
       findFirst:vi.fn(async()=>run),
+      findUnique: vi.fn(async () => run),
       create: vi.fn(async ({ data }: any) => { run = { ...run, ...data }; return run; }),
       update: vi.fn(async ({ data }: any) => { run.eventSequence += data.eventSequence.increment; return run; }),
       updateMany: vi.fn(async ({ data }: any) => { Object.assign(run, data); return { count: 1 }; }),
@@ -121,6 +123,7 @@ describe("Prototype Runtime bridge execution", () => {
   });
   it("waits for provider cancellation acknowledgement and durable cancelled state", async () => {
     const h = harness(); h.plan.runtimeRunId = "run-1"; h.run.status = "running";
+    h.tx.prototypeWorkflowCommand.findFirst.mockResolvedValue({ id: "cancel-command" });
     const started = deferred(); const cancelRequested = deferred(); const providerAck = deferred(); const controller = new AbortController();
     const cancel = vi.fn(async () => { cancelRequested.resolve(); await providerAck.promise; h.run.status = "cancelled"; return { runId: "run-1", cancelled: true }; });
     const execute = vi.fn(async (_run: string, _approvals: string[], signal: AbortSignal) => { started.resolve(); return new Promise((_resolve, reject) => signal.addEventListener("abort", () => reject(signal.reason), { once: true })); });
@@ -133,6 +136,7 @@ describe("Prototype Runtime bridge execution", () => {
   });
   it("keeps a failed run with unconfirmed provider cancellation pending until convergence", async () => {
     const h = harness(); h.plan.runtimeRunId = "run-1"; h.run.status = "failed";
+    h.tx.prototypeWorkflowCommand.findFirst.mockResolvedValue({ id: "cancel-command" });
     h.run.errorCode = "RUNTIME_PROVIDER_CANCELLATION_UNCONFIRMED";
     h.tx.run.updateMany.mockResolvedValue({ count: 0 });
     const cancel = vi.fn(async () => ({ runId: "run-1", cancelled: false, cancellationPending: true }));
@@ -142,6 +146,7 @@ describe("Prototype Runtime bridge execution", () => {
   });
   it("does not claim cancellation succeeded while durable state is still cancelling", async () => {
     const h = harness(); h.plan.runtimeRunId = "run-1"; h.run.status = "running";
+    h.tx.prototypeWorkflowCommand.findFirst.mockResolvedValue({ id: "cancel-command" });
     const bridge = new PrototypeRuntimeBridge(h.db as never, runtime(), { issue: vi.fn() }, factory(vi.fn(), vi.fn(async () => ({ runId: "run-1", cancelled: false }))));
     await expect(bridge.cancelPlan(input.planId)).rejects.toThrow("PROTOTYPE_RUNTIME_CANCELLATION_PENDING");
     expect(h.run.status).toBe("cancelling");

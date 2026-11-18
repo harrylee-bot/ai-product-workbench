@@ -99,11 +99,13 @@ export function createPrototypeActivities(db: PrismaClient, config: PrototypeAct
     markPlanFailed: async (input) => {
       // Retry this cleanup activity until provider cancellation is acknowledged;
       // cancellation must never be claimed merely because Temporal stopped waiting.
-      await generation.cancelPlan(input.planId);
-      const status = input.code === "PROTOTYPE_WORKFLOW_CANCELLED" ? "cancelled" : "failed";
+      const status = await generation.settlePlanFailure(input.planId);
+      const code = status === "cancelled" ? "PROTOTYPE_WORKFLOW_CANCELLED" : "PROTOTYPE_GENERATION_FAILED";
+      const detail = code === input.code ? input.detail
+        : status === "cancelled" ? "Prototype generation was cancelled" : "Prototype generation failed";
       await db.$transaction(async (tx) => {
-        await tx.prototypePlan.updateMany({ where: { id: input.planId, status: { in: ["approved", "generating"] } }, data: { status, failureCode: input.code, failureDetail: input.detail, revision: { increment: 1 } } });
-        await tx.prototypeRevision.updateMany({ where: { id: `revision_${input.planId}`, status: { in: ["queued", "generating"] } }, data: { status, failureCode: input.code, failureDetail: input.detail, revision: { increment: 1 } } });
+        await tx.prototypePlan.updateMany({ where: { id: input.planId, status: { in: ["approved", "generating"] } }, data: { status, failureCode: code, failureDetail: detail, revision: { increment: 1 } } });
+        await tx.prototypeRevision.updateMany({ where: { id: `revision_${input.planId}`, status: { in: ["queued", "generating"] } }, data: { status, failureCode: code, failureDetail: detail, revision: { increment: 1 } } });
       });
     },
     markExportFailed: (input) => failPrototypeExport(db, input),
