@@ -89,6 +89,7 @@ const makeRevision = (projectId, id, planId, version) => ({
 });
 
 let sseMode = false;
+let sseFinal = false;
 let sseEvents = [];
 const sseStreams = new Set();
 const sseRun = {
@@ -239,8 +240,8 @@ const server = createServer(async (req, res) => {
     projectId: proj.id,
     rootPlanId: null,
     sourceRevisionId: null,
-    contentVersion: 1,
-    status: sseMode && proj.id === "project-alpha" ? "generating" : "ready",
+    contentVersion: sseMode && proj.id === "project-alpha" ? 2 : 1,
+    status: sseMode && !sseFinal && proj.id === "project-alpha" ? "generating" : "ready",
     prompt: `创建 ${proj.title}`,
     title: proj.title,
     revision: 1,
@@ -323,11 +324,11 @@ const server = createServer(async (req, res) => {
       events: sseMode && proj.id === "project-alpha" ? sseEvents.slice(-64) : [],
       coverage: "window",
       finalRevisionId:
-        sseMode && proj.id === "project-alpha" ? null : rev1.id,
+        sseMode && proj.id === "project-alpha" ? (sseFinal ? rev2.id : null) : rev1.id,
     });
   if (path.endsWith(`/plans/${planId}/revisions`))
     return json(
-      sseMode && proj.id === "project-alpha"
+      sseMode && !sseFinal && proj.id === "project-alpha"
         ? []
         : [rev1, rev2].map(({ pages: _p, previewHtml: _h, ...s }) => s),
     );
@@ -933,7 +934,7 @@ try {
   const ssePage = await ctx3.newPage();
   ssePage.on("pageerror", (e) => results.errors.push(e.message));
   await ssePage.goto(
-    `${origin}/studio/project-alpha?plan=project-alpha-plan`,
+    `${origin}/studio/project-alpha?plan=project-alpha-plan&revision=project-alpha-rev-1&page=page-1`,
     { waitUntil: "domcontentloaded" },
   );
   for (let i = 0; i < 100 && sseStreams.size === 0; i++) {
@@ -1000,6 +1001,8 @@ try {
   const tFirst0 = performance.now();
   emitSse("artifact.preview.updated", makePreviewPayload("渐进节点 0"));
   await ssePage.getByText("渐进节点 0", { exact: false }).first().waitFor();
+  assert.equal(await ssePage.getByRole("button", { name: "页面总览", exact: true }).count(), 0);
+  assert.equal(await ssePage.locator(".visual-paper iframe").count(), 0);
   const firstProjectionRenderMs = Number(
     (performance.now() - tFirst0).toFixed(2),
   );
@@ -1062,6 +1065,26 @@ try {
   await ssePage.locator('[data-draft-node="node-live-2"]').filter({ hasText: "关闭动效仍继续接收" }).waitFor();
   assert.equal(await swarm.count(), 0);
   results.checks.push('Swarm: actual Studio SSE node update starts scoped decorative drawing; disable leaves SSE content updates working; screenshot recorded');
+  const makeTwoPages = label => {
+    const payload = makePreviewPayload(label);
+    payload.preview.screens.push({ ...payload.preview.screens[0], id: "page-2", name: "实时明细" });
+    return payload;
+  };
+  emitSse("artifact.preview.updated", makeTwoPages("已收到两个页面"));
+  const draftDirectory = ssePage.getByRole("group", { name: "草稿页面" });
+  const detailDraft = draftDirectory.getByRole("button", { name: /^实时明细/ });
+  await detailDraft.click();
+  await ssePage.locator('[data-draft-page="page-2"]').waitFor();
+  await ssePage.getByRole("button", { name: "开启绘制动效", exact: true }).waitFor();
+  assert.equal(await swarm.count(), 0, "Switching pages must preserve disabled motion");
+  emitSse("artifact.preview.updated", makePreviewPayload("只包含首页的窗口"));
+  await ssePage.getByText("该页暂无中间预览。", { exact: false }).waitFor();
+  assert.equal(await detailDraft.getAttribute("aria-pressed"), "true");
+  await ssePage.screenshot({ path: new URL("draft-outside-window.png", output).pathname });
+  emitSse("artifact.preview.updated", makeTwoPages("明细页重新进入窗口"));
+  await ssePage.locator('[data-draft-page="page-2"]').getByText("明细页重新进入窗口").waitFor();
+  await draftDirectory.getByRole("button", { name: /^实时首页/ }).click();
+  results.checks.push("AC-09: An older URL page never hides the first draft, final-only controls stay hidden, and selecting a page preserves its identity across projection windows and motion-off state");
   if (soakMs > 0) {
     const session = await ctx3.newCDPSession(ssePage);
     await session.send("Performance.enable");
@@ -1107,11 +1130,6 @@ try {
         taskSeconds: metrics.TaskDuration, layoutSeconds: metrics.LayoutDuration,
         streams: sseStreams.size, iframes: await ssePage.locator("iframe").count(),
         overlays: await ssePage.locator("[data-swarm-projection]").count() };
-    };
-    const makeTwoPages = label => {
-      const payload = makePreviewPayload(label);
-      payload.preview.screens.push({ ...payload.preview.screens[0], id: "screen-live-2", name: "实时明细" });
-      return payload;
     };
     // Warm both page/animation lifecycle paths before measuring retained objects.
     emitSse("artifact.preview.updated", makeTwoPages("资源检查预热"));
@@ -1174,6 +1192,21 @@ try {
     results.checks.push(`Resource soak: ${final.elapsedMs}ms / ${updates} updates / ${switches} page switches / ${toggles} animation toggles; matched-state retained DOM/listeners do not increase; ${soakMs >= 1_200_000 ? '20-minute duration met' : 'short diagnostic only'}`);
     await session.detach();
   }
+  await detailDraft.click();
+  await ssePage.locator('[data-draft-page="page-2"]').waitFor();
+  await ssePage.reload({ waitUntil: "domcontentloaded" });
+  await ssePage.locator('[data-draft-page="page-2"]').waitFor();
+  sseFinal = true;
+  sseRun.status = "succeeded";
+  sseRun.finishedAt = new Date().toISOString();
+  emitSse("run.completed", { artifactCount: 1 });
+  for (const stream of sseStreams) stream.end();
+  await ssePage.waitForURL(/revision=project-alpha-rev-2/);
+  await ssePage.frameLocator(".visual-paper iframe").getByRole("heading", { name: "通知设置" }).waitFor();
+  assert.equal(await ssePage.getByRole("combobox", { name: "当前页面" }).inputValue(), "page-2");
+  assert.equal(await ssePage.locator("[data-draft-page]").count(), 0);
+  await ssePage.screenshot({ path: new URL("draft-to-frozen.png", output).pathname });
+  results.checks.push("AC-10/AC-11: A reloaded running project restores the chosen draft page and switches to the matching page in the next frozen revision");
   await ctx3.close();
 
   assert.deepEqual(results.errors, []);

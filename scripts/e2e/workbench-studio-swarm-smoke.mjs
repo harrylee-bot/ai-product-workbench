@@ -13,14 +13,20 @@ await mkdir(output, { recursive: true });
 const bundle = await build({
   stdin: {
     contents: `
-      import React, { StrictMode } from 'react';
+      import React, { StrictMode, useState } from 'react';
       import { createRoot } from 'react-dom/client';
       import { DraftProjection } from './apps/web/components/studio/draft-projection';
       import { generationPreviewSchema } from '@workbench/workbench-contracts';
       const root = createRoot(document.querySelector('#mount'));
+      function Projection({ page, running }) {
+        const [motionEnabled, setMotionEnabled] = useState(true);
+        return <DraftProjection page={page} available={document.querySelector('#mount').clientWidth}
+          running={running} updated={false} motionEnabled={motionEnabled}
+          onMotionEnabledChange={setMotionEnabled} />;
+      }
       window.renderProjection = (nodes, { running = true, scope = 'run-1:page-1', width = 960 } = {}) => {
         const preview = generationPreviewSchema.parse({ artifactIndex: 0, kind: 'prototype', title: '订单中心', markdown: '', screens: [{ id: scope, name: '订单中心', width, height: 680, nodes }] });
-        root.render(<StrictMode><DraftProjection key={scope} page={preview.screens[0]} available={document.querySelector('#mount').clientWidth} running={running} updated={false}/></StrictMode>);
+        root.render(<StrictMode><Projection key={scope} page={preview.screens[0]} running={running}/></StrictMode>);
       };
       window.swarmAnimationFrames = 0;
       const raf = window.requestAnimationFrame.bind(window);

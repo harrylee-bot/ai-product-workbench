@@ -35,7 +35,7 @@ import {
   type RequirementContext,
 } from "@workbench/workbench-contracts";
 import { z } from "zod";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createIdempotencyKey } from "@/lib/workbench/transport/contracts";
 import {
   studioRecordKey,
@@ -330,6 +330,13 @@ export function StudioWorkspace({
     configDirty;
 
   const awaitingPlan = useRef<string | undefined>(undefined);
+  const [lastDraftPage, setLastDraftPage] = useState<{ planId: string; pageId: string }>();
+  const rememberDraftPage = useCallback(
+    (pageId: string) => setLastDraftPage({ planId, pageId }),
+    [planId],
+  );
+  const followedDraftPage =
+    followRun && lastDraftPage?.planId === planId ? lastDraftPage.pageId : undefined;
   const plansQuery = useWorkbenchPrototypeV2Plans(projectId);
   const planQuery = useWorkbenchPrototypeV2Plan(projectId, planId);
   const directRevisionQuery = useWorkbenchPrototypeV2Revision(
@@ -449,6 +456,15 @@ export function StudioWorkspace({
   );
 
   const previews = Object.values(progress.projection?.generationPreviews ?? {});
+  const showingDraft = followRun && (
+    running ||
+    (previews.length > 0 && (
+      !selectedRevision?.previewHtml ||
+      (Boolean(followedDraftPage) &&
+        plan?.status === "ready" &&
+        selectedRevision.version !== plan.contentVersion)
+    ))
+  );
   const elapsed = progress.snapshot?.run?.startedAt
     ? Math.max(
         0,
@@ -504,6 +520,7 @@ export function StudioWorkspace({
       planId === selectedRevision.planId &&
       planId !== selectedRevisionPlan.id &&
       !running &&
+      !followedDraftPage &&
       !awaitingPlan.current
     )
       setSelection((current) => ({
@@ -512,6 +529,7 @@ export function StudioWorkspace({
       }));
   }, [
     directRevisionQuery.data,
+    followedDraftPage,
     plan?.id,
     planId,
     plansQuery.data,
@@ -523,16 +541,18 @@ export function StudioWorkspace({
   useEffect(() => {
     if (!revisions.length) return;
     const generated =
-      awaitingPlan.current === plan?.id && plan?.status === "ready"
+      plan?.status === "ready" && (awaitingPlan.current === plan.id || followedDraftPage)
         ? revisions.find((revision) => revision.version === plan.contentVersion)
         : undefined;
     if (generated) {
       awaitingPlan.current = undefined;
-      setSelection((current) => ({
-        ...current,
-        revisionId: generated.id,
-        pageId: current.pageId,
-      }));
+      setLastDraftPage(undefined);
+      if (generated.id !== selectedRevisionId)
+        setSelection((current) => ({
+          ...current,
+          revisionId: generated.id,
+          pageId: followedDraftPage ?? current.pageId,
+        }));
     } else if (!selectedRevisionId) {
       const latest = revisions[revisions.length - 1]!;
       setSelection((current) => ({
@@ -541,7 +561,7 @@ export function StudioWorkspace({
         pageId: "",
       }));
     }
-  }, [plan, revisions, selectedRevisionId]);
+  }, [followedDraftPage, plan, revisions, selectedRevisionId]);
   useEffect(() => {
     if (
       selectedSummary &&
@@ -553,11 +573,11 @@ export function StudioWorkspace({
   useEffect(() => {
     if (
       selectedRevision &&
-      !(running && followRun) &&
+      !showingDraft &&
       !pages.some((page) => page.id === selectedPageId)
     )
       setSelection((current) => ({ ...current, pageId: pages[0]?.id ?? "" }));
-  }, [pages, selectedPageId, selectedRevision, running, followRun]);
+  }, [pages, selectedPageId, selectedRevision, showingDraft]);
   useEffect(() => {
     if (planId || selectedRevisionId) writePrototypeSelection(selection);
   }, [planId, selectedRevisionId, selection]);
@@ -1531,6 +1551,7 @@ export function StudioWorkspace({
                 html={selectedRevision?.previewHtml}
                 pages={pages}
                 pageId={selectedPageId}
+                onDraftPageShown={rememberDraftPage}
                 onPage={(id) => {
                   const next = { ...selection, pageId: id };
                   const url = new URL(window.location.href);
@@ -1543,11 +1564,7 @@ export function StudioWorkspace({
                   if (next) setPanel("feedback");
                 }}
                 previews={previews}
-                showDraft={
-                  followRun &&
-                  previews.length > 0 &&
-                  (running || !selectedRevision?.previewHtml)
-                }
+                showDraft={showingDraft}
                 running={running}
               />
             ) : (

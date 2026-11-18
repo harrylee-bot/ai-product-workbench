@@ -37,6 +37,7 @@ type Props = {
   pages: PrototypePage[];
   pageId: string;
   onPage: (id: string) => void;
+  onDraftPageShown?: (id: string) => void;
   onSelection: (selection?: PrototypePreviewInteraction) => void;
   draftIdentity: string;
   previews: GenerationPreview[];
@@ -53,6 +54,7 @@ export function PageStage({
   pages,
   pageId,
   onPage,
+  onDraftPageShown,
   onSelection,
   draftIdentity,
   previews,
@@ -177,13 +179,13 @@ export function PageStage({
     return () => window.removeEventListener("keydown", onKeyDown);
   }, []);
   useEffect(() => {
-    if (!html || loaded) return;
+    if (!html || loaded || showDraft) return;
     const timer = setTimeout(
       () => setNotice("页面加载较慢，可重新载入；这不会重新生成版本。"),
       10000,
     );
     return () => clearTimeout(timer);
-  }, [html, loaded, reload]);
+  }, [html, loaded, reload, showDraft]);
   useEffect(() => {
     const receive = (event: MessageEvent) => {
       if (
@@ -263,9 +265,11 @@ export function PageStage({
   }, [locate?.requestId, revisionId, pageId, loaded, showDraft]);
   const preview = previews.find((p) => p.kind === "prototype") ?? previews[0];
   const draftPages = preview?.screens ?? [];
-  const [knownDraftPages, setKnownDraftPages] = useState<
-    { id: string; name: string }[]
-  >([]);
+  const [draftDirectory, setDraftDirectory] = useState<{
+    scope: string;
+    pages: { id: string; name: string }[];
+  }>({ scope: "", pages: [] });
+  const [motionEnabled, setMotionEnabled] = useState(true);
   const [updatedPage, setUpdatedPage] = useState("");
   const lastDraft = useRef<{ scope: string; pages: Map<string, string> }>({
     scope: "",
@@ -277,29 +281,43 @@ export function PageStage({
     if (previous.scope !== draftIdentity) {
       previous.scope = draftIdentity;
       previous.pages = new Map();
-      setKnownDraftPages([]);
       setUpdatedPage("");
     }
     let changed = "";
     for (const page of draftPages) {
       const text = JSON.stringify(page);
-      if (previous.pages.has(page.id) && previous.pages.get(page.id) !== text)
+      if (previous.pages.get(page.id) !== text)
         changed = page.id;
       previous.pages.set(page.id, text);
     }
-    setKnownDraftPages((current) => {
-      const map = new Map(current.map((page) => [page.id, page]));
+    setDraftDirectory((current) => {
+      const map = new Map(
+        current.scope === draftIdentity
+          ? current.pages.map((page) => [page.id, page])
+          : [],
+      );
       for (const page of draftPages)
         map.set(page.id, { id: page.id, name: page.name });
-      return [...map.values()].slice(0, 50);
+      return { scope: draftIdentity, pages: [...map.values()].slice(0, 50) };
     });
     if (changed) setUpdatedPage(changed);
     const timer = setTimeout(() => setUpdatedPage(""), 2500);
     return () => clearTimeout(timer);
   }, [draftSignature, draftIdentity]);
-  const draftPage = pageId
-    ? draftPages.find((p) => p.id === pageId)
-    : draftPages[0];
+  const knownDraftPages =
+    draftDirectory.scope === draftIdentity ? draftDirectory.pages : [];
+  const activeDraftPageId =
+    draftPages.some((page) => page.id === pageId) ||
+    knownDraftPages.some((page) => page.id === pageId)
+      ? pageId
+      : draftPages[0]?.id;
+  const draftPage = draftPages.find((page) => page.id === activeDraftPageId);
+  useEffect(() => {
+    if (showDraft && running && activeDraftPageId) onDraftPageShown?.(activeDraftPageId);
+  }, [showDraft, running, activeDraftPageId, onDraftPageShown]);
+  useEffect(() => {
+    if (showDraft) setOverview(false);
+  }, [showDraft]);
   const filtered = pages.filter((p) =>
     p.title.toLowerCase().includes(search.toLowerCase()),
   );
@@ -307,7 +325,7 @@ export function PageStage({
   const box = node ?? hover;
   return (
     <section className="visual-stage" aria-label="页面舞台">
-      <div className="visual-stage-toolbar">
+      {!showDraft && <div className="visual-stage-toolbar">
         <button
           type="button"
           aria-pressed={overview}
@@ -355,7 +373,7 @@ export function PageStage({
             setZoom(null);
           }}
         />
-      </div>
+      </div>}
       {html && !showDraft && (
         <div className="visual-modebar">
           <div role="group" aria-label="页面模式">
@@ -461,7 +479,8 @@ export function PageStage({
           {showDraft && preview ? (
             <div className="visual-draft">
               <p className="visual-draft-label">
-                生成中草稿 · 部分预览，内容可能变化 · 暂不可操作
+                {running ? "生成中草稿" : "最后收到的草稿"} · 部分预览，暂不可操作
+                {running && " · 内容可能变化"}
               </p>
               {preview.kind === "prd" ? (
                 <article className="visual-document">
@@ -469,12 +488,12 @@ export function PageStage({
                 </article>
               ) : (
                 <>
-                  <div className="visual-draft-pages">
+                  <div className="visual-draft-pages" role="group" aria-label="草稿页面">
                     {knownDraftPages.map((p) => (
                       <button
                         type="button"
                         key={p.id}
-                        aria-pressed={draftPage?.id === p.id}
+                        aria-pressed={activeDraftPageId === p.id}
                         onClick={() => onPage(p.id)}
                       >
                         {p.name}
@@ -489,6 +508,8 @@ export function PageStage({
                       available={available}
                       running={running}
                       updated={updatedPage === draftPage.id}
+                      motionEnabled={motionEnabled}
+                      onMotionEnabledChange={setMotionEnabled}
                     />
                   )}
                   {!draftPage && (
@@ -510,7 +531,7 @@ export function PageStage({
                 </>
               )}
             </div>
-          ) : overview && pages.length ? (
+          ) : !showDraft && overview && pages.length ? (
             <>
               <label className="visual-page-search">
                 查找页面
@@ -539,7 +560,7 @@ export function PageStage({
                 ))}
               </div>
             </>
-          ) : selectedPage && srcDoc ? (
+          ) : !showDraft && selectedPage && srcDoc ? (
             <Canvas
               width={size.width}
               height={size.height}
@@ -589,7 +610,7 @@ export function PageStage({
               <p>
                 {running
                   ? "当前阶段尚未提供中间预览，收到真实内容后将在这里展示。"
-                  : "在下方描述需求，审阅计划后开始。默认同时生成需求文档和原型。"}
+                  : "在下方描述需求，确认改动范围后开始。默认同时生成需求文档和原型。"}
               </p>
             </div>
           )}

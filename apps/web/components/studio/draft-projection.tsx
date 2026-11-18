@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, type CSSProperties } from "react";
+import { useEffect, useRef, type CSSProperties } from "react";
 import type {
   GenerationPreview,
   GenerationPreviewNode,
@@ -16,16 +16,19 @@ export function DraftProjection({
   available,
   running,
   updated,
+  motionEnabled,
+  onMotionEnabledChange,
 }: {
   page: DraftPage;
   available: number;
   running: boolean;
   updated: boolean;
+  motionEnabled: boolean;
+  onMotionEnabledChange: (enabled: boolean) => void;
 }) {
   const target = useRef<HTMLDivElement>(null);
   const controller = useRef<SwarmController | null>(null);
   const signatures = useRef(new Map<string, string>());
-  const [enabled, setEnabled] = useState(true);
   const content = JSON.stringify(page.nodes);
 
   useEffect(() => {
@@ -36,7 +39,7 @@ export function DraftProjection({
   }, [content]);
 
   useEffect(() => {
-    if (!enabled || !running || !target.current) return;
+    if (!motionEnabled || !running || !target.current) return;
     let cancelled = false;
     let deadline: ReturnType<typeof setTimeout> | undefined;
     const motion = window.matchMedia("(prefers-reduced-motion: reduce)");
@@ -111,20 +114,20 @@ export function DraftProjection({
       document.removeEventListener("visibilitychange", onVisibility);
       dispose();
     };
-  }, [enabled, running]);
+  }, [motionEnabled, running]);
 
   return (
     <>
-      <div className="visual-draft-motion">
-        <span>随草稿更新绘制</span>
-        <button
-          type="button"
-          aria-pressed={enabled}
-          onClick={() => setEnabled((value) => !value)}
-        >
-          {enabled ? "关闭绘制动效" : "开启绘制动效"}
-        </button>
-      </div>
+      {running && (
+        <div className="visual-draft-motion">
+          <button
+            type="button"
+            onClick={() => onMotionEnabledChange(!motionEnabled)}
+          >
+            {motionEnabled ? "关闭绘制动效" : "开启绘制动效"}
+          </button>
+        </div>
+      )}
       <div className="visual-draft-scroll">
         <div
           ref={target}
