@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { readFile, writeFile, mkdir, mkdtemp, rm } from "node:fs/promises";
 import http from "node:http";
+import { execFileSync } from "node:child_process";
+import { readFileSync } from "node:fs";
 import path from "node:path";
 import { tmpdir } from "node:os";
 import { unzipSync } from "fflate";
@@ -259,12 +261,44 @@ export async function runStudioLiveScenarios({ page, browser, webOrigin, outDir,
       const bytes = await readFile(target); assert.equal(bytes.length, Number(row.byte_size)); assert.equal(digest(bytes), row.sha256);
       if (format === "docx") {
         const document = unzipSync(bytes)["word/document.xml"]; assert.ok(document); assert.match(Buffer.from(document).toString("utf8"), /渠道|活动/);
-      } else assert.equal(bytes.subarray(0, 5).toString(), "%PDF-");
-      files.push({ format, path: target, sha256: digest(bytes), byteSize: bytes.length });
+        const officeBin = process.env.WORKBENCH_STUDIO_LIVE_OFFICE_BIN;
+        assert.ok(officeBin, "Provide LibreOffice/soffice for DOCX visual rendering");
+        const renderDir = await mkdtemp(path.join(tmpdir(), "studio-docx-render-"));
+        try {
+          execFileSync(officeBin, ["--headless", "--convert-to", "pdf", "--outdir", renderDir, target], { stdio: "pipe" });
+          const renderedPdf = path.join(renderDir, `${label}.pdf`);
+          const renderedBytes = await readFile(renderedPdf);
+          const renderedCopy = path.join(outDir, `${label}.docx-rendered.pdf`);
+          await writeFile(renderedCopy, renderedBytes);
+          files.push({ format: "docx-rendered-pdf", ...renderPdfEvidence(renderedCopy, outDir, `${label}-docx`) });
+        } finally {
+          await rm(renderDir, { recursive: true, force: true });
+        }
+      } else {
+        assert.equal(bytes.subarray(0, 5).toString(), "%PDF-");
+        files.push({ format, path: target, sha256: digest(bytes), byteSize: bytes.length, ...renderPdfEvidence(target, outDir, `${label}-pdf`) });
+      }
+      if (format === "docx") files.push({ format, path: target, sha256: digest(bytes), byteSize: bytes.length });
     }
     evidence[`${label}DocumentDownloads`] = files;
     await checkpoint();
   }
+}
+
+function renderPdfEvidence(pdfPath, outDir, prefix) {
+  const pdfInfoBin = process.env.WORKBENCH_STUDIO_LIVE_PDFINFO_BIN ?? "pdfinfo";
+  const pdfToPpmBin = process.env.WORKBENCH_STUDIO_LIVE_PDFTOPPM_BIN ?? "pdftoppm";
+  const info = execFileSync(pdfInfoBin, [pdfPath], { encoding: "utf8" });
+  const pageMatch = info.match(/^Pages:\s+(\d+)/mu);
+  assert.ok(pageMatch, "PDF must expose a page count");
+  const pageCount = Number(pageMatch[1]);
+  assert.ok(Number.isInteger(pageCount) && pageCount > 0, "PDF must render at least one page");
+  const outputPrefix = path.join(outDir, `${prefix}-page-1`);
+  execFileSync(pdfToPpmBin, ["-f", "1", "-l", "1", "-singlefile", "-png", pdfPath, outputPrefix], { stdio: "pipe" });
+  const renderedPath = `${outputPrefix}.png`;
+  const renderedBytes = readFileSync(renderedPath);
+  assert.ok(renderedBytes.length > 1_000, "Rendered PDF page must contain visible output");
+  return { pageCount, renderedPage: renderedPath, renderedPageBytes: renderedBytes.length };
 }
 
 async function verifyActivityInteraction(frame) {
