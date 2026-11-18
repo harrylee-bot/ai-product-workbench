@@ -35,7 +35,7 @@ import {
   type RequirementContext,
 } from "@workbench/workbench-contracts";
 import { z } from "zod";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type SetStateAction } from "react";
 import { createIdempotencyKey } from "@/lib/workbench/transport/contracts";
 import {
   studioRecordKey,
@@ -93,6 +93,9 @@ const shareCommandSchema = z.object({
   key: z.string().min(8),
   request: createPrototypeShareRequestSchema,
 }).strict();
+
+const studioPanelSchema = z.enum(["plan", "versions", "feedback", "delivery"]);
+type StudioPanel = z.infer<typeof studioPanelSchema>;
 
 function artifactPromptLabel(context: StudioArtifactContext) {
   if (context.generationIntent === "followup-design") return "设计变体";
@@ -195,11 +198,24 @@ export function StudioWorkspace({
     nodeId: string | null;
     requestId: string;
   }>();
-  const [panel, setPanel] = useState<
-    "plan" | "versions" | "feedback" | "delivery" | null
-  >(null);
+  const panelRecord = useStudioStoredRecord(
+    studioRecordKey(user?.id, projectId, "expanded-panel-v1"),
+    studioPanelSchema,
+  );
+  const panel = panelRecord.value;
+  const latestPanel = useRef(panel);
+  latestPanel.current = panel;
+  const setPanel = (value: SetStateAction<StudioPanel | null>) => {
+    if (!panelRecord.isCurrent()) return;
+    // An async confirmation must consider the panel the user opened meanwhile.
+    const next = typeof value === "function" ? value(latestPanel.current) : value;
+    if (next === latestPanel.current) return;
+    latestPanel.current = next;
+    if (next) panelRecord.save(next);
+    else panelRecord.clear();
+  };
   const panelTrigger = useRef<HTMLElement | null>(null);
-  const openPanel = (next: NonNullable<typeof panel>, trigger: HTMLElement | null) => {
+  const openPanel = (next: StudioPanel, trigger: HTMLElement | null) => {
     panelTrigger.current = trigger;
     setPanel(next);
   };
@@ -1491,7 +1507,7 @@ export function StudioWorkspace({
                   value ?? "",
                 )
               )
-                openPanel(value as NonNullable<typeof panel>, trigger);
+                openPanel(value as StudioPanel, trigger);
               else {
                 setPanel(null);
                 if (value) setView(value as StudioView);

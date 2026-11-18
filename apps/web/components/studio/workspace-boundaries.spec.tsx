@@ -18,13 +18,13 @@ vi.mock('@/components/studio/relations',()=>({RevisionRelations:()=>null,RunOutp
 vi.mock('@/components/studio/page-stage',()=>({PageStage:({html}:any)=><div data-testid="private-preview">{html}</div>}));
 vi.mock('@/components/studio/project-views',()=>({ProjectViews:()=>null,RunDetails:()=>null}));
 vi.mock('@/components/studio/onlook/main',()=>({Main:({topBar,leftPanel,canvas,bottomBar}:any)=><>{topBar}{leftPanel}{canvas}{bottomBar}</>}));
-vi.mock('@/components/studio/onlook/design-panel',()=>({DesignPanel:({tabs,selectedTab,onSelect}:any)=><>{tabs.map((t:any)=><button key={t.value} onClick={()=>onSelect(t.value)}>{t.label}导航</button>)}{tabs.find((t:any)=>t.value===selectedTab)?.content}</>}));
 vi.mock('@/components/studio/composer',()=>({StudioComposer:(props:any)=>{m.composer=props;return <>{props.intentControl}<span data-testid="composer-prompt">{props.prompt}</span></>;}}));
 vi.mock('@/components/studio/requirement-input',()=>({RequirementInput:({children}:any)=><>{children}</>}));
 import {StudioProject} from '@/components/studio/project-route';
 import {workbenchQueryKeys} from '@/lib/workbench/query/keys';
 import {WorkbenchApiError} from '@/lib/workbench/api';
 import {clearStudioComposerSessions,readComposerSession} from '@/lib/studio/composer-session';
+import {studioRecordKey} from '@/lib/studio/stored-record';
 const plan={id:'plan-one',rootPlanId:null,projectId:'project-one',contentVersion:1,revision:1,title:'audit-plan',prompt:'goal',status:'ready'};
 const revision={id:'revision-one',planId:'plan-one',version:1,revision:1,projectId:'project-one',status:'ready',title:'audit-version',previewHtml:'PRIVATE_FROZEN_HTML',pages:[{id:'page-one',title:'Page',order:0}],sourceRevisionId:null};
 const request={prompt:'goal',modelId:'deepseek-flash',workflow:'edit',sourceIds:[],requestedArtifactKinds:['prd','prototype'],targetSurface:'web',designStyle:{kind:'automatic'},artifactTargets:[],generationIntent:null,canvasSnapshot:null};
@@ -35,14 +35,87 @@ afterEach(()=>{cleanup();clients.splice(0).forEach(c=>c.clear());vi.useRealTimer
 
 it('clears private previews and project queries after explicit access revocation, then verifies permission',async()=>{
  const client=await mount(); const initial=m.api.getProjectBootstrap.mock.calls.length;
+ fireEvent.click(screen.getByRole('button',{name:'计划',exact:true}));
+ expect(screen.getByRole('complementary',{name:'计划'})).toBeTruthy();
  const denied=new WorkbenchApiError({status:403,code:'PROJECT_FORBIDDEN',title:'access revoked',type:'about:blank'});
  m.api.getProjectBootstrap.mockRejectedValue(denied);
  for(const name of ['getPlan','listPlans','getRevision','listRevisions','listShares','listExports','getRevisionDiff'] as const)m.api[name].mockRejectedValue(denied);
  await act(async()=>{await client.invalidateQueries({queryKey:workbenchQueryKeys.prototypeV2('project-one')});});
  await waitFor(()=>expect(screen.queryByTestId('private-preview')).toBeNull());
  await waitFor(()=>expect(screen.getByRole('alert').textContent).toContain('项目访问权限已失效'));
+ expect(screen.queryByRole('complementary',{name:'计划'})).toBeNull();
  expect(m.api.getProjectBootstrap.mock.calls.length).toBeGreaterThan(initial);
  expect(client.getQueryData(workbenchQueryKeys.prototypeV2Plan('project-one','plan-one'))).toBeUndefined();
+});
+it('restores an expanded panel on refresh without changing the deep link or explicit keyboard focus',async()=>{
+ await mount();
+ const initialUrl=window.location.href;
+ const planButton=screen.getByRole('button',{name:'计划',exact:true});
+ fireEvent.click(planButton);
+ const close=screen.getByRole('button',{name:'关闭面板'});
+ expect(document.activeElement).toBe(close);
+ expect(window.location.href).toBe(initialUrl);
+ fireEvent.keyDown(close,{key:'Escape'});
+ expect(document.activeElement).toBe(planButton);
+ fireEvent.click(planButton);
+
+ cleanup();
+ await mount();
+ expect(screen.getByRole('complementary',{name:'计划'})).toBeTruthy();
+ expect(document.activeElement).not.toBe(screen.getByRole('button',{name:'关闭面板'}));
+ expect(window.location.href).toBe(initialUrl);
+ const changedUrl=new URL(initialUrl);
+ changedUrl.searchParams.set('view','resources');
+ window.history.pushState(null,'',changedUrl);
+ act(()=>window.history.back());
+ await waitFor(()=>expect(window.location.href).toBe(initialUrl));
+ act(()=>window.history.forward());
+ await waitFor(()=>expect(window.location.href).toBe(changedUrl.href));
+ expect(screen.getByRole('complementary',{name:'计划'})).toBeTruthy();
+ act(()=>window.history.back());
+ await waitFor(()=>expect(window.location.href).toBe(initialUrl));
+ fireEvent.click(screen.getByRole('button',{name:'关闭面板'}));
+
+ cleanup();
+ await mount();
+ expect(screen.queryByRole('complementary',{name:'计划'})).toBeNull();
+ expect(window.location.href).toBe(initialUrl);
+});
+
+it('scopes the restored panel to the authorized account and project and clears it on logout',async()=>{
+ await mount();
+ fireEvent.click(screen.getByRole('button',{name:'计划',exact:true}));
+ const key=studioRecordKey('audit-actor','project-one','expanded-panel-v1')!;
+ expect(JSON.parse(sessionStorage.getItem(key)!)).toBe('plan');
+
+ cleanup();
+ m.userId='other-actor';
+ await mount();
+ expect(screen.queryByRole('complementary',{name:'计划'})).toBeNull();
+
+ cleanup();
+ m.userId='audit-actor';
+ const bootstrap=await m.api.getProjectBootstrap();
+ m.api.getProjectBootstrap.mockImplementation(async (id:string)=>({
+  ...bootstrap,value:{...bootstrap.value,project:{...bootstrap.value.project,id}},
+ }));
+ window.history.replaceState(null,'','/studio/project-two');
+ const client=new QueryClient({defaultOptions:{queries:{retry:false}}});
+ clients.push(client);
+ render(<QueryClientProvider client={client}><StudioProject projectId="project-two"/></QueryClientProvider>);
+ await screen.findByRole('button',{name:'计划',exact:true});
+ expect(screen.queryByRole('complementary',{name:'计划'})).toBeNull();
+
+ cleanup();
+ window.history.replaceState(null,'','/studio/project-one?plan=plan-one&revision=revision-one&page=page-one');
+ await mount();
+ expect(screen.getByRole('complementary',{name:'计划'})).toBeTruthy();
+ act(()=>window.dispatchEvent(new Event('workbench:logout')));
+ expect(screen.queryByRole('complementary',{name:'计划'})).toBeNull();
+ expect(sessionStorage.getItem(key)).toBeNull();
+ fireEvent.click(screen.getByRole('button',{name:'计划',exact:true}));
+ expect(screen.queryByRole('complementary',{name:'计划'})).toBeNull();
+ expect(sessionStorage.getItem(key)).toBeNull();
 });
 it('retains an authorized cached preview during an ordinary network failure',async()=>{
  const client=await mount(); m.api.getRevision.mockRejectedValue(new Error('network unavailable'));
