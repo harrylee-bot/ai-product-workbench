@@ -166,6 +166,14 @@ it("shows complete requirements immediately, preserves source context and separa
   ).toBeVisible();
 });
 it.each([
+  ["source-unreadable", /导出为 UTF-8 文本或 Markdown/u],
+  ["source-too-large", /减少所选资料，或上传精简的文本或 Markdown/u],
+] as const)("shows the actionable remedy for %s without opening confirmation", (knowledgeStatus, remedy) => {
+  show({ ...ready(), knowledgeStatus, status: "discussing", review: undefined, canConfirm: false });
+  expect(screen.getByText(remedy)).toBeVisible();
+  expect(screen.queryByRole("button", { name: "确认需求并生成" })).not.toBeInTheDocument();
+});
+it.each([
   "dirty",
   "stale",
   "blocking",

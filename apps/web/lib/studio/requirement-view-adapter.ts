@@ -12,7 +12,8 @@ const knowledgeFailures: Partial<Record<string, RequirementDiscussionView["knowl
   REQUIREMENT_SOURCE_UNAVAILABLE: "restricted",
   REQUIREMENT_KNOWLEDGE_UNAVAILABLE: "unavailable",
   REQUIREMENT_SOURCE_CHANGED: "source-changed",
-  REQUIREMENT_SOURCE_TEXT_UNAVAILABLE: "source-changed",
+  REQUIREMENT_SOURCE_TEXT_UNAVAILABLE: "source-unreadable",
+  REQUIREMENT_SOURCE_CONTEXT_LIMIT: "source-too-large",
 };
 
 /** Map the fixed backend contract to display props. Incomplete cards stay

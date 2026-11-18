@@ -108,10 +108,10 @@ suite('New generation flow over actual HTTP and PostgreSQL',()=>{
   const response=await fetch(origin+path,{method,headers:{'x-workbench-dev-subject':options.principal??fixture.ownerId,...(options.body?{'content-type':'application/json'}:{}),...(options.key?{'idempotency-key':options.key}:{}),...(options.etag?{'if-match':options.etag}:{})},body:options.body?JSON.stringify(options.body):undefined});
   const raw=await response.text(),value=raw?JSON.parse(raw):null;expect(response.status,JSON.stringify(value)).toBe(options.status??200);return {value,etag:response.headers.get('etag'),headers:response.headers};
  }
- async function createDiscussion(kinds:('prd'|'prototype')[]=['prd']){
+ async function createDiscussion(kinds:('prd'|'prototype')[]=['prd'],selectedSources=[sourceId]){
   expect(sourceId).toBeTruthy();
   const thread=await db.thread.create({data:{projectId:fixture.projectId,createdById:fixture.ownerId,title:'HTTP discussion'}});
-  const generationRequest=startRunRequestSchema.parse({prompt:'产品工作台用户规则，活动列表只增加渠道筛选',modelId:'deepseek-flash',workflow:'generate',targetSurface:'web',designStyle:{kind:'automatic'},sourceIds:[sourceId],requestedArtifactKinds:kinds});
+  const generationRequest=startRunRequestSchema.parse({prompt:'产品工作台用户规则，活动列表只增加渠道筛选',modelId:'deepseek-flash',workflow:'generate',targetSurface:'web',designStyle:{kind:'automatic'},sourceIds:selectedSources,requestedArtifactKinds:kinds});
   const created=await http('POST',`/threads/${thread.id}/requirement-sessions`,{body:{generationRequest,context:{kind:'new'}},key:randomUUID(),status:201});
   return {thread,generationRequest,created,path:`/requirement-sessions/${created.value.id}`};
  }
@@ -215,6 +215,37 @@ suite('New generation flow over actual HTTP and PostgreSQL',()=>{
    expect(await db.requirementSummary.count({where:{sessionId:value.id}})).toBe(0);
   }
   expect(model.analyze).toHaveBeenCalledTimes(calls);
+ });
+ it.each([
+  {name:'unextracted.pdf',mediaType:'application/pdf',bytes:Buffer.from('%PDF-1.7 test source without extraction'),failureCode:'REQUIREMENT_SOURCE_TEXT_UNAVAILABLE'},
+  {name:'text-at-budget.md',mediaType:'text/markdown',bytes:Buffer.alloc(60000,97),failureCode:'REQUIREMENT_SOURCE_CONTEXT_LIMIT'},
+ ])('blocks analysis and confirmation for a ready attachment with $failureCode',async({name,mediaType,bytes,failureCode})=>{
+  const verifiedAt=new Date();
+  const byteSize=BigInt(bytes.length);
+  const storageKey='requirements-source-test/'+randomUUID();
+  objects.set(storageKey,{bytes,mediaType});
+  const file=await db.$transaction(async tx=>{
+   const blob=await tx.blob.create({data:{sha256:sha(bytes),storageKey,mediaType,byteSize,status:'ready',verifiedAt}});
+   await tx.blobScan.create({data:{blobId:blob.id,attempt:1,status:'clean',scanner:'fixture-scanner',scannerVersion:'1',signatureVersion:'fixture',evidence:{fixture:true},startedAt:verifiedAt,finishedAt:verifiedAt}});
+   return tx.fileAsset.create({data:{projectId:fixture.projectId,uploadedById:fixture.ownerId,blobId:blob.id,
+    originalName:name,declaredMediaType:mediaType,detectedMediaType:mediaType,byteSize,status:'ready',verifiedAt}});
+  });
+  const source=await http('POST',`/projects/${fixture.projectId}/import-sources`,{body:{kind:'file',fileAssetId:file.id},key:randomUUID(),status:201});
+  expect(source.value.status).toBe('ready');
+  const selectedSources=[sourceId,source.value.id];
+  const {thread,generationRequest,created,path}=await createDiscussion(['prd'],selectedSources);
+  const calls=model.analyze.mock.calls.length;
+  await http('POST',path+'/messages',{body:{text:generationRequest.prompt},key:randomUUID(),etag:created.etag!,status:202});
+  await processor.tick(created.value.id);
+  const discussion=await http('GET',path);
+  expect(discussion.value).toMatchObject({
+   state:'discussing',generationRequest:{sourceIds:selectedSources},evidence:[],confirmation:null,
+   activeTurn:{status:'failed',failureCode,inputTokens:null},
+  });
+  expect(model.analyze).toHaveBeenCalledTimes(calls);
+  expect(await db.requirementSummary.count({where:{sessionId:created.value.id}})).toBe(0);
+  await http('POST',path+'/confirm',{body:{summaryVersion:1,summaryChecksum:'a'.repeat(64),acceptedAssumptionIds:[],acceptedPlatformChanges:false},key:randomUUID(),etag:discussion.etag!,status:409});
+  expect(await db.run.count({where:{threadId:thread.id}})).toBe(0);
  });
  it('cancels and retries the same discussion turn across an API restart without duplicating the user entry',async()=>{
   const {thread,generationRequest,created,path}=await createDiscussion();

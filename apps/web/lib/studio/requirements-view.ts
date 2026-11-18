@@ -71,6 +71,8 @@ export type RequirementDiscussionView = {
     | "restricted"
     | "unavailable"
     | "source-changed"
+    | "source-unreadable"
+    | "source-too-large"
     | "searching"
     | "not-provided";
   // Authoritative result of server readiness + latest input/summary binding.

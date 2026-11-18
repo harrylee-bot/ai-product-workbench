@@ -28,6 +28,8 @@ const knowledgeLabels = {
   restricted: "部分资料无法访问，需要有权限的依据",
   unavailable: "知识检索暂时不可用，请稍后重试本次分析。",
   "source-changed": "选定资料状态已变化，请重新核对资料后再分析。",
+  "source-unreadable": "无法读取所选资料的正文。请将资料导出为 UTF-8 文本或 Markdown，上传后替换引用。",
+  "source-too-large": "所选资料正文超过本次讨论的容量。请减少所选资料，或上传精简的文本或 Markdown 后再分析。",
   searching: "正在核对平台能力依据…",
   "not-provided": "当前尚未返回可核对的知识引用",
 };

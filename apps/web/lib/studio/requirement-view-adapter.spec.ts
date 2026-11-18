@@ -46,6 +46,8 @@ it("does not manufacture a complete card or infer missing knowledge from an earl
 it.each([
   ["REQUIREMENT_SOURCE_UNAVAILABLE", "restricted"],
   ["REQUIREMENT_SOURCE_CHANGED", "source-changed"],
+  ["REQUIREMENT_SOURCE_TEXT_UNAVAILABLE", "source-unreadable"],
+  ["REQUIREMENT_SOURCE_CONTEXT_LIMIT", "source-too-large"],
   ["REQUIREMENT_KNOWLEDGE_UNAVAILABLE", "unavailable"],
 ])("displays the server's %s without exposing source details", (failureCode, knowledgeStatus) => {
   const now = "2026-11-17T00:00:00Z";

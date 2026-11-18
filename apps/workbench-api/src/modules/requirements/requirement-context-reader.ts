@@ -58,11 +58,14 @@ export class RequirementContextReader {
    const output=extraction?.status==='ready'?extraction.outputs.find(x=>x.kind==='text')??extraction.outputs.find(x=>x.kind==='markdown'):null;
    const originalText=/^(text\/|application\/(json|xml))/i.test(row.blob.mediaType);
    const blob=originalText?row.blob:output?.blob;
-   if(!blob||blob.status!=='ready'||blob.deletedAt||blob.byteSize>BigInt(Math.min(remaining,65536)))throw requirementProblem('REQUIREMENT_SOURCE_TEXT_UNAVAILABLE',409);
+   if(!blob||blob.status!=='ready'||blob.deletedAt)throw requirementProblem('REQUIREMENT_SOURCE_TEXT_UNAVAILABLE');
+   if(blob.byteSize>BigInt(remaining))throw requirementProblem('REQUIREMENT_SOURCE_CONTEXT_LIMIT',413);
    const content=await readReadyObject(this.storage,{storageKey:blob.storageKey,sha256:blob.sha256,byteSize:Number(blob.byteSize),mediaType:blob.mediaType},undefined,undefined,{signal,recordIntegrityFailure:readyObjectIntegrityRecorder(this.db)});
    if(content.notModified)throw requirementProblem('REQUIREMENT_SOURCE_CHANGED');
    const buffers=[];for await(const part of content.body)buffers.push(Buffer.from(part));const bytes=Buffer.concat(buffers);remaining-=bytes.length;
-   readings.push({sourceId:source.sourceId,originalBlobId:row.blob.id,blobId:blob.id,text:new TextDecoder('utf-8',{fatal:true}).decode(bytes),sha256:blob.sha256,extraction:originalText?null:{id:extraction!.id,kind:output!.kind,position:output!.position,content:{storageKey:blob.storageKey,sha256:blob.sha256,byteSize:Number(blob.byteSize),mediaType:blob.mediaType}}});
+   let text:string;
+   try{text=new TextDecoder('utf-8',{fatal:true}).decode(bytes);}catch{throw requirementProblem('REQUIREMENT_SOURCE_TEXT_UNAVAILABLE');}
+   readings.push({sourceId:source.sourceId,originalBlobId:row.blob.id,blobId:blob.id,text,sha256:blob.sha256,extraction:originalText?null:{id:extraction!.id,kind:output!.kind,position:output!.position,content:{storageKey:blob.storageKey,sha256:blob.sha256,byteSize:Number(blob.byteSize),mediaType:blob.mediaType}}});
   }
   const artifactTargets=[];
   for(const target of request.artifactTargets){
