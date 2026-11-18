@@ -558,10 +558,10 @@ class DraftRepairScopeTests(unittest.IsolatedAsyncioTestCase):
             "runId": "run-auto", "runtimeAttemptId": "attempt-auto", "requestedArtifactKinds": ["prd", "prototype"],
         }})
         before = copy.deepcopy(request.state)
-        self.assertTrue(self.middleware()._prototype_transport_ready(model_request))
+        self.assertTrue(self.middleware()._prototype_transport_ready(model_request.state, model_request.runtime))
         self.assertEqual(request.state, before)
         request.state["messages"][-2]["tool_calls"][0]["args"]["repair"]["operations"][0]["path"] = "/content/sections/safetyBaseline"
-        self.assertFalse(self.middleware()._prototype_transport_ready(model_request))
+        self.assertFalse(self.middleware()._prototype_transport_ready(model_request.state, model_request.runtime))
 
     @unittest.skipIf(USING_IMPORT_STUBS, "requires real ToolNode sync and async concurrency")
     async def test_real_graph_rejects_every_sibling_of_a_repair_batch(self):
@@ -918,6 +918,51 @@ class PrototypeTransportContextTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(accepted.state, state_before)
                 self.assertEqual(middleware_module._stage_progress(scoped.state, "run-auto", "attempt-auto"), (4, False))
                 self.assertEqual(middleware_module._successful_runtime_results(scoped.state, "run-auto", "attempt-auto"), (0, False))
+
+    async def test_prototype_malformed_draft_retries_only_after_causal_stages(self):
+        for kinds, artifact_index in ((["prototype"], 0), (["prd", "prototype"], 1)):
+            with self.subTest(kinds=kinds):
+                request = self.request(kinds, accepted=artifact_index == 1)
+                middleware = self.middleware(kinds)
+                request.runtime.execution_info = types.SimpleNamespace(task_id="malformed-model-task")
+                messages = request.state["messages"]
+                rejected = middleware_module.AIMessage(
+                    id="invalid-prototype-assistant",
+                    content="",
+                    response_metadata={"finish_reason": "tool_calls"},
+                    invalid_tool_calls=[{"id": "invalid-prototype-tool",
+                                         "name": middleware_module.ARTIFACT_DRAFT_TOOL_NAME, "args": "}"}],
+                )
+                self.assertIsNone(await middleware.aafter_model(
+                    {"messages": [*messages, rejected]}, request.runtime,
+                ))
+                stage_name = "workbench_generation_stage_update"
+                for stage in middleware_module.PROTOTYPE_STAGE_SEQUENCE:
+                    call_id = "phase-" + stage
+                    append_tool_batch(messages, [call(stage_name, call_id, {"stage": stage})], [
+                        tool_message(stage_name, call_id, artifact={
+                            "protocol": "workbench.runtime.generation-stage.v1", "stage": stage,
+                            "runId": "run-auto", "runtimeAttemptId": "attempt-auto", "toolCallId": call_id,
+                        }),
+                    ])
+                result = await middleware.aafter_model({"messages": [*messages, rejected]}, request.runtime)
+                self.assertEqual(result["jump_to"], "model")
+                marker_key = middleware_module._PRD_TOOL_JSON_RETRY_KEY
+                self.assertEqual(result[marker_key]["kind"], "prototype")
+                self.assertEqual(result[marker_key]["count"], 1)
+                replacement = result["messages"][0]
+                self.assertEqual(replacement.id, rejected.id)
+                self.assertFalse(replacement.tool_calls)
+                self.assertFalse(replacement.invalid_tool_calls)
+                self.assertFalse(replacement.additional_kwargs)
+                request.state = {"messages": [*messages, replacement], marker_key: result[marker_key]}
+                scoped = middleware.wrap_model_call(request, lambda captured: captured)
+                self.assertIn("<workbench_prototype_tool_json_retry>", scoped.system_message.text)
+                self.assertIn(f"at artifact_index {artifact_index} as the only tool call", scoped.system_message.text)
+                request.runtime.context["workbench"]["runtimeAttemptId"] = "some-other-attempt"
+                self.assertIsNone(middleware.after_model(
+                    {"messages": [*messages, rejected]}, request.runtime,
+                ))
 
     def test_runtime_and_constructor_scope_must_be_exact_and_trusted(self):
         cases = (

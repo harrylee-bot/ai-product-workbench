@@ -1301,8 +1301,8 @@ class WorkbenchToolScopeMiddleware(AgentMiddleware[AgentState]):
         ):
             self._run_id, self._runtime_attempt_id = run_scope
 
-    def _prototype_transport_ready(self, request: ModelRequest) -> bool:
-        scope = _value(_value(request.runtime, "context"), "workbench")
+    def _prototype_transport_ready(self, state: Any, runtime: Any) -> bool:
+        scope = _value(_value(runtime, "context"), "workbench")
         kinds = normalize_workbench_requested_artifact_kinds(_value(scope, "requestedArtifactKinds"))
         if (
             not self._run_id or not self._runtime_attempt_id
@@ -1312,21 +1312,21 @@ class WorkbenchToolScopeMiddleware(AgentMiddleware[AgentState]):
             or self._requested_artifact_kinds not in (frozenset({"prototype"}), frozenset({"prd", "prototype"}))
         ):
             return False
-        result_count, result_invalid = _successful_runtime_results(request.state, self._run_id, self._runtime_attempt_id)
+        result_count, result_invalid = _successful_runtime_results(state, self._run_id, self._runtime_attempt_id)
         if result_count or result_invalid:
             return False
         if self._requested_artifact_kinds == frozenset({"prototype"}):
             return True
-        draft, index, invalid = _successful_prd_draft(request.state, self._run_id, self._runtime_attempt_id)
-        references, reference_invalid = _reference_progress(request.state, self._run_id, self._runtime_attempt_id)
-        stages, stage_invalid = _stage_progress(request.state, self._run_id, self._runtime_attempt_id)
+        draft, index, invalid = _successful_prd_draft(state, self._run_id, self._runtime_attempt_id)
+        references, reference_invalid = _reference_progress(state, self._run_id, self._runtime_attempt_id)
+        stages, stage_invalid = _stage_progress(state, self._run_id, self._runtime_attempt_id)
         if (
             draft is None or index != 0 or invalid or reference_invalid or stage_invalid
             or len(references) != len(PRD_REFERENCE_FILES) or stages != len(PRD_STAGE_SEQUENCE)
         ):
             return False
-        completed, _ = _completed_tool_calls(request.state)
-        messages = _state_messages(request.state)
+        completed, _ = _completed_tool_calls(state)
+        messages = _state_messages(state)
         stage_calls = [
             call for call in completed
             if call["name"] == GENERATION_STAGE_TOOL_NAME
@@ -1408,14 +1408,35 @@ class WorkbenchToolScopeMiddleware(AgentMiddleware[AgentState]):
             or not 1 <= marker["count"] <= _PRD_TOOL_JSON_RETRY_LIMIT
             or any(not isinstance(marker.get(key), str) or not marker[key] for key in ("messageId", "taskId"))
             or type(marker.get("repair")) is not bool
+            or marker.get("kind", "prd") not in ("prd", "prototype")
         ):
             raise ValueError("WORKBENCH_PRD_TOOL_JSON_RETRY_STATE_INVALID")
         return marker
 
-    def _recover_prd_tool_json(self, state: AgentState, runtime: Any) -> dict[str, Any] | None:
+    def _malformed_draft_target(self, state: Any, runtime: Any) -> tuple[str, int] | None:
+        if self._prd_tool_json_retry_scope(runtime):
+            references, reference_invalid = _reference_progress(state, self._run_id, self._runtime_attempt_id)
+            stages, stage_invalid = _stage_progress(state, self._run_id, self._runtime_attempt_id)
+            drafts, draft_invalid = _successful_prd_drafts(state, self._run_id, self._runtime_attempt_id)
+            if (
+                not reference_invalid and not stage_invalid and not draft_invalid and not drafts
+                and not _missing_reference_indexes(references) and stages == len(PRD_STAGE_SEQUENCE)
+            ):
+                return "prd", 0
+        if not self._prototype_transport_ready(state, runtime):
+            return None
+        linked = self._requested_artifact_kinds == frozenset({"prd", "prototype"})
+        stages, stage_invalid = _prototype_stage_progress(
+            state, self._run_id, self._runtime_attempt_id, allow_prd_stages=linked,
+        )
+        draft, _, draft_invalid = _successful_prototype_draft(state, self._run_id, self._runtime_attempt_id)
+        if not stage_invalid and not draft_invalid and draft is None and stages == len(PROTOTYPE_STAGE_SEQUENCE):
+            return "prototype", int(linked)
+        return None
+
+    def _recover_draft_tool_json(self, state: AgentState, runtime: Any) -> dict[str, Any] | None:
         if (
-            not self._prd_tool_json_retry_scope(runtime)
-            or state.get("jump_to") is not None
+            state.get("jump_to") is not None
             or state.get("__interrupt__")
             or state.get("interrupts")
             or _value(_value(runtime, "control"), "drain_requested")
@@ -1448,40 +1469,54 @@ class WorkbenchToolScopeMiddleware(AgentMiddleware[AgentState]):
         task_id = _value(_value(runtime, "execution_info"), "task_id")
         if any(not isinstance(value, str) or not value for value in (message_id, task_id)):
             return None
-        marker = self._prd_tool_json_retry_marker(state)
-        replay = marker is not None and marker["taskId"] == task_id
-        count = marker["count"] if marker else 0
         history = {"messages": messages[:-1]}
-        references, reference_invalid = _reference_progress(history, self._run_id, self._runtime_attempt_id)
-        stages, stage_invalid = _stage_progress(history, self._run_id, self._runtime_attempt_id)
-        drafts, draft_invalid = _successful_prd_drafts(history, self._run_id, self._runtime_attempt_id)
-        if (
-            reference_invalid or stage_invalid or draft_invalid or drafts
-            or _missing_reference_indexes(references) or stages != len(PRD_STAGE_SEQUENCE)
-        ):
+        target = self._malformed_draft_target(history, runtime)
+        if target is None:
             return None
+        kind, artifact_index = target
+        marker = self._prd_tool_json_retry_marker(state)
+        replay = marker is not None and marker["taskId"] == task_id and marker.get("kind", "prd") == kind
+        count = marker["count"] if marker else 0
         if not replay and count >= _PRD_TOOL_JSON_RETRY_LIMIT:
             return {"jump_to": "end"}
         rejected = _unrepaired_linked_draft(history, self._run_id, self._runtime_attempt_id)
         # The reducer replaces the malformed declaration using the same ID.
         # Neither wire arguments nor an unanswered tool call go back to the model.
         return {
-            "messages": [AIMessage(id=message_id, content="The PRD tool arguments were malformed.")],
+            "messages": [AIMessage(id=message_id, content=f"The {kind} draft tool arguments were malformed.")],
             "jump_to": "model",
             _PRD_TOOL_JSON_RETRY_KEY: {
                 "runId": self._run_id, "runtimeAttemptId": self._runtime_attempt_id,
                 "messageId": message_id, "taskId": task_id, "count": count if replay else count + 1,
-                "repair": rejected is not None and rejected["artifactIndex"] == 0,
+                "kind": kind,
+                "repair": rejected is not None and rejected["artifactIndex"] == artifact_index,
             },
         }
 
-    def _prd_tool_json_retry_policy(self, request: ModelRequest) -> str | None:
-        if not self._prd_tool_json_retry_scope(request.runtime):
-            return None
+    def _draft_tool_json_retry_policy(self, request: ModelRequest) -> str | None:
         marker = self._prd_tool_json_retry_marker(request.state)
         messages = _state_messages(request.state)
         if not marker or not messages or _value(messages[-1], "id") != marker["messageId"]:
             return None
+        target = self._malformed_draft_target(request.state, request.runtime)
+        if target is None or target[0] != marker.get("kind", "prd"):
+            return None
+        kind, artifact_index = target
+        if kind == "prototype":
+            next_call = (
+                "Send one small repair against the latest rejected Draft ACK's baseCandidateChecksum."
+                if marker["repair"] else
+                "Send a valid complete Prototype Draft. Keep all confirmed screens and actions. "
+                "Use shared style tokens, concise object IDs and content, and the supplied Prototype schema. "
+                "For large arguments, start with the structural Draft and add small groups of real nodes or actions "
+                "with checksum-bound repairs until the complete confirmed scope validates."
+            )
+            return (
+                "<workbench_prototype_tool_json_retry>\n"
+                f"Retry workbench_artifact_draft_publish at artifact_index {artifact_index} as the only tool call. "
+                "Check each delimiter and quote. Preserve the approved scope and prior stages. "
+                + next_call + "\n</workbench_prototype_tool_json_retry>"
+            )
         next_call = (
             "Use repair with baseCandidateChecksum copied from the latest rejected PRD Draft ACK. "
             "Send a single small operation. If an introduction section is too large, add its fixed title first, "
@@ -1600,7 +1635,7 @@ class WorkbenchToolScopeMiddleware(AgentMiddleware[AgentState]):
 
     def _linked_result_reference_policy(self, request: ModelRequest) -> str | None:
         """Offer only checksum-bound references after both causal Drafts are ready."""
-        if not self._linked_recovery_scope(request.runtime) or not self._prototype_transport_ready(request):
+        if not self._linked_recovery_scope(request.runtime) or not self._prototype_transport_ready(request.state, request.runtime):
             return None
         stage_count, stage_invalid = _prototype_stage_progress(
             request.state, self._run_id, self._runtime_attempt_id, allow_prd_stages=True,
@@ -1698,12 +1733,12 @@ class WorkbenchToolScopeMiddleware(AgentMiddleware[AgentState]):
                     if system_text.strip()
                     else policy
                 ))
-        repair_policy = self._prd_tool_json_retry_policy(request) or self._linked_repair_policy(request)
+        repair_policy = self._draft_tool_json_retry_policy(request) or self._linked_repair_policy(request)
         if repair_policy is not None:
             system_message = overrides.get("system_message", request.system_message)
             system_text = system_message.text if system_message is not None else ""
             overrides["system_message"] = SystemMessage(content=f"{system_text.rstrip()}\n\n{repair_policy}".strip())
-        if self._prototype_transport_ready(request):
+        if self._prototype_transport_ready(request.state, request.runtime):
             transport_context = _prototype_transport_reference_context()
             system_message = overrides.get("system_message", request.system_message)
             system_text = system_message.text if system_message is not None else ""
@@ -2296,7 +2331,7 @@ class WorkbenchToolScopeMiddleware(AgentMiddleware[AgentState]):
     def after_model(self, state: AgentState, runtime: Any = None) -> dict[str, Any] | None:
         if self._workbench_run_enabled and _contains_llm_error_fallback(state.get("messages")):
             return {"jump_to": "end"}
-        return self._recover_prd_tool_json(state, runtime) or self._recover_linked_draft_stop(state, runtime)
+        return self._recover_draft_tool_json(state, runtime) or self._recover_linked_draft_stop(state, runtime)
 
     @override
     def wrap_tool_call(
@@ -2363,7 +2398,7 @@ class WorkbenchToolScopeMiddleware(AgentMiddleware[AgentState]):
     ) -> dict[str, Any] | None:
         if self._workbench_run_enabled and _contains_llm_error_fallback(state.get("messages")):
             return {"jump_to": "end"}
-        return self._recover_prd_tool_json(state, runtime) or self._recover_linked_draft_stop(state, runtime)
+        return self._recover_draft_tool_json(state, runtime) or self._recover_linked_draft_stop(state, runtime)
 
     @override
     async def awrap_tool_call(
