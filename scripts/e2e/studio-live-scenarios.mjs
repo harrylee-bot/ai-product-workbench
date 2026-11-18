@@ -84,19 +84,36 @@ export async function runStudioLiveScenarios({ page, browser, webOrigin, outDir,
     assert.equal(discussionBody.generationRequest.modelId, "deepseek-flash");
     if (source) assert.deepEqual(discussionBody.generationRequest.sourceIds, [source.sourceId]);
     assert.equal(Object.hasOwn(discussionBody.generationRequest, "outputOperations"), false, "Discussion must not submit server-resolved output operations");
-    await waitUntil(async () => {
-      const [state] = await query("SELECT s.state, t.status AS turn_status, t.failure_code FROM workbench.requirement_sessions s LEFT JOIN workbench.requirement_turns t ON t.id=s.current_turn_id WHERE s.id=$1", [session.id]);
-      if (state?.turn_status === "failed") throw Object.assign(new Error(`Requirement turn failed: ${state.failure_code}`), { fatal: true });
-      if (state?.turn_status === "succeeded" && source) {
-        result.activityDiscussion = await auditStudioActivityDiscussion({ query, source, sessionId: session.id });
-        await checkpoint();
-      }
-      if (state?.turn_status === "succeeded" && state.state !== "ready_to_confirm") {
-        result.discussionText = await page.getByRole("region", { name: "需求交流", exact: true }).innerText().catch(() => "");
-        throw Object.assign(new Error(`Sufficient request was not ready: ${state.state}`), { fatal: true });
-      }
-      return state?.state === "ready_to_confirm";
-    }, "ready confirmation from real Flash", 180000, 1000);
+    const analyze = () => waitUntil(async () => {
+      const [state] = await query("SELECT s.state, t.id AS turn_id, t.status AS turn_status, t.request_hash, t.attempt, t.failure_code FROM workbench.requirement_sessions s LEFT JOIN workbench.requirement_turns t ON t.id=s.current_turn_id WHERE s.id=$1", [session.id]);
+      return ["succeeded", "failed"].includes(state?.turn_status) ? state : false;
+    }, "completed discussion analysis from real Flash", 180000, 1000);
+    let analysis = await analyze();
+    if (analysis.turn_status === "failed" && analysis.failure_code === "REQUIREMENT_KNOWLEDGE_UNAVAILABLE") {
+      const previous = analysis;
+      const retryPath = `/requirement-sessions/${session.id}/turns/${previous.turn_id}/retry`;
+      result.requirementRetry = { turnId: previous.turn_id, from: previous.failure_code, previousAttempt: previous.attempt };
+      await checkpoint();
+      const retryResponse = page.waitForResponse(r => r.request().method() === "POST" && new URL(r.url()).pathname.endsWith(retryPath));
+      await page.getByRole("button", { name: "重试需求分析", exact: true }).click();
+      assert.ok((await retryResponse).ok(), "Retry must use the same persisted requirement turn");
+      analysis = await analyze();
+      assert.equal(analysis.turn_id, previous.turn_id);
+      assert.equal(analysis.request_hash, previous.request_hash);
+      assert.ok(analysis.attempt > previous.attempt, "Retry must claim the persisted turn again");
+      Object.assign(result.requirementRetry, { retryAttempt: analysis.attempt, status: analysis.turn_status });
+      await checkpoint();
+    }
+    if (analysis.turn_status === "failed")
+      throw new Error(`Requirement turn failed: ${analysis.failure_code}`);
+    if (source) {
+      result.activityDiscussion = await auditStudioActivityDiscussion({ query, source, sessionId: session.id });
+      await checkpoint();
+    }
+    if (analysis.state !== "ready_to_confirm") {
+      result.discussionText = await page.getByRole("region", { name: "需求交流", exact: true }).innerText().catch(() => "");
+      throw new Error(`Sufficient request was not ready: ${analysis.state}`);
+    }
     assert.equal(Number((await query("SELECT count(*) AS n FROM workbench.runs WHERE project_id=$1", [projectId]))[0].n), beforeRuns, "Ordinary discussion must not start a Run");
     result.ordinarySendCreatedNoRun = true;
     const review = page.getByRole("article", { name: "本次改动确认", exact: true });
