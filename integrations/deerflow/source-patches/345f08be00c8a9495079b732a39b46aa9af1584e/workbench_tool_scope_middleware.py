@@ -185,7 +185,7 @@ This PRD-only Workbench Run cannot resume free-form clarification. The ask_clari
 </workbench_prd_clarification_policy>"""
 _PROTOTYPE_CLARIFICATION_SYSTEM_POLICY = """<workbench_prototype_clarification_policy>
 This Workbench Prototype Run has a fixed, trusted input and cannot resume free-form clarification. The ask_clarification tool is unavailable. Do not ask a question or end early. Use the supplied workbench_context and verified transport references, make conservative assumptions for nonessential details, and complete the Prototype stages and final workbench_runtime_result_submit call.
-Implement the controls and observable behavior in the confirmed requirements, even for a new prototype with no source revision. Native search and select controls are kind="input", with inputType="search" or inputType="select". Select options require label, value, and disabled. Keep the declared bindings and actions when fixing rejected draft paths, and check the approved interactions before final submission.
+Implement the controls and observable behavior in the confirmed requirements, even for a new prototype with no source revision. Native search and select controls are kind="input", with inputType="search" or inputType="select". Select options require label, value, and disabled. Each requested screen needs a distinct route, its own root, and its own initial state. Link the relevant screen changes to actionable controls. Keep the declared screens, bindings and actions when fixing rejected draft paths, and check the approved interactions before final submission.
 </workbench_prototype_clarification_policy>"""
 _LINKED_PRD_SYSTEM_POLICY = f"""<workbench_linked_prd_policy>
 This Workbench Run requests a linked PRD and Prototype. Free-form clarification is unavailable; record conservative typed assumptions for unsupported behavior. Complete the PRD reference reads and all PRD stages, then finish one validated PRD Draft. Keep that accepted Draft unchanged. Continue with the Prototype stages and a complete Prototype Draft at artifact_index 1 based on that PRD. Finally call workbench_runtime_result_submit with candidate containing protocol, a concise message, and artifacts copied from the two accepted ACKs' finalSubmissionArtifact fields in PRD/Prototype order. Each entry is {{"draftReference":{{"artifactIndex":0,"draftChecksum":"the exact accepted ACK checksum"}}}} with its own index and checksum. Do not rewrite accepted title, content, operation, or citations, invent a checksum, or mix a reference with artifact fields. The trusted tool resolves the explicit references and validates the complete unchanged Result. A PRD Draft alone does not finish this Run; there is no automatic PRD-only submission.
@@ -328,6 +328,40 @@ def _can_repair_prototype(rejected: Mapping[str, Any]) -> bool:
             for issue in rejected["issues"]
         )
     )
+
+def _prototype_repair_drops_addressed_structure(rejected: Mapping[str, Any], repaired: Mapping[str, Any]) -> bool:
+    previous = rejected["candidate"]["content"]
+    next_content = repaired.get("content")
+    if not isinstance(next_content, Mapping):
+        return True
+    for issue in rejected["issues"]:
+        path = issue.get("path")
+        if (
+            not isinstance(path, list) or len(path) < 4 or path[0] != "content"
+            or path[1] not in ("screens", "nodes") or type(path[2]) is not int
+            or path[2] < 0 or path[3] == "id"
+        ):
+            continue
+        collection, index = path[1], path[2]
+        original_items = previous[collection]
+        if index >= len(original_items) or not isinstance(original_items[index], Mapping):
+            continue
+        original = original_items[index]
+        if collection == "nodes" and original.get("kind") not in ("input", "select", "form"):
+            continue
+        identity = original.get("id")
+        if not isinstance(identity, str) or not identity or sum(
+            isinstance(item, Mapping) and item.get("id") == identity for item in original_items
+        ) != 1:
+            continue
+        items = next_content.get(collection)
+        if not isinstance(items, list) or not any(
+            isinstance(item, Mapping) and item.get("id") == identity
+            and (collection == "screens" or item.get("kind") in ("input", "select", "form"))
+            for item in items
+        ):
+            return True
+    return False
 
 
 def _is_llm_error_fallback_message(message: Any) -> bool:
@@ -1960,24 +1994,24 @@ class WorkbenchToolScopeMiddleware(AgentMiddleware[AgentState]):
         args = _tool_args(request.tool_call.get("args"))
         if request.tool_call.get("name") != ARTIFACT_DRAFT_TOOL_NAME:
             return None
+        rejected = None
+        if self._prototype_enabled and self._run_id and self._runtime_attempt_id:
+            kinds = ("prd", "prototype") if self._prd_gate_enabled else ("prototype",)
+            prior = _unrepaired_draft(request.state, self._run_id, self._runtime_attempt_id, kinds)
+            if prior is not None and prior["artifactIndex"] == args.get("artifact_index") and _can_repair_prototype(prior):
+                rejected = prior
         if args.get("repair") is None:
             draft = args.get("draft")
-            if (
-                self._prototype_enabled and self._run_id and self._runtime_attempt_id
-                and isinstance(draft, Mapping) and draft.get("kind") == "prototype"
-            ):
-                kinds = ("prd", "prototype") if self._prd_gate_enabled else ("prototype",)
-                rejected = _unrepaired_draft(request.state, self._run_id, self._runtime_attempt_id, kinds)
-                if rejected is not None and rejected["artifactIndex"] == args.get("artifact_index") and _can_repair_prototype(rejected):
-                    return _error_tool_message(
-                        request, "WORKBENCH_PROTOTYPE_DRAFT_REPAIR_REQUIRED",
-                        "Omit draft and call repair alone with the last rejected Prototype ACK's candidateChecksum "
-                        "as baseCandidateChecksum. Fix its issue paths in small JSON Patch groups. Preserve the original "
-                        "screens, controls, bindings, and actions while repairing their fields.",
-                    )
+            if rejected is not None and isinstance(draft, Mapping) and draft.get("kind") == "prototype":
+                return _error_tool_message(
+                    request, "WORKBENCH_PROTOTYPE_DRAFT_REPAIR_REQUIRED",
+                    "Omit draft and call repair alone with the last rejected Prototype ACK's candidateChecksum "
+                    "as baseCandidateChecksum. Fix its issue paths in small JSON Patch groups. Preserve the original "
+                    "screens, controls, bindings, and actions while repairing their fields.",
+                )
             return None
         try:
-            _artifact_draft_from_declaration(
+            repaired = _artifact_draft_from_declaration(
                 request.state, request.tool_call, self._run_id, self._runtime_attempt_id,
             )
         except (ValueError, RuntimeError, ImportError) as error:
@@ -1992,6 +2026,13 @@ class WorkbenchToolScopeMiddleware(AgentMiddleware[AgentState]):
                 request, "WORKBENCH_ARTIFACT_DRAFT_REPAIR_INVALID",
                 "Use the latest rejected ACK's candidateChecksum for this run and artifact_index, omit draft, and repair only permitted paths. Accepted drafts are immutable."
                 + feedback,
+            )
+        if rejected is not None and isinstance(repaired, Mapping) and _prototype_repair_drops_addressed_structure(rejected, repaired):
+            return _error_tool_message(
+                request, "WORKBENCH_PROTOTYPE_REPAIR_REMOVES_STRUCTURE",
+                "Keep the screen or input named in the previous Prototype ACK. Correct the reported fields "
+                "without removing the addressed screen, form, or input. Each screen has its own route, root node "
+                "and initial state. Continue from that same ACK with a small repair.",
             )
         return None
 

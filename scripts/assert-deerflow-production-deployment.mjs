@@ -223,7 +223,7 @@ const gatewayContextPatch = patchManifest.gatewaySources[0];
 assert(
   gatewayContextPatch.path === "app/gateway/services.py"
     && gatewayContextPatch.upstreamSha256 === "8379c34eeb2ddb46270b0e937035d5ee032dab68459b36b10435d28b8e2ab601"
-    && gatewayContextPatch.patchedSha256 === "a0ab6162914d9927c8fe985337b35b9a4b184cc771ff9c3039b12891422f38fa",
+    && gatewayContextPatch.patchedSha256 === "e20e457c52c4e3c7456beedd67a1edd5dbc6ae934c10956950d2949cedf78251",
   "DeerFlow Gateway context patch must bind the audited upstream and patched hashes",
 );
 assert(
@@ -249,7 +249,7 @@ const gatewayContextPatchText = JSON.stringify(gatewayContextPatch.replacements 
 assert(
   gatewayContextPatchText.includes('sanitized.pop(\\"recursion_limit\\", None)')
     && gatewayContextPatchText.includes("_DEFAULT_LEAD_GRAPH_RECURSION_LIMIT = 100")
-    && gatewayContextPatchText.includes("_WORKBENCH_PRD_LEAD_GRAPH_RECURSION_LIMIT = 200")
+    && gatewayContextPatchText.includes("_WORKBENCH_PRD_LEAD_GRAPH_RECURSION_LIMIT = 400")
     && gatewayContextPatchText.includes("_WORKBENCH_PROTOTYPE_LEAD_GRAPH_RECURSION_LIMIT = 320")
     && gatewayContextPatchText.includes("_WORKBENCH_LINKED_LEAD_GRAPH_RECURSION_LIMIT = 400")
     && gatewayContextPatchText.includes("_apply_workbench_lead_recursion_limit")

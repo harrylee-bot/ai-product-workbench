@@ -2385,6 +2385,29 @@ class PrototypeStageAdmissionTests(unittest.TestCase):
                     req = request_in_state(messages, tool, "new-draft", args)
                     self.assertIs(self.middleware.wrap_tool_call(req, lambda _: sentinel), sentinel)
 
+    def test_repair_fixes_a_screen_root_or_input_without_dropping_the_item(self):
+        draft = {"content": {
+            "screens": [{"id": "list", "rootNodeId": "list-root"}, {"id": "detail", "rootNodeId": "list-root"}],
+            "nodes": [{"id": "filter", "kind": "select"}, {"id": "decorative", "kind": "text"}],
+        }}
+        rejected = {"candidate": draft, "issues": [
+            {"path": ["content", "screens", 1, "rootNodeId"]},
+            {"path": ["content", "nodes", 0, "kind"]},
+        ]}
+        protected = middleware_module._prototype_repair_drops_addressed_structure
+        fixed = copy.deepcopy(draft)
+        fixed["content"]["screens"][1]["rootNodeId"] = "detail-root"
+        fixed["content"]["nodes"][0]["kind"] = "input"
+        del fixed["content"]["nodes"][1]
+        self.assertFalse(protected(rejected, fixed))
+        for collection, index in (("screens", 1), ("nodes", 0)):
+            missing = copy.deepcopy(fixed)
+            del missing["content"][collection][index]
+            self.assertTrue(protected(rejected, missing))
+        invalid_id = {"candidate": draft, "issues": [{"path": ["content", "screens", 1, "id"]}]}
+        fixed["content"]["screens"][1]["id"] = "corrected"
+        self.assertFalse(protected(invalid_id, fixed))
+
     def test_patch_requires_the_current_run_checkpoint_for_the_same_artifact_and_screen(self):
         args = {"artifact_index": 0, "screen_id": "screen-main"}
         self.rejected(self.stages(), "workbench_prototype_patch_publish", args,
