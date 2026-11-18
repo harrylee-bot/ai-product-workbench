@@ -89,7 +89,9 @@ export async function runStudioLiveScenarios({ page, browser, webOrigin, outDir,
       return ["succeeded", "failed"].includes(state?.turn_status) ? state : false;
     }, "completed discussion analysis from real Flash", 180000, 1000);
     let analysis = await analyze();
-    if (analysis.turn_status === "failed" && analysis.failure_code === "REQUIREMENT_KNOWLEDGE_UNAVAILABLE") {
+    const canRetry = analysis.failure_code === "REQUIREMENT_KNOWLEDGE_UNAVAILABLE"
+      || (label === "joint" && analysis.failure_code === "REQUIREMENT_MODEL_OUTPUT_INVALID");
+    if (analysis.turn_status === "failed" && canRetry) {
       const previous = analysis;
       const retryPath = `/requirement-sessions/${session.id}/turns/${previous.turn_id}/retry`;
       result.requirementRetry = { turnId: previous.turn_id, from: previous.failure_code, previousAttempt: previous.attempt };
@@ -100,12 +102,16 @@ export async function runStudioLiveScenarios({ page, browser, webOrigin, outDir,
       analysis = await analyze();
       assert.equal(analysis.turn_id, previous.turn_id);
       assert.equal(analysis.request_hash, previous.request_hash);
-      assert.ok(analysis.attempt > previous.attempt, "Retry must claim the persisted turn again");
+      assert.equal(analysis.attempt, previous.attempt + 1, "Retry must claim the persisted turn once");
       Object.assign(result.requirementRetry, { retryAttempt: analysis.attempt, status: analysis.turn_status });
       await checkpoint();
     }
-    if (analysis.turn_status === "failed")
+    if (analysis.turn_status === "failed") {
+      result.status = "failed";
+      result.errorCode = analysis.failure_code;
+      await checkpoint();
       throw new Error(`Requirement turn failed: ${analysis.failure_code}`);
+    }
     if (source) {
       result.activityDiscussion = await auditStudioActivityDiscussion({ query, source, sessionId: session.id });
       await checkpoint();
