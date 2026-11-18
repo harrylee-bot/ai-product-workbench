@@ -54,7 +54,7 @@ describe("S3ExportStorageAdapter", () => {
     expect(send.mock.calls.some(([command]) => command instanceof DeleteObjectCommand)).toBe(false);
   });
 
-  it("cleans up only an object created by this attempt when verification fails", async () => {
+  it("leaves an object for Blob GC when verification fails after this attempt creates it", async () => {
     const send = vi.fn(async (command: unknown) => {
       if (command instanceof HeadObjectCommand) throw { name: "NotFound" };
       if (command instanceof PutObjectCommand) return {};
@@ -74,7 +74,7 @@ describe("S3ExportStorageAdapter", () => {
     );
     await expect(storage.putVerified(identity, expectedBytes)).rejects.toThrow("OBJECT_STORAGE_SHA256_MISMATCH");
     expect(recordIntegrityFailure).toHaveBeenCalledOnce();
-    expect(send.mock.calls.some(([command]) => command instanceof DeleteObjectCommand)).toBe(true);
+    expect(send.mock.calls.some(([command]) => command instanceof DeleteObjectCommand)).toBe(false);
   });
 });
 

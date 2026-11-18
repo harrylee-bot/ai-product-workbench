@@ -178,6 +178,22 @@ describe("PrismaExportStore", () => {
       data: expect.objectContaining({ status: "succeeded", outputBlobId: "blob-1", revision: { increment: 1 } }),
     }));
   });
+
+  it("marks a pending shared reservation for GC without deleting its canonical object", async () => {
+    const tx = {
+      $queryRaw: vi.fn(async () => [{ id: "blob-1" }]),
+      blob: {
+        findUnique: vi.fn(async () => ({ status: "pending", ...identity, byteSize: BigInt(identity.byteSize), generation: 1 })),
+        updateMany: vi.fn(async () => ({ count: 1 })),
+      },
+    };
+    const store = new PrismaExportStore({ $transaction: vi.fn(async (callback) => callback(tx)) } as never, prefixes());
+    await expect(store.abandonOutput({ ...identity, blobId: "blob-1", generation: 1, canonicalStorageKey: "blobs/aa/output/g1" })).resolves.toBeUndefined();
+    expect(tx.blob.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: { id: "blob-1", status: "pending" },
+      data: expect.objectContaining({ storageKey: "blobs/aa/output/g1", gcEligibleAt: expect.any(Date) }),
+    }));
+  });
 });
 
 function prefixes() {

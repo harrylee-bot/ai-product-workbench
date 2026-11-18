@@ -56,10 +56,15 @@ export class ExportProcessor {
         mediaType: output.mediaType,
       };
       const reservation = await this.store.reserveOutput(identity);
-      await this.storage.putVerified({
-        storageKey: reservation.canonicalStorageKey,
-        ...identity,
-      }, output.bytes, signal);
+      try {
+        await this.storage.putVerified({
+          storageKey: reservation.canonicalStorageKey,
+          ...identity,
+        }, output.bytes, signal);
+      } catch (error) {
+        await this.store.abandonOutput(reservation).catch(() => undefined);
+        throw error;
+      }
       const published = await this.store.publishSucceeded(exportJobId, reservation);
       return { kind: "published", status: published, blobId: reservation.blobId, fileName: output.fileName };
     } catch (error) {

@@ -219,6 +219,33 @@ export class PrismaExportStore {
     }, { maxWait: 10_000, timeout: 30_000 });
   }
 
+  /** Move an unreferenced pending reservation to the canonical key so Blob GC
+   * owns cleanup. Never delete the object here: another producer may have
+   * verified the same shared digest and may publish it concurrently. */
+  async abandonOutput(output: OutputReservation): Promise<void> {
+    await this.db.$transaction(async (tx) => {
+      await tx.$queryRaw(Prisma.sql`SELECT "id" FROM "blobs" WHERE "id" = ${output.blobId} FOR UPDATE`);
+      const blob = await tx.blob.findUnique({
+        where: { id: output.blobId },
+        select: { status: true, sha256: true, generation: true, byteSize: true, mediaType: true },
+      });
+      if (!blob || blob.status !== "pending") return;
+      if (
+        blob.sha256 !== output.sha256
+        || blob.generation !== output.generation
+        || safeByteSize(blob.byteSize) !== output.byteSize
+        || blob.mediaType !== output.mediaType
+      ) return;
+      await tx.blob.updateMany({
+        where: { id: output.blobId, status: "pending" },
+        data: {
+          storageKey: output.canonicalStorageKey,
+          gcEligibleAt: new Date(Date.now() + 60_000),
+        },
+      });
+    }, { maxWait: 10_000, timeout: 30_000 });
+  }
+
   async fail(exportJobId: string, code: string, detail: string) {
     const updated = await this.db.exportJob.updateMany({
       where: { id: exportJobId, status: { in: ["queued", "running"] }, outputBlobId: null, finishedAt: null },

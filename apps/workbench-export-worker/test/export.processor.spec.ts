@@ -77,6 +77,7 @@ function harness() {
     status: vi.fn(async () => "running"),
     reserveOutput: vi.fn(async (identity) => ({ ...identity, blobId: "blob-1", generation: 1, canonicalStorageKey: "blobs/aa/output/g1" })),
     publishSucceeded: vi.fn(async () => "succeeded" as const),
+    abandonOutput: vi.fn(async () => undefined),
     fail: vi.fn(async () => undefined),
   };
   const loader = { load: vi.fn(async () => source()) };
@@ -113,6 +114,14 @@ describe("ExportProcessor", () => {
     expect(identity.byteSize).toBe(bytes.byteLength);
     expect(identity.sha256).toBe(createHash("sha256").update(bytes).digest("hex"));
     expect(test.store.publishSucceeded).toHaveBeenCalledWith("export-1", expect.objectContaining({ blobId: "blob-1" }));
+  });
+
+  it("coordinates a failed shared-object verification through Blob GC", async () => {
+    const test = harness();
+    test.storage.putVerified.mockRejectedValueOnce(new Error("OBJECT_STORAGE_SHA256_MISMATCH"));
+    await expect(test.processor.process("export-1", undefined, { retryCount: 5, retryLimit: 5 })).resolves.toEqual({ kind: "failed", code: "EXPORT_RETRY_EXHAUSTED" });
+    expect(test.store.abandonOutput).toHaveBeenCalledWith(expect.objectContaining({ blobId: "blob-1", canonicalStorageKey: "blobs/aa/output/g1" }));
+    expect(test.store.fail).toHaveBeenCalledWith("export-1", "EXPORT_RETRY_EXHAUSTED", "OBJECT_STORAGE_SHA256_MISMATCH");
   });
 
   it("builds the versioned Figma importer package without a browser or clipboard converter", async () => {

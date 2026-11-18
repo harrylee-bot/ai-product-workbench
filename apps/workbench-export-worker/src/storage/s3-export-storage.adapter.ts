@@ -1,7 +1,6 @@
 import { createHash } from "node:crypto";
 import { Readable } from "node:stream";
 import {
-  DeleteObjectCommand,
   GetObjectCommand,
   HeadObjectCommand,
   PutObjectCommand,
@@ -86,7 +85,6 @@ export class S3ExportStorageAdapter implements ExportStoragePort {
       await this.readVerified(identity, identity.byteSize, signal);
       return;
     }
-    let created = false;
     try {
       const command = new PutObjectCommand({
         Bucket: this.config.s3Bucket,
@@ -99,7 +97,6 @@ export class S3ExportStorageAdapter implements ExportStoragePort {
       });
       attachConditionalCreateHeader(command, this.config.s3ConditionalCreateMode);
       await this.client.send(command, signal ? { abortSignal: signal } : undefined);
-      created = true;
     } catch (error) {
       if (!isConditionalObjectCreateConflict(error)) throw error;
       const raced = await this.head(identity.storageKey, signal);
@@ -108,9 +105,9 @@ export class S3ExportStorageAdapter implements ExportStoragePort {
     try {
       await this.readVerified(identity, identity.byteSize, signal);
     } catch (error) {
-      if (created) {
-        await this.client.send(new DeleteObjectCommand({ Bucket: this.config.s3Bucket, Key: identity.storageKey })).catch(() => undefined);
-      }
+      // The canonical key is shared by every concurrent producer of this
+      // digest. Cleanup is coordinated by the Blob row and GC; deleting here
+      // could remove bytes that another producer has already verified/published.
       throw error;
     }
   }
