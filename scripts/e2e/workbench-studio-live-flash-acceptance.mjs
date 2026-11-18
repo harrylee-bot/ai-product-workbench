@@ -31,13 +31,13 @@ import {
 const root = path.resolve(fileURLToPath(new URL("../../", import.meta.url)));
 const runId = String(Date.now());
 const phase = process.env.WORKBENCH_STUDIO_LIVE_PHASE ?? "generation";
-assert.ok(["generation", "prd", "joint", "stop", "access", "files", "delivery"].includes(phase));
+assert.ok(["generation", "prd", "joint", "stop", "access", "files", "imports", "delivery"].includes(phase));
 const generates = ["generation", "prd", "joint", "stop"].includes(phase);
 const activityContract = process.env.WORKBENCH_STUDIO_LIVE_ACTIVITY_CONTRACT === "1";
 assert.ok(!activityContract || ["prd", "joint"].includes(phase), "The local activity contract applies to PRD and joint acceptance");
 const usesModelFixture = generates || phase === "access";
 const needsTemporal = generates || phase === "delivery";
-const suiteDirectory = { stop: "studio-live-stop", joint: "studio-live-joint", prd: "studio-live-prd", files: "file-delivery", delivery: "artifact-delivery" }[phase] ?? "studio-live-flash";
+const suiteDirectory = { stop: "studio-live-stop", joint: "studio-live-joint", prd: "studio-live-prd", files: "file-delivery", imports: "external-imports", delivery: "artifact-delivery" }[phase] ?? "studio-live-flash";
 const auditRoot = path.join(root, "output/audit/1.0.0");
 const outDir = path.join(auditRoot, suiteDirectory, runId);
 await mkdir(outDir, { recursive: true });
@@ -78,7 +78,7 @@ const evidence = {
   runId,
   phase,
   evidenceLevel:
-    generates ? "isolated-real-studio-stack-model-retrieval-and-object-storage" : phase === "delivery" ? "isolated-real-export-workers-with-fixed-versioned-inputs" : phase === "files" ? "isolated-real-studio-file-upload-scan-and-extraction" : "isolated-real-studio-authentication-and-project-permissions",
+    generates ? "isolated-real-studio-stack-model-retrieval-and-object-storage" : phase === "imports" ? "isolated-real-studio-import-with-loopback-provider-boundary" : phase === "delivery" ? "isolated-real-export-workers-with-fixed-versioned-inputs" : phase === "files" ? "isolated-real-studio-file-upload-scan-and-extraction" : "isolated-real-studio-authentication-and-project-permissions",
   browserApiInterception: false,
   allowedModelId: "deepseek-flash",
   forbiddenModelIds: ["deepseek-pro", "deepseek-v4-pro"],
@@ -320,15 +320,21 @@ try {
   const modifiedServiceFiles = execFileSync("git", ["diff", "--name-only", "HEAD", "--", "apps/*/src", "packages/*/src", "packages/workbench-db/prisma"], { cwd: serviceRoot, encoding: "utf8" }).trim();
   assert.equal(modifiedServiceFiles, "", "Backend runtime sources must match the fixed commit");
   assert.equal(await readFile(path.join(serviceRoot, "packages/workbench-contracts/openapi/workbench.v1.yaml"), "utf8"), await readFile(path.join(root, "packages/workbench-contracts/openapi/workbench.v1.yaml"), "utf8"), "Frontend and backend must consume the same shared wire contract");
-  const requirementsConfig = requirementsConfigPath ? JSON.parse(await readFile(requirementsConfigPath, "utf8")) : { model: "deepseek-flash" };
+  const importFixtures = phase === "imports"
+    ? await (await import("./studio-live-import-upstream.mjs")).startImportFixtures() : null;
+  if (importFixtures) tlsCloses.push(importFixtures.close);
+  const requirementsConfig = importFixtures
+    ? { baseUrl: importFixtures.origin + "/requirements", apiKey: importFixtures.catalogToken, model: "deepseek-flash" }
+    : requirementsConfigPath ? JSON.parse(await readFile(requirementsConfigPath, "utf8")) : { model: "deepseek-flash" };
   assert.ok(["deepseek-flash", "deepseek-4.1-flash"].includes(requirementsConfig.model));
   const localTls = await loadTls(handoffDir);
   // The file and delivery suites run no model service. The API requires an origin
   // for its model catalog, so isolate that dependency on an unused local port.
-  const localModelOrigin = !usesModelFixture ? `http://127.0.0.1:${await freePort()}` : null;
+  const localModelOrigin = importFixtures?.origin ?? (!usesModelFixture ? `http://127.0.0.1:${await freePort()}` : null);
   const providerEnv = providerEnvFile ? parseEnvFile(await readFile(providerEnvFile, "utf8")) : {
     V2_PROVIDER_MODEL_ID: "deepseek-flash", V2_PROVIDER_GATEWAY_URL: localModelOrigin,
-    V2_PROVIDER_URL: localModelOrigin, V2_PROVIDER_TOKEN: randomBytes(32).toString("hex"),
+    V2_PROVIDER_URL: importFixtures ? importFixtures.origin + "/api" : localModelOrigin,
+    V2_PROVIDER_TOKEN: importFixtures?.catalogToken ?? randomBytes(32).toString("hex"),
   };
   const s3Env = parseEnvFile(await readFile(s3EnvFile, "utf8"));
   const inferenceEnv = inferenceEnvFile ? parseEnvFile(await readFile(inferenceEnvFile, "utf8")) : {};
@@ -459,6 +465,7 @@ try {
   const apiBase = `http://127.0.0.1:${apiPort}/api/v1`;
   const previewOrigin = `https://127.0.0.1:${previewTlsPort}`;
   const s3Endpoint = s3Env.V2_S3_ENDPOINT;
+  if (importFixtures) assert.equal(new URL(s3Endpoint).hostname, "127.0.0.1", "Use loopback storage for the import test");
   const s3Port = Number(new URL(s3Endpoint).port);
   const bucket = `studio-live-${runId}`;
 
@@ -522,7 +529,7 @@ try {
     WORKBENCH_EXPORT_CHROMIUM_PATH: chromiumPath,
     WORKBENCH_PROTOTYPE_ARTIFACT_S3_BUCKET: bucket,
     WORKBENCH_PROTOTYPE_ARTIFACT_S3_PREFIX: "studio-live",
-    WORKBENCH_TEMPORAL_ADDRESS: phase === "files" ? `127.0.0.1:${temporalPort}` : requiredEnv("WORKBENCH_STUDIO_LIVE_TEMPORAL_ADDRESS"),
+    WORKBENCH_TEMPORAL_ADDRESS: needsTemporal || phase === "access" ? requiredEnv("WORKBENCH_STUDIO_LIVE_TEMPORAL_ADDRESS") : `127.0.0.1:${temporalPort}`,
     WORKBENCH_TEMPORAL_TASK_QUEUE: `studio-live-${runId}`,
     WORKBENCH_TEMPORAL_WORKER_HEALTH_PORT: String(temporalPort),
     WORKBENCH_TEMPORAL_WORKFLOW_START_URL: `http://127.0.0.1:${temporalPort}/workflows/start`,
@@ -619,6 +626,28 @@ try {
         return /\[file-worker\] listening .* with clamav scanner/u.test(log);
       }, "Isolated contract file worker queues and ClamAV", 45000);
     }
+  }
+  if (importFixtures) {
+    const scanner = parseEnvFile(await readFile(requiredEnv("V2_FILE_PIPELINE_ENV_FILE"), "utf8"));
+    assert.equal(scanner.WORKBENCH_FILE_SCAN_MODE, "clamav");
+    assert.equal(scanner.WORKBENCH_CLAMAV_HOST, "127.0.0.1", "Use a loopback ClamAV scanner");
+    const importer = startService("import-worker", [path.join(root, "scripts/e2e/studio-live-import-worker.mjs")], {
+      ...common,
+      WORKBENCH_FILE_SCAN_MODE: "clamav",
+      WORKBENCH_CLAMAV_HOST: scanner.WORKBENCH_CLAMAV_HOST,
+      WORKBENCH_CLAMAV_PORT: scanner.WORKBENCH_CLAMAV_PORT,
+      WORKBENCH_CLAMAV_SIGNATURE_MAX_AGE_MS: scanner.WORKBENCH_CLAMAV_SIGNATURE_MAX_AGE_MS,
+      WORKBENCH_IMPORT_S3_ACCESS_KEY_ID: s3Env.V2_S3_ACCESS_KEY_ID,
+      WORKBENCH_IMPORT_S3_SECRET_ACCESS_KEY: s3Env.V2_S3_SECRET_ACCESS_KEY,
+      WORKBENCH_IMPORT_GITHUB_TOKEN: importFixtures.githubToken,
+      WORKBENCH_IMPORT_FIGMA_TOKEN: importFixtures.figmaToken,
+      WORKBENCH_STUDIO_IMPORT_FIXTURE_ORIGIN: importFixtures.origin,
+    }, serviceRoot);
+    await waitUntil(async () => {
+      if (importer.exitCode !== null || importer.signalCode !== null)
+        throw Object.assign(new Error("Import worker exited before opening its queue"), { fatal: true });
+      return (await readFile(path.join(outDir, "service-import-worker.log"), "utf8")).includes("[import-worker] listening on");
+    }, "Real Import Worker queue and scanner", 45000);
   }
   await health(`${apiBase}/system/live`);
   if (needsTemporal) await health(`http://127.0.0.1:${temporalPort}/healthz`);
@@ -726,6 +755,10 @@ try {
     await runStudioDeliveryFixture({ page, browser, webOrigin, previewOrigin, outDir, runId, dbUrl, waitUntil, evidence, step, s3, bucket, chromiumPath, runCmd });
   }
   if (phase === "files") await runStudioLiveFileScenarios({ page, browser, webOrigin, outDir, runId, dbUrl, sql, waitUntil, evidence, step, s3, bucket });
+  if (importFixtures) {
+    const { runStudioLiveImportScenarios } = await import("./studio-live-import-scenarios.mjs");
+    await runStudioLiveImportScenarios({ page, browser, webOrigin, outDir, runId, dbUrl, sql, waitUntil, evidence, step, s3, bucket, fixtures: importFixtures });
+  }
   if (checkAccess) {
     const accessEvidence = phase === "access" ? evidence : { checks: {} };
     const accessPage = phase === "access" ? page : await browser.newPage();
@@ -745,7 +778,7 @@ try {
     assert.deepEqual(evidence.networkErrors.filter(item => !evidence.unavailableGenerationDependencies.includes(item)), []);
   }
   evidence.status = "passed";
-  step(phase === "stop" ? "Completed real Flash stop and frozen retry" : phase === "joint" ? "Completed real linked PRD and interactive prototype generation" : phase === "prd" ? "Completed real Studio PRD-only delivery" : phase === "generation" ? "Completed Studio real-stack deepseek-flash acceptance scenario" : phase === "delivery" ? "Completed fixed-source artifact delivery" : phase === "files" ? "Completed real Studio file delivery" : "Completed real local account and permission checks; no generation or storage acceptance");
+  step(phase === "imports" ? "Completed real Studio imports backed by loopback upstream fixtures" : phase === "stop" ? "Completed real Flash stop and frozen retry" : phase === "joint" ? "Completed real linked PRD and interactive prototype generation" : phase === "prd" ? "Completed real Studio PRD-only delivery" : phase === "generation" ? "Completed Studio real-stack deepseek-flash acceptance scenario" : phase === "delivery" ? "Completed fixed-source artifact delivery" : phase === "files" ? "Completed real Studio file delivery" : "Completed real local account and permission checks; no generation or storage acceptance");
 } catch (error) {
   evidence.status = "failed";
   evidence.failure = error.stack || String(error);
