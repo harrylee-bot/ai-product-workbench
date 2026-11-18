@@ -7,6 +7,7 @@ import { workbenchAuthIpAddressOptions } from "./workbench-auth-ip";
 import { isWorkbenchEnterpriseSsoEnabled } from "./workbench-enterprise-sso-policy";
 import { isWorkbenchPublicRegistrationEnabled } from "./workbench-registration-policy";
 import { verifyWorkbenchPassword } from "./workbench-password";
+import { verificationEmailOptions } from "./verification-email.server";
 import {
   isWorkbenchUsername,
   WORKBENCH_OIDC_PROVIDER_ID,
@@ -94,6 +95,7 @@ export const auth = betterAuth({
   ),
   database,
   trustedOrigins: [authOrigin],
+  emailVerification: verificationEmailOptions(process.env, authOrigin),
   user: {
     modelName: "auth_users",
     fields: {

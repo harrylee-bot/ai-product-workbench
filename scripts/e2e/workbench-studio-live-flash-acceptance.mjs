@@ -37,6 +37,14 @@ await writeFile(path.join(root, "output/audit/1.0.0/studio-live-flash-latest.jso
 const dbName = `workbench_studio_live_test_${runId}`;
 // All credentials and machine-specific locations are supplied externally.
 const requiredEnv = (key) => { assert.ok(process.env[key], `${key} is required`); return process.env[key]; };
+const checkAccess = phase === "access" || Boolean(process.env.WORKBENCH_STUDIO_LIVE_MAILBOX_URL);
+const mailboxOrigin = checkAccess ? new URL(requiredEnv("WORKBENCH_STUDIO_LIVE_MAILBOX_URL")) : null;
+const smtpUrl = checkAccess ? new URL(requiredEnv("WORKBENCH_STUDIO_LIVE_SMTP_URL")) : null;
+if (checkAccess) {
+  assert.equal(mailboxOrigin.protocol, "http:");
+  assert.equal(smtpUrl.protocol, "smtp:");
+  for (const url of [mailboxOrigin, smtpUrl]) assert.equal(url.hostname, "127.0.0.1", "Use an isolated local mailbox");
+}
 const adminDbUrl = requiredEnv("WORKBENCH_STUDIO_LIVE_ADMIN_DATABASE_URL");
 const dbAddress = new URL(adminDbUrl);
 assert.ok(["127.0.0.1", "localhost", "::1"].includes(dbAddress.hostname), "Use an isolated local PostgreSQL server");
@@ -577,6 +585,7 @@ try {
     WORKBENCH_DATABASE_SCHEMA: "workbench",
     WORKBENCH_AUTH_CLIENT_IP_HEADER: "x-workbench-client-ip",
     WORKBENCH_PUBLIC_REGISTRATION_ENABLED: "true",
+    ...(checkAccess && { WORKBENCH_AUTH_SMTP_URL: smtpUrl.href, WORKBENCH_AUTH_MAIL_FROM: "studio@example.test" }),
     WORKBENCH_API_INTERNAL_URL: apiBase,
   };
   await runCmd(
@@ -640,7 +649,16 @@ try {
   });
 
   if (phase === "generation") await runStudioLiveScenarios({ page, browser, webOrigin, outDir, runId, dbUrl, sql, waitUntil, evidence, step, runCmd });
-  else await runStudioLiveAccessScenarios({ page, browser, webOrigin, outDir, runId, dbUrl, sql, waitUntil, evidence, step });
+  if (checkAccess) {
+    const accessEvidence = phase === "access" ? evidence : { checks: {} };
+    const accessPage = phase === "access" ? page : await browser.newPage();
+    try {
+      await runStudioLiveAccessScenarios({ page: accessPage, browser, webOrigin, outDir, runId, dbUrl, sql, waitUntil, evidence: accessEvidence, step, mailboxOrigin });
+      if (phase === "generation") evidence.access = accessEvidence;
+    } finally {
+      if (accessPage !== page) await accessPage.close();
+    }
+  }
 
   assert.equal(evidence.forbiddenModelAttempted, false);
   assert.deepEqual(evidence.failures, []);

@@ -9,6 +9,8 @@ import {
 } from "lucide-react";
 import { useEffect, useState } from "react";
 
+import { useWorkbenchAuth } from "@/lib/auth/workbench-auth";
+import { workbenchAuthClient } from "@/lib/auth/workbench-auth.client";
 import { isWorkbenchApiError } from "@/lib/workbench/api/problem-details";
 import {
   useAcceptWorkbenchProjectInvitation,
@@ -99,7 +101,11 @@ export default function ProjectInvitationAcceptPage() {
             </div>
           ) : preview.error ? (
             <div>
-              <InvitationMessage tone="error">{invitationError(preview.error)}</InvitationMessage>
+              {needsVerifiedEmail(preview.error) ? (
+                <InvitationVerification />
+              ) : (
+                <InvitationMessage tone="error">{invitationError(preview.error)}</InvitationMessage>
+              )}
               <button
                 className="mt-[12px] inline-flex h-[32px] items-center gap-[6px] rounded-[8px] border border-white/[0.12] px-[10px] text-[11px] font-semibold hover:bg-white/[0.06]"
                 onClick={() => void preview.refetch()}
@@ -138,7 +144,9 @@ export default function ProjectInvitationAcceptPage() {
               )}
               {accept.error && (
                 <div className="mt-[16px]">
-                  <InvitationMessage tone="error">{invitationError(accept.error)}</InvitationMessage>
+                  {needsVerifiedEmail(accept.error) ? <InvitationVerification /> : (
+                    <InvitationMessage tone="error">{invitationError(accept.error)}</InvitationMessage>
+                  )}
                 </div>
               )}
             </div>
@@ -169,6 +177,47 @@ export default function ProjectInvitationAcceptPage() {
         </footer>
       </section>
     </main>
+  );
+}
+
+function needsVerifiedEmail(error: unknown) {
+  return isWorkbenchApiError(error) && error.code === "PROJECT_INVITATION_STATE_CONFLICT"
+    && error.problem.errors?.email?.includes("VERIFIED_EMAIL_REQUIRED");
+}
+
+function InvitationVerification() {
+  const { user } = useWorkbenchAuth();
+  const [sending, setSending] = useState(false);
+  const [sent, setSent] = useState(false);
+  const [error, setError] = useState("");
+  async function requestVerification() {
+    if (!user?.email || sending) return;
+    setSending(true);
+    setError("");
+    try {
+      const result = await workbenchAuthClient.sendVerificationEmail({ email: user.email, callbackURL: "/" });
+      if (result.error) {
+        setError(result.error.code === "VERIFICATION_EMAIL_NOT_ENABLED"
+          ? "邮箱验证服务尚未配置。请联系管理员，或使用已验证此邮箱的企业账号登录。"
+          : "验证邮件发送失败，请稍后重试。");
+        return;
+      }
+      setSent(true);
+    } catch {
+      setError("验证邮件发送失败，请检查连接后重试。");
+    } finally {
+      setSending(false);
+    }
+  }
+  return (
+    <div className="grid gap-2 text-[13px]">
+      <p>接受邀请前需要验证当前账户的邮箱。{user?.email}</p>
+      <button type="button" className="w-fit rounded-[8px] border px-3 py-2" onClick={requestVerification} disabled={!user?.email || sending}>
+        {sending ? "正在发送…" : sent ? "重新发送验证邮件" : "发送验证邮件"}
+      </button>
+      {sent && <p role="status">验证邮件已发送。打开邮件中的链接后，请返回此页重试。</p>}
+      {error && <InvitationMessage tone="error">{error}</InvitationMessage>}
+    </div>
   );
 }
 

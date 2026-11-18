@@ -204,12 +204,13 @@ export function projectStateConflictProblem(detail: string) {
   });
 }
 
-export function projectInvitationStateConflictProblem(detail: string) {
+export function projectInvitationStateConflictProblem(detail: string, errors?: Record<string, string[]>) {
   return new ProblemException({
     title: "Project invitation conflict",
     status: HttpStatus.CONFLICT,
     detail,
     code: "PROJECT_INVITATION_STATE_CONFLICT",
+    ...(errors && { errors }),
   });
 }
 

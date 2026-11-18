@@ -582,6 +582,7 @@ function matchingEmail(principalEmail: string | null, invitationEmail: string) {
   if (!principalEmail) {
     throw projectInvitationStateConflictProblem(
       "The signed-in account does not expose an email address",
+      { email: ["VERIFIED_EMAIL_REQUIRED"] },
     );
   }
   let normalized: string;
