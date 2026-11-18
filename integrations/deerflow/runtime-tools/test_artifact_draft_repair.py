@@ -117,6 +117,54 @@ class ArtifactDraftRepairTests(unittest.TestCase):
                 content, _ = workbench_artifact_draft_publish.func(self.runtime, 0, draft=draft)
                 self.assertTrue(json.loads(content)["ok"])
 
+    def test_repair_uses_verified_citation_identity_and_preserves_prd_body(self):
+        self.install_retrieval()
+        expected = copy.deepcopy(self.draft)
+        citation_id = expected["citations"][0]["id"]
+        paragraph = expected["content"]["sections"]["introduction"]["background"]["blocks"][0]
+        paragraph["content"].append({"type": "citation", "citationId": citation_id, "label": "Evidence"})
+        expected["content"]["assumptions"][0]["citationIds"] = [citation_id]
+        draft = copy.deepcopy(expected)
+        alias = "c-invented-by-model"
+        for citations in (draft["citations"], draft["content"]["citations"]):
+            citations[0]["id"] = alias
+            citations[0]["locator"]["heading"] = "Changed by the model"
+        draft["content"]["sections"]["introduction"]["background"]["blocks"][0]["content"][-1]["citationId"] = alias
+        draft["content"]["assumptions"][0]["citationIds"] = [alias]
+
+        ack, _ = self.publish("initial", draft=draft)
+        self.assertFalse(ack["ok"])
+        self.assertEqual(ack["citationRepair"]["operations"], [{"op": "restoreCitation", "path": "/citations/0"}])
+        repaired, _ = self.publish("repair1", repair=ack["citationRepair"])
+        self.assertTrue(repaired["ok"], repaired["issues"])
+        self.assertEqual(latest_accepted_artifact_draft(
+            self.runtime.state, run_id="run_1", runtime_attempt_id="attempt_1", artifact_index=0,
+        ), expected)
+
+    def test_citation_restore_refuses_a_different_quote_or_unrelated_path(self):
+        self.install_retrieval()
+        draft = copy.deepcopy(self.draft)
+        for citations in (draft["citations"], draft["content"]["citations"]):
+            citations[0]["id"] = "c-unknown"
+            citations[0]["quote"] = "A different assertion"
+        ack, _ = self.publish("initial", draft=draft)
+        self.assertFalse(ack["ok"])
+        self.assertNotIn("citationRepair", ack)
+        self.assertEqual(ack["issues"][0]["verifiedSourceCitation"], self.draft["citations"][0])
+        for path, error in (("/citations/0", "CITATION_SOURCE_UNRESOLVED"),
+                            ("/content/title", "CITATION_PATH_FORBIDDEN")):
+            with self.subTest(path=path), self.assertRaisesRegex(ValueError, error):
+                resolve_artifact_draft_candidate(
+                    {"messages": [*self.runtime.state["messages"], {"type": "ai", "tool_calls": [{
+                        "id": "forged", "name": "workbench_artifact_draft_publish",
+                        "args": {"artifact_index": 0, "repair": self.repair(ack, [
+                            {"op": "restoreCitation", "path": path},
+                        ])},
+                    }]}]},
+                    run_id="run_1", runtime_attempt_id="attempt_1", tool_call_id="forged",
+                    artifact_index=0, repair=self.repair(ack, [{"op": "restoreCitation", "path": path}]),
+                )
+
     def test_reconstructs_multiple_failed_repairs_then_accepts_final_repair(self):
         ack,_=self.reject()
         ack,artifact=self.publish("repair1",repair=self.repair(ack,[{"op":"move","from":"/safetyBaseline","path":"/content/sections/safetyBaseline"}]))

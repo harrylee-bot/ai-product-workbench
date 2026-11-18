@@ -176,6 +176,20 @@ def _retrieved_citations(state: Any, run_id: str, runtime_attempt_id: str) -> di
     return retrieved
 
 
+def _unique_retrieved_source(citation: dict, retrieved: dict[str, list[dict]], *, exact_quote: bool = True) -> dict | None:
+    fields = ("documentId", "chunkId", "sourcePath")
+    if exact_quote:
+        fields += ("quote",)
+    if any(not isinstance(citation.get(key), str) or not citation[key] for key in fields):
+        return None
+    matches = {
+        _json(item): item
+        for items in retrieved.values() for item in items
+        if all(item.get(key) == citation[key] for key in fields)
+    }
+    return next(iter(matches.values())) if len(matches) == 1 else None
+
+
 def validate_retrieved_citations(validation: dict[str, Any], state: Any, run_id: str,
                                 runtime_attempt_id: str, candidate: dict[str, Any], *,
                                 envelope: bool = False) -> dict[str, Any]:
@@ -194,16 +208,46 @@ def validate_retrieved_citations(validation: dict[str, Any], state: Any, run_id:
         prefix = ["artifacts", index] if envelope else []
         for number, citation in enumerate(artifact["citations"]):
             known = retrieved.get(citation["id"], [])
-            if not known or citation in known:
+            if citation in known:
+                continue
+            if not known:
+                expected = _unique_retrieved_source(citation, retrieved)
+                issue = {
+                    "code": "custom", "path": prefix + ["citations", number],
+                    "message": (
+                        "The citation uses an ID absent from the current retrieval. "
+                        "Use the complete citation object from an authorized Knowledge tool response, "
+                        "including its original ID. Retrieve the source again if necessary."
+                    ),
+                }
+                if expected:
+                    if not envelope:
+                        issue["citationRepair"] = {"op": "restoreCitation", "path": f"/citations/{number}"}
+                    else:
+                        issue["message"] += " Matching source citation: " + _json(expected)
+                else:
+                    source = _unique_retrieved_source(citation, retrieved, exact_quote=False)
+                    if source:
+                        issue["message"] += (
+                            " The proposed quote differs from this retrieved source. "
+                            "Read the verified quote and confirm it supports the claims; revise any unsupported "
+                            "claims before replacing the citation with this exact object."
+                        )
+                        issue["verifiedSourceCitation"] = source
+                issues.append(issue)
+                if len(issues) >= 12:
+                    return {**validation, "ok": False, "issues": issues}
                 continue
             expected = min(known, key=lambda row: sum(row.get(k) != v for k, v in citation.items()))
+            content_index = next((i for i, entry in enumerate(artifact["content"]["citations"])
+                                  if entry["id"] == citation["id"]), None) if artifact["kind"] == "prd" else None
             for key, value in expected.items():
                 if key in citation and citation[key] == value:
                     continue
                 guidance = "Copy this exact retrieved value: " + _json(value)
                 paths = [["citations", number, key]]
-                if artifact["kind"] == "prd":
-                    paths.append(["content", "citations", number, key])
+                if content_index is not None:
+                    paths.append(["content", "citations", content_index, key])
                 for path in paths:
                     issues.append({"code": "custom", "path": prefix + path, "message": guidance})
                 if len(issues) >= 12:
@@ -387,7 +431,49 @@ def _restore_template(candidate: dict[str, Any], operation: dict[str, Any], part
     _write(candidate, parts, matches[0]["expectedValue"], replace=not isinstance(parent, dict) or key in parent)
 
 
-def _apply_repair(candidate: dict[str, Any], repair: Any, checksum: str) -> dict[str, Any]:
+def _update_inline_citation_ids(value: Any, old_id: str, new_id: str) -> None:
+    if isinstance(value, dict):
+        if value.get("type") == "citation" and value.get("citationId") == old_id:
+            value["citationId"] = new_id
+        for child in value.values():
+            _update_inline_citation_ids(child, old_id, new_id)
+    elif isinstance(value, list):
+        for child in value:
+            _update_inline_citation_ids(child, old_id, new_id)
+
+
+def _restore_citation(candidate: dict[str, Any], parts: list[str], retrieved: dict[str, list[dict]]) -> None:
+    if len(parts) != 2 or parts[0] != "citations" or not isinstance(candidate.get("citations"), list):
+        _fail("CITATION_PATH_FORBIDDEN")
+    if candidate.get("kind") == "prd" and candidate.get("operation", {}).get("kind") == "revise":
+        _fail("CITATION_PATH_FORBIDDEN")
+    citations = candidate["citations"]
+    index = _array_index(parts[1], len(citations))
+    original = citations[index]
+    if not isinstance(original, dict) or not isinstance(old_id := original.get("id"), str) or old_id in retrieved:
+        _fail("CITATION_SOURCE_UNRESOLVED")
+    verified = _unique_retrieved_source(original, retrieved)
+    if verified is None:
+        _fail("CITATION_SOURCE_UNRESOLVED")
+    new_id = verified["id"]
+    if any(isinstance(item, dict) and item.get("id") == new_id for item in citations):
+        _fail("CITATION_ALREADY_PRESENT")
+    citations[index] = copy.deepcopy(verified)
+    if candidate.get("kind") == "prd":
+        document = candidate.get("content")
+        if not isinstance(document, dict) or not isinstance(document.get("citations"), list):
+            _fail("CITATION_SOURCE_UNRESOLVED")
+        slots = [i for i, item in enumerate(document["citations"]) if item == original]
+        if len(slots) != 1:
+            _fail("CITATION_SOURCE_UNRESOLVED")
+        document["citations"][slots[0]] = copy.deepcopy(verified)
+        _update_inline_citation_ids(document["sections"], old_id, new_id)
+        for assumption in document["assumptions"]:
+            assumption["citationIds"] = [new_id if value == old_id else value for value in assumption["citationIds"]]
+
+
+def _apply_repair(candidate: dict[str, Any], repair: Any, checksum: str,
+                  retrieved: dict[str, list[dict]] | None = None) -> dict[str, Any]:
     if (not isinstance(repair, dict) or set(repair) != {"baseCandidateChecksum", "operations"}
             or not _checksum(repair.get("baseCandidateChecksum"))):
         _fail("REQUEST_INVALID")
@@ -398,19 +484,28 @@ def _apply_repair(candidate: dict[str, Any], repair: Any, checksum: str) -> dict
     operations = repair["operations"]
     if not isinstance(operations, list) or not 1 <= len(operations) <= MAX_REPAIR_OPERATIONS:
         _fail("OPERATIONS_INVALID")
+    citation_operations = [
+        operation for operation in operations if isinstance(operation, dict) and operation.get("op") == "restoreCitation"
+    ]
+    if citation_operations and (
+        len(citation_operations) != len(operations) or validate_runtime_artifact_draft(candidate)["ok"] is not True
+    ):
+        _fail("CITATION_REPAIR_REQUIRES_VALID_SHAPE")
     result = _copy_candidate(candidate)
     for index, operation in enumerate(operations):
         if not isinstance(operation, dict):
             _fail("OPERATION_INVALID")
         op = operation.get("op")
         keys = {"op", "path", "value"} if op in {"add", "replace"} else {"op", "path", "from"} if op == "move" else {"op", "path"}
-        if op not in {"add", "replace", "remove", "move", "restore"} or set(operation) != keys:
+        if op not in {"add", "replace", "remove", "move", "restore", "restoreCitation"} or set(operation) != keys:
             _fail("OPERATION_INVALID")
         parts = _pointer(operation["path"])
         before_operation = copy.deepcopy(result)
         try:
             if op == "restore":
                 _restore_template(result, operation, parts)
+            elif op == "restoreCitation":
+                _restore_citation(result, parts, retrieved or {})
             elif op == "remove":
                 _remove(result, parts)
             elif op == "move":
@@ -480,13 +575,14 @@ def resolve_artifact_draft_candidate(
             _fail("HISTORY_TOO_LONG")
         if position <= previous_response_index:
             _fail("CAUSAL_HISTORY_INVALID")
+        prefix = {"messages": [{"type": "human"}, *messages[:position]]}
         if historical_draft is not None:
             reconstructed = _copy_candidate(historical_draft)
         else:
             if batch_size != 1 or latest is None or latest_checksum is None:
                 _fail("CAUSAL_HISTORY_INVALID")
-            reconstructed = _apply_repair(latest, historical_repair, latest_checksum)
-        prefix = {"messages": [{"type": "human"}, *messages[:position]]}
+            reconstructed = _apply_repair(latest, historical_repair, latest_checksum,
+                                          _retrieved_citations(prefix, run_id, runtime_attempt_id))
         if _verify_response(paired[0][1], reconstructed, prefix, call_id=call_id, run_id=run_id,
                             runtime_attempt_id=runtime_attempt_id, artifact_index=artifact_index):
             _fail("DRAFT_ALREADY_ACCEPTED")
@@ -495,7 +591,7 @@ def resolve_artifact_draft_candidate(
         previous_response_index = paired[0][0]
     if latest is None or latest_checksum is None:
         _fail("BASE_MISSING")
-    return _apply_repair(latest, repair, latest_checksum)
+    return _apply_repair(latest, repair, latest_checksum, _retrieved_citations(state, run_id, runtime_attempt_id))
 
 
 def latest_accepted_artifact_draft(

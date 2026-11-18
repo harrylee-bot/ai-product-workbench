@@ -42,7 +42,9 @@ def workbench_artifact_draft_publish(
     Pass exactly one of draft or repair. A repair is {baseCandidateChecksum,
     operations:[{op:"replace",path:"/content/...",value:...}]}; use the checksum
     from the latest rejection. Supported operations are add, replace, remove, move,
-    and restore (move uses from instead of value). For fixed template errors, copy templateRepair
+    restore, and restoreCitation (move uses from instead of value). For wrong citation IDs,
+    copy citationRepair from the rejection. It uses exact source evidence retrieved in this
+    attempt and updates the PRD's dependent inline citation IDs. For fixed template errors, copy templateRepair
     from the rejection: restore uses only op and path and loads the exact text from
     the contract, so never retype its value. Paths use JSON Pointer syntax. Move keeps
     the complete existing object; never overwrite an existing destination object.
@@ -142,7 +144,7 @@ def workbench_artifact_draft_publish(
         )
         response["repairMode"] = {
             "baseCandidateChecksum": validation["candidateChecksum"],
-            "supportedOperations": ["add", "replace", "remove", "move", "restore"],
+            "supportedOperations": ["add", "replace", "remove", "move", "restore", "restoreCitation"],
             "maximumOperations": 24,
             "maximumBytes": 65_536,
             "editablePaths": ["/title", "/content/...", "/citations/..."],
@@ -153,6 +155,17 @@ def workbench_artifact_draft_publish(
         )
         template_operations = [operation for issue in validation["issues"]
                                if (operation := template_restore_operation(issue)) is not None]
+        citation_operations = [issue["citationRepair"] for issue in validation["issues"] if "citationRepair" in issue]
+        if citation_operations:
+            response["citationRepair"] = {
+                "baseCandidateChecksum": validation["candidateChecksum"],
+                "operations": citation_operations,
+            }
+            response["repairInstruction"] = (
+                "Copy citationRepair exactly as the repair argument. It restores verified "
+                "citation objects and their linked PRD citation IDs from the current retrieval. "
+                + response["repairInstruction"]
+            )
         if template_operations:
             response["templateRepair"] = {
                 "baseCandidateChecksum": validation["candidateChecksum"],

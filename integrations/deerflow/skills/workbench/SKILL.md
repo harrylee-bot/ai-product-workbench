@@ -189,7 +189,10 @@ its Prototype and publish it at artifact_index 1. Submit both artifacts once
 by copying their accepted ACKs' `finalSubmissionArtifact` references into the
 final candidate in that same order. Do not stop after the PRD Draft in a linked Run.
 Every artifact requires at least one exact citation from successful Knowledge
-retrieval in the current attempt. A revised PRD also retains every exact base
+retrieval in the current attempt. Copy the entire retrieved citation object,
+including its original ID and locator. Use that same ID in PRD inline citations
+and assumption citationIds. For a draft rejection with citationRepair, copy
+those exact operations in a separate call with the rejection's checksum. A revised PRD also retains every exact base
 citation and may append newly retrieved citations; never replace historical
 citation IDs or fields when the pinned release changes. Missing knowledge is a blocker,
 not permission to generate from memory or fabricate sources.
