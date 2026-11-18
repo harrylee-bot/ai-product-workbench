@@ -56,7 +56,10 @@ export async function startImportFixtures() {
     if (!host) {
       modelCalls.push({ method: incoming.method, route });
       if (incoming.method === "GET" && route === "/api/models" && incoming.headers["x-deerflow-internal-token"] === catalogToken) {
-        return json({ models: [{ name: "deepseek-flash", display_name: "DeepSeek Flash", description: "Local catalog fixture", supports_thinking: false, supports_reasoning_effort: false }] });
+        return json({
+          models: [{ name: "deepseek-flash", model: "deepseek-4.1-flash", display_name: "DeepSeek Flash", description: "Local catalog fixture", supports_thinking: false, supports_reasoning_effort: false }],
+          token_usage: { enabled: false },
+        });
       }
       return json({ error: "This suite does not execute a model" }, 503);
     }

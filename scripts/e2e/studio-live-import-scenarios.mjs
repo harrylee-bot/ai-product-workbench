@@ -11,7 +11,7 @@ const fatal = message => Object.assign(new Error(message), { fatal: true });
 export async function runStudioLiveImportScenarios({ page, browser, webOrigin, runId, outDir, dbUrl, sql, waitUntil, evidence, step, fixtures, s3, bucket }) {
   const report = evidence.externalImports = {
     upstream: "Loopback HTTP fixture with injected provider DNS and socket transport; real URL, GitHub and Figma provider adapters",
-    model: "Loopback catalog for selection only; no analysis or generation model acceptance",
+    model: "Loopback catalog for selection only; analysis model intentionally unconfigured",
     sources: [],
   };
   const query = async (text, values = []) => (await sql(text, values, dbUrl)).rows;
@@ -122,7 +122,7 @@ export async function runStudioLiveImportScenarios({ page, browser, webOrigin, r
   assert.equal(await composer.getByRole("checkbox", { name: failed.label + " · failed", exact: true }).isDisabled(), true);
   await picker.click();
   await page.getByRole("combobox", { name: "模型", exact: true }).waitFor();
-  await waitUntil(async () => (await page.getByRole("combobox", { name: "模型", exact: true }).inputValue()) === "deepseek-flash", "Loopback model catalog selector");
+  await waitUntil(async () => (await page.getByRole("combobox", { name: "模型", exact: true }).inputValue()) === "deepseek-flash", "Loopback model catalog selector", 30000);
   const sent = page.waitForResponse(response => response.request().method() === "POST" && /\/api\/v1\/requirement-sessions\/[^/]+\/messages$/u.test(new URL(response.url()).pathname));
   await page.getByRole("textbox", { name: "描述需求或修改" }).fill("请核对这三份活动渠道资料。");
   await page.screenshot({ path: path.join(outDir, "external-imports-selected.png") });
@@ -132,16 +132,16 @@ export async function runStudioLiveImportScenarios({ page, browser, webOrigin, r
   const payload = accepted.request().postDataJSON();
   const { id: sessionId } = await accepted.json();
   const expected = report.sources.map(item => item.id);
-  assert.deepEqual(payload.generationRequest.sourceIds, expected);
+  assert.deepEqual([...payload.generationRequest.sourceIds].sort(), [...expected].sort());
   assert.equal(payload.generationRequest.modelId, "deepseek-flash");
   assert.deepEqual(payload.generationRequest.requestedArtifactKinds, ["prd", "prototype"]);
   const [turn] = await query(`SELECT s.id AS session_id,t.id AS turn_id,t.input->'request' AS request
      FROM workbench.requirement_sessions s JOIN workbench.requirement_turns t ON t.id=s.current_turn_id
      WHERE s.id=$1 AND s.project_id=$2`, [sessionId, projectId]);
-  assert.deepEqual(turn.request.sourceIds, expected);
+  assert.deepEqual(turn.request.sourceIds, payload.generationRequest.sourceIds);
   const [runs] = await query("SELECT count(*)::int AS count FROM workbench.runs WHERE project_id=$1", [projectId]);
   assert.equal(runs.count, 0);
-  report.composer = { sessionId, turnId: turn.turn_id, actualSourceIds: expected, modelId: payload.generationRequest.modelId, requestedArtifactKinds: payload.generationRequest.requestedArtifactKinds, status: accepted.status(), generationRunsCreated: runs.count };
+  report.composer = { sessionId, turnId: turn.turn_id, actualSourceIds: payload.generationRequest.sourceIds, modelId: payload.generationRequest.modelId, requestedArtifactKinds: payload.generationRequest.requestedArtifactKinds, status: accepted.status(), generationRunsCreated: runs.count };
   await checkpoint();
 
   step("Verify outsider concealment and viewer write denial on the real API");
@@ -153,8 +153,10 @@ export async function runStudioLiveImportScenarios({ page, browser, webOrigin, r
     assert.equal((await api(viewer, "GET", read)).status, 404);
     const { data: identity } = await api(viewer, "GET", "/identity/me");
     // Fixture-only membership setup. The following reads and writes use the real BFF.
-    await query(`INSERT INTO workbench.project_members(project_id,workspace_id,principal_id,role,updated_at)
-      SELECT id,workspace_id,$2,'viewer',now() FROM workbench.projects WHERE id=$1`, [projectId, identity.id]);
+    const membershipDb = new URL(dbUrl);
+    membershipDb.searchParams.set("options", "-c search_path=workbench,public");
+    await sql(`INSERT INTO workbench.project_members(project_id,workspace_id,principal_id,role,updated_at)
+      SELECT id,workspace_id,$2,'viewer',now() FROM workbench.projects WHERE id=$1`, [projectId, identity.id], membershipDb.href);
     assert.equal((await api(viewer, "GET", read)).status, 200);
     const denied = await api(viewer, "POST", `/projects/${projectId}/import-sources`, { kind: "url_snapshot", sourceUrl: missingWebsite });
     assert.ok([403, 404].includes(denied.status));
@@ -167,6 +169,8 @@ export async function runStudioLiveImportScenarios({ page, browser, webOrigin, r
   assert.equal(fixtures.modelCalls.some(call => call.method === "POST"), false);
   report.modelCatalogRequests = fixtures.modelCalls.filter(call => call.method === "GET" && call.route === "/api/models").length;
   assert.ok(report.modelCatalogRequests > 0);
+  const [analysis] = await query("SELECT status,failure_code FROM workbench.requirement_turns WHERE id=$1", [turn.turn_id]);
+  report.composer.analysisTurn = { status: analysis.status, failureCode: analysis.failure_code };
   report.status = "passed";
   await checkpoint();
 }

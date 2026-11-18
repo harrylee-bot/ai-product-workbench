@@ -323,9 +323,8 @@ try {
   const importFixtures = phase === "imports"
     ? await (await import("./studio-live-import-upstream.mjs")).startImportFixtures() : null;
   if (importFixtures) tlsCloses.push(importFixtures.close);
-  const requirementsConfig = importFixtures
-    ? { baseUrl: importFixtures.origin + "/requirements", apiKey: importFixtures.catalogToken, model: "deepseek-flash" }
-    : requirementsConfigPath ? JSON.parse(await readFile(requirementsConfigPath, "utf8")) : { model: "deepseek-flash" };
+  const requirementsConfig = requirementsConfigPath
+    ? JSON.parse(await readFile(requirementsConfigPath, "utf8")) : { model: "deepseek-flash" };
   assert.ok(["deepseek-flash", "deepseek-4.1-flash"].includes(requirementsConfig.model));
   const localTls = await loadTls(handoffDir);
   // The file and delivery suites run no model service. The API requires an origin
@@ -465,7 +464,11 @@ try {
   const apiBase = `http://127.0.0.1:${apiPort}/api/v1`;
   const previewOrigin = `https://127.0.0.1:${previewTlsPort}`;
   const s3Endpoint = s3Env.V2_S3_ENDPOINT;
-  if (importFixtures) assert.equal(new URL(s3Endpoint).hostname, "127.0.0.1", "Use loopback storage for the import test");
+  if (importFixtures) {
+    assert.equal(new URL(s3Endpoint).hostname, "127.0.0.1", "Use loopback storage for the import test");
+    evidence.checks.importStorageBoundary = requiredEnv("WORKBENCH_STUDIO_IMPORT_STORAGE_BOUNDARY");
+    assert.ok(["local-minio", "local-s3mock"].includes(evidence.checks.importStorageBoundary));
+  }
   const s3Port = Number(new URL(s3Endpoint).port);
   const bucket = `studio-live-${runId}`;
 
