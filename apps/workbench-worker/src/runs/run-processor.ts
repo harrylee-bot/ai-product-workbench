@@ -188,6 +188,7 @@ type RuntimeFailureDisposition = "terminalized" | "fenced";
 
 export type RuntimeExecutionHooks = {
   onRuntimeAttemptResolved?: (runtimeAttemptId: string) => void;
+  onExecutionClaimBusy?: () => void;
 };
 
 export class RunProcessor {
@@ -509,6 +510,7 @@ export class RunProcessor {
       }
       if (error instanceof RunTransitionRejectedError) return { runId, skipped: true };
       if (error instanceof RuntimeExecutionClaimBusyError || error instanceof RuntimeExecutionFencedError) {
+        if (error instanceof RuntimeExecutionClaimBusyError) hooks.onExecutionClaimBusy?.();
         return { runId, skipped: true };
       }
       const queueAbortWon = Boolean(
@@ -516,14 +518,16 @@ export class RunProcessor {
         && caught === jobSignal.reason
         && wallClockFailure === null,
       );
-      if (queueAbortWon && claim) {
-        try {
-          await this.attempts.release(claim);
-        } catch (releaseError) {
-          if (releaseError instanceof RuntimeExecutionFencedError) {
-            return { runId, skipped: true };
+      if (queueAbortWon) {
+        if (claim) {
+          try {
+            await this.attempts.release(claim);
+          } catch (releaseError) {
+            if (releaseError instanceof RuntimeExecutionFencedError) {
+              return { runId, skipped: true };
+            }
+            throw releaseError;
           }
-          throw releaseError;
         }
         throw caught;
       }
@@ -742,6 +746,14 @@ export class RunProcessor {
     }
     if (settlement === "external_run_conflict") {
       throw new Error("RUNTIME_PROVIDER_CANCELLATION_EXTERNAL_RUN_CONFLICT");
+    }
+  }
+
+  async failPrototypeWorkflow(runId: string): Promise<void> {
+    await this.failRun(runId, null, new Error("PROTOTYPE_GENERATION_FAILED"), true, null, null, true);
+    const run = await this.db.run.findUniqueOrThrow({ where: { id: runId }, select: { status: true, errorCode: true } });
+    if (run.status === "failed" && run.errorCode === runtimeProviderCancellationUnconfirmedCode) {
+      await this.cancel(runId);
     }
   }
 
@@ -2603,13 +2615,8 @@ export class RunProcessor {
     retryable: boolean,
     claim: RuntimeExecutionClaim | null = null,
     context: RuntimeFailureContext | null = null,
+    prototypeWorkflowExhausted = false,
   ): Promise<RuntimeFailureDisposition> {
-    const code = context?.code ?? runtimeExecutionErrorCode(error);
-    const providerMessage = error instanceof RuntimeProviderContentFilterError && code === error.code
-      ? error.message
-      : null;
-    const detailCode = context?.detailCode ?? providerMessage ?? code;
-    const message = providerMessage ?? code;
     return this.db.$transaction(async (tx): Promise<RuntimeFailureDisposition> => {
       if (claim) {
         try {
@@ -2621,8 +2628,22 @@ export class RunProcessor {
       }
       const runLifecycle = await lockRunLifecycleState(tx, runId);
       if (!runLifecycle) return "fenced";
-      const attempt = runtimeAttemptId
-        ? await lockRuntimeAttemptLifecycleState(tx, runId, runtimeAttemptId)
+      const latestAttempt = prototypeWorkflowExhausted ? await tx.runtimeAttempt.findFirst({
+        where: { runId }, orderBy: { attempt: "desc" }, select: { id: true, status: true, externalRunId: true },
+      }) : null;
+      const attemptId = latestAttempt?.id ?? runtimeAttemptId;
+      const providerMayExist = latestAttempt && ["submitting", "submission_unknown", "running"].includes(latestAttempt.status);
+      const failure = providerMayExist ? {
+        code: runtimeProviderCancellationUnconfirmedCode,
+        detailCode: "PROTOTYPE_GENERATION_FAILED",
+        submissionUnknown: latestAttempt.externalRunId === null,
+      } : context;
+      const code = failure?.code ?? runtimeExecutionErrorCode(error);
+      const providerMessage = error instanceof RuntimeProviderContentFilterError && code === error.code ? error.message : null;
+      const detailCode = failure?.detailCode ?? providerMessage ?? code;
+      const message = providerMessage ?? code;
+      const attempt = attemptId
+        ? await lockRuntimeAttemptLifecycleState(tx, runId, attemptId)
         : null;
       const attemptCanFail = attempt
         && !["waiting_input", "succeeded", "failed", "cancelled"].includes(attempt.status);
@@ -2640,7 +2661,7 @@ export class RunProcessor {
               executionOwnerId: claim.ownerId,
               executionEpoch: claim.epoch,
             }
-          : { id: runId, status: { in: ["queued", "running"] } },
+          : { id: runId, status: { in: prototypeWorkflowExhausted ? ["queued", "running", "waiting_input"] : ["queued", "running"] } },
         data: {
           status: "failed",
           finishedAt: failedAt,
@@ -2651,16 +2672,16 @@ export class RunProcessor {
         },
       });
       if (updated.count !== 1) return "fenced";
-      if (runtimeAttemptId && attemptCanFail) {
+      if (attemptId && attemptCanFail) {
         const attemptFailed = await tx.runtimeAttempt.updateMany({
           where: claim
             ? {
-                id: runtimeAttemptId,
+                id: attemptId,
                 runId,
                 executionOwnerId: claim.ownerId,
                 executionEpoch: claim.epoch,
               }
-            : { id: runtimeAttemptId },
+            : { id: attemptId },
           data: {
             status: "failed",
             startedAt: attempt.startedAt ?? failedAt,
@@ -2668,7 +2689,7 @@ export class RunProcessor {
             errorCode: code,
             errorDetail: detailCode,
             errorRetryable: retryable,
-            ...(context?.submissionUnknown
+            ...(failure?.submissionUnknown
               ? { submissionUnknownAt: attempt.submissionUnknownAt ?? failedAt }
               : {}),
             ...releasedExecutionLease(),

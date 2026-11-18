@@ -61,20 +61,20 @@ describe("Prototype generation activity lifecycle", () => {
   });
 
   it("waits for runtime cancellation cleanup before marking a failed plan or revision", async () => {
-    let acknowledge!: () => void;
-    const ack = new Promise<void>(resolve => { acknowledge = resolve; });
-    const cleanup = vi.spyOn(PrototypeRuntimeBridge.prototype, "cancelPlan").mockReturnValue(ack);
+    let acknowledge!: (status: "cancelled") => void;
+    const ack = new Promise<"cancelled">(resolve => { acknowledge = resolve; });
+    const cleanup = vi.spyOn(PrototypeRuntimeBridge.prototype, "settlePlanFailure").mockReturnValue(ack);
     const h = persistence(); const activities = createPrototypeActivities(h.db as never, config);
     const operation = activities.markPlanFailed({ planId: input.planId, code: "PROTOTYPE_WORKFLOW_CANCELLED", detail: "Cancelled" });
     expect(cleanup).toHaveBeenCalledWith(input.planId);
     expect(h.db.$transaction).not.toHaveBeenCalled();
-    acknowledge(); await operation;
+    acknowledge("cancelled"); await operation;
     expect(h.tx.prototypePlan.updateMany).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ status: "cancelled" }) }));
     expect(h.tx.prototypeRevision.updateMany).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ status: "cancelled" }) }));
   });
 
   it("leaves terminal projections untouched if provider cleanup is still unconfirmed", async () => {
-    vi.spyOn(PrototypeRuntimeBridge.prototype, "cancelPlan").mockRejectedValue(new Error("PROTOTYPE_RUNTIME_CANCELLATION_PENDING"));
+    vi.spyOn(PrototypeRuntimeBridge.prototype, "settlePlanFailure").mockRejectedValue(new Error("PROTOTYPE_RUNTIME_CANCELLATION_PENDING"));
     const h = persistence(); const activities = createPrototypeActivities(h.db as never, config);
     await expect(activities.markPlanFailed({ planId: input.planId, code: "PROTOTYPE_WORKFLOW_CANCELLED", detail: "Cancelled" })).rejects.toThrow("PROTOTYPE_RUNTIME_CANCELLATION_PENDING");
     expect(h.tx.prototypePlan.updateMany).not.toHaveBeenCalled(); expect(h.tx.prototypeRevision.updateMany).not.toHaveBeenCalled();
