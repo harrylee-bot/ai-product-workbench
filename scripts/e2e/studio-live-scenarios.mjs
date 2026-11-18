@@ -353,15 +353,36 @@ function renderPdfEvidence(pdfPath, outDir, prefix) {
   return { pageCount, renderedPage: renderedPath, renderedPageBytes: renderedBytes.length };
 }
 
-async function verifyActivityInteraction(frame) {
+export async function verifyActivityInteraction(frame) {
   const channel = frame.getByRole("combobox", { name: "渠道类型", exact: true });
-  await channel.waitFor(); await channel.selectOption({ label: "企微" });
-  assert.equal(await channel.locator("option:checked").innerText(), "企微");
+  const details = frame.getByRole("button", { name: "查看详情", exact: true });
+  async function assertVisibleRows(count) {
+    if (count) await details.nth(count - 1).waitFor({ state: "visible" });
+    await details.nth(count).waitFor({ state: "hidden" });
+    assert.equal(await details.count(), count);
+  }
+  await channel.waitFor();
+  assert.equal(await channel.locator("option:checked").innerText(), "全部");
+  await assertVisibleRows(4);
+  const groups = [];
+  for (const label of ["企微", "短信"]) {
+    await channel.selectOption({ label });
+    assert.equal(await channel.locator("option:checked").innerText(), label);
+    await assertVisibleRows(2);
+    groups.push(await details.evaluateAll(buttons => buttons.map(button => {
+      let row = button;
+      while (row.parentElement && buttons.filter(other => row.parentElement.contains(other)).length === 1) row = row.parentElement;
+      return row.innerText.trim();
+    })));
+  }
+  assert.equal(new Set(groups.flat()).size, 4, "Each channel must display its own two activities");
   const search = frame.getByPlaceholder("搜索活动", { exact: true });
   await search.fill("不存在的验收活动");
   await frame.getByText("无匹配活动", { exact: true }).waitFor();
+  await assertVisibleRows(0);
   await search.fill(""); await channel.selectOption({ label: "全部" });
-  await frame.getByRole("button", { name: "查看详情", exact: true }).first().click();
+  await assertVisibleRows(4);
+  await details.first().click();
   await frame.getByRole("button", { name: "返回列表", exact: true }).click();
   await channel.waitFor();
 }
