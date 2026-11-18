@@ -31,8 +31,10 @@ import {
 const root = path.resolve(fileURLToPath(new URL("../../", import.meta.url)));
 const runId = String(Date.now());
 const phase = process.env.WORKBENCH_STUDIO_LIVE_PHASE ?? "generation";
-assert.ok(["generation", "access", "files"].includes(phase));
-const suiteDirectory = phase === "files" ? "file-delivery" : "studio-live-flash";
+assert.ok(["generation", "access", "files", "delivery"].includes(phase));
+const usesModelFixture = phase === "generation" || phase === "access";
+const needsTemporal = phase === "generation" || phase === "delivery";
+const suiteDirectory = { files: "file-delivery", delivery: "artifact-delivery" }[phase] ?? "studio-live-flash";
 const auditRoot = path.join(root, "output/audit/1.0.0");
 const outDir = path.join(auditRoot, suiteDirectory, runId);
 await mkdir(outDir, { recursive: true });
@@ -54,11 +56,11 @@ assert.ok(["127.0.0.1", "localhost", "::1"].includes(dbAddress.hostname), "Use a
 const dbUrlObject = new URL(adminDbUrl); dbUrlObject.pathname = `/${dbName}`; dbUrlObject.searchParams.set("schema", "workbench");
 const dbUrl = dbUrlObject.toString();
 const handoffDir = requiredEnv("V2_TLS_DIRECTORY");
-const providerEnvFile = phase === "files" ? null : requiredEnv("V2_PROVIDER_ENV_FILE");
-const inferenceEnvFile = phase === "files" ? null : requiredEnv("V2_INFERENCE_ENV_FILE");
+const providerEnvFile = usesModelFixture ? requiredEnv("V2_PROVIDER_ENV_FILE") : null;
+const inferenceEnvFile = usesModelFixture ? requiredEnv("V2_INFERENCE_ENV_FILE") : null;
 const s3EnvFile = requiredEnv("V2_S3_ENV_FILE");
-const requirementsConfigPath = phase === "files" ? null : requiredEnv("WORKBENCH_STUDIO_LIVE_REQUIREMENTS_CONFIG");
-const publishedPath = phase === "files" ? null : requiredEnv("WORKBENCH_STUDIO_LIVE_PUBLISHED_KNOWLEDGE");
+const requirementsConfigPath = usesModelFixture ? requiredEnv("WORKBENCH_STUDIO_LIVE_REQUIREMENTS_CONFIG") : null;
+const publishedPath = usesModelFixture ? requiredEnv("WORKBENCH_STUDIO_LIVE_PUBLISHED_KNOWLEDGE") : null;
 const serviceRoot = path.resolve(requiredEnv("WORKBENCH_STUDIO_LIVE_SERVICE_ROOT"));
 const expectedBackendCommit = requiredEnv("WORKBENCH_STUDIO_LIVE_BACKEND_COMMIT");
 const node = process.execPath;
@@ -73,7 +75,7 @@ const evidence = {
   runId,
   phase,
   evidenceLevel:
-    phase === "generation" ? "isolated-real-studio-stack-model-retrieval-and-object-storage" : phase === "files" ? "isolated-real-studio-file-upload-scan-and-extraction" : "isolated-real-studio-authentication-and-project-permissions",
+    phase === "generation" ? "isolated-real-studio-stack-model-retrieval-and-object-storage" : phase === "delivery" ? "isolated-real-export-workers-with-fixed-versioned-inputs" : phase === "files" ? "isolated-real-studio-file-upload-scan-and-extraction" : "isolated-real-studio-authentication-and-project-permissions",
   browserApiInterception: false,
   allowedModelId: "deepseek-flash",
   forbiddenModelIds: ["deepseek-pro", "deepseek-v4-pro"],
@@ -317,9 +319,9 @@ try {
   const requirementsConfig = requirementsConfigPath ? JSON.parse(await readFile(requirementsConfigPath, "utf8")) : { model: "deepseek-flash" };
   assert.ok(["deepseek-flash", "deepseek-4.1-flash"].includes(requirementsConfig.model));
   const localTls = await loadTls(handoffDir);
-  // The file suite runs no model service. The API still requires an origin
+  // The file and delivery suites run no model service. The API requires an origin
   // for its model catalog, so isolate that dependency on an unused local port.
-  const localModelOrigin = phase === "files" ? `http://127.0.0.1:${await freePort()}` : null;
+  const localModelOrigin = !usesModelFixture ? `http://127.0.0.1:${await freePort()}` : null;
   const providerEnv = providerEnvFile ? parseEnvFile(await readFile(providerEnvFile, "utf8")) : {
     V2_PROVIDER_MODEL_ID: "deepseek-flash", V2_PROVIDER_GATEWAY_URL: localModelOrigin,
     V2_PROVIDER_URL: localModelOrigin, V2_PROVIDER_TOKEN: randomBytes(32).toString("hex"),
@@ -491,6 +493,7 @@ try {
     ...knowledge.environment,
     NODE_ENV: "test",
     NODE_EXTRA_CA_CERTS: localTls.caPath,
+    ...(phase === "delivery" && { WORKBENCH_KNOWLEDGE_TOOL_SECRET: secret }),
     WORKBENCH_WEB_ORIGIN: webOrigin,
     WORKBENCH_S3_BUCKET: bucket,
     WORKBENCH_S3_REGION: s3Env.V2_S3_REGION || "us-east-1",
@@ -554,7 +557,7 @@ try {
     },
     outDir,
   );
-  if (phase === "generation") startService(
+  if (needsTemporal) startService(
     "temporal",
     [path.join(serviceRoot, "apps/workbench-worker/dist/prototypes/temporal-worker-main.js")],
     common,
@@ -572,7 +575,15 @@ try {
   );
   if (phase === "generation") {
     startService("runtime-worker", [path.join(serviceRoot, "apps/workbench-worker/dist/main.js")], common, serviceRoot);
-    startService("export-worker", [path.join(serviceRoot, "apps/workbench-export-worker/dist/main.js")], common, serviceRoot);
+  }
+  if (needsTemporal) {
+    const office = process.env.WORKBENCH_STUDIO_LIVE_OFFICE_BIN;
+    const python = process.env.WORKBENCH_EXPORT_PYTHON_PATH;
+    startService("export-worker", [path.join(serviceRoot, "apps/workbench-export-worker/dist/main.js")], {
+      ...common,
+      ...(office && { WORKBENCH_SOFFICE_PATH: office }),
+      ...(python && { WORKBENCH_EXPORT_PYTHON_PATH: python }),
+    }, serviceRoot);
   }
   if (phase === "files") {
     const fileConfig = parseEnvFile(await readFile(requiredEnv("V2_FILE_PIPELINE_ENV_FILE"), "utf8"));
@@ -584,7 +595,7 @@ try {
     }, serviceRoot);
   }
   await health(`${apiBase}/system/live`);
-  if (phase === "generation") await health(`http://127.0.0.1:${temporalPort}/healthz`);
+  if (needsTemporal) await health(`http://127.0.0.1:${temporalPort}/healthz`);
   await health(`http://127.0.0.1:${previewPort}/healthz`);
 
   step("Build and start new Studio Next.js production bundle");
@@ -667,6 +678,10 @@ try {
   });
 
   if (phase === "generation") await runStudioLiveScenarios({ page, browser, webOrigin, outDir, runId, dbUrl, sql, waitUntil, evidence, step, runCmd });
+  if (phase === "delivery") {
+    const { runStudioDeliveryFixture } = await import("./studio-live-delivery-scenarios.mjs");
+    await runStudioDeliveryFixture({ page, browser, webOrigin, previewOrigin, outDir, runId, dbUrl, waitUntil, evidence, step, s3, bucket, chromiumPath, runCmd });
+  }
   if (phase === "files") await runStudioLiveFileScenarios({ page, browser, webOrigin, outDir, runId, dbUrl, sql, waitUntil, evidence, step, s3, bucket });
   if (checkAccess) {
     const accessEvidence = phase === "access" ? evidence : { checks: {} };
@@ -687,7 +702,7 @@ try {
     assert.deepEqual(evidence.networkErrors.filter(item => !evidence.unavailableGenerationDependencies.includes(item)), []);
   }
   evidence.status = "passed";
-  step(phase === "generation" ? "Completed Studio real-stack deepseek-flash acceptance scenario" : phase === "files" ? "Completed real Studio file delivery" : "Completed real local account and permission checks; no generation or storage acceptance");
+  step(phase === "generation" ? "Completed Studio real-stack deepseek-flash acceptance scenario" : phase === "delivery" ? "Completed fixed-source artifact delivery" : phase === "files" ? "Completed real Studio file delivery" : "Completed real local account and permission checks; no generation or storage acceptance");
 } catch (error) {
   evidence.status = "failed";
   evidence.failure = error.stack || String(error);
