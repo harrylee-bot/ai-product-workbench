@@ -13,7 +13,8 @@ import {
 
 const digest = bytes => createHash("sha256").update(bytes).digest("hex");
 const increment = "在云溪营销极速发布平台现有活动管理列表中，为策划人员增加渠道类型筛选。只筛当前角色已授权区域内活动，已有登录、导航、审核发布和报表保持不变。筛选项为全部、企微、短信，默认全部；与现有分页联动，改变筛选重置第一页，空结果提示无匹配活动，失败保留条件可重试。复用当前活动列表查询能力，仅扩展筛选参数，不接新外部系统，不改业务流程。目标为Web端，沿用原设计规范。";
-const interactionSpec = "原型交互验收：列表页包含标签为渠道类型的原生select、全部/企微/短信三个选项，和占位文字搜索活动的搜索框。提供企微活动与短信活动各两条，切换渠道后真实隐藏其他渠道的行。输入搜索词真实按活动名称过滤，不存在的名称显示无匹配活动；清空搜索恢复列表。点击活动旁查看详情打开第二个活动详情页，详情提供返回列表按钮，点击后可返回。两页均可实际操作，不新增登录页或报表页。";
+const sampleActivities = { 企微: ["企微春日活动", "企微城市活动"], 短信: ["短信春日活动", "短信城市活动"] };
+const interactionSpec = "原型交互验收：列表页包含标签为渠道类型的原生select、全部/企微/短信三个选项，和占位文字搜索活动的搜索框。使用这四条验收活动：" + Object.values(sampleActivities).flat().join("、") + "。切换渠道后真实隐藏其他渠道的行。按活动名称搜索，名称与渠道同时生效，不存在的名称显示无匹配活动，清空搜索恢复列表。点击活动旁查看详情打开第二个活动详情页，详情提供返回列表按钮，点击后可返回。两页均可实际操作，不新增登录页或报表页。";
 const prototypeFilterRules = " 渠道与活动名称条件必须同时满足。企微和短信按已选活动列表接口合同使用 wecom、sms 值。其他或未知渠道只在「全部」中显示，仍受区域授权限制。复用现有活动详情流程，原型复现列表与既有详情，不新建业务页面。详情返回时恢复默认「全部」、清空搜索词并回到第1页。查询异常沿用原失败区，显示「加载失败，请重试」和「重试」按钮，保留渠道与搜索词，以同一条件重试。";
 
 export async function runStudioLiveScenarios({ page, browser, webOrigin, outDir, runId, dbUrl, sql, waitUntil, evidence, step, runCmd, jointOnly = false, activityContract = false }) {
@@ -318,19 +319,21 @@ export async function runStudioLiveScenarios({ page, browser, webOrigin, outDir,
   }
   if (scope === "all" || scope === "prd") {
     const prdProject = await createProject("文档");
-    await discussAndGenerate(prdProject, "prd", increment + "只输出需求文档，包括字段、状态、筛选逻辑、权限边界、异常处理和验收条件。", "prd");
-    await verifyDocumentDelivery(prdProject, "prd");
+    const prd = await discussAndGenerate(prdProject, "prd", increment + "只输出需求文档，包括字段、状态、筛选逻辑、权限边界、异常处理和验收条件。", "prd");
+    await verifyDocumentDelivery(prdProject, prd);
     ids.push(prdProject);
   }
   if (scope === "all" || scope === "joint") {
     const jointProject = await createProject("联合");
     const source = activityContract ? await attachStudioActivityContract({ page, webOrigin, projectId: jointProject, query, waitUntil }) : undefined;
     const contractPrompt = source ? "请按本次所选的项目附件核对现有接口和查询参数。原型演示中的四条活动都有已知渠道，历史空渠道的产品规则写入需求文档。" : "";
-    const joint = await discussAndGenerate(jointProject, "both", increment + "同时输出需求文档和交互原型，范围与术语一致。" + interactionSpec + contractPrompt, "joint", { source });
+    const joint = await discussAndGenerate(jointProject, "both", increment + "同时输出需求文档和交互原型，范围与术语一致。" + interactionSpec + prototypeFilterRules + contractPrompt, "joint", { source });
     const { auditJointOutputs } = await import("./studio-live-joint-outputs.mjs");
     evidence.joint = await auditJointOutputs(query, api, joint, page.frameLocator(".visual-paper iframe"));
     await checkpoint();
-    if (!jointOnly) await verifyDocumentDelivery(jointProject, "joint");
+    await page.locator(".studio-top-actions").getByRole("button", { name: "分享 / 导出", exact: true }).click();
+    await verifyPrototypeDelivery(jointProject, joint);
+    await verifyDocumentDelivery(jointProject, joint);
     ids.push(jointProject);
   }
   const runs = await query("SELECT id,status,request->>'modelId' AS model_id FROM workbench.runs WHERE project_id=ANY($1::text[])", [ids]);
@@ -343,6 +346,7 @@ export async function runStudioLiveScenarios({ page, browser, webOrigin, outDir,
 
   async function verifyPrototypeDelivery(projectId, scenario) {
     step("Verify anonymous share, revoke, natural expiry, downloaded HTML and installed React execution");
+    const exportName = scenario.label === "joint" ? "joint-prototype" : "prototype";
     await page.getByRole("button", { name: "创建分享", exact: true }).click();
     const link = page.getByRole("link", { name: "打开分享链接", exact: true }).first();
     await link.waitFor();
@@ -361,6 +365,7 @@ export async function runStudioLiveScenarios({ page, browser, webOrigin, outDir,
       await publicPage.goto(new URL(expiring.body.url, webOrigin).href);
       await publicPage.getByText(/到期|过期|分享已失效/).first().waitFor();
     } finally { await anon.close(); }
+    scenario.publicShareRevocationAndNaturalExpiry = true;
     evidence.checks.publicShareRevocationAndNaturalExpiry = true;
     const downloads = {};
     for (const format of ["html", "react"]) {
@@ -375,12 +380,13 @@ export async function runStudioLiveScenarios({ page, browser, webOrigin, outDir,
       const rowElement = page.locator(`[data-studio-export-id="${created.id}"]`);
       const button = rowElement.getByRole("button", { name: "下载", exact: true });
       const downloaded = page.waitForEvent("download"); await button.click();
-      const file = path.join(outDir, format === "html" ? "prototype.html" : "prototype-react.zip");
+      const file = path.join(outDir, format === "html" ? `${exportName}.html` : `${exportName}-react.zip`);
       await (await downloaded).saveAs(file); const bytes = await readFile(file);
       assert.equal(bytes.length, Number(row.byte_size)); assert.equal(digest(bytes), row.artifact_sha256);
       downloads[format] = { path: file, byteSize: bytes.length, sha256: digest(bytes) };
     }
-    evidence.downloads = downloads;
+    scenario.prototypeDownloads = downloads;
+    if (scenario.label !== "joint") evidence.downloads = downloads;
     const directory = await mkdtemp(path.join(tmpdir(), "studio-export-run-"));
     try {
       const entries = unzipSync(await readFile(downloads.react.path));
@@ -402,23 +408,39 @@ export async function runStudioLiveScenarios({ page, browser, webOrigin, outDir,
       });
       await withStaticServer(outDir, async origin => {
         const standalone = await browser.newPage();
-        try { await standalone.goto(`${origin}/prototype.html`); await verifyActivityInteraction(standalone); }
+        try { await standalone.goto(`${origin}/${path.basename(downloads.html.path)}`); await verifyActivityInteraction(standalone); }
         finally { await standalone.close(); }
       });
+      scenario.realHtmlAndInstalledReactInteraction = true;
       evidence.checks.realHtmlAndInstalledReactInteraction = true;
     } finally { await rm(directory, { recursive: true, force: true }); }
     await checkpoint();
   }
 
-  async function verifyDocumentDelivery(projectId, label) {
+  async function verifyDocumentDelivery(projectId, scenario) {
+    const { label, outputs } = scenario;
     step(`${label}: publish exact PRD version and download actual DOCX/PDF`);
     await page.goto(`${webOrigin}/studio/${projectId}?view=publishing`);
+    const created = page.waitForResponse(r => r.request().method() === "POST" && new URL(r.url()).pathname === `/api/v1/projects/${projectId}/releases`);
     await page.getByRole("button", { name: "创建项目发布", exact: true }).click();
+    const releaseResponse = await created;
+    assert.equal(releaseResponse.status(), 201);
+    const release = await releaseResponse.json();
+    const readyPrd = outputs.find(output => output.kind === "prd" && output.status === "ready");
+    assert.ok(readyPrd, "The generated PRD must be ready before delivery");
+    const artifactPin = release.artifactPins.find(pin => pin.artifactVersionId === readyPrd.id);
+    assert.equal(artifactPin?.artifactId, readyPrd.artifact_id);
+    scenario.documentRelease = { id: release.id, artifactVersionId: artifactPin.artifactVersionId };
+    const releaseCard = page.getByRole("article", { name: `发布 ${release.version}`, exact: true });
     const files = [];
     for (const format of ["docx", "pdf"]) {
       const reply = page.waitForResponse(r => r.request().method() === "POST" && new URL(r.url()).pathname === `/api/v1/projects/${projectId}/exports`);
-      await page.getByRole("button", { name: `导出 ${format.toUpperCase()}`, exact: true }).first().click();
-      const job = await (await reply).json();
+      await releaseCard.getByRole("button", { name: `导出 ${format.toUpperCase()}`, exact: true }).click();
+      const response = await reply;
+      const request = response.request().postDataJSON();
+      assert.equal(request.releaseId, release.id);
+      assert.equal(request.selection.artifactVersionId, readyPrd.id);
+      const job = await response.json();
       const row = await waitUntil(async () => {
         const [record] = await query("SELECT e.status,e.failure_code,b.sha256,b.byte_size FROM workbench.export_jobs e LEFT JOIN workbench.blobs b ON b.id=e.output_blob_id WHERE e.id=$1", [job.id]);
         if (record?.status === "failed") throw Object.assign(new Error(`${format} failed: ${record.failure_code}`), { fatal: true });
@@ -482,10 +504,11 @@ export async function verifyActivityInteraction(frame) {
   assert.equal(await channel.locator("option:checked").innerText(), "全部");
   await assertVisibleRows(4);
   const groups = [];
-  for (const label of ["企微", "短信"]) {
+  for (const [label, names] of Object.entries(sampleActivities)) {
     await channel.selectOption({ label });
     assert.equal(await channel.locator("option:checked").innerText(), label);
     await assertVisibleRows(2);
+    for (const name of names) await frame.getByText(name, { exact: true }).waitFor({ state: "visible" });
     groups.push(await details.evaluateAll(buttons => buttons.map(button => {
       let row = button;
       while (row.parentElement && buttons.filter(other => row.parentElement.contains(other)).length === 1) row = row.parentElement;
@@ -494,17 +517,31 @@ export async function verifyActivityInteraction(frame) {
   }
   assert.equal(new Set(groups.flat()).size, 4, "Each channel must display its own two activities");
   const search = frame.getByPlaceholder("搜索活动", { exact: true });
+  await search.fill("春日活动");
+  await assertVisibleRows(1);
+  await frame.getByText(sampleActivities.短信[0], { exact: true }).waitFor({ state: "visible" });
+  await frame.getByText(sampleActivities.企微[0], { exact: true }).waitFor({ state: "hidden" });
+  await channel.selectOption({ label: "全部" });
+  await assertVisibleRows(2);
+  await frame.getByText(sampleActivities.企微[0], { exact: true }).waitFor({ state: "visible" });
   await search.fill("不存在的验收活动");
   await frame.getByText("无匹配活动", { exact: true }).waitFor();
   await assertVisibleRows(0);
   await search.fill(""); await channel.selectOption({ label: "全部" });
   await assertVisibleRows(4);
+  await channel.selectOption({ label: "短信" });
+  await search.fill("春日活动");
+  await assertVisibleRows(1);
   await details.first().click();
   await frame.getByRole("button", { name: "返回列表", exact: true }).click();
   await channel.waitFor();
+  assert.equal(await channel.locator("option:checked").innerText(), "全部");
+  assert.equal(await search.inputValue(), "");
+  await assertVisibleRows(4);
   return {
     defaultChannel: "全部",
     channelRowCounts: { 企微: groups[0].length, 短信: groups[1].length },
+    combinedChannelAndNameFilter: true,
     emptySearchShowsMessage: true,
     resetRestoresRows: true,
     detailReturnsToList: true,
