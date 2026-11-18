@@ -291,7 +291,7 @@ def _unexecuted_response(message: Any) -> bool:
 
 
 def _verify_response(message: Any, candidate: dict[str, Any], state: Any, *, call_id: str,
-                     run_id: str, runtime_attempt_id: str, artifact_index: int) -> bool:
+                     run_id: str, runtime_attempt_id: str, artifact_index: int) -> tuple[bool, str]:
     if _value(message, "name") != DRAFT_TOOL or _value(message, "status") != "success":
         _fail("RESPONSE_INVALID")
     artifact = _value(message, "artifact")
@@ -335,7 +335,7 @@ def _verify_response(message: Any, candidate: dict[str, Any], state: Any, *, cal
             _fail("BASE_CHECKSUM_MISMATCH")
     elif _json(artifact.get("issues")) != _json(validation.get("issues")):
         _fail("RESPONSE_INVALID")
-    return ok
+    return ok, ack["candidateChecksum"]
 
 
 def _pointer(value: Any, *, source: bool = False) -> list[str]:
@@ -583,11 +583,14 @@ def resolve_artifact_draft_candidate(
                 _fail("CAUSAL_HISTORY_INVALID")
             reconstructed = _apply_repair(latest, historical_repair, latest_checksum,
                                           _retrieved_citations(prefix, run_id, runtime_attempt_id))
-        if _verify_response(paired[0][1], reconstructed, prefix, call_id=call_id, run_id=run_id,
-                            runtime_attempt_id=runtime_attempt_id, artifact_index=artifact_index):
+        accepted, checksum = _verify_response(
+            paired[0][1], reconstructed, prefix, call_id=call_id, run_id=run_id,
+            runtime_attempt_id=runtime_attempt_id, artifact_index=artifact_index,
+        )
+        if accepted:
             _fail("DRAFT_ALREADY_ACCEPTED")
         latest = reconstructed
-        latest_checksum = validate_runtime_artifact_draft(reconstructed)["candidateChecksum"]
+        latest_checksum = checksum
         previous_response_index = paired[0][0]
     if latest is None or latest_checksum is None:
         _fail("BASE_MISSING")
@@ -629,8 +632,11 @@ def latest_accepted_artifact_draft(
             prefix, run_id=run_id, runtime_attempt_id=runtime_attempt_id,
             tool_call_id=call_id, artifact_index=artifact_index, draft=draft, repair=repair,
         )
-        if _verify_response(paired[0][1], reconstructed, prefix, call_id=call_id, run_id=run_id,
-                            runtime_attempt_id=runtime_attempt_id, artifact_index=artifact_index):
+        accepted, _ = _verify_response(
+            paired[0][1], reconstructed, prefix, call_id=call_id, run_id=run_id,
+            runtime_attempt_id=runtime_attempt_id, artifact_index=artifact_index,
+        )
+        if accepted:
             return reconstructed
     except (ValueError, TypeError, KeyError, RuntimeError):
         return None

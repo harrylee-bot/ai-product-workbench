@@ -165,6 +165,40 @@ class ArtifactDraftRepairTests(unittest.TestCase):
                     artifact_index=0, repair=self.repair(ack, [{"op": "restoreCitation", "path": path}]),
                 )
 
+    def test_prd_assembles_small_repairs_without_publishing_partial_content(self):
+        baseline = copy.deepcopy(self.draft)
+        sections = baseline["content"]["sections"]
+        sections_to_write = copy.deepcopy(sections)
+        sections.clear()
+        parts = sections_to_write["businessRequirements"]["functionSections"]
+        sections_to_write["businessRequirements"]["functionSections"] = []
+        ack, artifact = self.publish("initial", draft=baseline)
+        self.assertFalse(ack["ok"])
+        self.assertNotIn("draft", artifact)
+        ordered_steps = [
+            ("/content/sections/introduction", sections_to_write["introduction"]),
+            ("/content/sections/businessRequirements", sections_to_write["businessRequirements"]),
+            *[("/content/sections/businessRequirements/functionSections/-", section) for section in parts],
+            ("/content/sections/degradation", sections_to_write["degradation"]),
+            ("/content/sections/safetyBaseline", sections_to_write["safetyBaseline"]),
+        ]
+        for index, (path, value) in enumerate(ordered_steps):
+            if index and path.endswith("/-") and ordered_steps[index - 1][0] == path:
+                self.assertNotIn(path, ack["prdAssembly"]["missingPaths"])
+            else:
+                self.assertEqual(ack["prdAssembly"]["nextOperation"], {"op": "add", "path": path})
+            ack, artifact = self.publish(f"add_{index}", repair=self.repair(ack, [
+                {"op": "add", "path": path, "value": value},
+            ]))
+            if index + 1 < len(ordered_steps):
+                self.assertFalse(ack["ok"])
+                self.assertNotIn("draft", artifact)
+        self.assertTrue(ack["ok"], ack["issues"])
+        self.assertNotIn("prdAssembly", ack)
+        self.assertEqual(latest_accepted_artifact_draft(
+            self.runtime.state, run_id="run_1", runtime_attempt_id="attempt_1", artifact_index=0,
+        ), self.draft)
+
     def test_reconstructs_multiple_failed_repairs_then_accepts_final_repair(self):
         ack,_=self.reject()
         ack,artifact=self.publish("repair1",repair=self.repair(ack,[{"op":"move","from":"/safetyBaseline","path":"/content/sections/safetyBaseline"}]))

@@ -153,6 +153,19 @@ def workbench_artifact_draft_publish(
         response["repairHints"] = _artifact_draft_repair_hints(
             draft, validation["issues"], validation.get("repairHints", []), validation["candidateChecksum"],
         )
+        assembly = _prd_assembly_progress(draft)
+        if assembly:
+            response["prdAssembly"] = assembly
+            response["repairInstruction"] = (
+                "Continue assembling this PRD with separate, small repairs. Use one JSON Pointer "
+                "add for the next missing part with the latest candidateChecksum. When authoring "
+                "businessRequirements, start with its title, summary, pageLinks and an empty functionSections. "
+                "Append one complete function section at a time at "
+                "/content/sections/businessRequirements/functionSections/-. If a section is large, "
+                "start with its header and append blocks individually. Add the remaining functions "
+                "from the confirmation before adding safetyBaseline. After all sections exist, "
+                "address the remaining validation issues."
+            )
         template_operations = [operation for issue in validation["issues"]
                                if (operation := template_restore_operation(issue)) is not None]
         citation_operations = [issue["citationRepair"] for issue in validation["issues"] if "citationRepair" in issue]
@@ -178,6 +191,29 @@ def workbench_artifact_draft_publish(
                 + response["repairInstruction"]
             )
     return json.dumps(response, ensure_ascii=False, separators=(",", ":")), artifact
+
+
+def _prd_assembly_progress(candidate: dict[str, Any]) -> dict[str, Any] | None:
+    document = candidate.get("content")
+    if (candidate.get("kind") != "prd" or candidate.get("schemaVersion") != 3
+            or not isinstance(document, dict) or document.get("protocol") != "workbench.prd.v3"):
+        return None
+    sections = document.get("sections")
+    if not isinstance(sections, dict):
+        return None
+    base = "/content/sections"
+    missing = [f"{base}/{key}" for key in ("introduction", "businessRequirements") if key not in sections]
+    business = sections.get("businessRequirements")
+    if isinstance(business, dict):
+        functions = f"{base}/businessRequirements/functionSections"
+        if "functionSections" not in business:
+            missing.append(functions)
+        elif business["functionSections"] == []:
+            missing.append(f"{functions}/-")
+    missing.extend(f"{base}/{key}" for key in ("degradation", "safetyBaseline") if key not in sections)
+    if not missing:
+        return None
+    return {"missingPaths": missing, "nextOperation": {"op": "add", "path": missing[0]}}
 
 
 def _artifact_draft_repair_instruction(candidate: Any, issues: list[Any]) -> str:
