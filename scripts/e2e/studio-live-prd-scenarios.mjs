@@ -177,14 +177,15 @@ export async function runStudioPrd({
   });
   await checkpoint();
   let lastSequence = 0;
+  prd.visiblePhases = [];
   const finished = await waitUntil(
     async () => {
       const [r] = await query(
-        "SELECT status,request,knowledge_release_id FROM workbench.runs WHERE id=$1",
+        "SELECT status,request,knowledge_release_id,error_code FROM workbench.runs WHERE id=$1",
         [run],
       );
       const rows = await query(
-        "SELECT sequence,type,occurred_at FROM workbench.run_events WHERE run_id=$1 AND sequence>$2 ORDER BY sequence",
+        "SELECT sequence,type,occurred_at,CASE WHEN type='run.phase.changed' THEN payload->>'label' END AS label FROM workbench.run_events WHERE run_id=$1 AND sequence>$2 ORDER BY sequence",
         [run, lastSequence],
       );
       if (rows.length) {
@@ -192,8 +193,31 @@ export async function runStudioPrd({
         prd.events.push(...rows);
         await checkpoint();
       }
+      if (r?.status === "running") {
+        const heading = page.locator(".studio-direct-run summary").first();
+        if (await heading.isVisible()) {
+          const label = (await heading.innerText()).trim();
+          const source = prd.events.findLast((event) => event.label === label);
+          if (
+            source &&
+            !prd.visiblePhases.some((item) => item.sequence === source.sequence)
+          ) {
+            prd.visiblePhases.push({
+              label,
+              sequence: source.sequence,
+              observedAt: new Date().toISOString(),
+            });
+            await page.screenshot({
+              path: path.join(outDir, "prd-phase-" + source.sequence + ".png"),
+            });
+            await checkpoint();
+          }
+        }
+      }
       if (["failed", "cancelled", "waiting_input"].includes(r?.status))
-        throw fatal("PRD generation ended " + r.status);
+        throw fatal(
+          "PRD generation ended " + r.status + " " + (r.error_code ?? ""),
+        );
       return r?.status === "succeeded" && r;
     },
     "Real Flash PRD generation",
