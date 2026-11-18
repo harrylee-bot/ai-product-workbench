@@ -1,6 +1,7 @@
 import { persistArtifactDraft, persistDelta } from "./run-persistence.fixture.js";
 import { createHash, randomUUID } from "node:crypto";
-import { boardNodeProtocol, type RuntimeArtifactDraft } from "@workbench/workbench-contracts";
+import { workerRequirementFlow } from "./confirmed-run.fixture.js";
+import { boardNodeProtocol, startRunRequestSchema, type RuntimeArtifactDraft } from "@workbench/workbench-contracts";
 import { prdDocumentV3Example } from "@workbench/workbench-contracts/test-fixtures";
 import { Prisma, PrismaClient } from "@workbench/workbench-db";
 import { RunProcessor, sha256Canonical } from "../src/runs/run-processor.js";
@@ -26,15 +27,6 @@ const databaseUrl =
   ?? process.env.WORKBENCH_TEST_DATABASE_URL;
 const describeWithPostgres = databaseUrl ? describe : describe.skip;
 const noKnowledgeToolGrants = () => ({ issue: vi.fn(async () => null) });
-
-type DocumentDraft = {
-  kind: "document";
-  schemaVersion: number;
-  title: string;
-  citations: Awaited<ReturnType<typeof seedKnowledgeReceipt>>;
-  operation: { kind: "create" };
-  content: { text: string };
-};
 
 type ProcessorInternals = {
   prepare(runId: string, approvalIds: string[]): Promise<unknown>;
@@ -236,15 +228,16 @@ describeWithPostgres("Run processor PostgreSQL cancellation fences", () => {
       designStyle: { kind: "automatic" },
       sourceIds: [],
       artifactTargets: [],
-      requestedArtifactKinds: ["document"],
+      requestedArtifactKinds: ["prd"],
     }));
     const claim = await claimRunFixture(worker, fixture);
-    const draft = documentDraft("Cancelled document", "must roll back", fixture.citations);
+    const draft = prdDraft("Cancelled document", fixture.citations);
     const checkpointProcessor = new RunProcessor(
       worker,
       {} as never,
       noKnowledgeToolGrants(),
     ) as unknown as ProcessorInternals;
+    await recordPrdStages(worker, checkpointProcessor, claim);
     await persistArtifactDraft(checkpointProcessor,
       claim,
       {
@@ -335,7 +328,7 @@ describeWithPostgres("Run processor PostgreSQL cancellation fences", () => {
       designStyle: { kind: "automatic" },
       sourceIds: [],
       artifactTargets: [],
-      requestedArtifactKinds: ["document"],
+      requestedArtifactKinds: ["prd"],
     }));
     const claim = await claimRunFixture(worker, fixture);
     const processor = new RunProcessor(
@@ -343,9 +336,10 @@ describeWithPostgres("Run processor PostgreSQL cancellation fences", () => {
       {} as never,
       noKnowledgeToolGrants(),
     ) as unknown as ProcessorInternals;
-    const draft = documentDraft("Published document", "committed", fixture.citations);
+    const draft = prdDraft("Published document", fixture.citations);
 
     try {
+      await recordPrdStages(worker, processor, claim);
       await persistArtifactDraft(processor,
         claim,
         {
@@ -395,7 +389,7 @@ describeWithPostgres("Run processor PostgreSQL cancellation fences", () => {
       await expect(worker.artifact.count({ where: { projectId: fixture.projectId } })).resolves.toBe(1);
       await expect(worker.boardNode.count({ where: { boardId: fixture.boardId } })).resolves.toBe(1);
       await expect(worker.runEvent.findMany({
-        where: { runId: fixture.runId },
+        where: { runId: fixture.runId, type: { notIn: ["run.queued", "run.generation.stage.changed", "run.phase.changed"] } },
         orderBy: { sequence: "asc" },
         select: { type: true },
       })).resolves.toEqual([
@@ -490,29 +484,9 @@ describeWithPostgres("Run processor PostgreSQL cancellation fences", () => {
 
   it("creates a new Prototype from a pinned source screen without mutating the source Artifact", async () => {
     const worker = new PrismaClient({ datasourceUrl: databaseUrl! });
-    let sourceArtifactId = "";
-    let sourceVersionId = "";
-    const fixture = await seedRunFixture(worker, "publish", (ids) => {
-      sourceArtifactId = `source_artifact_${ids.runId}`;
-      sourceVersionId = `source_version_${ids.runId}`;
-      return {
-        prompt: "Generate a new Prototype from the selected source screen",
-        modelId: "quality",
-        workflow: "generate",
-        generationIntent: "interactive-prototype",
-        targetSurface: "app",
-        designStyle: { kind: "automatic" },
-        sourceIds: [],
-        artifactTargets: [{
-          artifactId: sourceArtifactId,
-          artifactVersionId: sourceVersionId,
-          screenIds: ["screen-home"],
-        }],
-        requestedArtifactKinds: ["prototype"],
-      };
-    });
-    const sourceBlobId = `source_blob_${fixture.runId}`;
-    const assetSha256 = "d".repeat(64);
+    const sourceArtifactId = randomUUID(), sourceVersionId = randomUUID();
+    const sourceBlobId = `blob_${randomUUID()}`;
+    const assetSha256 = createHash("sha256").update(sourceBlobId).digest("hex");
     const sourceAsset = {
       id: "source-hero",
       kind: "image" as const,
@@ -538,6 +512,76 @@ describeWithPostgres("Run processor PostgreSQL cancellation fences", () => {
       documentId: "generated-prototype",
       title: "Generated Prototype",
     };
+    const fixture = await seedRunFixture(worker, "publish", () => ({
+      prompt: "Generate a new Prototype from the selected source screen",
+      modelId: "quality",
+      workflow: "generate",
+      generationIntent: "interactive-prototype",
+      targetSurface: "app",
+      designStyle: { kind: "automatic" },
+      sourceIds: [],
+      artifactTargets: [{
+        artifactId: sourceArtifactId,
+        artifactVersionId: sourceVersionId,
+        screenIds: ["screen-home"],
+      }],
+      requestedArtifactKinds: ["prototype"],
+    }), async (tx, ids) => {
+      await tx.blob.create({
+        data: {
+          id: sourceBlobId,
+          sha256: assetSha256,
+          storageKey: `runtime-source/${ids.projectId}/hero.png`,
+          mediaType: sourceAsset.mediaType,
+          byteSize: BigInt(sourceAsset.byteSize),
+          status: "ready",
+          verifiedAt: new Date(),
+        },
+      });
+      await tx.artifact.create({
+        data: {
+          id: sourceArtifactId,
+          projectId: ids.projectId,
+          kind: "prototype",
+          title: sourceDocument.title,
+        },
+      });
+      await tx.artifactVersion.create({
+        data: {
+          id: sourceVersionId,
+          artifactId: sourceArtifactId,
+          projectId: ids.projectId,
+          version: 1,
+          schemaVersion: 1,
+          status: "staging",
+          content: sourceDocument,
+          checksum: sha256Canonical(sourceDocument),
+          citations: [],
+        },
+      });
+      await tx.artifactVersionAsset.create({
+        data: {
+          artifactVersionId: sourceVersionId,
+          artifactId: sourceArtifactId,
+          projectId: ids.projectId,
+          assetId: sourceAsset.id,
+          kind: sourceAsset.kind,
+          blobId: sourceAsset.blobId,
+          mediaType: sourceAsset.mediaType,
+          byteSize: BigInt(sourceAsset.byteSize),
+          sha256: sourceAsset.sha256,
+          metadata: sourceAsset,
+        },
+      });
+      await tx.artifactVersion.update({
+        where: { id: sourceVersionId },
+        data: { status: "ready" },
+      });
+      await tx.artifact.update({
+        where: { id: sourceArtifactId },
+        data: { currentVersionId: sourceVersionId },
+      });
+    });
     const draft = {
       kind: "prototype" as const,
       schemaVersion: 1 as const,
@@ -553,63 +597,6 @@ describeWithPostgres("Run processor PostgreSQL cancellation fences", () => {
     ) as unknown as ProcessorInternals;
 
     try {
-      await worker.$transaction(async (tx) => {
-        await tx.blob.create({
-          data: {
-            id: sourceBlobId,
-            sha256: assetSha256,
-            storageKey: `runtime-source/${fixture.runId}/hero.png`,
-            mediaType: sourceAsset.mediaType,
-            byteSize: BigInt(sourceAsset.byteSize),
-            status: "ready",
-            verifiedAt: new Date(),
-          },
-        });
-        await tx.artifact.create({
-          data: {
-            id: sourceArtifactId,
-            projectId: fixture.projectId,
-            kind: "prototype",
-            title: sourceDocument.title,
-          },
-        });
-        await tx.artifactVersion.create({
-          data: {
-            id: sourceVersionId,
-            artifactId: sourceArtifactId,
-            projectId: fixture.projectId,
-            version: 1,
-            schemaVersion: 1,
-            status: "staging",
-            content: sourceDocument,
-            checksum: sha256Canonical(sourceDocument),
-            citations: [],
-          },
-        });
-        await tx.artifactVersionAsset.create({
-          data: {
-            artifactVersionId: sourceVersionId,
-            artifactId: sourceArtifactId,
-            projectId: fixture.projectId,
-            assetId: sourceAsset.id,
-            kind: sourceAsset.kind,
-            blobId: sourceAsset.blobId,
-            mediaType: sourceAsset.mediaType,
-            byteSize: BigInt(sourceAsset.byteSize),
-            sha256: sourceAsset.sha256,
-            metadata: sourceAsset,
-          },
-        });
-        await tx.artifactVersion.update({
-          where: { id: sourceVersionId },
-          data: { status: "ready" },
-        });
-        await tx.artifact.update({
-          where: { id: sourceArtifactId },
-          data: { currentVersionId: sourceVersionId },
-        });
-      });
-
       const prepared = await processor.prepare(fixture.runId, []) as {
         artifactTargets: RuntimeArtifactTarget[];
       };
@@ -957,6 +944,9 @@ describeWithPostgres("Run processor PostgreSQL lifecycle database clock", () => 
     ) as unknown as ProcessorInternals;
 
     try {
+      const draft = prdDraft("Clock-fenced document", fixture.citations);
+      await recordPrdStages(worker, processor, claim);
+      await persistArtifactDraft(processor, claim, { type: "artifact.draft", artifactIndex: 0, sourceEventId: "clock:prd", draft, checkpointScreens: [] }, [], []);
       const clock = await withDatabaseClockAheadOfHost(
         worker,
         fixture.runtimeAttemptId!,
@@ -967,7 +957,7 @@ describeWithPostgres("Run processor PostgreSQL lifecycle database clock", () => 
           {
             protocol: "workbench.runtime.result.v1",
             message: "Published with the database clock",
-            artifacts: [],
+            artifacts: [draft],
           },
         ),
       );
@@ -1595,7 +1585,11 @@ describeWithPostgres("Run processor PostgreSQL failed provider cancellation conv
 describeWithPostgres("Run processor PostgreSQL external finalization crash replay", () => {
   it("replays a committed finalization after its response is lost without duplicating tail or activity effects", async () => {
     const worker = new PrismaClient({ datasourceUrl: databaseUrl! });
-    const fixture = await seedRunFixture(worker, "publish");
+    const fixture = await seedRunFixture(worker, "publish", () => ({
+      prompt: "Add a filter to the existing prototype", modelId: "quality", workflow: "generate",
+      targetSurface: "web", designStyle: { kind: "automatic" }, requestedArtifactKinds: ["prototype"],
+    }));
+    await worker.$transaction(tx => new RunEventStore().append(tx, fixture.runId, "run.generation.stage.changed", { attempt: 1, stage: "thinking" }));
     const token = `wbkg1.${"a".repeat(80)}.${"b".repeat(43)}`;
     const provider = deerFlowFinalizationReplayProvider(fixture, `before ${token}`);
     vi.stubGlobal("fetch", provider.fetch);
@@ -1661,7 +1655,7 @@ describeWithPostgres("Run processor PostgreSQL external finalization crash repla
       const recoveringProcessor = new RunProcessor(worker, runtime, noKnowledgeToolGrants());
       await expect(recoveringProcessor.execute(fixture.runId)).resolves.toEqual({
         runId: fixture.runId,
-        artifactCount: 0,
+        artifactCount: 1,
       });
 
       await expect(finalizationEffectState(worker, fixture.runId)).resolves.toEqual({
@@ -1717,6 +1711,7 @@ async function seedRunFixture(
   db: PrismaClient,
   kind: FixtureKind,
   requestFactory?: (ids: RunFixture) => Prisma.InputJsonValue,
+  seedInputs?: (tx: Prisma.TransactionClient, ids: RunFixture) => Promise<void>,
 ): Promise<RunFixture> {
   const suffix = randomUUID().replaceAll("-", "");
   const ids: RunFixture = {
@@ -1732,7 +1727,7 @@ async function seedRunFixture(
     externalThreadId: `external_thread_${suffix}`,
     externalRunId: `external_run_${suffix}`,
   };
-  await db.$transaction(async (tx) => {
+  const knowledgeReleaseId = await db.$transaction(async (tx) => {
     await tx.principal.create({
       data: {
         id: ids.principalId,
@@ -1786,6 +1781,21 @@ async function seedRunFixture(
         title: "Run cancellation race",
       },
     });
+    if (seedInputs) await seedInputs(tx, ids);
+    return seedReadyKnowledge(tx);
+  });
+  // Publication always starts with the actual frozen requirement. The other
+  // shapes represent in-flight rows for isolated cancellation/lease tests.
+  if (kind === "publish") {
+    const input = requestFactory?.(ids) ?? {
+      prompt: "Describe the existing workspace and add a filter to its list", modelId: "quality", workflow: "generate",
+      targetSurface: "app", designStyle: { kind: "automatic" }, requestedArtifactKinds: ["prd"],
+    };
+    const flow = workerRequirementFlow(db, ids.principalId, ids.projectId);
+    const { run } = await flow.create(startRunRequestSchema.parse(input), { kind: "new" }, ids.threadId);
+    ids.runId = run.id;
+  }
+  await db.$transaction(async tx => {
     const externalThreadId = ids.externalThreadId;
     const bindingId = `binding_${suffix}`;
     if (ids.runtimeAttemptId) {
@@ -1804,9 +1814,11 @@ async function seedRunFixture(
       });
     }
     const running = kind !== "prepare";
-    await tx.run.create({
+    if (kind === "publish") {
+      await tx.run.update({ where: { id: ids.runId }, data: { status: "running", attempt: 1, startedAt: new Date() } });
+    } else await tx.run.create({
       data: {
-        knowledgeReleaseId: await seedReadyKnowledge(tx),
+        knowledgeReleaseId,
         id: ids.runId,
         projectId: ids.projectId,
         threadId: ids.threadId,
@@ -1832,20 +1844,17 @@ async function seedRunFixture(
       },
     });
     if (ids.outputEntryId) {
+      const thread = await tx.thread.update({ where: { id: ids.threadId }, data: { entrySequence: { increment: 1 } } });
       await tx.threadEntry.create({
         data: {
           id: ids.outputEntryId,
           threadId: ids.threadId,
-          sequence: 1,
+          sequence: thread.entrySequence,
           role: "assistant",
           kind: "message",
           producedByRunId: ids.runId,
           content: { protocol: "workbench.entry.v1", type: "assistant.message", text: "" },
         },
-      });
-      await tx.thread.update({
-        where: { id: ids.threadId },
-        data: { entrySequence: 1 },
       });
       await tx.run.update({
         where: { id: ids.runId },
@@ -1892,11 +1901,10 @@ async function seedCanvasEditPublicationFixture(
   db: PrismaClient,
   mode: "quick_edit" | "direct",
 ) {
-  let artifactId = "";
-  let baseVersionId = "";
+  const artifactId = randomUUID();
+  const baseVersionId = randomUUID();
+  const base = canvasPrototypeDocument();
   const fixture = await seedRunFixture(db, "publish", (ids) => {
-    artifactId = `canvas_artifact_${ids.runId}`;
-    baseVersionId = `canvas_base_${ids.runId}`;
     return {
       prompt: "Edit the selected screen",
       modelId: "quality",
@@ -1911,8 +1919,37 @@ async function seedCanvasEditPublicationFixture(
       }],
       requestedArtifactKinds: ["prototype"],
     };
+  }, async (tx, ids) => {
+    await tx.artifact.create({
+      data: {
+        id: artifactId,
+        projectId: ids.projectId,
+        kind: "prototype",
+        title: "Base prototype",
+      },
+    });
+    await tx.artifactVersion.create({
+      data: {
+        id: baseVersionId,
+        artifactId,
+        projectId: ids.projectId,
+        version: 1,
+        schemaVersion: 1,
+        status: "staging",
+        content: base,
+        checksum: sha256Canonical(base),
+        citations: [],
+      },
+    });
+    await tx.artifactVersion.update({
+      where: { id: baseVersionId },
+      data: { status: "ready" },
+    });
+    await tx.artifact.update({
+      where: { id: artifactId },
+      data: { currentVersionId: baseVersionId },
+    });
   });
-  const base = canvasPrototypeDocument();
   const ai = structuredClone(base);
   ai.revision = 2;
   ai.nodes[0]!.name = "ai-edited-home";
@@ -1940,35 +1977,6 @@ async function seedCanvasEditPublicationFixture(
   const expiresAt = new Date(Date.now() + 120_000);
 
   await db.$transaction(async (tx) => {
-    await tx.artifact.create({
-      data: {
-        id: artifactId,
-        projectId: fixture.projectId,
-        kind: "prototype",
-        title: "Base prototype",
-      },
-    });
-    await tx.artifactVersion.create({
-      data: {
-        id: baseVersionId,
-        artifactId,
-        projectId: fixture.projectId,
-        version: 1,
-        schemaVersion: 1,
-        status: "staging",
-        content: base,
-        checksum: sha256Canonical(base),
-        citations: [],
-      },
-    });
-    await tx.artifactVersion.update({
-      where: { id: baseVersionId },
-      data: { status: "ready" },
-    });
-    await tx.artifact.update({
-      where: { id: artifactId },
-      data: { currentVersionId: baseVersionId },
-    });
     await tx.boardNode.create({
       data: {
         boardId: fixture.boardId,
@@ -2249,11 +2257,21 @@ function canvasPrototypeDocumentWithImage(asset: {
 }
 
 function deerFlowFinalizationReplayProvider(fixture: RunFixture, assistantText: string) {
+  const content = prototypeDocumentFixture();
   const result = {
     protocol: "workbench.runtime.result.v1" as const,
     message: "",
-    artifacts: [],
+    artifacts: [{ kind: "prototype", schemaVersion: 1, title: content.title, content,
+      citations: fixture.citations, operation: { kind: "create" } }],
   };
+  const stageMessages = ["design-system", "mapping-components", "creating-flows", "generating-ui"].flatMap(stage => {
+    const name = "workbench_generation_stage_update", id = "stage-" + stage;
+    const artifact = { protocol: "workbench.runtime.generation-stage.v1", runId: fixture.runId, runtimeAttemptId: fixture.runtimeAttemptId, toolCallId: id, stage };
+    return [
+      { type: "ai", content: "", tool_calls: [{ id, name, args: {} }] },
+      { type: "tool", name, tool_call_id: id, artifact: { ...artifact, checksum: sha256Canonical(artifact) } },
+    ];
+  });
   const toolCallId = "result-finalization-replay";
   const envelope = {
     protocol: "workbench.runtime.validated-result.v1",
@@ -2267,6 +2285,7 @@ function deerFlowFinalizationReplayProvider(fixture: RunFixture, assistantText: 
     node: "writer",
     messages: [
       { type: "human", content: "current turn" },
+      ...stageMessages,
       {
         type: "ai",
         content: "",
@@ -2544,15 +2563,17 @@ function rawSqlText(value: unknown): string {
   return Array.isArray(strings) ? strings.join("?") : String(value);
 }
 
-function documentDraft(title: string, text: string, citations: DocumentDraft["citations"]): DocumentDraft {
-  return {
-    kind: "document",
-    schemaVersion: 1,
-    title,
-    citations,
-    operation: { kind: "create" },
-    content: { text },
-  };
+
+function prdDraft(title: string, citations: Awaited<ReturnType<typeof seedKnowledgeReceipt>>): RuntimeArtifactDraft {
+  return { kind: "prd", schemaVersion: 3, title, citations, operation: { kind: "create" },
+    content: { ...structuredClone(prdDocumentV3Example), title, citations } };
+}
+
+async function recordPrdStages(db: PrismaClient, processor: ProcessorInternals, claim: RuntimeExecutionClaim) {
+  await db.$transaction(tx => new RunEventStore().append(tx, claim.runId, "run.generation.stage.changed", { attempt: 1, stage: "thinking" }));
+  for (const stage of ["collecting-prd-context", "structuring-prd", "drafting-prd", "validating-prd"]) {
+    await processor.persistProgress(claim, { type: "generation.stage", stage, sourceEventId: "fixture:" + stage });
+  }
 }
 
 async function cancelActiveRun(db: PrismaClient, runId: string) {
@@ -2708,6 +2729,10 @@ async function markProviderCancellationPending(
 
 async function cleanupFixture(db: PrismaClient, fixture: RunFixture) {
   await db.knowledgeToolBudget.deleteMany({ where: { runtimeAttempt: { runId: fixture.runId } } });
+  await db.requirementConfirmation.deleteMany({ where: { projectId: fixture.projectId } });
+  await db.threadEntry.deleteMany({ where: { requirementSession: { projectId: fixture.projectId } } });
+  await db.requirementSession.deleteMany({ where: { projectId: fixture.projectId } });
+  await db.prototypePlan.deleteMany({ where: { projectId: fixture.projectId } });
   await db.workspace.deleteMany({ where: { id: fixture.workspaceId } });
   await db.principal.deleteMany({ where: { id: fixture.principalId } });
 }
