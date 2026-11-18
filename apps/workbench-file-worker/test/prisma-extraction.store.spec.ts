@@ -99,6 +99,16 @@ describe("PrismaExtractionStore", () => {
     });
   });
 
+  it("reuses a byte-identical ready plain text Blob while keeping the Markdown output kind", async () => {
+    const tx = transaction();
+    tx.blob.findFirst.mockResolvedValue({ ...outputBlob("plain", markdownSha, "text/plain", 12n), status: "ready" });
+    const output = await createStore(tx).reserveOutputBlob({
+      kind: "markdown", position: 0, sha256: markdownSha, byteSize: 12, mediaType: "text/markdown",
+    });
+    expect(output).toMatchObject({ blobId: "plain", kind: "markdown", storedMediaType: "text/plain" });
+    expect(tx.blob.create).not.toHaveBeenCalled();
+  });
+
   it("rejects reuse of an active digest with another media type", async () => {
     const tx = transaction();
     tx.blob.findFirst.mockResolvedValue({
