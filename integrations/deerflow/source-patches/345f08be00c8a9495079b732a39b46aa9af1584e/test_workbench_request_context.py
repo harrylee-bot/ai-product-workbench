@@ -218,7 +218,7 @@ class WorkbenchRequestContextTests(unittest.TestCase):
                 self.assertEqual(config["recursion_limit"], 800)
 
     def test_exact_trusted_prototype_scope_receives_a_bounded_budget(self) -> None:
-        self.assertEqual(_WORKBENCH_PROTOTYPE_LEAD_GRAPH_RECURSION_LIMIT, 320)
+        self.assertEqual(_WORKBENCH_PROTOTYPE_LEAD_GRAPH_RECURSION_LIMIT, 480)
         for forged_limit in (1, 999):
             with self.subTest(forged_limit=forged_limit):
                 config = build_run_config("thread-1", {
@@ -233,7 +233,7 @@ class WorkbenchRequestContextTests(unittest.TestCase):
                     },
                 }, allow_workbench_context=True)
                 _apply_workbench_lead_recursion_limit(config, trusted_internal_caller=True)
-                self.assertEqual(config["recursion_limit"], 320)
+                self.assertEqual(config["recursion_limit"], 480)
 
     def test_non_delivery_malformed_untrusted_and_forged_fields_keep_default_budget(self) -> None:
         exact_prd_scope = {

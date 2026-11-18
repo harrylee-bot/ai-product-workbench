@@ -223,7 +223,7 @@ const gatewayContextPatch = patchManifest.gatewaySources[0];
 assert(
   gatewayContextPatch.path === "app/gateway/services.py"
     && gatewayContextPatch.upstreamSha256 === "8379c34eeb2ddb46270b0e937035d5ee032dab68459b36b10435d28b8e2ab601"
-    && gatewayContextPatch.patchedSha256 === "67fbc699d01c8035db4fa54cc049a922f4b03538e7ad5408693d3f08f2974e79",
+    && gatewayContextPatch.patchedSha256 === "ddd193d0ec9b89cd75e2458ec46afe66b3e77b11c92ea79d1e58330a352bae29",
   "DeerFlow Gateway context patch must bind the audited upstream and patched hashes",
 );
 assert(
@@ -250,14 +250,14 @@ assert(
   gatewayContextPatchText.includes('sanitized.pop(\\"recursion_limit\\", None)')
     && gatewayContextPatchText.includes("_DEFAULT_LEAD_GRAPH_RECURSION_LIMIT = 100")
     && gatewayContextPatchText.includes("_WORKBENCH_PRD_LEAD_GRAPH_RECURSION_LIMIT = 560")
-    && gatewayContextPatchText.includes("_WORKBENCH_PROTOTYPE_LEAD_GRAPH_RECURSION_LIMIT = 320")
+    && gatewayContextPatchText.includes("_WORKBENCH_PROTOTYPE_LEAD_GRAPH_RECURSION_LIMIT = 480")
     && gatewayContextPatchText.includes("_WORKBENCH_LINKED_LEAD_GRAPH_RECURSION_LIMIT = 800")
     && gatewayContextPatchText.includes("_apply_workbench_lead_recursion_limit")
     && gatewayContextPatchText.includes("trusted_internal_caller is True")
     && gatewayContextPatchText.includes('set(requested_kinds) == {\\"prd\\", \\"prototype\\"}')
     && gatewayContextPatchText.includes('requested_kinds == [\\"prd\\"]')
     && gatewayContextPatchText.includes('requested_kinds == [\\"prototype\\"]'),
-  "DeerFlow Gateway patch must keep bounded trusted budgets of 800 for linked delivery, 320 for Prototype-only, 560 for PRD-only, and 100 otherwise",
+  "DeerFlow Gateway patch must keep bounded trusted budgets of 800 for linked delivery, 480 for Prototype-only, 560 for PRD-only, and 100 otherwise",
 );
 assert(
   patchManifest.agent?.insertion?.includes("WorkbenchToolScopeMiddleware(")
