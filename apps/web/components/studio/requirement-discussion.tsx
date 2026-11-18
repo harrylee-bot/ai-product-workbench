@@ -1,6 +1,6 @@
 "use client";
 
-import { useId, useRef, useState } from "react";
+import { useCallback, useId, useRef, useState } from "react";
 import type {
   RequirementDiscussionView,
   RequirementEvidenceView,
@@ -158,6 +158,14 @@ function DiscussionBody({
       if (latestScope.current === scope) setOperation("");
     }
   };
+  const historySummary = useRef<HTMLElement>(null);
+  const historyMoreButton = useCallback((button: HTMLButtonElement | null) => {
+    if (!button) return;
+    // The last page removes this control. Keep keyboard readers in the history.
+    return () => {
+      if (document.activeElement === button) historySummary.current?.focus();
+    };
+  }, []);
   const review = view.review;
   return (
     <section
@@ -195,11 +203,12 @@ function DiscussionBody({
         className="studio-requirement-history"
         open={view.messages.length > 0 && !review}
       >
-        <summary>本次需求讨论 · {view.messages.length} 条</summary>
+        <summary ref={historySummary}>本次需求讨论 · {view.messages.length} 条</summary>
         {view.hasEarlierMessages && (
           <button
             type="button"
-            disabled={!!operation}
+            ref={historyMoreButton}
+            aria-disabled={!!operation}
             onClick={() => void perform("读取更多记录", onLoadEarlier)}
           >
             加载更多交流
