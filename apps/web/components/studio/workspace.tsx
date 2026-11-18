@@ -326,7 +326,10 @@ export function StudioWorkspace({
   discussionView.reviewCurrent =
     discussionView.reviewCurrent &&
     !discussion.requiresReview &&
-    !discussion.pending;
+    !discussion.pending &&
+    !composerSession.sourcePending;
+  discussionView.canConfirm =
+    discussionView.canConfirm && !composerSession.sourcePending;
   const discussionDirty =
     !!composerEntry.draft.prompt.trim() ||
     !!composerEntry.draft.files.length ||
@@ -645,6 +648,8 @@ export function StudioWorkspace({
     setFocused(false);
   };
   const submitPlan: StudioComposerProps["onSubmit"] = async (submission) => {
+    if (composerSession.isSelectingSource())
+      throw new Error("正在读取固定来源，请稍候再发送。");
     const entryKey = composerEntry.context.key;
     const submittedDraft = composerEntry.draft;
     const scope = discussionKey;
@@ -1218,34 +1223,35 @@ export function StudioWorkspace({
                 }
                 onClick={() =>
                   void run(async () => {
-                    const applySource = composerSession.beginSourceSelection();
-                    const input = await api.getRevisionInput(
-                      projectId,
-                      selectedRevision.id,
-                    );
-                    const selected = [...feedbackIds].sort();
-                    const applied = applySource(
-                      {
-                        kind: "input",
-                        key: `revision:${selectedRevision.id}:feedback:${selected.join(",")}`,
-                        title: `修改版本 ${selectedRevision.version}`,
-                        target: {
-                          kind: "revision",
-                          id: selectedRevision.id,
-                          etag: etag(selectedRevision),
-                          feedbackIds: selected,
+                    const applied = await composerSession.selectSource(async () => {
+                      const input = await api.getRevisionInput(
+                        projectId,
+                        selectedRevision.id,
+                      );
+                      const selected = [...feedbackIds].sort();
+                      return [
+                        {
+                          kind: "input",
+                          key: `revision:${selectedRevision.id}:feedback:${selected.join(",")}`,
+                          title: `修改版本 ${selectedRevision.version}`,
+                          target: {
+                            kind: "revision",
+                            id: selectedRevision.id,
+                            etag: etag(selectedRevision),
+                            feedbackIds: selected,
+                          },
+                          input: {
+                            plan: input.plan,
+                            request: input.request,
+                            snapshot: input.snapshot,
+                            sha256: input.sha256,
+                          },
+                          operationRequest: input.modificationRequest,
+                          version: selectedRevision.version,
                         },
-                        input: {
-                          plan: input.plan,
-                          request: input.request,
-                          snapshot: input.snapshot,
-                          sha256: input.sha256,
-                        },
-                        operationRequest: input.modificationRequest,
-                        version: selectedRevision.version,
-                      },
-                      "请根据所选批注梳理本次增量改动",
-                    );
+                        "请根据所选批注梳理本次增量改动",
+                      ];
+                    });
                     if (!applied) return false;
                     setInteraction(undefined);
                     setPanel(null);
@@ -1800,6 +1806,8 @@ export function StudioWorkspace({
                     canEdit,
                     dirtyInput: discussionDirty,
                     onConfirm: async (review) => {
+                      if (composerSession.isSelectingSource())
+                        throw new Error("正在读取固定来源，请稍候再确认。");
                       await discussion.confirm(review);
                     },
                     onContinue: () => {
@@ -1854,37 +1862,38 @@ export function StudioWorkspace({
                           onClick={() =>
                             void run(async () => {
                               if (!selectedRevision) return;
-                              const applySource = composerSession.beginSourceSelection();
-                              const input = await api.getRevisionInput(
-                                projectId,
-                                selectedRevision.id,
-                              );
-                              return applySource(
-                                {
-                                  kind: "input",
-                                  key: `revision:${selectedRevision.id}`,
-                                  title: `修改版本 ${selectedRevision.version}`,
-                                  target: {
-                                    kind: "revision",
-                                    id: selectedRevision.id,
-                                    etag: etag(selectedRevision),
-                                    feedbackIds,
+                              return composerSession.selectSource(async () => {
+                                const input = await api.getRevisionInput(
+                                  projectId,
+                                  selectedRevision.id,
+                                );
+                                return [
+                                  {
+                                    kind: "input",
+                                    key: `revision:${selectedRevision.id}`,
+                                    title: `修改版本 ${selectedRevision.version}`,
+                                    target: {
+                                      kind: "revision",
+                                      id: selectedRevision.id,
+                                      etag: etag(selectedRevision),
+                                      feedbackIds,
+                                    },
+                                    input: {
+                                      plan: input.plan,
+                                      request: input.request,
+                                      snapshot: input.snapshot,
+                                      sha256: input.sha256,
+                                    },
+                                    operationRequest: input.modificationRequest,
+                                    version: selectedRevision.version,
                                   },
-                                  input: {
-                                    plan: input.plan,
-                                    request: input.request,
-                                    snapshot: input.snapshot,
-                                    sha256: input.sha256,
+                                  "",
+                                  {
+                                    inheritPrompt: true,
+                                    fromKey: composerEntry.context.key,
                                   },
-                                  operationRequest: input.modificationRequest,
-                                  version: selectedRevision.version,
-                                },
-                                "",
-                                {
-                                  inheritPrompt: true,
-                                  fromKey: composerEntry.context.key,
-                                },
-                              );
+                                ];
+                              });
                             }, "已载入该版本的固定输入，可调整资料和设计")
                           }
                         >
@@ -1916,13 +1925,21 @@ export function StudioWorkspace({
                     }
                     busy={discussion.pending}
                     disabled={
-                      composer.disabled || !canEdit || !composerSession.ready
+                      composer.disabled ||
+                      !canEdit ||
+                      !composerSession.ready ||
+                      composerSession.sourcePending
                     }
                     uploads={discussion.uploads}
                     onRetryUpload={discussion.retryUpload}
                     onCancelUpload={discussion.cancelUpload}
                     onSubmit={submitPlan}
                   />
+                  {composerSession.sourcePending && (
+                    <p className="visual-muted" role="status">
+                      正在读取所选版本与批注…
+                    </p>
+                  )}
                 </RequirementInput>
               )}
             </div>

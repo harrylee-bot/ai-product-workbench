@@ -233,15 +233,64 @@ it("keeps a fixed artifact discussion active after accepted text without erasing
 it("invalidates asynchronous source choices on repeated explicit selection, account changes and unmount", async () => {
   const hook = renderHook(({ user }) => useStudioComposerSession(user, "project-one"), { initialProps: { user: "account-one" } });
   await waitFor(() => expect(hook.result.current.ready).toBe(true));
-  const source = hook.result.current.beginSourceSelection();
+  function holdSource() {
+    let release!: () => void;
+    const response = new Promise<void>((resolve) => { release = resolve; });
+    let task!: Promise<boolean>;
+    act(() => {
+      task = hook.result.current.selectSource(async () => {
+        await response;
+        return [artifact, "迟到的来源"];
+      });
+    });
+    expect(hook.result.current.sourcePending).toBe(true);
+    expect(hook.result.current.isSelectingSource()).toBe(true);
+    return async () => {
+      release();
+      await expect(task).resolves.toBe(false);
+    };
+  }
+  const source = holdSource();
   act(() => hook.result.current.switchTo(hook.result.current.newContext));
-  act(() => expect(source(artifact, "迟到的来源")).toBe(false));
+  await act(source);
+  expect(hook.result.current.sourcePending).toBe(false);
   expect(hook.result.current.entry.context.kind).toBe("new");
-  const accountOneSource = hook.result.current.beginSourceSelection();
+  const accountOneSource = holdSource();
   hook.rerender({ user: "account-two" });
   await waitFor(() => expect(hook.result.current.ready).toBe(true));
-  act(() => expect(accountOneSource(artifact, "账户一的迟到来源")).toBe(false));
-  const unmountedSource = hook.result.current.beginSourceSelection();
+  await act(accountOneSource);
+  const unmountedSource = holdSource();
   hook.unmount();
-  expect(unmountedSource(artifact, "离开后的来源")).toBe(false);
+  await unmountedSource();
+});
+
+it("blocks sending while a source loads and releases it only for the applied source or an error", async () => {
+  const { result } = renderHook(() => useStudioComposerSession("account-one", "project-one"));
+  await waitFor(() => expect(result.current.ready).toBe(true));
+  let loaded!: () => void;
+  const input = new Promise<void>((resolve) => { loaded = resolve; });
+  let selected!: Promise<boolean>;
+  act(() => {
+    selected = result.current.selectSource(async () => {
+      await input;
+      return [artifact, "新来源"];
+    });
+    expect(result.current.isSelectingSource()).toBe(true);
+  });
+  expect(result.current.sourcePending).toBe(true);
+  expect(result.current.entry.context.kind).toBe("new");
+  await act(async () => {
+    loaded();
+    await expect(selected).resolves.toBe(true);
+  });
+  expect(result.current.sourcePending).toBe(false);
+  expect(result.current.entry.context.key).toBe(artifact.key);
+  expect(result.current.entry.draft.prompt).toBe("新来源");
+  await act(async () => {
+    await expect(result.current.selectSource(async () => {
+      throw new Error("来源读取失败");
+    })).rejects.toThrow("来源读取失败");
+  });
+  expect(result.current.sourcePending).toBe(false);
+  expect(result.current.entry.context.key).toBe(artifact.key);
 });
