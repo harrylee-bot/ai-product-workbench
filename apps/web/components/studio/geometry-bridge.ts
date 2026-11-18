@@ -41,13 +41,15 @@ export function prototypeGeometryScript(
     const geometry = (element) => {
       if (!(element instanceof Element) || !element.isConnected || !page()?.contains(element)) return null;
       const rect = element.getBoundingClientRect(), target = selector(element);
-      if (!target || !rect.width || !rect.height || rect.bottom <= 0 || rect.right <= 0 || rect.top >= innerHeight || rect.left >= innerWidth) return null;
+      if (!target || !rect.width || !rect.height || getComputedStyle(element).visibility !== 'visible') return null;
       const numbers = [rect.x,rect.y,rect.width,rect.height]; if (numbers.some(n => !Number.isFinite(n) || Math.abs(n) > 32768)) return null;
       return { nodeId: element.getAttribute('data-wb-node'),
         selector: target, parentSelector: selector(element.parentElement), tag: element.tagName.toLowerCase(),
         label: (element.getAttribute('aria-label') || element.getAttribute('name') || element.textContent || element.tagName).trim().slice(0,160),
         x: rect.x, y: rect.y, width: rect.width, height: rect.height };
     };
+    const inViewport = (node) => node && node.x + node.width > 0 && node.y + node.height > 0 &&
+      node.x < innerWidth && node.y < innerHeight ? node : null;
     const send = (kind, node, layers = []) => {
       if (!pageId) return;
       parent.postMessage({ protocol: 'workbench.studio.frame.v1', ...identity, pageId, sequence: ++sequence, kind, node, layers,
@@ -59,9 +61,18 @@ export function prototypeGeometryScript(
       pendingSelection = false; pendingHover = false; pendingMeasure = false;
       // Selection is semantic state, not a geometry notification. Never let a
       // subsequent scroll, mutation or hover in the same frame replace it.
-      if (selection) send('selection', geometry(selected));
-      else if (measurement) send('measure', geometry(selected));
-      if (hover) send('hover', geometry(hovered));
+      if (selection || measurement) {
+        const node = geometry(selected);
+        const invalidated = selected !== null && !node;
+        if (invalidated) selected = null;
+        // Keep the element selected while it is temporarily outside the viewport.
+        send(selection || invalidated ? 'selection' : 'measure', inViewport(node));
+      }
+      if (hover || (measurement && hovered)) {
+        const node = geometry(hovered);
+        if (!node) hovered = null;
+        send('hover', inViewport(node));
+      }
     };
     const schedule = (kind = 'measure') => {
       if (kind === 'selection') pendingSelection = true;
@@ -70,7 +81,7 @@ export function prototypeGeometryScript(
       if (!raf) raf = requestAnimationFrame(measure);
     };
     const layers = () => [...(page()?.querySelectorAll('[data-wb-node]') || [])].slice(0,120).map(e => {
-      const result = geometry(e); if (result) return result;
+      const result = inViewport(geometry(e)); if (result) return result;
       const target = selector(e); return target ? { nodeId: e.getAttribute('data-wb-node'), selector:target, parentSelector:selector(e.parentElement), tag:e.tagName.toLowerCase(), label:(e.getAttribute('aria-label') || e.textContent || e.tagName).trim().slice(0,160), x:0,y:0,width:0,height:0 } : null;
     }).filter(Boolean);
     const query = (target) => { try { return typeof target === 'string' && target.length <= 500 ? page()?.querySelector(target) || (page()?.matches(target) ? page() : null) : null; } catch { return null; } };
@@ -83,7 +94,7 @@ export function prototypeGeometryScript(
       if (d.command === 'selectNode') { selected = typeof d.nodeId === 'string' && /^[A-Za-z][A-Za-z0-9_.:-]{0,95}$/.test(d.nodeId) ? query('[data-wb-node="'+d.nodeId+'"]') : null; if (selected) { selected.scrollIntoView({block:'center',inline:'nearest'}); schedule('selection'); } else send('missing',null); }
       if (d.command === 'select') { selected = query(d.selector); if (selected) { selected.scrollIntoView({block:'center',inline:'nearest'}); schedule('selection'); } else send('missing',null); }
       if (d.command === 'parent' && selected) { selected = selected.parentElement?.closest('[data-wb-node]') || null; schedule('selection'); }
-      if (d.command === 'layers' || d.command === 'mode') send('layers',geometry(selected),layers());
+      if (d.command === 'layers' || d.command === 'mode') send('layers',inViewport(geometry(selected)),layers());
       schedule();
     });
     document.addEventListener('pointermove', e => { if (mode === 'select') { hovered = e.target instanceof Element ? e.target.closest('[data-wb-node]') : null; schedule('hover'); } }, true);

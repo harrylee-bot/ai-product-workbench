@@ -894,11 +894,17 @@ try {
     height: dprLocalAfter.height * dprRatioAfter,
   };
   assert(
-    Math.abs(dprSelection.x - dprExpected.x) <= 2 &&
-      Math.abs(dprSelection.width - dprExpected.width) <= 2,
+    Object.keys(dprExpected).every(
+      (field) => Math.abs(dprSelection[field] - dprExpected[field]) <= 2,
+    ),
     `DPR 2 zoomed geometry error exceeded 2px: ${JSON.stringify({ dprSelection, dprExpected })}`,
   );
   results.metrics.dpr2Geometry = { dprSelection, dprExpected };
+  await dprHeading.evaluate((heading) => {
+    heading.style.visibility = "hidden";
+  });
+  await dprPage.locator("[data-testid=selection-outline]").waitFor({ state: "detached" });
+  await dprPage.locator(".studio-dimension").waitFor({ state: "detached" });
 
   // 200% zoom equivalent (720x450) and mobile soft-keyboard (390x480 with focused Composer)
   await dprPage.setViewportSize({ width: 720, height: 450 });
@@ -924,7 +930,7 @@ try {
     path: new URL("mobile-soft-keyboard.png", output).pathname,
   });
   results.checks.push(
-    "AC-17/AC-28/AC-29: DPR 2 + zoomed geometry stays within <= 2 CSS px, reduced-motion preserves selection/progress, and 200% zoom + 390x480 mobile soft-keyboard have zero horizontal shell overflow",
+    "AC-17/AC-28/AC-29: DPR 2 zoomed geometry stays within 2 CSS px on each axis, a hidden node clears its outline and dimensions, and 200% zoom-equivalent + 390x480 mobile soft-keyboard have zero horizontal shell overflow",
   );
   await ctx2.close();
 
