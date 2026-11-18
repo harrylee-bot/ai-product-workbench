@@ -177,37 +177,50 @@ export async function runStudioLiveScenarios({ page, browser, webOrigin, outDir,
     return result;
   }
 
-  const prototypeProject = await createProject("原型");
-  const prototype = await discussAndGenerate(prototypeProject, "prototype", increment + "只输出交互原型。" + interactionSpec, "prototype");
-  step("Save real anchored feedback and generate a derived revision through discussion");
-  const [sourceRevision] = await query("SELECT id FROM workbench.prototype_revisions WHERE plan_id=$1 ORDER BY created_at DESC LIMIT 1", [prototype.planId]);
-  await page.getByRole("button", { name: "选择元素", exact: true }).click();
-  await page.frameLocator(".visual-paper iframe").locator("[data-wb-node]").first().click();
-  await page.getByRole("textbox", { name: "当前版本批注", exact: true }).fill("渠道筛选区域增加说明文字：仅显示当前授权区域内的活动。保持原有筛选、搜索与详情交互。");
-  await page.getByRole("button", { name: "保存批注", exact: true }).click();
-  await page.getByRole("checkbox", { name: "用于本次修改", exact: true }).first().check();
-  await page.getByRole("button", { name: "讨论所选 1 条批注", exact: true }).click();
-  const revision = await discussAndGenerate(prototypeProject, "prototype", "按照所选批注，仅在渠道筛选区域增加说明文字：仅显示当前授权区域内的活动。保持已有页面、功能和样式，不更改权限逻辑，不新增平台能力。" + interactionSpec, "revision");
-  const [child] = await query("SELECT source_revision_id FROM workbench.prototype_plans WHERE id=$1", [revision.planId]);
-  assert.equal(child.source_revision_id, sourceRevision.id);
-  evidence.checks.fixedSourceFeedbackRevision = true;
+  const scope = process.env.WORKBENCH_STUDIO_LIVE_GENERATION_SCOPE ?? "all";
+  assert.ok(["all", "prototype", "prd", "joint"].includes(scope), "Unknown Studio generation scope");
+  evidence.generationScope = scope;
+  const ids = [];
+  if (scope === "all" || scope === "prototype") {
+    const prototypeProject = await createProject("原型");
+    const prototype = await discussAndGenerate(prototypeProject, "prototype", increment + "只输出交互原型。" + interactionSpec, "prototype");
+    step("Save real anchored feedback and generate a derived revision through discussion");
+    const [sourceRevision] = await query("SELECT id FROM workbench.prototype_revisions WHERE plan_id=$1 ORDER BY created_at DESC LIMIT 1", [prototype.planId]);
+    await page.getByRole("button", { name: "选择元素", exact: true }).click();
+    await page.frameLocator(".visual-paper iframe").locator("[data-wb-node]").first().click();
+    await page.getByRole("textbox", { name: "当前版本批注", exact: true }).fill("渠道筛选区域增加说明文字：仅显示当前授权区域内的活动。保持原有筛选、搜索与详情交互。");
+    await page.getByRole("button", { name: "保存批注", exact: true }).click();
+    await page.getByRole("checkbox", { name: "用于本次修改", exact: true }).first().check();
+    await page.getByRole("button", { name: "讨论所选 1 条批注", exact: true }).click();
+    const revision = await discussAndGenerate(prototypeProject, "prototype", "按照所选批注，仅在渠道筛选区域增加说明文字：仅显示当前授权区域内的活动。保持已有页面、功能和样式，不更改权限逻辑，不新增平台能力。" + interactionSpec, "revision");
+    const [child] = await query("SELECT source_revision_id FROM workbench.prototype_plans WHERE id=$1", [revision.planId]);
+    assert.equal(child.source_revision_id, sourceRevision.id);
+    evidence.checks.fixedSourceFeedbackRevision = true;
 
-  await page.locator(".studio-top-actions").getByRole("button", { name: "版本", exact: true }).click();
-  await page.getByRole("button", { name: "确认版本", exact: true }).click();
-  await page.getByText(/已确认/).first().waitFor();
-  await page.locator(".studio-top-actions").getByRole("button", { name: "分享 / 导出", exact: true }).click();
-  await verifyPrototypeDelivery(prototypeProject, revision);
-
-  const prdProject = await createProject("文档");
-  await discussAndGenerate(prdProject, "prd", increment + "只输出需求文档，包括字段、状态、筛选逻辑、权限边界、异常处理和验收条件。", "prd");
-  await verifyDocumentDelivery(prdProject, "prd");
-  const jointProject = await createProject("联合");
-  await discussAndGenerate(jointProject, "both", increment + "同时输出需求文档和交互原型，范围与术语一致。" + interactionSpec, "joint");
-  await verifyDocumentDelivery(jointProject, "joint");
-  const ids = [prototypeProject, prdProject, jointProject];
+    await page.locator(".studio-top-actions").getByRole("button", { name: "版本", exact: true }).click();
+    await page.getByRole("button", { name: "确认版本", exact: true }).click();
+    await page.getByText(/已确认/).first().waitFor();
+    await page.locator(".studio-top-actions").getByRole("button", { name: "分享 / 导出", exact: true }).click();
+    await verifyPrototypeDelivery(prototypeProject, revision);
+    ids.push(prototypeProject);
+  }
+  if (scope === "all" || scope === "prd") {
+    const prdProject = await createProject("文档");
+    await discussAndGenerate(prdProject, "prd", increment + "只输出需求文档，包括字段、状态、筛选逻辑、权限边界、异常处理和验收条件。", "prd");
+    await verifyDocumentDelivery(prdProject, "prd");
+    ids.push(prdProject);
+  }
+  if (scope === "all" || scope === "joint") {
+    const jointProject = await createProject("联合");
+    await discussAndGenerate(jointProject, "both", increment + "同时输出需求文档和交互原型，范围与术语一致。" + interactionSpec, "joint");
+    await verifyDocumentDelivery(jointProject, "joint");
+    ids.push(jointProject);
+  }
   const runs = await query("SELECT id,status,request->>'modelId' AS model_id FROM workbench.runs WHERE project_id=ANY($1::text[])", [ids]);
   const turns = await query("SELECT id,status,model_id FROM workbench.requirement_turns WHERE project_id=ANY($1::text[])", [ids]);
-  assert.ok(runs.length >= 4 && turns.length >= 4);
+  const expectedRuns = scope === "all" ? 4 : scope === "prototype" ? 2 : 1;
+  assert.equal(runs.length, expectedRuns, "One Run per confirmed generation");
+  assert.ok(turns.length >= expectedRuns);
   assert.ok([...runs, ...turns].every(item => item.model_id === "deepseek-flash"));
   evidence.runs = runs; evidence.turns = turns; evidence.checks.allDatabaseRunsAndTurnsUsedFlash = true;
 
