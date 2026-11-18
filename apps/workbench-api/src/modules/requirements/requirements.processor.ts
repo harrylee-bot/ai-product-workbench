@@ -7,12 +7,14 @@ import { RequirementsService } from './requirements.service.js';
 import { RequirementModel } from './requirement-model.js';
 import { KnowledgeRetrievalError } from '../knowledge/knowledge-retrieval.types.js';
 import { RequirementKnowledge } from './requirement-knowledge.js';
-import { isReady, validateAnalysis, requirementEvidenceForModel, requirementProblem, RequirementModelOutputError } from './requirement-policy.js';
+import { isReady, validateAnalysis, requirementCitationCorrection, requirementEvidenceForModel, requirementProblem, RequirementModelOutputError } from './requirement-policy.js';
 import { RequirementContextReader } from './requirement-context-reader.js';
 import { RunsService } from '../runs/runs.service.js';
 import { PrototypeV2Service } from '../prototypes/prototype-v2.service.js';
 import { feedbackAnchorIndex } from '../prototypes/prototype-feedback-location.js';
 const json=(x:unknown)=>x as Prisma.InputJsonValue;
+const combinedTokens=(first:number|null,second:number|null)=>first===null||second===null?null:
+ Math.min(first+second,2_147_483_647);
 @Injectable()
 export class RequirementsProcessor implements OnModuleInit,OnModuleDestroy {
  private readonly logger=new Logger(RequirementsProcessor.name);
@@ -100,8 +102,21 @@ export class RequirementsProcessor implements OnModuleInit,OnModuleDestroy {
    const messages=input.entries.filter(x=>x.role==='user'||x.role==='assistant').map(x=>({role:x.role as 'user'|'assistant',content:x.content.text??''}));messages.push({role:'user',content:input.message.text});
    const modelContext={configuration:request,context,projectContext,sourceContents,evidence:requirementEvidenceForModel(knowledge.evidence)};
    if(JSON.stringify(modelContext).length>100000)throw requirementProblem('REQUIREMENT_CONTEXT_LIMIT',429);
-   const result=await this.model.analyze({messages,context:modelContext},controller.signal);
-   const analysis=validateAnalysis(result.value,knowledge.evidence);
+   const modelInput={messages,context:modelContext};
+   const first=await this.model.analyze(modelInput,controller.signal);
+   let inputTokens=first.inputTokens,outputTokens=first.outputTokens;
+   let analysis;
+   try{analysis=validateAnalysis(first.value,knowledge.evidence);}
+   catch(error){
+    const citationCorrection=requirementCitationCorrection(error);
+    if(!citationCorrection)throw error;
+    controller.signal.throwIfAborted();
+    this.logger.warn({operation:'requirement-citation-correction',turnId:turn.id,reason:citationCorrection});
+    const corrected=await this.model.analyze({...modelInput,citationCorrection},controller.signal);
+    analysis=validateAnalysis(corrected.value,knowledge.evidence);
+    inputTokens=combinedTokens(inputTokens,corrected.inputTokens);
+    outputTokens=combinedTokens(outputTokens,corrected.outputTokens);
+   }
    if(analysis.card?.targetSurface&&analysis.card.targetSurface!==request.targetSurface||analysis.card?.outputKinds&&hashRequest([...analysis.card.outputKinds].sort())!==hashRequest([...request.requestedArtifactKinds].sort()))throw new RequirementModelOutputError('output_scope');
    const ready=isReady(analysis.card,knowledge.evidence);
    await this.sessions.transaction(turn.principalId,turn.sessionId,async(tx,s)=>{
@@ -112,7 +127,7 @@ export class RequirementsProcessor implements OnModuleInit,OnModuleDestroy {
     await tx.requirementSummary.create({data:{id:`summary_${randomUUID()}`,sessionId:s.id,version,inputRevision:turn.inputRevision,checksum,card:analysis.card?json(analysis.card):Prisma.JsonNull,evidence:json(knowledge.evidence),knowledgeReleaseId:knowledge.releaseId,contextSnapshot:json({projectContext,sourceContents,request,context,retrievalEvidence:knowledge.retrievalEvidence??null})}});
     const thread=await tx.thread.update({where:{id:s.threadId},data:{entrySequence:{increment:1},revision:{increment:1}}});
     await tx.threadEntry.create({data:{threadId:s.threadId,sequence:thread.entrySequence,role:'assistant',kind:'message',audiencePrincipalId:turn.principalId,requirementSessionId:s.id,content:{protocol:'workbench.entry.v1',type:'assistant.message',text:analysis.reply}}});
-    await tx.requirementTurn.update({where:{id:turn.id},data:{status:'succeeded',inputTokens:result.inputTokens,outputTokens:result.outputTokens,finishedAt:new Date(),leaseExpiresAt:null}});
+    await tx.requirementTurn.update({where:{id:turn.id},data:{status:'succeeded',inputTokens,outputTokens,finishedAt:new Date(),leaseExpiresAt:null}});
     await tx.requirementSession.update({where:{id:s.id},data:{state:ready?'ready_to_confirm':'needs_clarification',summaryVersion:version,revision:{increment:1}}});
    });
    if(ready&&input.message.intent==='confirm_suggestion'){

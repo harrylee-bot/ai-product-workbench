@@ -1,8 +1,13 @@
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { requirementAnalysisSchema } from '@workbench/workbench-contracts';
-import { RequirementModelOutputError, requirementProblem, REQUIREMENT_SYSTEM_PROMPT } from './requirement-policy.js';
-export type RequirementModelInput={messages:{role:'user'|'assistant';content:string}[];context:unknown};
+import { RequirementModelOutputError, requirementProblem, REQUIREMENT_SYSTEM_PROMPT, type RequirementCitationCorrection } from './requirement-policy.js';
+export type RequirementModelInput={messages:{role:'user'|'assistant';content:string}[];context:unknown;citationCorrection?:RequirementCitationCorrection};
+const citationCorrections:Record<RequirementCitationCorrection,string>={
+ claim_shape:'重新按 schema 输出。existingCapabilities 的每条能力需有描述、明确来源范围和至少一个证据短 ID；省略无法以已授权证据支持的能力。',
+ evidence_id:'重新按 schema 输出。检查每个 evidenceIds，只能使用当前 evidence 中可逐字复制的短 ID。不要使用其他条目、文件名或项目附件 ID。',
+ evidence_scope:'重新按 schema 输出。检查每条既有能力，把支持这条能力的 evidence 的短 ID 和 scope 原样配对。缩小相应能力描述或省略无足够证据的能力。不要提升来源的适用范围。',
+};
 @Injectable()
 export class RequirementModel {
  constructor(private readonly config:ConfigService){}
@@ -18,7 +23,8 @@ export class RequirementModel {
   if(model!=='deepseek-flash')throw requirementProblem('REQUIREMENT_MODEL_NOT_ALLOWED',503);
   const url=new URL(base);if(url.protocol!=='https:'||url.username||url.password||url.search||url.hash)throw requirementProblem('REQUIREMENT_MODEL_UNAVAILABLE',503);
   const format=JSON.stringify(requirementAnalysisSchema.toJSONSchema());
-  const response=await fetch(base.replace(/\/$/,'')+'/chat/completions',{method:'POST',signal,headers:{'content-type':'application/json',authorization:`Bearer ${key}`},body:JSON.stringify({model,messages:[{role:'system',content:REQUIREMENT_SYSTEM_PROMPT+'\nJSON schema:\n'+format},{role:'user',content:JSON.stringify({context:input.context,discussion:input.messages})}],response_format:{type:'json_object'},max_tokens:8000,stream:false,thinking:{type:'disabled'},temperature:0.1})}).catch(error=>{
+  const correction=input.citationCorrection?citationCorrections[input.citationCorrection]+'\n':'';
+  const response=await fetch(base.replace(/\/$/,'')+'/chat/completions',{method:'POST',signal,headers:{'content-type':'application/json',authorization:`Bearer ${key}`},body:JSON.stringify({model,messages:[{role:'system',content:REQUIREMENT_SYSTEM_PROMPT+'\n'+correction+'JSON schema:\n'+format},{role:'user',content:JSON.stringify({context:input.context,discussion:input.messages})}],response_format:{type:'json_object'},max_tokens:8000,stream:false,thinking:{type:'disabled'},temperature:0.1})}).catch(error=>{
    if(signal.aborted)throw error;
    throw requirementProblem('REQUIREMENT_MODEL_UNAVAILABLE',503);
   });
