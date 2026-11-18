@@ -31,7 +31,7 @@ async function verifyChannelRows(frame) {
   return { all: all.length, wecom: wecom.length, sms: sms.length, distinctRowSets: true };
 }
 
-export async function auditJointOutputs(query, scenario, frame) {
+export async function auditJointOutputs(query, api, scenario, frame) {
   const [frozen] = await query("SELECT * FROM workbench.requirement_confirmations WHERE id=$1", [scenario.confirmationId]);
   const [run] = await query("SELECT request, status, model_id, knowledge_release_id FROM workbench.runs WHERE id=$1", [scenario.runId]);
   assert.equal(run.status, "succeeded");
@@ -64,6 +64,31 @@ export async function auditJointOutputs(query, scenario, frame) {
   // The browser also executes channel/empty/search/detail/back interactions.
   assert.ok(scenario.finalInteraction);
   const channelRows = await verifyChannelRows(frame);
+  const [prdRelations, prototypeRelations] = await Promise.all(
+    [prd, prototype].map(output => api("GET", `/artifacts/${output.artifact_id}/versions/${output.id}/relations`)),
+  );
+  const prototypes = prdRelations.body?.derivedPrototypes;
+  const derived = Array.isArray(prototypes) ? prototypes.find(item => item.artifactVersionId === prototype.id) : undefined;
+  const relations = {
+    prdResponseStatus: prdRelations.status,
+    prototypeResponseStatus: prototypeRelations.status,
+    prdListsGeneratedPrototype: derived?.createdByRunId === scenario.runId && derived?.prototypeRevision?.id === revision.id,
+    prototypePointsToGeneratedPrd: prototypeRelations.body?.sourcePrd?.artifactVersionId === prd.id
+      && prototypeRelations.body?.sourcePrd?.createdByRunId === scenario.runId,
+  };
+  const { requirements } = documentAudit;
+  const observed = scenario.activityInteraction;
+  const prdBody = canonicalJson(prd.content.sections);
+  const commonFacts = {
+    defaultChannel: {
+      prdAllOptionEvidenceSha256: hash(requirements.all),
+      prdMentionsAllAsDefault: /默认[^。！？]{0,24}全部|全部[^。！？]{0,12}默认/u.test(prdBody),
+      prototype: observed.defaultChannel,
+    },
+    wecomChannel: { prdEvidenceSha256: hash(requirements.channels), prototypeVisibleRows: observed.channelRowCounts.企微 },
+    smsChannel: { prdEvidenceSha256: hash(requirements.sms), prototypeVisibleRows: observed.channelRowCounts.短信 },
+    emptyResult: { prdEvidenceSha256: hash(requirements.empty), prototypeShowsEmptyMessage: observed.emptySearchShowsMessage },
+  };
   const published = JSON.parse(await readFile(process.env.WORKBENCH_STUDIO_LIVE_PUBLISHED_KNOWLEDGE, "utf8"));
   const citations = [...frozen.baseline.evidence, ...prd.citations, ...prototype.citations];
   const lookedUp = new Set(scenario.retrievals.flatMap(x => x.citationIds));
@@ -77,7 +102,8 @@ export async function auditJointOutputs(query, scenario, frame) {
   return {
     runId: scenario.runId, planId: scenario.planId, confirmationId: frozen.id, summaryChecksum: frozen.baseline.summaryChecksum,
     publishedReleaseId: published.release.id, publishedSourceVersion: published.release.version,
-    releaseId: run.knowledge_release_id, firstDraftEvent: { prd: prdSequence, prototype: prototypeSequence }, channelRows, prd: { versionId: prd.id, version: prd.version, sha256: prd.checksum, citations: prd.citations.map(x => x.id), semanticChecks: Object.keys(documentAudit.requirements) },
+    releaseId: run.knowledge_release_id, firstDraftEvent: { prd: prdSequence, prototype: prototypeSequence }, channelRows, relations, commonFacts,
+    prd: { versionId: prd.id, version: prd.version, sha256: prd.checksum, citations: prd.citations.map(x => x.id), semanticChecks: Object.keys(requirements) },
     prototype: { versionId: prototype.id, version: prototype.version, sha256: prototype.checksum, revisionId: revision.id, sourcePrdVersionId: prototype.source_prd_version_id, citations: prototype.citations.map(x => x.id), screenCount: doc.screens.length, interactive: scenario.finalInteraction },
   };
 }

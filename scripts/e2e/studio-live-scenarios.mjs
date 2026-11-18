@@ -181,7 +181,7 @@ export async function runStudioLiveScenarios({ page, browser, webOrigin, outDir,
     if (output !== "prd") {
       assert.ok(new Set(result.intermediate.map(sample => sample.eventSequence)).size >= 2, "At least two distinct Run events must produce visible changes before completion");
       await waitUntil(async () => (await page.frameLocator(".visual-paper iframe").locator("[data-wb-screen]").count()) > 0, "Final generated iframe", 60000);
-      await verifyActivityInteraction(page.frameLocator(".visual-paper iframe"));
+      result.activityInteraction = await verifyActivityInteraction(page.frameLocator(".visual-paper iframe"));
       result.finalInteraction = true;
     }
     await page.screenshot({ path: path.join(outDir, `${label}-completed.png`) });
@@ -243,7 +243,7 @@ export async function runStudioLiveScenarios({ page, browser, webOrigin, outDir,
     const jointProject = await createProject("联合");
     const joint = await discussAndGenerate(jointProject, "both", increment + "同时输出需求文档和交互原型，范围与术语一致。" + interactionSpec, "joint");
     const { auditJointOutputs } = await import("./studio-live-joint-outputs.mjs");
-    evidence.joint = await auditJointOutputs(query, joint, page.frameLocator(".visual-paper iframe"));
+    evidence.joint = await auditJointOutputs(query, api, joint, page.frameLocator(".visual-paper iframe"));
     await checkpoint();
     if (!jointOnly) await verifyDocumentDelivery(jointProject, "joint");
     ids.push(jointProject);
@@ -417,6 +417,13 @@ export async function verifyActivityInteraction(frame) {
   await details.first().click();
   await frame.getByRole("button", { name: "返回列表", exact: true }).click();
   await channel.waitFor();
+  return {
+    defaultChannel: "全部",
+    channelRowCounts: { 企微: groups[0].length, 短信: groups[1].length },
+    emptySearchShowsMessage: true,
+    resetRestoresRows: true,
+    detailReturnsToList: true,
+  };
 }
 
 async function withStaticServer(directory, action) {
