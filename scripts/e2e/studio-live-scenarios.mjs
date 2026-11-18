@@ -51,7 +51,9 @@ export async function runStudioLiveScenarios({ page, browser, webOrigin, outDir,
     assert.ok(sent.ok(), `Discussion HTTP ${sent.status()}`);
     const session = await sent.json();
     result.sessionId = session.id;
-    assert.equal(sent.request().postDataJSON().generationRequest.modelId, "deepseek-flash");
+    const discussionBody = sent.request().postDataJSON();
+    assert.equal(discussionBody.generationRequest.modelId, "deepseek-flash");
+    assert.equal(Object.hasOwn(discussionBody.generationRequest, "outputOperations"), false, "Discussion must not submit server-resolved output operations");
     await waitUntil(async () => {
       const [state] = await query("SELECT s.state, t.status AS turn_status, t.failure_code FROM workbench.requirement_sessions s LEFT JOIN workbench.requirement_turns t ON t.id=s.current_turn_id WHERE s.id=$1", [session.id]);
       if (state?.turn_status === "failed") throw Object.assign(new Error(`Requirement turn failed: ${state.failure_code}`), { fatal: true });
@@ -80,6 +82,18 @@ export async function runStudioLiveScenarios({ page, browser, webOrigin, outDir,
     }, "confirmed Run dispatch", 120000, 1000);
     result.runId = frozen.run_id; result.planId = frozen.plan_id;
     result.baselineChecksum = digest(JSON.stringify(frozen.baseline));
+    const frozenRequest = frozen.generation_request ?? frozen.generationRequest;
+    const outputOperations = frozenRequest?.outputOperations;
+    assert.ok(Array.isArray(outputOperations) && outputOperations.length === frozenRequest.requestedArtifactKinds.length, "Confirmed Run must freeze one output operation per requested artifact");
+    assert.deepEqual(outputOperations.map((operation) => operation.kind), frozenRequest.requestedArtifactKinds, "Frozen output operation order must match requested outputs");
+    if (output === "both") assert.equal(outputOperations[0].kind, "prd", "Joint output must create PRD first");
+    for (const operation of outputOperations) {
+      assert.ok(operation.operation?.kind === "create" || operation.operation?.kind === "revise", "Frozen output operation must be create or revise");
+      if (operation.operation.kind === "revise") {
+        assert.ok(operation.operation.target?.artifactId && operation.operation.target?.artifactVersionId, "Revision operation must identify its exact artifact target");
+      }
+    }
+    result.outputOperations = outputOperations;
     assert.ok(frozen.input_snapshot.knowledgeReleaseId, "Confirmation pins a published knowledge release");
     assert.ok(frozen.baseline.evidence?.length, "Confirmation includes real authorized knowledge evidence");
     const seen = new Set();
