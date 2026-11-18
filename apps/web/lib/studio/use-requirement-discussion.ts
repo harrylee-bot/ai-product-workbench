@@ -548,7 +548,14 @@ export function useRequirementDiscussion({
           throw new Error("恢复记录不属于当前项目及固定来源，未重放操作");
       }
       persist(local.value);
-      return execute(local.value.command);
+      const command = local.value.command;
+      const receipt = await execute(command);
+      if (command.kind === "message") {
+        // The receipt follows the original turn. Another tab may have
+        // advanced the current session while this response was missing.
+        void client.invalidateQueries({ queryKey: snapshotKey(command.sessionId) });
+      }
+      return receipt;
     });
   const turn = (action: "cancel" | "retry") =>
     perform(async () => {

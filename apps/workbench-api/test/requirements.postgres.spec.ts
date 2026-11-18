@@ -114,6 +114,28 @@ suite('Requirement discussions with actual PostgreSQL; fixture model and workflo
   const next=await service.message(fixture.ownerId,s.id,'next-message',first.revision,{text:'仅显示当前用户可见区域',intent:'discuss'});
   expect((await db.requirementTurn.findUniqueOrThrow({where:{id:first.activeTurn!.id}})).status).toBe('superseded');expect(next.activeTurn?.id).not.toBe(first.activeTurn?.id);
  });
+ it('recovers the original message turn and its own suggestion confirmation after another tab advances',async()=>{
+  const s=await create(['prd']);
+  const firstInput={text:'只增加渠道筛选',intent:'confirm_suggestion' as const};
+  const secondInput={text:'继续调整筛选展示',intent:'discuss' as const};
+  const first=await service.message(fixture.ownerId,s.id,'first-suggestion',s.revision,firstInput);
+  const job=processor({...baseCard,outputKinds:['prd']});
+  await job.tick(s.id);
+  const generated=await service.get(fixture.ownerId,s.id);
+  expect(generated.confirmation?.status).toBe('started');
+  const second=await service.message(fixture.ownerId,s.id,'second-discussion',generated.revision,secondInput);
+  const replay=await service.message(fixture.ownerId,s.id,'first-suggestion',s.revision,firstInput);
+  expect(replay.activeTurn?.id).toBe(first.activeTurn?.id);
+  expect(replay.confirmation?.id).toBe(generated.confirmation?.id);
+  expect((await service.get(fixture.ownerId,s.id)).activeTurn?.id).toBe(second.activeTurn?.id);
+  await job.tick(s.id);
+  const reviewed=await service.get(fixture.ownerId,s.id);
+  await service.confirm(fixture.ownerId,s.id,'manual-confirmation',reviewed.revision,accept(reviewed));
+  const discussionReplay=await service.message(fixture.ownerId,s.id,'second-discussion',generated.revision,secondInput);
+  expect(discussionReplay.activeTurn?.id).toBe(second.activeTurn?.id);
+  expect(discussionReplay.confirmation).toBeNull();
+  expect(await db.requirementTurn.count({where:{sessionId:s.id}})).toBe(2);
+ });
  it('paginates sessions with tied timestamps and rejects cross-user or cross-thread cursors',async()=>{
   const s=await create(),ids=[s.id];
   for(let i=0;i<3;i++)ids.push((await service.create(fixture.ownerId,s.threadId,randomUUID(),s.generationRequest)).id);
