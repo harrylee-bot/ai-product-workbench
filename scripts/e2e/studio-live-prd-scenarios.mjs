@@ -128,10 +128,10 @@ export async function runStudioPrd({
       "SELECT card FROM workbench.requirement_summaries WHERE session_id=$1 ORDER BY version DESC LIMIT 1",
       [session],
     );
-    prd.clarifications.push({
-      questions: summary.card.issues.map((issue) => issue.question),
-      answer: supplemental,
-    });
+    const questions = summary.card.issues.map((issue) => issue.question);
+    assert.ok(questions.length, "Clarification state carries a visible business question");
+    await page.getByText(questions[0], { exact: true }).waitFor();
+    prd.clarifications.push({ questions, answer: supplemental });
     await checkpoint();
     assert.equal(await sendDiscussion(supplemental), session);
   }
