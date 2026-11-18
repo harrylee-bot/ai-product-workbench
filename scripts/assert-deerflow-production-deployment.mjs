@@ -190,12 +190,12 @@ assert(
 );
 assert(
   Array.isArray(patchManifest.additionalSources)
-    && patchManifest.additionalSources.length === 4,
+    && patchManifest.additionalSources.length === 5,
   "DeerFlow source patch must declare the audited subagent tool filter",
 );
-const subagentToolPatch = patchManifest.additionalSources[0];
+const subagentToolPatch = patchManifest.additionalSources.find((source) => source.path === "deerflow/tools/builtins/task_tool.py");
 assert(
-  subagentToolPatch.path === "deerflow/tools/builtins/task_tool.py"
+  subagentToolPatch?.path === "deerflow/tools/builtins/task_tool.py"
     && subagentToolPatch.upstreamSha256 === "b650fa0815fa0be406c2f612670cb71687f4df15aed6c8195545998381ff9e7d"
     && subagentToolPatch.patchedSha256 === "b46460b3aff7000d66530fd5023026b2427d7aa973bd29061ccd72a46537be30",
   "DeerFlow subagent tool filter must bind the audited upstream and patched hashes",
@@ -481,8 +481,14 @@ assert(
 );
 assertDeepEqual(
   patchManifest.additionalSources.map((source) => source.path),
-  ["deerflow/tools/builtins/task_tool.py", "deerflow/runtime/checkpoint_state.py", "deerflow/runtime/runs/worker.py", "deerflow/runtime/stream_bridge/memory.py"],
+  ["deerflow/models/factory.py", "deerflow/tools/builtins/task_tool.py", "deerflow/runtime/checkpoint_state.py", "deerflow/runtime/runs/worker.py", "deerflow/runtime/stream_bridge/memory.py"],
   "DeerFlow must retain subagent isolation, materialized history filtering, fallback rollback and active stream backpressure",
+);
+const flashFactoryPatch = patchManifest.additionalSources.find((source) => source.path === "deerflow/models/factory.py");
+assert(
+  flashFactoryPatch?.upstreamSha256 === "1ccd4b57c6f54a90667cf8af5ec92f4b2629915f4ef1c403e8525893e0d13840"
+    && flashFactoryPatch.patchedSha256 === "a39797fa5847ae742f2b5075bea51d0a7de74eaf9a29b1349d0507f3e57bc518",
+  "DeerFlow Flash transport must bind the audited model factory hashes",
 );
 const streamBridgePatch = patchManifest.additionalSources.find((source) => source.path === "deerflow/runtime/stream_bridge/memory.py");
 assert(
