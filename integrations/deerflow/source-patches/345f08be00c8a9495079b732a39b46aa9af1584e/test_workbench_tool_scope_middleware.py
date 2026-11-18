@@ -802,15 +802,30 @@ class DraftRepairScopeTests(unittest.IsolatedAsyncioTestCase):
         key = middleware_module._PRD_TOOL_JSON_RETRY_KEY
         limit = middleware_module._PRD_TOOL_JSON_RETRY_LIMIT
 
-        def invalid(name="workbench_artifact_draft_publish", finish="tool_calls"):
+        def invalid(name="workbench_artifact_draft_publish", finish="tool_calls", content=""):
             return middleware_module.AIMessage(
-                id="provider-repeat-id", content="",
+                id="provider-repeat-id", content=content,
                 invalid_tool_calls=[{"id": "bad-call", "name": name, "args": "}"}],
                 response_metadata={"finish_reason": finish},
             )
 
-        state = {"messages": [*messages, invalid()]}
-        for bad in (invalid("workbench_runtime_result_submit"), invalid(finish="length")):
+        lead_in = "我会在此运行提交需求说明书草稿。"
+        state = {"messages": [*messages, invalid(content=lead_in)]}
+        truncated = invalid(finish="length")
+        recovered_truncation = middleware.after_model({"messages": [*messages, truncated]}, runtime)
+        self.assertEqual(recovered_truncation["jump_to"], "model")
+        self.assertFalse(recovered_truncation["messages"][0].invalid_tool_calls)
+        mixed_batch = truncated.model_copy(update={"tool_calls": [
+            call(READ_FILE_TOOL_NAME, "real-sibling", {"path": PRD_REFERENCE_FILES[0][0]}),
+        ]})
+        for bad in (
+            invalid("workbench_runtime_result_submit"),
+            invalid(finish="content_filter", content=lead_in),
+            mixed_batch,
+            invalid(content=[{"type": "refusal", "refusal": "fixture refusal"}]),
+            invalid(content="[FORCED STOP]"),
+            invalid(content="a" * (middleware_module._DRAFT_TOOL_JSON_RETRY_MAX_LEAD_IN + 1)),
+        ):
             self.assertIsNone(middleware.after_model({"messages": [*messages, bad]}, runtime))
         unrelated = {**context["workbench"], "runtimeAttemptId": "another-attempt"}
         foreign = types.SimpleNamespace(context={"workbench": unrelated}, execution_info=runtime.execution_info)
@@ -821,6 +836,7 @@ class DraftRepairScopeTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(reply["jump_to"], "model")
             self.assertEqual(reply[key]["count"], count)
             self.assertFalse(reply["messages"][0].invalid_tool_calls)
+            self.assertNotIn(lead_in, reply["messages"][0].content)
             state[key] = reply[key]
             self.assertEqual((await middleware.aafter_model(state, runtime))[key]["count"], count)
             runtime.execution_info.task_id = f"task-{count}"

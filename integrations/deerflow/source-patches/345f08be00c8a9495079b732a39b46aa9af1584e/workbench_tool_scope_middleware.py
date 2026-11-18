@@ -208,6 +208,8 @@ _LINKED_DRAFT_RECOVERY_KEY = "workbench_linked_draft_recovery"
 _LINKED_DRAFT_RECOVERY_LIMIT = 2
 _PRD_TOOL_JSON_RETRY_KEY = "workbench_prd_tool_json_retry"
 _PRD_TOOL_JSON_RETRY_LIMIT = 3
+_DRAFT_TOOL_JSON_RETRY_MAX_LEAD_IN = 256
+_FORCED_STOP_MARKERS = ("[TOKEN BUDGET EXCEEDED]", "[FORCED STOP]", "[LOOP DETECTED]")
 
 
 class WorkbenchToolScopeState(AgentState, total=False):
@@ -255,9 +257,7 @@ def _ordinary_model_stop(message: Any) -> bool:
         for block in content or [] if isinstance(block, (str, Mapping))
     )
     # These upstream middleware stops currently have no structured marker.
-    return not any(marker in text for marker in (
-        "[TOKEN BUDGET EXCEEDED]", "[FORCED STOP]", "[LOOP DETECTED]",
-    ))
+    return not any(marker in text for marker in _FORCED_STOP_MARKERS)
 
 
 def _unrepaired_linked_draft(state: Any, run_id: str, attempt_id: str) -> dict[str, Any] | None:
@@ -1444,16 +1444,25 @@ class WorkbenchToolScopeMiddleware(AgentMiddleware[AgentState]):
             return None
         messages = _state_messages(state)
         message = messages[-1] if messages else None
-        if not isinstance(message, AIMessage) or message.content or message.tool_calls:
+        if not isinstance(message, AIMessage) or message.tool_calls:
+            return None
+        # The provider may return a short lead-in before its known Draft call.
+        # Structured refusal content and terminal middleware markers still stop.
+        if message.content and (
+            not isinstance(message.content, str)
+            or len(message.content) > _DRAFT_TOOL_JSON_RETRY_MAX_LEAD_IN
+            or any(marker in message.content for marker in _FORCED_STOP_MARKERS)
+        ):
             return None
         invalid = message.invalid_tool_calls
         metadata, additional = message.response_metadata, message.additional_kwargs
         raw_calls = additional.get("tool_calls")
+        finish_reason = metadata.get("finish_reason")
         if (
             len(invalid) != 1 or invalid[0].get("name") != ARTIFACT_DRAFT_TOOL_NAME
             or not isinstance(invalid[0].get("id"), str) or not invalid[0]["id"]
             or not isinstance(invalid[0].get("args"), str) or not invalid[0]["args"]
-            or metadata.get("finish_reason") != "tool_calls" or additional.get("function_call")
+            or finish_reason not in ("tool_calls", "length") or additional.get("function_call")
             or (raw_calls is not None and (
                 not isinstance(raw_calls, list) or len(raw_calls) != 1
                 or _value(raw_calls[0], "id") != invalid[0]["id"]
@@ -1461,7 +1470,7 @@ class WorkbenchToolScopeMiddleware(AgentMiddleware[AgentState]):
             ))
             or any(container.get(key) for container in (metadata, additional)
                    for key in ("refusal", "safety_termination", "error", "deerflow_error_fallback"))
-            or any(container.get(key) not in (None, "tool_calls") for container in (metadata, additional)
+            or any(container.get(key) not in (None, finish_reason) for container in (metadata, additional)
                    for key in ("finish_reason", "stop_reason"))
         ):
             return None
