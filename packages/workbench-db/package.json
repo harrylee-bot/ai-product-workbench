@@ -14,7 +14,7 @@
     "generate": "prisma generate --schema prisma/schema.prisma",
     "validate": "prisma validate --schema prisma/schema.prisma",
     "migrate:dev": "prisma migrate dev --schema prisma/schema.prisma",
-    "migrate:deploy": "prisma migrate deploy --schema prisma/schema.prisma"
+    "migrate:deploy": "node ../../scripts/deploy-workbench-migrations.mjs"
   },
   "dependencies": {
     "@prisma/client": "^6.16.0"

@@ -72,14 +72,20 @@ function command() {
 }
 
 function harness() {
+  const lease = { owner: "export-worker", id: "lease-1" };
   const store = {
-    start: vi.fn(async () => ({ kind: "run" as const, command: command() })),
-    status: vi.fn(async () => "running"),
+    start: vi.fn(async () => ({ kind: "run" as const, lease })),
+    loadRunning: vi.fn(async () => command()),
+    pulseExecutionLease: vi.fn<() => Promise<"running" | "cancelling" | "lost">>(async () => "running"),
+    beginExecutionResources: vi.fn(async () => undefined),
+    endExecutionResources: vi.fn(async () => undefined),
+    releaseExecutionLease: vi.fn(async () => undefined),
+    status: vi.fn<() => Promise<"running" | "cancelling">>(async () => "running"),
     reserveOutput: vi.fn(async (identity) => ({ ...identity, storageKey: "blobs/aa/output/g1", blobId: "blob-1", generation: 1, canonicalStorageKey: "blobs/aa/output/g1" })),
     publishSucceeded: vi.fn(async () => "succeeded" as const),
     abandonOutput: vi.fn(async () => undefined),
     acknowledgeCancellation: vi.fn(async () => "cancelled" as const),
-    fail: vi.fn(async () => undefined),
+    fail: vi.fn(async () => true),
   };
   const loader = { load: vi.fn(async () => source()) };
   const storage = { putVerified: vi.fn(async () => undefined) };
@@ -87,7 +93,7 @@ function harness() {
     validateHtml: vi.fn(async () => undefined),
   };
   const processor = new ExportProcessor(store as never, loader as never, storage as never, browser as never, { maximumOutputBytes: 10 * 1024 * 1024 });
-  return { store, loader, storage, browser, processor };
+  return { store, loader, storage, browser, processor, lease };
 }
 
 describe("ExportProcessor", () => {
@@ -114,7 +120,7 @@ describe("ExportProcessor", () => {
     expect(identity.mediaType).toBe("text/html; charset=utf-8");
     expect(identity.byteSize).toBe(bytes.byteLength);
     expect(identity.sha256).toBe(createHash("sha256").update(bytes).digest("hex"));
-    expect(test.store.publishSucceeded).toHaveBeenCalledWith("export-1", expect.objectContaining({ blobId: "blob-1" }));
+    expect(test.store.publishSucceeded).toHaveBeenCalledWith("export-1", expect.objectContaining({ blobId: "blob-1" }), test.lease);
   });
 
   it("coordinates a failed shared-object verification through Blob GC", async () => {
@@ -122,16 +128,13 @@ describe("ExportProcessor", () => {
     test.storage.putVerified.mockRejectedValueOnce(new Error("OBJECT_STORAGE_SHA256_MISMATCH"));
     await expect(test.processor.process("export-1", undefined, { retryCount: 5, retryLimit: 5 })).resolves.toEqual({ kind: "failed", code: "EXPORT_RETRY_EXHAUSTED" });
     expect(test.store.abandonOutput).toHaveBeenCalledWith(expect.objectContaining({ blobId: "blob-1", canonicalStorageKey: "blobs/aa/output/g1" }));
-    expect(test.store.fail).toHaveBeenCalledWith("export-1", "EXPORT_RETRY_EXHAUSTED", "OBJECT_STORAGE_SHA256_MISMATCH");
+    expect(test.store.fail).toHaveBeenCalledWith("export-1", "EXPORT_RETRY_EXHAUSTED", "OBJECT_STORAGE_SHA256_MISMATCH", test.lease);
   });
 
   it("builds the versioned Figma importer package without a browser or clipboard converter", async () => {
     const test = harness();
     const fixture = exportRequest("figma");
-    test.store.start.mockResolvedValueOnce({
-      kind: "run",
-      command: { ...command(), format: "figma", packaging: "zip" },
-    } as never);
+    test.store.loadRunning.mockResolvedValueOnce({ ...command(), format: "figma", packaging: "zip" } as never);
     test.loader.load.mockResolvedValueOnce(fixture.source as never);
 
     const result = await test.processor.process("export-1", undefined, { retryCount: 0, retryLimit: 5 });
@@ -146,18 +149,15 @@ describe("ExportProcessor", () => {
   it("passes the persisted Preview initial screen into the build without changing Export selection", async () => {
     const test = harness();
     const fixture = exportRequest();
-    test.store.start.mockResolvedValueOnce({
-      kind: "run",
-      command: {
-        ...command(),
-        purpose: "preview",
-        release: null,
-        preview: { initialScreenId: "screen-success" },
-        selection: {
-          kind: "artifact",
-          artifactId: "artifact-1",
-          artifactVersionId: "version-1",
-        },
+    test.store.loadRunning.mockResolvedValueOnce({
+      ...command(),
+      purpose: "preview",
+      release: null,
+      preview: { initialScreenId: "screen-success" },
+      selection: {
+        kind: "artifact",
+        artifactId: "artifact-1",
+        artifactVersionId: "version-1",
       },
     } as never);
     test.loader.load.mockResolvedValueOnce(fixture.source as never);
@@ -180,18 +180,29 @@ describe("ExportProcessor", () => {
   it("confirms cancellation before publishing when the database is already cancelling", async () => {
     const test = harness();
     test.store.status.mockResolvedValue("cancelling");
+    test.store.pulseExecutionLease.mockResolvedValue("cancelling");
     await expect(test.processor.process("export-1", undefined, { retryCount: 0, retryLimit: 5 }))
       .resolves.toEqual({ kind: "terminal", status: "cancelled" });
-    expect(test.store.acknowledgeCancellation).toHaveBeenCalledWith("export-1", undefined);
+    expect(test.store.acknowledgeCancellation).toHaveBeenCalledWith("export-1", test.lease);
     expect(test.storage.putVerified).not.toHaveBeenCalled();
     expect(test.store.publishSucceeded).not.toHaveBeenCalled();
+  });
+
+  it("discards the reservation when ownership is lost before writing storage", async () => {
+    const test = harness();
+    test.store.pulseExecutionLease.mockResolvedValueOnce("running").mockResolvedValueOnce("lost");
+    await expect(test.processor.process("export-1")).rejects.toThrow("EXPORT_EXECUTION_LEASE_LOST");
+    expect(test.store.abandonOutput).toHaveBeenCalledOnce();
+    expect(test.store.releaseExecutionLease).toHaveBeenCalledWith("export-1", test.lease);
+    expect(test.store.fail).not.toHaveBeenCalled();
+    expect(test.storage.putVerified).not.toHaveBeenCalled();
   });
 
   it("persists explicit terminal failures and only exhausts retryable failures at the retry limit", async () => {
     const terminal = harness();
     terminal.loader.load.mockRejectedValueOnce(new TerminalExportError("EXPORT_RELEASE_NOT_READY", "Release not ready"));
     await expect(terminal.processor.process("export-1", undefined, { retryCount: 0, retryLimit: 5 })).resolves.toEqual({ kind: "failed", code: "EXPORT_RELEASE_NOT_READY" });
-    expect(terminal.store.fail).toHaveBeenCalledWith("export-1", "EXPORT_RELEASE_NOT_READY", "Release not ready");
+    expect(terminal.store.fail).toHaveBeenCalledWith("export-1", "EXPORT_RELEASE_NOT_READY", "Release not ready", terminal.lease);
 
     const retrying = harness();
     retrying.loader.load.mockRejectedValueOnce(new Error("S3 unavailable"));
@@ -201,6 +212,6 @@ describe("ExportProcessor", () => {
     const exhausted = harness();
     exhausted.loader.load.mockRejectedValueOnce(new Error("S3 unavailable"));
     await expect(exhausted.processor.process("export-1", undefined, { retryCount: 5, retryLimit: 5 })).resolves.toEqual({ kind: "failed", code: "EXPORT_RETRY_EXHAUSTED" });
-    expect(exhausted.store.fail).toHaveBeenCalledWith("export-1", "EXPORT_RETRY_EXHAUSTED", "S3 unavailable");
+    expect(exhausted.store.fail).toHaveBeenCalledWith("export-1", "EXPORT_RETRY_EXHAUSTED", "S3 unavailable", exhausted.lease);
   });
 });

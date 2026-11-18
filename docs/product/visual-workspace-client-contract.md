@@ -200,3 +200,11 @@ artifactTargets 是固定版本的参考输入；outputOperations 才是允许�
 
 通用 `ExportJob`（文档、发布和资料导出）增加 `cancelling`，与原型 V2 的独立导出状态区分。`POST /exports/:id/cancel` 的路由、空请求体和 If-Match 不变；取消被接受后可以返回 `cancelling`，此时 finishedAt/output/failure 都为 null，前端继续读取权威状态、显示正在取消，不能视为已停止或允许重试。只有对应执行者完成资源清理后才返回 `cancelled` 和完成时间。尚未启动的任务也可能短暂进入 cancelling。
 
+
+### 导出执行者停止与升级
+
+`cancelling` 表示已接受请求。Worker 以数据库时间和租约令牌控制续租、成功和失败写入。每次尝试在首次接触浏览器或存储前持久化资源占用记录，清理完资源后释放自己的记录。远端取消消费者须等到所有尝试都已释放，才可设置 `cancelled` 和完成时间。共享输出仍由 Blob GC 按引用处理。
+
+升级时停止向旧 Worker 投递新任务，等待其结束并关停旧副本，再运行 `deploy/workbench-migrate.sh`。迁移保留已应用的第 99 号文件及数据库记录。第 98 号中合法的在途取消沿用原状态、revision 和 updated_at，按 UTC 回填 cancel_requested_at。升级前已有执行者的非空租约会转为资源占用记录。旧版随机执行者身份缺乏容器信息，升级前应记录对应实例并核实其清理结果。
+
+同一 Docker 容器异常退出后重启，新 Worker 依据容器默认 ID、Linux 启动 ID 和 PID 1 起始时间回收前一实例的占用。计划替换新版 Compose 导出容器时，先优雅停止并保留容器。若它异常退出并遗留占用，可从部署机运行 `node deploy/retire-export-worker.mjs <完整容器ID>`，使用部署库的 WORKBENCH_DATABASE_URL。程序两次核对 Docker 的服务、容器 ID、默认主机名、停止时间与 PID，只释放该实例已观察到的尝试，业务终态仍由正常取消消费者提交。

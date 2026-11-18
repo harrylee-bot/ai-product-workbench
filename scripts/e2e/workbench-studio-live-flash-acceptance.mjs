@@ -15,6 +15,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 import pg from "pg";
 import { chromium } from "playwright";
+import { verifyStudioRuntime } from "../test-support/studio-live-runtime.mjs";
 import { runStudioLiveScenarios } from "./studio-live-scenarios.mjs";
 import { runStudioLiveAccessScenarios } from "./studio-live-access-scenarios.mjs";
 import { startLiveKnowledgeFixture } from "../test-support/studio-live-knowledge.mjs";
@@ -320,13 +321,13 @@ try {
     ["provider", `${providerEnv.V2_PROVIDER_GATEWAY_URL}/api/models`, { "X-DeerFlow-Internal-Token": providerEnv.V2_PROVIDER_TOKEN }],
     ["embedding", `${inferenceEnv.V2_INFERENCE_EMBEDDING_URL}/info`, { Authorization: `Bearer ${inferenceEnv.V2_INFERENCE_TOKEN}` }],
     ["reranker", `${inferenceEnv.V2_INFERENCE_RERANKER_URL}/info`, { Authorization: `Bearer ${inferenceEnv.V2_INFERENCE_TOKEN}` }],
-    ["object-storage", s3Env.V2_S3_ENDPOINT, {}],
+    ["object-storage", new URL("/minio/health/ready", s3Env.V2_S3_ENDPOINT).href, {}],
   ];
   evidence.preflight = await Promise.all(checks.map(async ([name, url, headers]) => {
     try {
       const response = await fetch(url, { headers, signal: AbortSignal.timeout(5000) });
       await response.body?.cancel();
-      return { name, reachable: response.status < 500, status: response.status };
+      return { name, reachable: response.ok, status: response.status };
     } catch (error) {
       return { name, reachable: false, code: error.cause?.code ?? error.code ?? error.name };
     }
@@ -335,17 +336,7 @@ try {
   assert.equal(missing.length, 0, `Live dependency unavailable: ${missing.join(", ")}`);
   // The runtime is independently deployed. Require its deployment owner's
   // inspection receipt; a model catalog alone cannot prove tool compatibility.
-  const runtimeProof = JSON.parse(await readFile(requiredEnv("WORKBENCH_STUDIO_LIVE_RUNTIME_PROOF"), "utf8"));
-  const dockerfile = await readFile(path.join(serviceRoot, "integrations/deerflow/Dockerfile"), "utf8");
-  const patchPath = dockerfile.match(/^COPY (integrations\/deerflow\/source-patches\/[a-f0-9]+)\//m)?.[1];
-  assert.ok(patchPath, "Resolve the actual source patch selected by the fixed Dockerfile");
-  const sourceManifest = await readFile(path.join(serviceRoot, patchPath, "manifest.json"));
-  const manifestSha256 = createHash("sha256").update(sourceManifest).digest("hex");
-  assert.equal(runtimeProof.backendCommit, expectedBackendCommit);
-  assert.equal(runtimeProof.sourceManifestSha256, manifestSha256);
-  assert.equal(runtimeProof.allRuntimeToolFileHashesMatched, true);
-  assert.ok(runtimeProof.containerId && runtimeProof.inspectedAt && runtimeProof.imageId);
-  evidence.runtimeDeploymentAttestation = { backendCommit: expectedBackendCommit, sourceManifestSha256: manifestSha256, containerId: runtimeProof.containerId, imageId: runtimeProof.imageId, inspectedAt: runtimeProof.inspectedAt, scope: "Deployment-owner file inspection receipt, compared with the fixed local source; not inferred from the model catalog" };
+  evidence.runtimeDeploymentAttestation = await verifyStudioRuntime(serviceRoot, expectedBackendCommit, requiredEnv("WORKBENCH_STUDIO_LIVE_RUNTIME_PROOF"));
 
   // Verify DeerFlow model catalog exposes ONLY deepseek-flash
   const catalogRes = await fetch(`${providerEnv.V2_PROVIDER_GATEWAY_URL}/api/models`, {
@@ -385,13 +376,7 @@ try {
   await sql(extensionSql, [], dbUrl);
   await runCmd(
     "migrations",
-    [
-      "node_modules/prisma/build/index.js",
-      "migrate",
-      "deploy",
-      "--schema",
-      "packages/workbench-db/prisma/schema.prisma",
-    ],
+    ["scripts/deploy-workbench-migrations.mjs"],
     serviceRoot,
     envBase,
   );

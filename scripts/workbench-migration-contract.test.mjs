@@ -139,7 +139,7 @@ test("document export packaging expands the old check without disabling guards o
 test("Canvas grant snapshot digest migration is append-only and fences legacy grants", async () => {
   const migrationEntries = await readdir(migrationsDirectory, { withFileTypes: true });
   const migrationCount = migrationEntries.filter((entry) => entry.isDirectory()).length;
-  assert.equal(migrationCount, 99, "candidate migration inventory must be updated explicitly");
+  assert.equal(migrationCount, 102, "candidate migration inventory must be updated explicitly");
   assert(migrationEntries.some((entry) => (
     entry.isDirectory()
     && entry.name === "20260719010000_canvas_grant_snapshot_digest"
@@ -566,7 +566,7 @@ test("database extensions are provisioned outside least-privilege application mi
   }
   assert(
     migratorEntrypoint.indexOf("assert-workbench-postgres-extensions.mjs --check")
-      < migratorEntrypoint.indexOf("prisma/build/index.js migrate deploy"),
+      < migratorEntrypoint.indexOf("deploy-workbench-migrations.mjs"),
     "the migrator must fail closed on missing or unsupported extensions before Prisma runs",
   );
 });

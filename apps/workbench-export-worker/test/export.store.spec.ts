@@ -2,22 +2,14 @@ import { describe, expect, it, vi } from "vitest";
 import { PrismaExportStore } from "../src/export/export.store.js";
 
 const identity = { sha256: "a".repeat(64), byteSize: 128, mediaType: "text/html; charset=utf-8" };
+const lease = { owner: "worker-a", id: "lease-1" };
 
 describe("PrismaExportStore", () => {
   it("claims queued work with a single revision increment", async () => {
-    const db = {
-      exportJob: {
-        findUnique: vi.fn(async () => ({ status: "queued" })),
-        updateMany: vi.fn(async () => ({ count: 1 })),
-      },
-    };
+    const db = { $executeRaw: vi.fn(async () => 1) };
     const store = new PrismaExportStore(db as never, prefixes());
-    vi.spyOn(store, "loadRunning").mockResolvedValue({ id: "export-1" } as never);
-    await expect(store.start("export-1")).resolves.toMatchObject({ kind: "run", command: { id: "export-1" }, lease: { owner: "export-worker" } });
-    expect(db.exportJob.updateMany).toHaveBeenCalledWith(expect.objectContaining({
-      where: expect.objectContaining({ id: "export-1", status: "queued" }),
-      data: expect.objectContaining({ status: "running", revision: { increment: 1 } }),
-    }));
+    await expect(store.start("export-1", lease.owner)).resolves.toMatchObject({ kind: "run", lease: { owner: lease.owner, id: expect.any(String) } });
+    expect(db.$executeRaw).toHaveBeenCalledOnce();
   });
 
   it("rehydrates a persisted Prototype screen selection", async () => {
@@ -147,10 +139,8 @@ describe("PrismaExportStore", () => {
 
   it("publishes Blob readiness and the succeeded ExportJob in one transaction", async () => {
     const tx = {
-      exportJob: {
-        findUnique: vi.fn(async () => ({ status: "running", outputBlobId: null })),
-        updateMany: vi.fn(async () => ({ count: 1 })),
-      },
+      $queryRaw: vi.fn(async () => [{ status: "running", ownsLease: true }]),
+      $executeRaw: vi.fn(async () => 1),
       blob: {
         findUnique: vi.fn(async () => ({
           id: "blob-1",
@@ -171,14 +161,11 @@ describe("PrismaExportStore", () => {
       blobId: "blob-1",
       generation: 1,
       canonicalStorageKey: "blobs/aa/output/g1",
-    })).resolves.toBe("succeeded");
+    }, lease)).resolves.toBe("succeeded");
     expect(tx.blob.updateMany).toHaveBeenCalledWith(expect.objectContaining({
       data: expect.objectContaining({ status: "ready", storageKey: "blobs/aa/output/g1" }),
     }));
-    expect(tx.exportJob.updateMany).toHaveBeenCalledWith(expect.objectContaining({
-      where: expect.objectContaining({ status: "running", outputBlobId: null }),
-      data: expect.objectContaining({ status: "succeeded", outputBlobId: "blob-1", revision: { increment: 1 } }),
-    }));
+    expect(tx.$executeRaw).toHaveBeenCalledOnce();
   });
 
   it("marks a pending shared reservation for GC without deleting its canonical object", async () => {
@@ -198,17 +185,11 @@ describe("PrismaExportStore", () => {
   });
 
   it("confirms a cancellation only after executor cleanup", async () => {
-    const exportJob = {
-      updateMany: vi.fn(async () => ({ count: 1 })),
-      findUnique: vi.fn(),
-    };
-    const store = new PrismaExportStore({ exportJob } as never, prefixes());
+    const db = { $executeRaw: vi.fn(async () => 1), exportJob: { findUnique: vi.fn() } };
+    const store = new PrismaExportStore(db as never, prefixes());
     await expect(store.acknowledgeCancellation("export-1")).resolves.toBe("cancelled");
-    expect(exportJob.updateMany).toHaveBeenCalledWith(expect.objectContaining({
-      where: expect.objectContaining({ id: "export-1", status: "cancelling", outputBlobId: null, finishedAt: null, OR: expect.any(Array) }),
-      data: expect.objectContaining({ status: "cancelled", finishedAt: expect.any(Date), revision: { increment: 1 } }),
-    }));
-    expect(exportJob.findUnique).not.toHaveBeenCalled();
+    expect(db.$executeRaw).toHaveBeenCalledOnce();
+    expect(db.exportJob.findUnique).not.toHaveBeenCalled();
   });
 });
 

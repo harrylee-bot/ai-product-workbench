@@ -59,6 +59,7 @@ ENV NODE_ENV=production
 COPY deploy/workbench-migrate.sh deploy/workbench-migrate.sh
 COPY deploy/run-workspace-cli.mjs deploy/run-workspace-cli.mjs
 COPY scripts/assert-workbench-postgres-extensions.mjs scripts/assert-workbench-postgres-extensions.mjs
+COPY scripts/deploy-workbench-migrations.mjs scripts/deploy-workbench-migrations.mjs
 COPY scripts/provision-workbench-database-roles.mjs scripts/provision-workbench-database-roles.mjs
 COPY scripts/reconcile-workbench-runtime-queues.mjs scripts/reconcile-workbench-runtime-queues.mjs
 RUN chmod 0555 deploy/workbench-migrate.sh

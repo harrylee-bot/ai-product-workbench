@@ -799,6 +799,7 @@ model ThreadEntry {
   outputForRun    Run?            @relation("RunOutputEntry")
 
   @@unique([threadId, sequence])
+  @@index([requirementSessionId, sequence])
   @@index([producedByRunId])
   @@map("thread_entries")
 }
@@ -2224,7 +2225,19 @@ model ProjectDuplicate {
   @@map("project_duplicates")
 }
 
+model ExportActiveExecution {
+  jobId String @map("job_id")
+  leaseId String @map("lease_id")
+  owner String
+  startedAt DateTime @default(dbgenerated("clock_timestamp()")) @map("started_at") @db.Timestamptz(6)
+  job ExportJob @relation(fields: [jobId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+
+  @@id([jobId, leaseId])
+  @@map("export_active_executions")
+}
+
 model ExportJob {
+  activeExecutions ExportActiveExecution[]
   id                         String                   @id @default(cuid())
   releaseId                  String?                  @map("release_id")
   createdById                String                   @map("created_by_id")
@@ -2247,11 +2260,11 @@ model ExportJob {
   createdAt                  DateTime                 @default(now()) @map("created_at")
   startedAt                  DateTime?                @map("started_at")
   finishedAt                 DateTime?                @map("finished_at")
-  cancelRequestedAt          DateTime?                @map("cancel_requested_at")
-  cancellationAcknowledgedAt DateTime?                @map("cancellation_acknowledged_at")
+  cancelRequestedAt          DateTime?                @map("cancel_requested_at") @db.Timestamptz(6)
+  cancellationAcknowledgedAt DateTime?                @map("cancellation_acknowledged_at") @db.Timestamptz(6)
   executionOwner             String?                  @map("execution_owner")
   executionLeaseId           String?                  @map("execution_lease_id")
-  executionLeaseExpiresAt    DateTime?                @map("execution_lease_expires_at")
+  executionLeaseExpiresAt    DateTime?                @map("execution_lease_expires_at") @db.Timestamptz(6)
   updatedAt                  DateTime                 @updatedAt @map("updated_at")
   release                    ProjectRelease?          @relation(fields: [releaseId], references: [id], onDelete: Restrict, onUpdate: Restrict)
   createdBy                  Principal                @relation("ExportCreator", fields: [createdById], references: [id], onDelete: Restrict, onUpdate: Restrict)

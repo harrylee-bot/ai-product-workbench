@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // Structural and optional network preflight for the real Flash acceptance stack.
 // It never creates a database, starts a worker, calls a model, or invents a fallback.
+import { verifyStudioRuntime } from "../test-support/studio-live-runtime.mjs";
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { readFile, mkdir, writeFile } from "node:fs/promises";
@@ -70,7 +71,7 @@ async function probe(name, value, headers = {}) {
   try {
     const response = await fetch(value, { headers, signal: AbortSignal.timeout(5000) });
     await response.body?.cancel();
-    result.reachable = response.status < 500;
+    result.reachable = response.ok;
     result.status = response.status;
   } catch (error) {
     result.reachable = false;
@@ -109,7 +110,7 @@ try {
   report.candidate.providerModel = provider.V2_PROVIDER_MODEL_ID;
   report.candidate.providerModelAllowed = provider.V2_PROVIDER_MODEL_ID === "deepseek-flash";
   report.candidate.runtimeProof = process.env.WORKBENCH_STUDIO_LIVE_RUNTIME_PROOF
-    ? { pathProvided: true, sha256: sha256(await readFile(process.env.WORKBENCH_STUDIO_LIVE_RUNTIME_PROOF)) }
+    ? await verifyStudioRuntime(serviceRoot, expectedCommit, process.env.WORKBENCH_STUDIO_LIVE_RUNTIME_PROOF)
     : { pathProvided: false };
 
   const published = JSON.parse(await readFile(process.env.WORKBENCH_STUDIO_LIVE_PUBLISHED_KNOWLEDGE, "utf8"));
@@ -121,7 +122,7 @@ try {
   await probe("provider", provider.V2_PROVIDER_GATEWAY_URL + "/api/models", { "X-DeerFlow-Internal-Token": provider.V2_PROVIDER_TOKEN });
   await probe("embedding", inference.V2_INFERENCE_EMBEDDING_URL + "/info", { authorization: `Bearer ${inference.V2_INFERENCE_TOKEN}` });
   await probe("reranker", inference.V2_INFERENCE_RERANKER_URL + "/info", { authorization: `Bearer ${inference.V2_INFERENCE_TOKEN}` });
-  await probe("object-storage", s3.V2_S3_ENDPOINT);
+  await probe("object-storage", new URL("/minio/health/ready", s3.V2_S3_ENDPOINT).href);
   const structural = report.candidate.backendCommit.matches
     && report.candidate.runtimeSourcesClean
     && report.candidate.sharedOpenApiMatches
@@ -129,9 +130,9 @@ try {
     && report.candidate.providerModelAllowed
     && report.candidate.knowledge.releaseIdPresent
     && report.candidate.knowledge.chunkCount > 0
-    && report.candidate.runtimeProof.pathProvided;
+    && report.candidate.runtimeProof.verifiedFiles > 0;
   const unreachable = report.dependencies.filter((dependency) => dependency.reachable === false).map((dependency) => dependency.name);
-  report.status = structural && unreachable.length === 0 ? "ready" : "blocked";
+  report.status = structural && report.networkChecked && unreachable.length === 0 ? "ready" : "blocked";
   if (!structural) report.failures.push("Candidate identity, Flash-only model, knowledge release, or runtime deployment proof is incomplete");
   if (unreachable.length) report.failures.push(`Live dependencies unavailable: ${unreachable.join(", ")}`);
 } catch (error) {

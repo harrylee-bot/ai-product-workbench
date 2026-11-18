@@ -24,10 +24,14 @@ export type OutputReservation = OutputIdentity & {
 export type ExecutionLease = {
   owner: string;
   id: string;
-  expiresAt: Date;
 };
 
-const executionLeaseDurationMs = 15_000;
+export class ExportExecutionLeaseLostError extends Error {
+  constructor() { super("EXPORT_EXECUTION_LEASE_LOST"); }
+}
+
+const leaseDurationSeconds = 15;
+const databaseTime = Prisma.sql`clock_timestamp() AT TIME ZONE 'UTC'`;
 
 export class PrismaExportStore {
   constructor(
@@ -35,82 +39,31 @@ export class PrismaExportStore {
     private readonly config: Pick<ExportWorkerConfig, "pendingBlobPrefix" | "canonicalBlobPrefix">,
   ) {}
 
-  async start(exportJobId: string, executionOwner = "export-worker"): Promise<
+  async start(exportJobId: string, executionOwner: string): Promise<
     | { kind: "missing" }
-    | { kind: "terminal"; status: string }
-    | { kind: "leased"; status: "running" }
-    | { kind: "run"; command: ExportCommand; lease: ExecutionLease }
+    | { kind: "terminal"; status: "succeeded" | "failed" | "cancelled" }
+    | { kind: "skipped"; status: "running" | "cancelling" }
+    | { kind: "run"; lease: ExecutionLease }
   > {
-    const current = await this.db.exportJob.findUnique({
-      where: { id: exportJobId },
-      select: {
-        status: true,
-        executionOwner: true,
-        executionLeaseId: true,
-        executionLeaseExpiresAt: true,
-      },
-    });
-    if (!current) return { kind: "missing" as const };
-    if (["succeeded", "failed", "cancelling", "cancelled"].includes(current.status)) {
-      return { kind: "terminal" as const, status: current.status };
-    }
-    if (current.status === "queued") {
-      const lease = newLease(executionOwner);
-      const claimed = await this.db.exportJob.updateMany({
-        where: { id: exportJobId, status: "queued", outputBlobId: null, finishedAt: null },
-        data: {
-          status: "running",
-          startedAt: new Date(),
-          failureCode: null,
-          failureDetail: null,
-          executionOwner: lease.owner,
-          executionLeaseId: lease.id,
-          executionLeaseExpiresAt: lease.expiresAt,
-          revision: { increment: 1 },
-        },
-      });
-      if (claimed.count === 0) {
-        const status = await this.db.exportJob.findUnique({
-          where: { id: exportJobId },
-          select: { status: true },
-        });
-        if (!status) return { kind: "missing" };
-        if (["succeeded", "failed", "cancelling", "cancelled"].includes(status.status)) {
-          return { kind: "terminal", status: status.status };
-        }
-        if (status.status !== "running") throw new Error("EXPORT_JOB_CLAIM_STATE_INVALID");
-      } else {
-        return { kind: "run", command: await this.loadRunning(exportJobId), lease };
-      }
-    }
-    const now = new Date();
-    if (
-      current.executionOwner !== null
-      && current.executionLeaseId !== null
-      && current.executionLeaseExpiresAt !== null
-      && current.executionLeaseExpiresAt > now
-    ) {
-      return { kind: "leased", status: "running" };
-    }
-    const lease = newLease(executionOwner);
-    const claimed = await this.db.exportJob.updateMany({
-      where: {
-        id: exportJobId,
-        status: "running",
-        OR: [
-          { executionOwner: null },
-          { executionLeaseId: null },
-          { executionLeaseExpiresAt: { lte: now } },
-        ],
-      },
-      data: {
-        executionOwner: lease.owner,
-        executionLeaseId: lease.id,
-        executionLeaseExpiresAt: lease.expiresAt,
-      },
-    });
-    if (claimed.count !== 1) return { kind: "leased", status: "running" };
-    return { kind: "run", command: await this.loadRunning(exportJobId), lease };
+    const lease = { owner: executionOwner, id: randomUUID() };
+    const claimed = await this.db.$executeRaw(Prisma.sql`
+      UPDATE "export_jobs"
+      SET "status" = 'running',
+          "started_at" = COALESCE("started_at", ${databaseTime}),
+          "updated_at" = CASE WHEN "status" = 'queued' THEN ${databaseTime} ELSE "updated_at" END,
+          "revision" = "revision" + CASE WHEN "status" = 'queued' THEN 1 ELSE 0 END,
+          "execution_owner" = ${lease.owner},
+          "execution_lease_id" = ${lease.id},
+          "execution_lease_expires_at" = clock_timestamp() + make_interval(secs => ${leaseDurationSeconds}::double precision)
+      WHERE "id" = ${exportJobId} AND "status" IN ('queued', 'running')
+        AND ("execution_lease_expires_at" IS NULL OR "execution_lease_expires_at" <= clock_timestamp())
+    `);
+    if (claimed === 1) return { kind: "run", lease };
+    const status = await this.status(exportJobId);
+    if (status === "running" || status === "cancelling") return { kind: "skipped", status };
+    if (status === "succeeded" || status === "failed" || status === "cancelled") return { kind: "terminal", status };
+    if (status === null) return { kind: "missing" };
+    throw new Error("EXPORT_JOB_CLAIM_STATE_INVALID");
   }
 
   async loadRunning(exportJobId: string) {
@@ -185,29 +138,52 @@ export class PrismaExportStore {
   }
 
   async pulseExecutionLease(exportJobId: string, lease: ExecutionLease): Promise<"running" | "cancelling" | "lost"> {
-    const updated = await this.db.exportJob.updateMany({
-      where: {
-        id: exportJobId,
-        status: { in: ["running", "cancelling"] },
-        executionOwner: lease.owner,
-        executionLeaseId: lease.id,
-      },
-      data: { executionLeaseExpiresAt: new Date(Date.now() + executionLeaseDurationMs) },
-    });
-    if (updated.count !== 1) return "lost";
-    const current = await this.db.exportJob.findUnique({ where: { id: exportJobId }, select: { status: true } });
-    return current?.status === "running" || current?.status === "cancelling" ? current.status : "lost";
+    const [row] = await this.db.$queryRaw<{ status: "running" | "cancelling" }[]>(Prisma.sql`
+      UPDATE "export_jobs"
+      SET "execution_lease_expires_at" = clock_timestamp() + make_interval(secs => ${leaseDurationSeconds}::double precision)
+      WHERE "id" = ${exportJobId} AND "status" IN ('running', 'cancelling') AND ${ownsLease(lease)}
+      RETURNING "status"::text AS "status"
+    `);
+    return row?.status ?? "lost";
+  }
+
+  async retirePreviousContainerRuns(containerId: string, incarnation: string) {
+    // A restarted Docker container has the same ID and a new PID 1. All
+    // processes and sockets from the previous PID namespace have exited.
+    await this.db.$executeRaw(Prisma.sql`
+      DELETE FROM "export_active_executions" WHERE
+        split_part("owner", ':', 1) = 'export-worker'
+        AND split_part("owner", ':', 2) = ${containerId}
+        AND split_part("owner", ':', 3) <> ${incarnation}
+        AND split_part("owner", ':', 4) <> ''
+    `);
+  }
+
+  async beginExecutionResources(exportJobId: string, lease: ExecutionLease) {
+    // Serialize the first external operation with cancellation and claim replacement.
+    const inserted = await this.db.$executeRaw(Prisma.sql`
+      INSERT INTO "export_active_executions" ("job_id", "lease_id", "owner")
+      SELECT "id", "execution_lease_id", "execution_owner" FROM "export_jobs"
+      WHERE "id" = ${exportJobId} AND "status" = 'running' AND ${ownsLease(lease)}
+      FOR UPDATE
+    `);
+    if (inserted !== 1) throw new ExportExecutionLeaseLostError();
+  }
+
+  async endExecutionResources(exportJobId: string, lease: ExecutionLease) {
+    // Even a fenced owner must be able to confirm its own cleanup.
+    await this.db.$executeRaw(Prisma.sql`
+      DELETE FROM "export_active_executions"
+      WHERE "job_id" = ${exportJobId} AND "lease_id" = ${lease.id} AND "owner" = ${lease.owner}
+    `);
   }
 
   async releaseExecutionLease(exportJobId: string, lease: ExecutionLease): Promise<void> {
-    await this.db.exportJob.updateMany({
-      where: { id: exportJobId, executionOwner: lease.owner, executionLeaseId: lease.id },
-      data: {
-        executionOwner: null,
-        executionLeaseId: null,
-        executionLeaseExpiresAt: null,
-      },
-    });
+    await this.db.$executeRaw(Prisma.sql`
+      UPDATE "export_jobs"
+      SET "execution_owner" = NULL, "execution_lease_id" = NULL, "execution_lease_expires_at" = NULL
+      WHERE "id" = ${exportJobId} AND ${leaseIdentity(lease)}
+    `);
   }
 
   async reserveOutput(identity: OutputIdentity): Promise<OutputReservation> {
@@ -251,16 +227,14 @@ export class PrismaExportStore {
     }, { maxWait: 10_000, timeout: 30_000 });
   }
 
-  async publishSucceeded(exportJobId: string, output: OutputReservation) {
+  async publishSucceeded(exportJobId: string, output: OutputReservation, lease: ExecutionLease) {
     return this.db.$transaction(async (tx) => {
-      const job = await tx.exportJob.findUnique({ where: { id: exportJobId }, select: { status: true, outputBlobId: true } });
-      if (!job) throw new Error("EXPORT_JOB_NOT_FOUND");
-      if (job.status === "succeeded") {
-        if (job.outputBlobId !== output.blobId) throw new Error("EXPORT_OUTPUT_PUBLICATION_CONFLICT");
-        return "succeeded" as const;
-      }
-      if (job.status === "cancelled" || job.status === "cancelling") return "cancelled" as const;
-      if (job.status !== "running" || job.outputBlobId !== null) throw new Error("EXPORT_PUBLICATION_STATE_INVALID");
+      const [job] = await tx.$queryRaw<{ status: string; ownsLease: boolean }[]>(Prisma.sql`
+        SELECT "status"::text AS "status", COALESCE(${ownsLease(lease)}, false) AS "ownsLease"
+        FROM "export_jobs" WHERE "id" = ${exportJobId} FOR UPDATE
+      `);
+      if (job?.status === "cancelling" || job?.status === "cancelled") return job.status;
+      if (job?.status !== "running" || !job.ownsLease) throw new ExportExecutionLeaseLostError();
 
       const blob = await tx.blob.findUnique({ where: { id: output.blobId } });
       if (!blob
@@ -286,28 +260,19 @@ export class PrismaExportStore {
       } else if (blob.storageKey !== output.canonicalStorageKey) {
         throw new Error("EXPORT_OUTPUT_BLOB_STORAGE_KEY_MISMATCH");
       }
-      const updated = await tx.exportJob.updateMany({
-        where: { id: exportJobId, status: "running", outputBlobId: null, finishedAt: null },
-        data: {
-          status: "succeeded",
-          outputBlobId: output.blobId,
-          failureCode: null,
-          failureDetail: null,
-          finishedAt: new Date(),
-          executionOwner: null,
-          executionLeaseId: null,
-          executionLeaseExpiresAt: null,
-          revision: { increment: 1 },
-        },
-      });
-      if (updated.count !== 1) throw new Error("EXPORT_PUBLICATION_LOST");
+      const updated = await tx.$executeRaw(Prisma.sql`
+        UPDATE "export_jobs"
+        SET "status" = 'succeeded', "output_blob_id" = ${output.blobId},
+            "finished_at" = ${databaseTime}, "updated_at" = ${databaseTime}, "revision" = "revision" + 1,
+            "execution_owner" = NULL, "execution_lease_id" = NULL, "execution_lease_expires_at" = NULL
+        WHERE "id" = ${exportJobId} AND "status" = 'running' AND ${ownsLease(lease)}
+      `);
+      if (updated !== 1) throw new ExportExecutionLeaseLostError();
       return "succeeded" as const;
     }, { maxWait: 10_000, timeout: 30_000 });
   }
 
-  /** Move an unreferenced pending reservation to the canonical key so Blob GC
-   * owns cleanup. Never delete the object here: another producer may have
-   * verified the same shared digest and may publish it concurrently. */
+  /** Leave pending bytes with Blob GC so a concurrent publisher can reuse them. */
   async abandonOutput(output: OutputReservation): Promise<void> {
     await this.db.$transaction(async (tx) => {
       await tx.$queryRaw(Prisma.sql`SELECT "id" FROM "blobs" WHERE "id" = ${output.blobId} FOR UPDATE`);
@@ -334,77 +299,45 @@ export class PrismaExportStore {
   }
 
   async acknowledgeCancellation(exportJobId: string, lease?: ExecutionLease): Promise<"cancelled" | "pending" | "terminal"> {
-    const now = new Date();
-    const updated = await this.db.exportJob.updateMany({
-      where: {
-        id: exportJobId,
-        status: "cancelling",
-        outputBlobId: null,
-        finishedAt: null,
-        ...(lease
-          ? { executionOwner: lease.owner, executionLeaseId: lease.id }
-          : {
-              OR: [
-                {
-                  executionOwner: null,
-                  executionLeaseId: null,
-                  executionLeaseExpiresAt: null,
-                },
-                { executionLeaseExpiresAt: { lte: now } },
-              ],
-            }),
-      },
-      data: {
-        status: "cancelled",
-        finishedAt: new Date(),
-        cancellationAcknowledgedAt: new Date(),
-        executionOwner: null,
-        executionLeaseId: null,
-        executionLeaseExpiresAt: null,
-        revision: { increment: 1 },
-      },
-    });
-    if (updated.count === 1) return "cancelled";
-    const current = await this.db.exportJob.findUnique({
-      where: { id: exportJobId },
-      select: { status: true },
-    });
-    return current?.status === "cancelling" ? "pending" : "terminal";
+    const eligible = lease ? ownsLease(lease)
+      : Prisma.sql`("execution_lease_expires_at" IS NULL OR "execution_lease_expires_at" <= clock_timestamp())`;
+    const updated = await this.db.$executeRaw(Prisma.sql`
+      UPDATE "export_jobs"
+      SET "status" = 'cancelled', "finished_at" = ${databaseTime},
+          "updated_at" = ${databaseTime}, "revision" = "revision" + 1,
+          "cancellation_acknowledged_at" = GREATEST(clock_timestamp(), "cancel_requested_at"),
+          "execution_owner" = NULL, "execution_lease_id" = NULL, "execution_lease_expires_at" = NULL
+      WHERE "id" = ${exportJobId} AND "status" = 'cancelling' AND ${eligible}
+        AND NOT EXISTS (SELECT 1 FROM "export_active_executions" WHERE "job_id" = ${exportJobId})
+    `);
+    if (updated === 1) return "cancelled";
+    const status = await this.status(exportJobId);
+    if (status === "cancelled") return "cancelled";
+    return status === "cancelling" ? "pending" : "terminal";
   }
 
-  async fail(exportJobId: string, code: string, detail: string) {
-    const updated = await this.db.exportJob.updateMany({
-      where: { id: exportJobId, status: { in: ["queued", "running"] }, outputBlobId: null, finishedAt: null },
-      data: {
-        status: "failed",
-        failureCode: code.slice(0, 120),
-        failureDetail: detail.slice(0, 4_000),
-        finishedAt: new Date(),
-        executionOwner: null,
-        executionLeaseId: null,
-        executionLeaseExpiresAt: null,
-        revision: { increment: 1 },
-      },
-    });
-    if (updated.count === 0) {
-      const status = await this.status(exportJobId);
-      if (!status || !["succeeded", "failed", "cancelling", "cancelled"].includes(status)) throw new Error("EXPORT_FAILURE_PUBLICATION_LOST");
-    }
+  async fail(exportJobId: string, code: string, detail: string, lease: ExecutionLease): Promise<boolean> {
+    const updated = await this.db.$executeRaw(Prisma.sql`
+      UPDATE "export_jobs"
+      SET "status" = 'failed', "failure_code" = ${code.slice(0, 120)}, "failure_detail" = ${detail.slice(0, 4_000)},
+          "finished_at" = ${databaseTime}, "updated_at" = ${databaseTime}, "revision" = "revision" + 1,
+          "execution_owner" = NULL, "execution_lease_id" = NULL, "execution_lease_expires_at" = NULL
+      WHERE "id" = ${exportJobId} AND "status" = 'running' AND ${ownsLease(lease)}
+    `);
+    return updated === 1;
   }
 
   async reconciliationCandidates(staleBefore: Date, limit = 100) {
-    return this.db.exportJob.findMany({
-      where: {
-        OR: [
-          { status: "queued" },
-          { status: "running", startedAt: { lt: staleBefore } },
-          { status: "cancelling" },
-        ],
-      },
-      orderBy: { updatedAt: "asc" },
-      take: limit,
-      select: { id: true, status: true },
-    });
+    return this.db.$queryRaw<{ id: string; status: "queued" | "running" | "cancelling" }[]>(Prisma.sql`
+      SELECT "id", "status"::text AS "status"
+      FROM "export_jobs"
+      WHERE "status" IN ('queued', 'cancelling')
+        OR ("status" = 'running' AND (
+          "execution_lease_expires_at" <= clock_timestamp()
+          OR ("execution_lease_expires_at" IS NULL AND "started_at" < (${staleBefore}::timestamptz AT TIME ZONE 'UTC'))
+        ))
+      ORDER BY "updated_at", "id" LIMIT ${limit}
+    `);
   }
 }
 
@@ -464,12 +397,12 @@ function stableKey(prefix: string, sha256: string, generation: number) {
   return `${prefix}/${sha256.slice(0, 2)}/${sha256.slice(2, 4)}/${sha256}/g${generation}`;
 }
 
-function newLease(owner: string): ExecutionLease {
-  return {
-    owner,
-    id: randomUUID(),
-    expiresAt: new Date(Date.now() + executionLeaseDurationMs),
-  };
+function leaseIdentity(lease: ExecutionLease) {
+  return Prisma.sql`"execution_owner" = ${lease.owner} AND "execution_lease_id" = ${lease.id}`;
+}
+
+function ownsLease(lease: ExecutionLease) {
+  return Prisma.sql`${leaseIdentity(lease)} AND "execution_lease_expires_at" > clock_timestamp()`;
 }
 
 function safeByteSize(value: bigint) {

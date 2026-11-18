@@ -1,4 +1,6 @@
 import { randomUUID } from "node:crypto";
+import { access, readFile } from "node:fs/promises";
+import { hostname } from "node:os";
 import {
   exportCancelQueue,
   exportCancelQueueOptions,
@@ -54,8 +56,10 @@ async function main() {
   const loader = new ExportSourceLoader(storage, config);
   const browser = new BrowserExportService(config);
   const processor = new ExportProcessor(store, loader, storage, browser, config);
-  const workerId = `export-worker:${randomUUID()}`;
-  const activeExports = new Map<string, Set<ActiveExportRun>>();
+  const container = await dockerIncarnation();
+  const workerId = container
+    ? `export-worker:${container.id}:${container.incarnation}:${randomUUID()}`
+    : `export-worker:${randomUUID()}`;
   await boss.work<ExportBuildJob>(exportBuildQueue, {
     includeMetadata: true,
     localConcurrency: config.concurrency,
@@ -65,36 +69,15 @@ async function main() {
     const job = jobs[0] as JobWithMetadata<ExportBuildJob> | undefined;
     if (!job) return;
     const payload = exportBuildJobSchema.parse(queuePayload(job.data));
-    const controller = new AbortController();
-    let resolveDone!: () => void;
-    const activeRun: ActiveExportRun = {
-      controller,
-      done: new Promise<void>((resolve) => { resolveDone = resolve; }),
-    };
-    const runs = activeExports.get(payload.exportJobId) ?? new Set<ActiveExportRun>();
-    runs.add(activeRun);
-    activeExports.set(payload.exportJobId, runs);
-    const abortFromQueue = () => {
-      if (!controller.signal.aborted) controller.abort(job.signal.reason ?? new Error("EXPORT_QUEUE_ABORTED"));
-    };
-    if (job.signal.aborted) abortFromQueue();
-    else job.signal.addEventListener("abort", abortFromQueue, { once: true });
-    try {
-      return await traceQueueConsume({
-        destination: exportBuildQueue,
-        messageId: job.id,
-        retryCount: job.retryCount,
-        retryLimit: job.retryLimit,
-      }, job.data, () => processor.process(payload.exportJobId, controller.signal, {
-        retryCount: job.retryCount,
-        retryLimit: job.retryLimit,
-      }, workerId));
-    } finally {
-      job.signal.removeEventListener("abort", abortFromQueue);
-      runs.delete(activeRun);
-      if (runs.size === 0) activeExports.delete(payload.exportJobId);
-      resolveDone();
-    }
+    return traceQueueConsume({
+      destination: exportBuildQueue,
+      messageId: job.id,
+      retryCount: job.retryCount,
+      retryLimit: job.retryLimit,
+    }, job.data, () => processor.process(payload.exportJobId, job.signal, {
+      retryCount: job.retryCount,
+      retryLimit: job.retryLimit,
+    }, workerId));
   });
 
   await boss.work<ExportCancelJob>(exportCancelQueue, {
@@ -112,18 +95,14 @@ async function main() {
       retryCount: job.retryCount,
       retryLimit: job.retryLimit,
     }, job.data, async () => {
-      const runs = activeExports.get(payload.exportJobId);
-      if (runs && runs.size > 0) {
-        for (const run of runs) run.controller.abort(new Error("EXPORT_CANCEL_REQUESTED"));
-        await Promise.all([...runs].map((run) => run.done));
-      }
       const acknowledged = await store.acknowledgeCancellation(payload.exportJobId);
       if (acknowledged === "pending") throw new Error("EXPORT_CANCELLATION_ACK_PENDING");
-      return { status: "cancelled" as const };
+      return { status: acknowledged };
     });
   });
 
   const reconcileOnce = async () => {
+    if (container) await store.retirePreviousContainerRuns(container.id, container.incarnation);
     const candidates = await store.reconciliationCandidates(new Date(Date.now() - config.staleRunningMs));
     for (const candidate of candidates) {
       try {
@@ -173,10 +152,23 @@ async function main() {
   console.log(`[export-worker] listening on ${exportBuildQueue}`);
 }
 
-type ActiveExportRun = {
-  controller: AbortController;
-  done: Promise<void>;
-};
+async function dockerIncarnation() {
+  const id = hostname();
+  if (process.platform !== "linux" || !/^[a-f0-9]{12}$/.test(id)) return null;
+  try {
+    await access("/.dockerenv");
+    const [boot, stat] = await Promise.all([
+      readFile("/proc/sys/kernel/random/boot_id", "utf8"),
+      readFile("/proc/1/stat", "utf8"),
+    ]);
+    // Field 22 is the start time in clock ticks. The command name may contain spaces.
+    const started = stat.slice(stat.lastIndexOf(")") + 2).split(" ")[19];
+    if (!/^[0-9a-f-]{36}$/.test(boot.trim()) || !started || !/^\d+$/.test(started)) return null;
+    return { id, incarnation: boot.trim() + "." + started };
+  } catch {
+    return null;
+  }
+}
 
 void main().catch(async (error) => {
   console.error("[export-worker] fatal", error);

@@ -89,8 +89,8 @@ suite("shared export object ownership on PostgreSQL", () => {
       }, { timeout: 60_000 });
       ({ ownerId, workspaceId, projectId, boardId, releaseId, exportJobId } = fixture);
       const job = await db.exportJob.findUniqueOrThrow({ where: { id: exportJobId } });
-      const started = await store.start(job.id);
-      expect(started.kind).toBe("run");
+      const started = await store.start(job.id, "shared-output-worker");
+      if (started.kind !== "run") throw new Error(`Expected execution lease, got ${started.kind}`);
 
       const first = await store.reserveOutput(identity);
       const second = await store.reserveOutput(identity);
@@ -105,7 +105,7 @@ suite("shared export object ownership on PostgreSQL", () => {
       expect(outcomes.filter((result) => result.status === "fulfilled")).toHaveLength(1);
       expect(outcomes.filter((result) => result.status === "rejected")).toHaveLength(1);
       await store.abandonOutput(first);
-      await expect(store.publishSucceeded(job.id, second)).resolves.toBe("succeeded");
+      await expect(store.publishSucceeded(job.id, second, started.lease)).resolves.toBe("succeeded");
       expect(objects.get(first.storageKey)).toEqual(bytes);
       const persisted = await db.blob.findUniqueOrThrow({ where: { id: first.blobId } });
       const completed = await db.exportJob.findUniqueOrThrow({ where: { id: job.id } });

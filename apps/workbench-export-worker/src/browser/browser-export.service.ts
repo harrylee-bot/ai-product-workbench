@@ -3,6 +3,8 @@ import { TerminalExportError } from "@workbench/workbench-export-core";
 import { chromium, type BrowserContext, type Page } from "playwright-core";
 import type { ExportWorkerConfig } from "../config.js";
 
+export class ExportBrowserCleanupError extends Error {}
+
 export class BrowserExportService {
   constructor(private readonly config: Pick<
     ExportWorkerConfig,
@@ -80,7 +82,11 @@ export class BrowserExportService {
     } finally {
       signal?.removeEventListener("abort", abort);
       await context?.close().catch(() => undefined);
-      await browser.close().catch(() => undefined);
+      try {
+        await browser.close();
+      } catch (cause) {
+        throw new ExportBrowserCleanupError("EXPORT_BROWSER_CLEANUP_UNCONFIRMED", { cause });
+      }
     }
   }
 }
