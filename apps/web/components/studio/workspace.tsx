@@ -198,6 +198,11 @@ export function StudioWorkspace({
   const [panel, setPanel] = useState<
     "plan" | "versions" | "feedback" | "delivery" | null
   >(null);
+  const panelTrigger = useRef<HTMLElement | null>(null);
+  const openPanel = (next: NonNullable<typeof panel>, trigger: HTMLElement | null) => {
+    panelTrigger.current = trigger;
+    setPanel(next);
+  };
   const [focused, setFocused] = useState(false);
   const [feedbackIds, setFeedbackIds] = useState<string[]>([]);
   const [feedbackFilter, setFeedbackFilter] = useState("all");
@@ -1436,7 +1441,7 @@ export function StudioWorkspace({
       <Main
         topBar={
           <>
-            <Link href="/" className="studio-wordmark" aria-label="项目首页">
+            <Link href="/" prefetch={false} className="studio-wordmark" aria-label="项目首页">
               W<span>工作台</span>
             </Link>
             <div className="studio-project-title">
@@ -1449,14 +1454,14 @@ export function StudioWorkspace({
             </div>
             <div className="studio-top-actions">
               <button
-                onClick={() => {
+                onClick={(event) => {
                   setView("pages");
-                  setPanel("versions");
+                  openPanel("versions", event.currentTarget);
                 }}
               >
                 版本
               </button>
-              <button onClick={() => setPanel("delivery")}>分享 / 导出</button>
+              <button onClick={(event) => openPanel("delivery", event.currentTarget)}>分享 / 导出</button>
             </div>
           </>
         }
@@ -1464,13 +1469,14 @@ export function StudioWorkspace({
           <DesignPanel
             tabs={navigation}
             selectedTab={panel ?? view}
-            onSelect={(value) => {
+            panelTrigger={panelTrigger}
+            onSelect={(value, trigger) => {
               if (
                 ["plan", "versions", "feedback", "delivery"].includes(
                   value ?? "",
                 )
               )
-                setPanel(value as typeof panel);
+                openPanel(value as NonNullable<typeof panel>, trigger);
               else {
                 setPanel(null);
                 if (value) setView(value as StudioView);
@@ -1560,7 +1566,7 @@ export function StudioWorkspace({
                 }}
                 onSelection={(next) => {
                   setInteraction(next);
-                  if (next) setPanel("feedback");
+                  if (next && panel !== "feedback") openPanel("feedback", null);
                 }}
                 previews={previews}
                 showDraft={showingDraft}
@@ -1586,9 +1592,9 @@ export function StudioWorkspace({
           <footer className="visual-composer-dock" data-focused={focused}>
             <div className="studio-composer-status-row">
             {(running || progress.error) && (
-              <div className="visual-progress" role="status">
+              <div className="visual-progress">
                 <span className={running ? "visual-pulse" : ""} />
-                <span>
+                <span role="status">
                   {progress.connection === "reconnecting"
                     ? "正在恢复连接，保留最后画面"
                     : progress.error
@@ -1602,7 +1608,7 @@ export function StudioWorkspace({
                     {Math.floor(elapsed / 60)}分{elapsed % 60}秒
                   </time>
                 )}
-                <button type="button" onClick={() => setPanel("plan")}>
+                <button type="button" onClick={(event) => openPanel("plan", event.currentTarget)}>
                   详情
                 </button>
                 {running && (

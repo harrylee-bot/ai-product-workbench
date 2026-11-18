@@ -5,6 +5,7 @@ import { createHash } from "node:crypto";
 import { mkdir, writeFile } from "node:fs/promises";
 import assert from "node:assert/strict";
 import { chromium } from "playwright";
+import { assertOnscreen } from "./studio-experience-checks.mjs";
 
 const origin = process.env.WORKBENCH_E2E_WEB_ORIGIN ?? "http://127.0.0.1:18930";
 const soakMs = Number(process.env.WORKBENCH_E2E_STUDIO_SOAK_MS ?? 0);
@@ -789,7 +790,7 @@ try {
 
   // 4. Keyboard Escape & accessible button names (AC-16, AC-29)
   await page.keyboard.press("Escape");
-  assert.equal(await page.locator("[data-testid=selection-outline]").count(), 0);
+  await page.locator("[data-testid=selection-outline]").waitFor({ state: "detached" });
   const unnamedButtons = await page.evaluate(() =>
     Array.from(document.querySelectorAll("button"))
       .filter(
@@ -1074,6 +1075,12 @@ try {
   await stageComposer.focus();
   await stageComposer.fill("尚未发送的后续需求");
   await stageStop.waitFor();
+  const usableViewport = {width:390,top:0,bottom:480};
+  await assertOnscreen(stageComposer, usableViewport);
+  await assertOnscreen(stageStop, usableViewport);
+  await assertOnscreen(ssePage.getByRole("button", { name:"发送需求", exact:true }), usableViewport);
+  assert(await ssePage.locator(".visual-progress time").evaluate(el => !el.closest("[role=status], [aria-live]")),
+    "The changing timer must stay outside the live progress announcement");
   assert(await viewportHeight() >= 140, "A reduced mobile viewport should show draft content above the Composer");
   const inputSettings = ssePage.getByRole("button", {name: "输入设置", exact: true});
   await inputSettings.click();

@@ -103,6 +103,7 @@ export function ChatInput({
       <textarea
         ref={textareaRef}
         rows={1}
+        enterKeyHint="send"
         aria-label="描述需求或修改"
         placeholder={
           discussion
