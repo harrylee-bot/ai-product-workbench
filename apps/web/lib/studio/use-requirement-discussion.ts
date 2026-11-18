@@ -550,7 +550,7 @@ export function useRequirementDiscussion({
       persist(local.value);
       const command = local.value.command;
       const receipt = await execute(command);
-      if (command.kind === "message") {
+      if (command.kind === "message" || command.kind === "turn") {
         // The receipt follows the original turn. Another tab may have
         // advanced the current session while this response was missing.
         void client.invalidateQueries({ queryKey: snapshotKey(command.sessionId) });
