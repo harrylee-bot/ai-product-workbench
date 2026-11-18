@@ -56,6 +56,9 @@ export async function runStudioLiveScenarios({ page, browser, webOrigin, outDir,
     result.recording = { fileName, startedAt: new Date().toISOString() };
     try {
       return await generate(result, prompt, expectedRevision);
+    } catch (error) {
+      if (result.status === "running") result.status = "failed";
+      throw error;
     } finally {
       await page.screencast.stop();
       result.recording.finishedAt = new Date().toISOString();
