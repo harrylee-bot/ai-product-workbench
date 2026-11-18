@@ -791,6 +791,42 @@ class DraftRepairScopeTests(unittest.IsolatedAsyncioTestCase):
                     self.assertTrue(all("repair" in call["args"] and "draft" not in call["args"] for call in declarations[1:]))
 
 
+    @unittest.skipIf(USING_IMPORT_STUBS, "requires LangChain message fields")
+    async def test_malformed_prd_retry_rejects_other_tools_and_stops_at_budget(self):
+        messages = automatic_prd_request().state["messages"][:-2]
+        middleware = self.middleware(["prd"])
+        context = {"workbench": {
+            "runId": "run-auto", "runtimeAttemptId": "attempt-auto", "requestedArtifactKinds": ["prd"],
+        }}
+        runtime = types.SimpleNamespace(context=context, execution_info=types.SimpleNamespace(task_id="task-0"))
+        key = middleware_module._PRD_TOOL_JSON_RETRY_KEY
+        limit = middleware_module._PRD_TOOL_JSON_RETRY_LIMIT
+
+        def invalid(name="workbench_artifact_draft_publish", finish="tool_calls"):
+            return middleware_module.AIMessage(
+                id="provider-repeat-id", content="",
+                invalid_tool_calls=[{"id": "bad-call", "name": name, "args": "}"}],
+                response_metadata={"finish_reason": finish},
+            )
+
+        state = {"messages": [*messages, invalid()]}
+        for bad in (invalid("workbench_runtime_result_submit"), invalid(finish="length")):
+            self.assertIsNone(middleware.after_model({"messages": [*messages, bad]}, runtime))
+        unrelated = {**context["workbench"], "runtimeAttemptId": "another-attempt"}
+        foreign = types.SimpleNamespace(context={"workbench": unrelated}, execution_info=runtime.execution_info)
+        self.assertIsNone(middleware.after_model(state, foreign))
+
+        for count in range(1, limit + 1):
+            reply = middleware.after_model(state, runtime)
+            self.assertEqual(reply["jump_to"], "model")
+            self.assertEqual(reply[key]["count"], count)
+            self.assertFalse(reply["messages"][0].invalid_tool_calls)
+            state[key] = reply[key]
+            self.assertEqual((await middleware.aafter_model(state, runtime))[key]["count"], count)
+            runtime.execution_info.task_id = f"task-{count}"
+        self.assertEqual(middleware.after_model(state, runtime), {"jump_to": "end"})
+
+
 class PrototypeTransportContextTests(unittest.IsolatedAsyncioTestCase):
     marker = "<workbench_prototype_transport_context>"
     reference_directory = SKILL_ROOT / "workbench" / "references"

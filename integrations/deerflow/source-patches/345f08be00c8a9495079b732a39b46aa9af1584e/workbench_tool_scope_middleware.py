@@ -206,6 +206,8 @@ _WORKBENCH_TOOL_NAMES = frozenset(
 )
 _LINKED_DRAFT_RECOVERY_KEY = "workbench_linked_draft_recovery"
 _LINKED_DRAFT_RECOVERY_LIMIT = 2
+_PRD_TOOL_JSON_RETRY_KEY = "workbench_prd_tool_json_retry"
+_PRD_TOOL_JSON_RETRY_LIMIT = 3
 
 
 class WorkbenchToolScopeState(AgentState, total=False):
@@ -213,6 +215,7 @@ class WorkbenchToolScopeState(AgentState, total=False):
     # exposed as product output. Never use a HumanMessage as a retry counter:
     # it would reset the current-turn stage and reference evidence.
     workbench_linked_draft_recovery: Annotated[dict[str, Any], PrivateStateAttr]
+    workbench_prd_tool_json_retry: Annotated[dict[str, Any], PrivateStateAttr]
 
 
 def _ordinary_model_stop(message: Any) -> bool:
@@ -1383,6 +1386,117 @@ class WorkbenchToolScopeMiddleware(AgentMiddleware[AgentState]):
                 return False
         return False
 
+    def _prd_tool_json_retry_scope(self, runtime: Any) -> bool:
+        if self._linked_recovery_scope(runtime):
+            return True
+        scope = _value(_value(runtime, "context"), "workbench")
+        return bool(
+            self._prd_auto_enabled and self._run_id and self._runtime_attempt_id
+            and _value(scope, "runId") == self._run_id
+            and _value(scope, "runtimeAttemptId") == self._runtime_attempt_id
+            and normalize_workbench_requested_artifact_kinds(_value(scope, "requestedArtifactKinds")) == ["prd"]
+        )
+
+    def _prd_tool_json_retry_marker(self, state: Any) -> Mapping[str, Any] | None:
+        marker = _value(state, _PRD_TOOL_JSON_RETRY_KEY)
+        if not isinstance(marker, Mapping) or (
+            marker.get("runId"), marker.get("runtimeAttemptId")
+        ) != (self._run_id, self._runtime_attempt_id):
+            return None
+        if (
+            type(marker.get("count")) is not int
+            or not 1 <= marker["count"] <= _PRD_TOOL_JSON_RETRY_LIMIT
+            or any(not isinstance(marker.get(key), str) or not marker[key] for key in ("messageId", "taskId"))
+            or type(marker.get("repair")) is not bool
+        ):
+            raise ValueError("WORKBENCH_PRD_TOOL_JSON_RETRY_STATE_INVALID")
+        return marker
+
+    def _recover_prd_tool_json(self, state: AgentState, runtime: Any) -> dict[str, Any] | None:
+        if (
+            not self._prd_tool_json_retry_scope(runtime)
+            or state.get("jump_to") is not None
+            or state.get("__interrupt__")
+            or state.get("interrupts")
+            or _value(_value(runtime, "control"), "drain_requested")
+        ):
+            return None
+        messages = _state_messages(state)
+        message = messages[-1] if messages else None
+        if not isinstance(message, AIMessage) or message.content or message.tool_calls:
+            return None
+        invalid = message.invalid_tool_calls
+        metadata, additional = message.response_metadata, message.additional_kwargs
+        raw_calls = additional.get("tool_calls")
+        if (
+            len(invalid) != 1 or invalid[0].get("name") != ARTIFACT_DRAFT_TOOL_NAME
+            or not isinstance(invalid[0].get("id"), str) or not invalid[0]["id"]
+            or not isinstance(invalid[0].get("args"), str) or not invalid[0]["args"]
+            or metadata.get("finish_reason") != "tool_calls" or additional.get("function_call")
+            or (raw_calls is not None and (
+                not isinstance(raw_calls, list) or len(raw_calls) != 1
+                or _value(raw_calls[0], "id") != invalid[0]["id"]
+                or _value(_value(raw_calls[0], "function"), "name") != ARTIFACT_DRAFT_TOOL_NAME
+            ))
+            or any(container.get(key) for container in (metadata, additional)
+                   for key in ("refusal", "safety_termination", "error", "deerflow_error_fallback"))
+            or any(container.get(key) not in (None, "tool_calls") for container in (metadata, additional)
+                   for key in ("finish_reason", "stop_reason"))
+        ):
+            return None
+        message_id = message.id
+        task_id = _value(_value(runtime, "execution_info"), "task_id")
+        if any(not isinstance(value, str) or not value for value in (message_id, task_id)):
+            return None
+        marker = self._prd_tool_json_retry_marker(state)
+        replay = marker is not None and marker["taskId"] == task_id
+        count = marker["count"] if marker else 0
+        history = {"messages": messages[:-1]}
+        references, reference_invalid = _reference_progress(history, self._run_id, self._runtime_attempt_id)
+        stages, stage_invalid = _stage_progress(history, self._run_id, self._runtime_attempt_id)
+        drafts, draft_invalid = _successful_prd_drafts(history, self._run_id, self._runtime_attempt_id)
+        if (
+            reference_invalid or stage_invalid or draft_invalid or drafts
+            or _missing_reference_indexes(references) or stages != len(PRD_STAGE_SEQUENCE)
+        ):
+            return None
+        if not replay and count >= _PRD_TOOL_JSON_RETRY_LIMIT:
+            return {"jump_to": "end"}
+        rejected = _unrepaired_linked_draft(history, self._run_id, self._runtime_attempt_id)
+        # The reducer replaces the malformed declaration using the same ID.
+        # Neither wire arguments nor an unanswered tool call go back to the model.
+        return {
+            "messages": [AIMessage(id=message_id, content="The PRD tool arguments were malformed.")],
+            "jump_to": "model",
+            _PRD_TOOL_JSON_RETRY_KEY: {
+                "runId": self._run_id, "runtimeAttemptId": self._runtime_attempt_id,
+                "messageId": message_id, "taskId": task_id, "count": count if replay else count + 1,
+                "repair": rejected is not None and rejected["artifactIndex"] == 0,
+            },
+        }
+
+    def _prd_tool_json_retry_policy(self, request: ModelRequest) -> str | None:
+        if not self._prd_tool_json_retry_scope(request.runtime):
+            return None
+        marker = self._prd_tool_json_retry_marker(request.state)
+        messages = _state_messages(request.state)
+        if not marker or not messages or _value(messages[-1], "id") != marker["messageId"]:
+            return None
+        next_call = (
+            "Use repair with baseCandidateChecksum copied from the latest rejected PRD Draft ACK. "
+            "Send a single small operation. If an introduction section is too large, add its fixed title first, "
+            "then add background, scope, and usageScenarios separately in later tool calls."
+            if marker["repair"] else
+            "Submit the initial PRD v3 draft with actual document-level fields and an empty sections object."
+        )
+        return (
+            "<workbench_prd_tool_json_retry>\n"
+            "Retry workbench_artifact_draft_publish now at artifact_index 0 as the only tool call. "
+            "Check every nested delimiter and quote before sending the JSON arguments. "
+            "Keep the already authored fields and use the existing generation stages and references. "
+            + next_call + "\n</workbench_prd_tool_json_retry>"
+        )
+
     def _linked_recovery_scope(self, runtime: Any) -> bool:
         context = _value(runtime, "context")
         scope = _value(context, "workbench")
@@ -1584,7 +1698,7 @@ class WorkbenchToolScopeMiddleware(AgentMiddleware[AgentState]):
                     if system_text.strip()
                     else policy
                 ))
-        repair_policy = self._linked_repair_policy(request)
+        repair_policy = self._prd_tool_json_retry_policy(request) or self._linked_repair_policy(request)
         if repair_policy is not None:
             system_message = overrides.get("system_message", request.system_message)
             system_text = system_message.text if system_message is not None else ""
@@ -2182,7 +2296,7 @@ class WorkbenchToolScopeMiddleware(AgentMiddleware[AgentState]):
     def after_model(self, state: AgentState, runtime: Any = None) -> dict[str, Any] | None:
         if self._workbench_run_enabled and _contains_llm_error_fallback(state.get("messages")):
             return {"jump_to": "end"}
-        return self._recover_linked_draft_stop(state, runtime)
+        return self._recover_prd_tool_json(state, runtime) or self._recover_linked_draft_stop(state, runtime)
 
     @override
     def wrap_tool_call(
@@ -2249,7 +2363,7 @@ class WorkbenchToolScopeMiddleware(AgentMiddleware[AgentState]):
     ) -> dict[str, Any] | None:
         if self._workbench_run_enabled and _contains_llm_error_fallback(state.get("messages")):
             return {"jump_to": "end"}
-        return self._recover_linked_draft_stop(state, runtime)
+        return self._recover_prd_tool_json(state, runtime) or self._recover_linked_draft_stop(state, runtime)
 
     @override
     async def awrap_tool_call(

@@ -95,37 +95,60 @@ export async function runStudioPrd({
   await page
     .getByRole("combobox", { name: "输出类型", exact: true })
     .selectOption("prd");
-  await page.getByRole("textbox", { name: "描述需求或修改" }).fill(prd.prompt);
-  const sent = post(/\/requirement-sessions\/[^/]+\/messages$/);
-  await page.getByRole("button", { name: "发送需求", exact: true }).click();
-  const msg = await sent;
-  assert.ok(msg.ok(), "Request discussion HTTP " + msg.status());
-  assert.equal(
-    msg.request().postDataJSON().generationRequest.modelId,
-    "deepseek-flash",
-  );
-  if (activityContract) assert.deepEqual(msg.request().postDataJSON().generationRequest.sourceIds, [prd.activityContract.sourceId]);
-  const session = (prd.sessionId = (await msg.json()).id);
+  async function sendDiscussion(text) {
+    await page.getByRole("textbox", { name: "描述需求或修改" }).fill(text);
+    const sent = post(/\/requirement-sessions\/[^/]+\/messages$/);
+    await page.getByRole("button", { name: "发送需求", exact: true }).click();
+    const response = await sent;
+    assert.ok(response.ok(), "Request discussion HTTP " + response.status());
+    assert.equal(
+      response.request().postDataJSON().generationRequest.modelId,
+      "deepseek-flash",
+    );
+    if (activityContract) assert.deepEqual(response.request().postDataJSON().generationRequest.sourceIds, [prd.activityContract.sourceId]);
+    return (await response.json()).id;
+  }
+  const session = (prd.sessionId = await sendDiscussion(prd.prompt));
   await checkpoint();
-  await waitUntil(
-    async () => {
-      const [s] = await query(
-        "SELECT s.state,t.status,t.failure_code FROM workbench.requirement_sessions s JOIN workbench.requirement_turns t ON t.id=s.current_turn_id WHERE s.id=$1",
-        [session],
-      );
-      if (s?.status === "failed")
-        throw fatal("Requirement discussion failed: " + s.failure_code);
-      if (s?.status === "succeeded" && activityContract) {
-        prd.activityDiscussion = await auditStudioActivityDiscussion({ query, source: prd.activityContract, sessionId: session });
-        await checkpoint();
-      }
-      if (s?.status === "succeeded" && s.state !== "ready_to_confirm")
-        throw fatal("Discussion needs clarification: " + s.state);
-      return s?.state === "ready_to_confirm";
-    },
-    "Confirmed business summary available",
-    240000,
-  );
+  const supplemental =
+    "确认本工单的业务决策：仅当前策划用户在现有区域授权范围内的活动管理 Web 列表。以活动发布时记录的渠道类型为准，不使用营销归因或外部系统。列表查询新增可选参数 channelType，全部时省略参数，企微对应 wecom，短信对应 sms。历史活动无渠道值时只在全部中显示。底层字段映射由既有活动查询实现负责，底表物理列名不影响本工单，无需新增数据源或角色。选项单选、即时查询，其余条件和权限保持，切换回第1页，失败保留条件原地重试。现有登录、导航、审核发布、报表只复用；未在本业务边界明确的实现选择记录为假设。仅 Web 文档，页面布局和设计沿用现有规范。";
+  prd.clarifications = [];
+  for (let attempt = 0; ; attempt++) {
+    const state = await waitUntil(
+      async () => {
+        const [row] = await query(
+          "SELECT s.state,t.status,t.failure_code FROM workbench.requirement_sessions s JOIN workbench.requirement_turns t ON t.id=s.current_turn_id WHERE s.id=$1",
+          [session],
+        );
+        if (row?.status === "failed")
+          throw fatal("Requirement discussion failed: " + row.failure_code);
+        return row?.status === "succeeded" && row.state;
+      },
+      "Flash discussion analysis",
+      240000,
+    );
+    if (activityContract) {
+      prd.activityDiscussion = await auditStudioActivityDiscussion({ query, source: prd.activityContract, sessionId: session });
+      await checkpoint();
+    }
+    if (state === "ready_to_confirm") break;
+    assert.equal(state, "needs_clarification");
+    assert.equal(
+      attempt,
+      0,
+      "The explicit answer should resolve the pending business questions",
+    );
+    const [summary] = await query(
+      "SELECT card FROM workbench.requirement_summaries WHERE session_id=$1 ORDER BY version DESC LIMIT 1",
+      [session],
+    );
+    const questions = summary.card.issues.map((issue) => issue.question);
+    assert.ok(questions.length, "Clarification state carries a visible business question");
+    await page.getByText(questions[0], { exact: true }).waitFor();
+    prd.clarifications.push({ questions, answer: supplemental });
+    await checkpoint();
+    assert.equal(await sendDiscussion(supplemental), session);
+  }
   const pending = await query(
     "SELECT id FROM workbench.runs WHERE project_id=$1",
     [project],

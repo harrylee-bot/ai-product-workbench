@@ -201,7 +201,10 @@ function enqueueWrite(key: string, session: ComposerSession) {
 }
 export function useStudioComposerSession(userId: string, projectId: string) {
   const key = `${userId}:${projectId}`;
-  const selection = useRef({ key, generation: 0, active: true });
+  const selection = useRef<{ key: string; generation: number; active: boolean; source?: number }>({
+    key, generation: 0, active: true,
+  });
+  const [sourceGeneration, setSourceGeneration] = useState<number>();
   if (selection.current.key !== key)
     selection.current = { key, generation: selection.current.generation + 1, active: true };
   useEffect(() => {
@@ -297,6 +300,8 @@ export function useStudioComposerSession(userId: string, projectId: string) {
   ) => {
     if (!selection.current.active || selection.current.key !== key) return false;
     selection.current.generation++;
+    selection.current.source = undefined;
+    setSourceGeneration(undefined);
     update((current) =>
       options && current.activeKey !== options.fromKey ? current : {
         ...current, activeKey: context.key,
@@ -308,24 +313,42 @@ export function useStudioComposerSession(userId: string, projectId: string) {
     );
     return true;
   };
+  const isSelectingSource = () =>
+    selection.current.active && selection.current.key === key &&
+    selection.current.source === selection.current.generation;
+  const selectSource = async (load: () => Promise<Parameters<typeof switchTo>>) => {
+    const generation = ++selection.current.generation;
+    selection.current.source = generation;
+    setSourceGeneration(generation);
+    const current = () => isSelectingSource() && selection.current.generation === generation;
+    try {
+      const input = await load();
+      if (!current()) return false;
+      return switchTo(...input);
+    } catch (error) {
+      if (!current()) return false;
+      throw error;
+    } finally {
+      if (current()) {
+        selection.current.source = undefined;
+        setSourceGeneration(undefined);
+      }
+    }
+  };
   return {
     ready,
     entry,
     entries: Object.values(session.entries),
     storageError,
+    sourcePending: sourceGeneration !== undefined && isSelectingSource(),
+    isSelectingSource,
     updateDraft: (transform: (draft: ComposerDraft) => ComposerDraft) =>
       updateEntry(entry.context.key, (current) => ({
         ...current,
         draft: transform(current.draft),
       })),
     switchTo,
-    beginSourceSelection: () => {
-      const generation = ++selection.current.generation;
-      return (...args: Parameters<typeof switchTo>) => {
-        if (!selection.current.active || selection.current.key !== key || selection.current.generation !== generation) return false;
-        return switchTo(...args);
-      };
-    },
+    selectSource,
     newContext,
     bindFileSource: (entryKey: string, file: File, sourceId: string) =>
       updateEntry(entryKey, (current) => ({

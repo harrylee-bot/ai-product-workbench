@@ -43,18 +43,18 @@ export async function runStudioLiveScenarios({ page, browser, webOrigin, outDir,
     return id;
   }
 
-  async function discussAndGenerate(projectId, output, prompt, label, source) {
+  async function discussAndGenerate(projectId, output, prompt, label, { expectedRevision, source } = {}) {
     step(`${label}: discuss, review, confirm once, and observe real generation`);
     const result = { label, projectId, output, status: "running", intermediate: [] };
     if (source) result.activityContract = source;
     evidence.scenarios.push(result);
-    if (output === "prd") return generate(result, prompt);
+    if (output === "prd") return generate(result, prompt, expectedRevision);
     const fileName = `${label}-generation.webm`;
     const videoPath = path.join(outDir, fileName);
     await page.screencast.start({ path: videoPath, size: { width: 1440, height: 900 } });
     result.recording = { fileName, startedAt: new Date().toISOString() };
     try {
-      return await generate(result, prompt);
+      return await generate(result, prompt, expectedRevision);
     } finally {
       await page.screencast.stop();
       result.recording.finishedAt = new Date().toISOString();
@@ -64,7 +64,7 @@ export async function runStudioLiveScenarios({ page, browser, webOrigin, outDir,
     }
   }
 
-  async function generate(result, prompt) {
+  async function generate(result, prompt, expectedRevision) {
     const { projectId, output, label, activityContract: source } = result;
     const beforeRuns = Number((await query("SELECT count(*) AS n FROM workbench.runs WHERE project_id=$1", [projectId]))[0].n);
     await page.getByRole("combobox", { name: "输出类型", exact: true }).selectOption(output);
@@ -75,6 +75,11 @@ export async function runStudioLiveScenarios({ page, browser, webOrigin, outDir,
     assert.ok(sent.ok(), `Discussion HTTP ${sent.status()}`);
     const session = await sent.json();
     result.sessionId = session.id;
+    if (expectedRevision) {
+      assert.equal(session.context.kind, "revision");
+      assert.equal(session.context.revisionId, expectedRevision.id);
+      assert.deepEqual(session.context.feedbackIds, [expectedRevision.feedbackId]);
+    }
     const discussionBody = sent.request().postDataJSON();
     assert.equal(discussionBody.generationRequest.modelId, "deepseek-flash");
     if (source) assert.deepEqual(discussionBody.generationRequest.sourceIds, [source.sourceId]);
@@ -224,8 +229,25 @@ export async function runStudioLiveScenarios({ page, browser, webOrigin, outDir,
     assert.equal(feedback?.anchor?.scope, "node");
     assert.equal(feedback.anchor.sourceRevisionId, sourceRevision.id);
     assert.equal(feedback.anchor.nodeId, selectedNodeId);
-    await page.getByRole("button", { name: "讨论所选 1 条批注", exact: true }).click();
-    const revision = await discussAndGenerate(prototypeProject, "prototype", "按照所选批注，仅在渠道筛选区域增加说明文字：仅显示当前授权区域内的活动。保持已有页面、功能和样式，不更改权限逻辑，不新增平台能力。" + interactionSpec, "revision");
+    const releaseInput = Promise.withResolvers();
+    const inputPath = `/prototype-v2/revisions/${sourceRevision.id}/input`;
+    await page.route(url => url.pathname.endsWith(inputPath), async (route) => {
+      await releaseInput.promise;
+      await route.continue();
+    }, { times: 1 });
+    try {
+      await page.getByRole("textbox", { name: "描述需求或修改" }).fill("保留在原讨论里的未发送草稿");
+      const send = page.getByRole("button", { name: "发送需求", exact: true });
+      await waitUntil(() => send.isEnabled(), "Original draft can be sent before the source selection");
+      await page.getByRole("button", { name: "讨论所选 1 条批注", exact: true }).click();
+      await page.getByText("正在读取所选版本与批注…", { exact: true }).waitFor();
+      assert.equal(await send.isDisabled(), true, "Sending must pause while the fixed revision input is still loading");
+      evidence.checks.selectionBlocksSend = true;
+    } finally {
+      releaseInput.resolve();
+    }
+    await page.getByText("已将所选批注带入需求讨论，尚未启动生成", { exact: true }).waitFor();
+    const revision = await discussAndGenerate(prototypeProject, "prototype", "按照所选批注，仅在渠道筛选区域增加说明文字：仅显示当前授权区域内的活动。保持已有页面、功能和样式，不更改权限逻辑，不新增平台能力。" + interactionSpec, "revision", { expectedRevision: { id: sourceRevision.id, feedbackId: feedback.id } });
     const [child] = await query("SELECT source_revision_id FROM workbench.prototype_plans WHERE id=$1", [revision.planId]);
     assert.equal(child.source_revision_id, sourceRevision.id);
     const [session] = await query("SELECT context FROM workbench.requirement_sessions WHERE id=$1", [revision.sessionId]);
@@ -253,7 +275,7 @@ export async function runStudioLiveScenarios({ page, browser, webOrigin, outDir,
     const jointProject = await createProject("联合");
     const source = activityContract ? await attachStudioActivityContract({ page, webOrigin, projectId: jointProject, query, waitUntil }) : undefined;
     const contractPrompt = source ? "请按本次所选的项目附件核对现有接口和查询参数。原型演示中的四条活动都有已知渠道，历史空渠道的产品规则写入需求文档。" : "";
-    const joint = await discussAndGenerate(jointProject, "both", increment + "同时输出需求文档和交互原型，范围与术语一致。" + interactionSpec + contractPrompt, "joint", source);
+    const joint = await discussAndGenerate(jointProject, "both", increment + "同时输出需求文档和交互原型，范围与术语一致。" + interactionSpec + contractPrompt, "joint", { source });
     const { auditJointOutputs } = await import("./studio-live-joint-outputs.mjs");
     evidence.joint = await auditJointOutputs(query, api, joint, page.frameLocator(".visual-paper iframe"));
     await checkpoint();
