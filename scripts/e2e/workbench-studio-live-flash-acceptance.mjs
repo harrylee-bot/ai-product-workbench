@@ -31,13 +31,13 @@ import {
 const root = path.resolve(fileURLToPath(new URL("../../", import.meta.url)));
 const runId = String(Date.now());
 const phase = process.env.WORKBENCH_STUDIO_LIVE_PHASE ?? "generation";
-assert.ok(["generation", "prd", "joint", "access", "files", "delivery"].includes(phase));
-const generates = ["generation", "prd", "joint"].includes(phase);
+assert.ok(["generation", "prd", "joint", "stop", "access", "files", "delivery"].includes(phase));
+const generates = ["generation", "prd", "joint", "stop"].includes(phase);
 const activityContract = process.env.WORKBENCH_STUDIO_LIVE_ACTIVITY_CONTRACT === "1";
 assert.ok(!activityContract || ["prd", "joint"].includes(phase), "The local activity contract applies to PRD and joint acceptance");
 const usesModelFixture = generates || phase === "access";
 const needsTemporal = generates || phase === "delivery";
-const suiteDirectory = { joint: "studio-live-joint", prd: "studio-live-prd", files: "file-delivery", delivery: "artifact-delivery" }[phase] ?? "studio-live-flash";
+const suiteDirectory = { stop: "studio-live-stop", joint: "studio-live-joint", prd: "studio-live-prd", files: "file-delivery", delivery: "artifact-delivery" }[phase] ?? "studio-live-flash";
 const auditRoot = path.join(root, "output/audit/1.0.0");
 const outDir = path.join(auditRoot, suiteDirectory, runId);
 await mkdir(outDir, { recursive: true });
@@ -708,6 +708,19 @@ try {
     const { runStudioPrd } = await import("./studio-live-prd-scenarios.mjs");
     await runStudioPrd({ page, webOrigin, outDir, runId, dbUrl, sql, waitUntil, evidence, step, activityContract });
   }
+  if (phase === "stop") {
+    const { runStudioLiveStopScenarios } = await import("./studio-live-stop-scenarios.mjs");
+    const providerRunStatus = async (attempt) => {
+      const route = "/threads/" + encodeURIComponent(attempt.external_thread_id) + "/runs/" + encodeURIComponent(attempt.external_run_id);
+      const response = await fetch(providerEnv.V2_PROVIDER_URL.replace(/\/$/, "") + route, {
+        headers: { "X-DeerFlow-Internal-Token": providerEnv.V2_PROVIDER_TOKEN, "X-DeerFlow-Owner-User-Id": attempt.owner_id },
+        signal: AbortSignal.timeout(5000),
+      });
+      assert.equal(response.status, 200, "Read actual DeerFlow Run status");
+      return (await response.json()).status;
+    };
+    await runStudioLiveStopScenarios({ page, webOrigin, outDir, runId, dbUrl, sql, waitUntil, evidence, step, temporalAddress: common.WORKBENCH_TEMPORAL_ADDRESS, providerRunStatus });
+  }
   if (phase === "delivery") {
     const { runStudioDeliveryFixture } = await import("./studio-live-delivery-scenarios.mjs");
     await runStudioDeliveryFixture({ page, browser, webOrigin, previewOrigin, outDir, runId, dbUrl, waitUntil, evidence, step, s3, bucket, chromiumPath, runCmd });
@@ -732,7 +745,7 @@ try {
     assert.deepEqual(evidence.networkErrors.filter(item => !evidence.unavailableGenerationDependencies.includes(item)), []);
   }
   evidence.status = "passed";
-  step(phase === "joint" ? "Completed real linked PRD and interactive prototype generation" : phase === "prd" ? "Completed real Studio PRD-only delivery" : phase === "generation" ? "Completed Studio real-stack deepseek-flash acceptance scenario" : phase === "delivery" ? "Completed fixed-source artifact delivery" : phase === "files" ? "Completed real Studio file delivery" : "Completed real local account and permission checks; no generation or storage acceptance");
+  step(phase === "stop" ? "Completed real Flash stop and frozen retry" : phase === "joint" ? "Completed real linked PRD and interactive prototype generation" : phase === "prd" ? "Completed real Studio PRD-only delivery" : phase === "generation" ? "Completed Studio real-stack deepseek-flash acceptance scenario" : phase === "delivery" ? "Completed fixed-source artifact delivery" : phase === "files" ? "Completed real Studio file delivery" : "Completed real local account and permission checks; no generation or storage acceptance");
 } catch (error) {
   evidence.status = "failed";
   evidence.failure = error.stack || String(error);
