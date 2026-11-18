@@ -1,15 +1,15 @@
 # 可视化原型 V2 后端实施账本
 
-对应 PRD 1.3。服务入口和用例位置可用于重跑，当前执行结果维护在 `docs/audit/1.0.0.md`。开发用例存在的条目在业务验收前保持待验。
+基线为[本地正式 PRD 1.3](visual-prototype-frontend-rebuild-requirements.md)。本文记录服务入口、实现合同与固定候选的核对操作。执行结果、证据边界、待验项和发布状态见[现行审计](../audit/1.0.0.md)，Studio 操作见[前端实施账本](frontend-rebuild-delivery-plan.md)。
 
 ## 服务入口
 
 | 领域 | 执行职责 | 源码 | 对应用例 |
 | --- | --- | --- | --- |
 | 项目 | 项目、角色与启动快照 | [apps/workbench-api/src/modules/projects/projects.service.ts](../../apps/workbench-api/src/modules/projects/projects.service.ts) | [projects.postgres.spec.ts](../../apps/workbench-api/test/projects.postgres.spec.ts) |
-| 需求 | 讨论、消息、幂等、摘要和确认 | [apps/workbench-api/src/modules/requirements/requirements.service.ts](../../apps/workbench-api/src/modules/requirements/requirements.service.ts) | [requirements-http.postgres.spec.ts](../../apps/workbench-api/test/requirements-http.postgres.spec.ts) |
+| 需求 | 讨论、会话消息分页、幂等、摘要和确认 | [HTTP 控制器](../../apps/workbench-api/src/modules/requirements/requirements.controller.ts)、[需求服务](../../apps/workbench-api/src/modules/requirements/requirements.service.ts) | [requirements-http.postgres.spec.ts](../../apps/workbench-api/test/requirements-http.postgres.spec.ts) |
 | 依据 | 当前发布、权限、检索与知识引用 | [apps/workbench-api/src/modules/requirements/requirement-knowledge.ts](../../apps/workbench-api/src/modules/requirements/requirement-knowledge.ts) | [knowledge-retrieval.postgres.spec.ts](../../apps/workbench-api/test/knowledge-retrieval.postgres.spec.ts) |
-| 分析 | 模型分析、结构化输出与失败 | [apps/workbench-api/src/modules/requirements/requirements.processor.ts](../../apps/workbench-api/src/modules/requirements/requirements.processor.ts) | [requirement-model.spec.ts](../../apps/workbench-api/test/requirement-model.spec.ts) |
+| 分析 | 结构化 Flash 分析。配置名 `deepseek-4.1-flash` 映射到唯一允许的请求模型 ID `deepseek-flash` | [需求分析执行器](../../apps/workbench-api/src/modules/requirements/requirements.processor.ts)、[模型约束](../../apps/workbench-api/src/modules/requirements/requirement-model.ts) | [requirement-model.spec.ts](../../apps/workbench-api/test/requirement-model.spec.ts) |
 | 门禁 | 生成前确认、冻结请求和派发 | [apps/workbench-api/src/modules/requirements/requirement-generation-gate.ts](../../apps/workbench-api/src/modules/requirements/requirement-generation-gate.ts) | [requirements.postgres.spec.ts](../../apps/workbench-api/test/requirements.postgres.spec.ts) |
 | 原型 | 计划、版本、批注、冻结和交付 | [apps/workbench-api/src/modules/prototypes/prototype-v2.service.ts](../../apps/workbench-api/src/modules/prototypes/prototype-v2.service.ts) | [prototype-v2.postgres.spec.ts](../../apps/workbench-api/test/prototype-v2.postgres.spec.ts) |
 | 事件 | 事件游标、重放和运行进度 | [apps/workbench-api/src/modules/runs/run-event.store.ts](../../apps/workbench-api/src/modules/runs/run-event.store.ts) | [run-event-stream.service.spec.ts](../../apps/workbench-api/test/run-event-stream.service.spec.ts) |
@@ -27,29 +27,37 @@
 | 合同 | OpenAPI 路由、响应与前后端共同类型 | [packages/workbench-contracts/src/http-routes.ts](../../packages/workbench-contracts/src/http-routes.ts) | 参见前端实施账本与合同验证 |
 | 前端 | Studio 舞台和本机交互，服务依赖列在同行 | [apps/web/components/studio/workspace.tsx](../../apps/web/components/studio/workspace.tsx) | 参见前端实施账本与合同验证 |
 
+## 导出取消与迁移合同
+
+| 范围 | 持久化合同与入口 | 可重跑的验收 |
+| --- | --- | --- |
+| BE-012 · 跨 Worker 执行租约 | [导出 API](../../apps/workbench-api/src/modules/exports/exports.service.ts)按项目写权限和 revision 接受取消，将任务写为 `cancelling` 并在同一事务登记取消队列。[执行器](../../apps/workbench-export-worker/src/export/export.processor.ts)通过 PostgreSQL 持有和续约执行租约，将同一取消信号传给浏览器、构建和上传。[存储层](../../apps/workbench-export-worker/src/export/export.store.ts)以租约令牌约束提交。续租只更新内部字段。 | 重跑[执行器回归](../../apps/workbench-export-worker/test/export.processor.spec.ts)和[双连接 fencing 回归](../../apps/workbench-export-worker/test/export-fencing.postgres.spec.ts)，验证旧持有者无法续租和提交成功或失败，并核对公开 revision 与终态。 |
+| BE-013 · 清理完成后确认取消 | Worker 按执行租约记录资源占用。[资源占用迁移](../../packages/workbench-db/prisma/migrations/20261118140000_export_active_resources/migration.sql)支持跨进程读取。即使执行租约自然过期，其他取消消费者仍需等待旧持有者清理浏览器、上传和对象预留，资源释放后才能确认 `cancelled`。排队但从未执行的任务可由取消消费者确认；共享对象由预留和 Blob GC 协调。 | 重跑[双进程 PgBoss 回归](../../apps/workbench-api/test/export-worker-processes.postgres.spec.ts)和[共享对象回归](../../apps/workbench-export-worker/test/s3-export-shared-cancellation.postgres.spec.ts)。分别验证活动及自然过期租约、暂停时仍开放的上传、清理屏障及取消队列事务回滚。 |
+| BE-014 · 保留原第 99 号迁移 | [原始 SQL](../../packages/workbench-db/prisma/migrations/20261118110000_export_job_execution_leases/migration.sql)固定 SHA-256 `20a1e8961f949616cc972e18f4d745a7f4e8bec13a5884151be2cf6cea1f7a26`。[迁移入口](../../scripts/deploy-workbench-migrations.mjs)用 PostgreSQL advisory lock 串行部署。若 #99 尚未登记，在单个事务中回填历史 `cancelling` 所需时间，以原校验和登记 #99，再执行前向迁移；已登记原 #99 的库直接走前向迁移。 | 重跑[带历史数据的升级用例](../../apps/workbench-export-worker/test/export-upgrade.postgres.spec.ts)和[迁移合同](../../scripts/workbench-migration-contract.test.mjs)。分别从 98 和已应用原版 99 升级，覆盖六种历史导出状态及 Prisma 记录；模拟历史回填提交后登记失败及两个部署程序竞争重试。 |
+
 ## 功能需求
 
-| 编号 | 功能 | 涉及领域 | 当前实施与验证 |
+| 编号 | 功能 | 涉及领域 | 实施合同与验证操作 |
 | --- | --- | --- | --- |
 | FR-01 | 统一项目工作区 | 项目、前端 | 已有上表服务或界面入口，须在固定候选执行下表对应操作 |
 | FR-02 | 参考视频对应的视觉语言 | 前端、预览 | 已有上表服务或界面入口，须在固定候选执行下表对应操作 |
 | FR-03 | 新信息架构中的完整产品功能 | 项目、账户、运行、导出 | 已有上表服务或界面入口，须在固定候选执行下表对应操作 |
-| FR-04 | 底部中央 Composer | 前端、需求 | 缩短移动视口与桌面草稿面积已测，真机软键盘待验 |
+| FR-04 | 底部中央 Composer | 前端、需求 | 见前端 Composer 合同。展开/收起讨论面板并以缩短视口聚焦，核对草稿可见性与底部安全区 |
 | FR-05 | 完整保留输入能力 | 资料、需求、门禁 | 已有上表服务或界面入口，须在固定候选执行下表对应操作 |
 | FR-06 | 新建与修改意图 | 原型、需求、门禁 | 已有上表服务或界面入口，须在固定候选执行下表对应操作 |
-| FR-07 | 对话记录与生成期间输入 | 需求、事件 | 单会话真实 HTTP 分页和追加通过，真实生成中追加待验 |
+| FR-07 | 对话记录与生成期间输入 | 需求、事件 | `GET /requirement-sessions/{sessionId}/messages` 按授权账号与会话绑定 sequence 游标；交错会话并在翻页中追加，核对刷新后独立历史和冻结基线 |
 | FR-08 | 可审阅计划 | 需求、分析、门禁 | 已有上表服务或界面入口，须在固定候选执行下表对应操作 |
 | FR-09 | 真实进度条与阶段说明 | 事件、运行 | 已有上表服务或界面入口，须在固定候选执行下表对应操作 |
-| FR-10 | 生成过程中的页面展示 | 生成、事件 | 受控 SSE 已测，真实模型两次有效中间变化待验 |
+| FR-10 | 生成过程中的页面展示 | 生成、事件 | Worker 按运行作用域回传真实 Flash 草稿。对照终态前至少两次可见变化、数据库事件序号及冻结产物 |
 | FR-11 | 页面、图层与当前处理位置 | 生成、事件、定位 | 已有上表服务或界面入口，须在固定候选执行下表对应操作 |
 | FR-12 | 草稿覆盖范围与最终切换 | 事件、预览、原型 | 已有上表服务或界面入口，须在固定候选执行下表对应操作 |
-| FR-13 | 恢复、断线与事件一致性 | 事件、运行 | 受控 SSE 断线与刷新已测，真实运行重连待验 |
-| FR-14 | 取消、失败、重试与审批等待 | 运行、原型 | 已有上表服务或界面入口，须在固定候选执行下表对应操作 |
+| FR-13 | 恢复、断线与事件一致性 | 事件、运行 | 真实 HTTP SSE 由授权快照与持久游标续接。中断流后重取快照，核对缺口、旧 attempt 以及终态 |
+| FR-14 | 取消、失败、重试与审批等待 | 运行、原型 | 正式 Plan/Run 提交停止并等待清理，按冻结请求重试；分别核对排队取消、执行取消与基础设施中断恢复 |
 | FR-15 | 多页面目录与总览 | 原型、预览 | 已有上表服务或界面入口，须在固定候选执行下表对应操作 |
 | FR-16 | 视口、缩放与移动 | 前端、预览 | 已有上表服务或界面入口，须在固定候选执行下表对应操作 |
 | FR-17 | 浏览模式 | 预览、原型 | 已有上表服务或界面入口，须在固定候选执行下表对应操作 |
 | FR-18 | 选择模式与图层定位 | 前端、定位 | 已有上表服务或界面入口，须在固定候选执行下表对应操作 |
-| FR-19 | 几何定位与覆盖层 | 前端、定位 | 受控 Chromium 几何已测，跨浏览器待验 |
+| FR-19 | 几何定位与覆盖层 | 前端、定位 | 预览经沙箱消息桥返回定位。比较 Chromium/WebKit 在不同 DPR、滚动和缩放条件的覆盖层，另复核原生浏览器 |
 | FR-20 | 元素批注与普通批注 | 原型、定位 | 已有上表服务或界面入口，须在固定候选执行下表对应操作 |
 | FR-21 | 批注驱动修改 | 原型、需求、门禁 | 已有上表服务或界面入口，须在固定候选执行下表对应操作 |
 | FR-22 | 版本历史与差异 | 原型、差异 | 已有上表服务或界面入口，须在固定候选执行下表对应操作 |
@@ -57,28 +65,28 @@
 | FR-24 | 需求文档与原型关联 | 关系、运行 | 已有上表服务或界面入口，须在固定候选执行下表对应操作 |
 | FR-25 | 文件、导入源、知识与设计上下文 | 资料、依据 | 资料与推理检索需对账已发布 release |
 | FR-26 | 分享与公开访问 | 分享、权限 | 已有上表服务或界面入口，须在固定候选执行下表对应操作 |
-| FR-27 | HTML / React 导出 | 原型、导出 | 导出终态组件回归通过，真实 HTML/React 下载构建待验 |
+| FR-27 | HTML / React 导出 | 原型、导出 | 按固定版本请求 HTML/React，再核对下载字节、SHA-256 与独立运行；取消和升级合同见 BE-012 至 BE-014 |
 | FR-28 | 项目、账户、运行与发布入口 | 账户、项目、运行 | 已有上表服务或界面入口，须在固定候选执行下表对应操作 |
 | FR-29 | 加载、空态、失败与冲突 | 权限、合同 | 已有上表服务或界面入口，须在固定候选执行下表对应操作 |
-| FR-30 | 响应式布局 | 前端 | 390×480 Chromium 聚焦视口已测，移动软键盘待验 |
-| FR-31 | 键盘、读屏和减弱动画 | 前端、事件 | 实际 VoiceOver、Safari 待验 |
+| FR-30 | 响应式布局 | 前端 | 以规定视口与缩短可视高度操作输入及交付，实际移动软键盘复核见现行审计 |
+| FR-31 | 键盘、读屏和减弱动画 | 前端、事件 | 沿键盘顺序确认焦点、通知和减弱动画下的操作；以实际 VoiceOver 和 Safari 核对 |
 | FR-32 | 页面与上下文恢复 | 项目、需求、权限 | 已有上表服务或界面入口，须在固定候选执行下表对应操作 |
 | FR-33 | 全新前端架构与旧实现退出 | 前端、合同 | 已有上表服务或界面入口，须在固定候选执行下表对应操作 |
 | FR-34 | 开源应用基线与二次开发 | 前端、预览 | 已有上表服务或界面入口，须在固定候选执行下表对应操作 |
-| FR-35 | 普通发送先交流需求 | 需求、分析 | 仅讨论的三种受控路径与 HTTP 基础已测，真实分析待验 |
+| FR-35 | 普通发送先交流需求 | 需求、分析 | 正式 Flash 分析按讨论回合执行。普通发送核对零 Run，再以显式确认触发生成 |
 | FR-36 | 平台能力依据与增量边界 | 依据、分析 | 已有上表服务或界面入口，须在固定候选执行下表对应操作 |
 | FR-37 | 少量关键澄清与结构化就绪 | 分析、需求 | 已有上表服务或界面入口，须在固定候选执行下表对应操作 |
 | FR-38 | 可审阅的增量改动确认卡 | 需求、依据 | 已有上表服务或界面入口，须在固定候选执行下表对应操作 |
-| FR-39 | 一次显式确认与不可变基线 | 门禁、需求 | 受控丢回执和三路径确认通过，真实冻结链待验 |
+| FR-39 | 一次显式确认与不可变基线 | 门禁、需求 | 以真实摘要版本与校验值建立一次不可变确认，重放动作并核对冻结基线、派发和 Run |
 | FR-40 | 三种产物共用需求基线 | 门禁、关系、生成 | 已有上表服务或界面入口，须在固定候选执行下表对应操作 |
-| FR-41 | 讨论、确认与并发恢复 | 需求、门禁、权限 | 会话归属、翻页中追加和游标隔离已测，并发确认仍需全链路验收 |
-| FR-42 | 生成期间追加需求 | 需求、门禁、事件 | 界面后续追加已测，真实生成及刷新后基线对账待验 |
+| FR-41 | 讨论、确认与并发恢复 | 需求、门禁、权限 | 会话归属、分页和幂等恢复采用正式合同；在双标签下比较过期请求、回执重放及原运行 |
+| FR-42 | 生成期间追加需求 | 需求、门禁、事件 | 新要求另存讨论回合。比较实际生成中的追加、刷新及重试前后稳定的确认和冻结输入 |
 | FR-43 | 知识缺口、冲突与范围呈现 | 依据、权限、分析 | 已有上表服务或界面入口，须在固定候选执行下表对应操作 |
-| FR-44 | 前后端分工与真实接入边界 | 合同、需求、生成 | 正式分页合同、服务和 Studio 已接，统一候选联验待办 |
+| FR-44 | 前后端分工与真实接入边界 | 合同、需求、生成 | 正式需求 API、发布知识检索和 Flash 分析均已接入；Run、Runtime 及冻结产物按正式合同回读。联验范围见现行审计 |
 
 ## 验收操作
 
-| 编号 | 关联需求 | 服务落点 | 固定候选仍须核对的操作 |
+| 编号 | 关联需求 | 服务落点 | 固定候选的验收操作 |
 | --- | --- | --- | --- |
 | AC-01 | FR-01、FR-02 | 项目、前端、预览 | 同一项目查看桌面默认、展开目录、展开工具面板 |
 | AC-02 | FR-03、FR-28 | 项目、账户、运行、导出 | 按产品能力清单逐项完成新界面中的操作 |
