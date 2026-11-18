@@ -183,7 +183,7 @@ export async function runStudioLiveScenarios({ page, browser, webOrigin, outDir,
     const projectId = await createProject("联合");
     const result = await discussAndGenerate(projectId, "both", increment + "同时输出需求文档和交互原型，范围与术语一致。" + interactionSpec, "joint");
     const { auditJointOutputs } = await import("./studio-live-joint-outputs.mjs");
-    evidence.joint = await auditJointOutputs(query, result);
+    evidence.joint = await auditJointOutputs(query, result, page.frameLocator(".visual-paper iframe"));
     await checkpoint();
     return projectId;
   }
