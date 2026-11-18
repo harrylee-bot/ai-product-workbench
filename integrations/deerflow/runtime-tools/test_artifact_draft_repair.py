@@ -5,8 +5,11 @@ import json
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import patch
 
 from test_artifact_draft_tool import anonymous_acceptance_collision, workbench_artifact_draft_publish
+from deerflow_workbench_tools.knowledge_tool import workbench_knowledge_retrieve
+from deerflow_workbench_tools.runtime_result_tool import workbench_runtime_result_submit
 from deerflow_workbench_tools.artifact_draft_repair import (
     ArtifactDraftRepairPathError,
     _apply_repair,
@@ -60,6 +63,59 @@ class ArtifactDraftRepairTests(unittest.TestCase):
         self.assertEqual(self.runtime.state["messages"][:3],original["messages"])
         self.assertNotIn("repair",artifact)
         self.assertEqual(latest_accepted_artifact_draft(self.runtime.state,run_id="run_1",runtime_attempt_id="attempt_1",artifact_index=0),self.draft)
+
+    def install_retrieval(self):
+        citation = self.draft["citations"][0]
+        name = "workbench_knowledge_retrieve"
+        self.runtime.tool_call_id = "retrieve"
+        self.runtime.context["secrets"] = {"WORKBENCH_KNOWLEDGE_CAPABILITY": json.dumps({"releaseId": "release"})}
+        self.runtime.state["messages"].append({"type": "ai", "tool_calls": [
+            {"name": name, "id": "retrieve", "args": {"query": "activity filters"}},
+        ]})
+        body = json.dumps({"protocol": "workbench.knowledge-retrieval-result.v1", "items": [{"citation": citation}],
+                           "evidence": {"release": {"id": "release"}, "mode": "hybrid", "routeScope": "production"}})
+        with patch("deerflow_workbench_tools.knowledge_tool.retrieve_knowledge", return_value=body):
+            content, receipt = workbench_knowledge_retrieve.func(self.runtime, "activity filters")
+        self.runtime.state["messages"].append({"type": "tool", "name": name, "tool_call_id": "retrieve",
+                                              "status": "success", "content": content, "artifact": receipt})
+        return receipt
+
+    def test_retrieved_locator_reports_exact_field_and_allows_checksum_bound_repair(self):
+        self.install_retrieval()
+        draft = copy.deepcopy(self.draft)
+        locator = self.draft["citations"][0]["locator"]
+        for citations in (draft["citations"], draft["content"]["citations"]):
+            citations[0]["locator"]["heading"] = "Transcribed heading"
+        raw = {"protocol": "workbench.runtime.result.v1", "message": "Ready", "artifacts": [draft]}
+        content, attempt = workbench_runtime_result_submit.func(self.runtime, raw)
+        self.assertFalse(attempt["ok"])
+        self.assertEqual(json.loads(content)["issues"][0]["path"], ["artifacts", 0, "citations", 0, "locator"])
+        ack, artifact = self.publish("initial", draft=draft)
+        self.assertFalse(ack["ok"])
+        self.assertNotIn("draft", artifact)
+        self.assertEqual([issue["path"] for issue in ack["issues"]],
+                         [["citations", 0, "locator"], ["content", "citations", 0, "locator"]])
+        self.assertEqual(json.loads(ack["issues"][0]["message"].split(": ", 1)[1]), locator)
+        repaired, artifact = self.publish("repair1", repair=self.repair(ack, [
+            {"op": "replace", "path": "/citations/0/locator", "value": locator},
+            {"op": "replace", "path": "/content/citations/0/locator", "value": locator},
+        ]))
+        self.assertTrue(repaired["ok"], repaired["issues"])
+        content, submitted = workbench_runtime_result_submit.func(
+            self.runtime, {**raw, "artifacts": [repaired["finalSubmissionArtifact"]]},
+        )
+        self.assertTrue(json.loads(content)["ok"])
+        self.assertEqual(submitted["result"]["artifacts"][0], self.draft)
+
+    def test_different_attempt_or_modified_receipt_cannot_supply_correction(self):
+        receipt = self.install_retrieval()
+        draft = copy.deepcopy(self.draft)
+        for citations in (draft["citations"], draft["content"]["citations"]):
+            citations[0]["locator"]["heading"] = "Different heading"
+        for key in ("runtimeAttemptId", "toolCallId", "releaseId", "contentSha256"):
+            with self.subTest(key=key), patch.dict(receipt, {key: "unrelated"}):
+                content, _ = workbench_artifact_draft_publish.func(self.runtime, 0, draft=draft)
+                self.assertTrue(json.loads(content)["ok"])
 
     def test_reconstructs_multiple_failed_repairs_then_accepts_final_repair(self):
         ack,_=self.reject()

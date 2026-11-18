@@ -8,7 +8,7 @@ from langchain.tools import tool
 
 from deerflow.tools.types import Runtime
 
-from .artifact_draft_repair import resolve_runtime_result_draft_references
+from .artifact_draft_repair import resolve_runtime_result_draft_references, validate_retrieved_citations
 from .prd_reference_normalizer import normalize_runtime_result_prd_references
 from .runtime_result_validator import validate_runtime_result
 
@@ -86,7 +86,10 @@ def workbench_runtime_result_submit(
         requested_artifact_kinds=scope.get("requestedArtifactKinds"),
     )
     normalizations.extend(reference_normalizations)
-    validation = validate_runtime_result(normalized_candidate)
+    validation = validate_retrieved_citations(
+        validate_runtime_result(normalized_candidate), getattr(runtime, "state", None),
+        run_id, runtime_attempt_id, normalized_candidate, envelope=True,
+    )
     if validation["ok"] is not True:
         artifact = _validated_artifact(
             run_id,

@@ -8,7 +8,7 @@ from langchain.tools import tool
 
 from deerflow.tools.types import Runtime
 
-from .artifact_draft_repair import resolve_artifact_draft_candidate, template_restore_operation
+from .artifact_draft_repair import resolve_artifact_draft_candidate, template_restore_operation, validate_retrieved_citations
 from .runtime_result_validator import validate_runtime_artifact_draft
 
 
@@ -87,7 +87,9 @@ def workbench_artifact_draft_publish(
     if not isinstance(draft_kind, str) or draft_kind not in requested_artifact_kinds:
         raise ValueError("WORKBENCH_ARTIFACT_DRAFT_KIND_NOT_REQUESTED")
 
-    validation = validate_runtime_artifact_draft(draft)
+    validation = validate_retrieved_citations(
+        validate_runtime_artifact_draft(draft), getattr(runtime, "state", None), run_id, runtime_attempt_id, draft,
+    )
     payload: dict[str, Any] = {
         "protocol": ARTIFACT_DRAFT_PROTOCOL,
         "runId": run_id,

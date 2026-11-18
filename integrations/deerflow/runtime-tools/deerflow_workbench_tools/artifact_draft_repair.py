@@ -138,6 +138,79 @@ def _history_index(messages: list[Any]) -> tuple[dict[str, tuple[int, Mapping[st
     return declarations, responses
 
 
+def _retrieved_citations(state: Any, run_id: str, runtime_attempt_id: str) -> dict[str, list[dict]]:
+    try:
+        messages = _turn_messages(state)
+        declarations, responses = _history_index(messages)
+    except ValueError:
+        return {}
+    retrieved: dict[str, list[dict]] = {}
+    for call_id, (position, call, _) in declarations.items():
+        paired = responses.get(call_id, [])
+        if call.get("name") != "workbench_knowledge_retrieve" or len(paired) != 1 or paired[0][0] <= position:
+            continue
+        message = paired[0][1]
+        receipt = _value(message, "artifact")
+        content = _value(message, "content")
+        if (_value(message, "name") != call["name"] or _value(message, "status") != "success"
+                or not isinstance(receipt, dict) or not isinstance(content, str)
+                or receipt.get("protocol") != "workbench.knowledge-receipt.v1"
+                or receipt.get("runId") != run_id or receipt.get("runtimeAttemptId") != runtime_attempt_id
+                or receipt.get("toolCallId") != call_id or not receipt.get("releaseId")
+                or receipt.get("contentSha256") != hashlib.sha256(content.encode("utf-8")).hexdigest()):
+            continue
+        try:
+            result = json.loads(content)
+            evidence = result["evidence"]
+            if (result["protocol"] != "workbench.knowledge-retrieval-result.v1"
+                    or evidence["release"]["id"] != receipt["releaseId"]
+                    or evidence["routeScope"] != "production" or evidence["mode"] != "hybrid"):
+                continue
+            items = [item["citation"] for item in result["items"]]
+            if any(not isinstance(item, dict) or not isinstance(item.get("id"), str) for item in items):
+                continue
+        except (TypeError, ValueError, KeyError):
+            continue
+        for citation in items:
+            retrieved.setdefault(citation["id"], []).append(citation)
+    return retrieved
+
+
+def validate_retrieved_citations(validation: dict[str, Any], state: Any, run_id: str,
+                                runtime_attempt_id: str, candidate: dict[str, Any], *,
+                                envelope: bool = False) -> dict[str, Any]:
+    """Catch transcription errors while the model can still repair its submission."""
+    if validation["ok"] is not True:
+        return validation
+    retrieved = _retrieved_citations(state, run_id, runtime_attempt_id)
+    if not retrieved:
+        return validation
+    issues: list[dict[str, Any]] = []
+    for index, artifact in enumerate(candidate["artifacts"] if envelope else [candidate]):
+        # A revised PRD can also cite the previous frozen version. Only the Worker
+        # can resolve that version and authenticate its retained citations.
+        if artifact["kind"] == "prd" and artifact["operation"]["kind"] == "revise":
+            continue
+        prefix = ["artifacts", index] if envelope else []
+        for number, citation in enumerate(artifact["citations"]):
+            known = retrieved.get(citation["id"], [])
+            if not known or citation in known:
+                continue
+            expected = min(known, key=lambda row: sum(row.get(k) != v for k, v in citation.items()))
+            for key, value in expected.items():
+                if key in citation and citation[key] == value:
+                    continue
+                guidance = "Copy this exact retrieved value: " + _json(value)
+                paths = [["citations", number, key]]
+                if artifact["kind"] == "prd":
+                    paths.append(["content", "citations", number, key])
+                for path in paths:
+                    issues.append({"code": "custom", "path": prefix + path, "message": guidance})
+                if len(issues) >= 12:
+                    return {**validation, "ok": False, "issues": issues}
+    return {**validation, "ok": False, "issues": issues} if issues else validation
+
+
 def _validate_pairing(declarations: Mapping[str, Any], responses: Mapping[str, Any], *, pending_id: str | None = None) -> None:
     for call_id, paired in responses.items():
         declared = declarations.get(call_id)
@@ -173,7 +246,7 @@ def _unexecuted_response(message: Any) -> bool:
             and content.startswith("Error:"))
 
 
-def _verify_response(message: Any, candidate: dict[str, Any], *, call_id: str,
+def _verify_response(message: Any, candidate: dict[str, Any], state: Any, *, call_id: str,
                      run_id: str, runtime_attempt_id: str, artifact_index: int) -> bool:
     if _value(message, "name") != DRAFT_TOOL or _value(message, "status") != "success":
         _fail("RESPONSE_INVALID")
@@ -202,7 +275,9 @@ def _verify_response(message: Any, candidate: dict[str, Any], *, call_id: str,
             or ack.get("ok") is not ok or type(ack.get("artifactIndex")) is not int
             or ack.get("artifactIndex") != artifact_index or not _checksum(ack.get("candidateChecksum"))):
         _fail("ACK_INVALID")
-    validation = validate_runtime_artifact_draft(candidate)
+    validation = validate_retrieved_citations(
+        validate_runtime_artifact_draft(candidate), state, run_id, runtime_attempt_id, candidate,
+    )
     if validation.get("ok") is not ok or validation.get("candidateChecksum") != ack["candidateChecksum"]:
         _fail("BASE_CHECKSUM_MISMATCH")
     if _json(validation.get("issues")) != _json(ack.get("issues")):
@@ -411,7 +486,8 @@ def resolve_artifact_draft_candidate(
             if batch_size != 1 or latest is None or latest_checksum is None:
                 _fail("CAUSAL_HISTORY_INVALID")
             reconstructed = _apply_repair(latest, historical_repair, latest_checksum)
-        if _verify_response(paired[0][1], reconstructed, call_id=call_id, run_id=run_id,
+        prefix = {"messages": [{"type": "human"}, *messages[:position]]}
+        if _verify_response(paired[0][1], reconstructed, prefix, call_id=call_id, run_id=run_id,
                             runtime_attempt_id=runtime_attempt_id, artifact_index=artifact_index):
             _fail("DRAFT_ALREADY_ACCEPTED")
         latest = reconstructed
@@ -457,7 +533,7 @@ def latest_accepted_artifact_draft(
             prefix, run_id=run_id, runtime_attempt_id=runtime_attempt_id,
             tool_call_id=call_id, artifact_index=artifact_index, draft=draft, repair=repair,
         )
-        if _verify_response(paired[0][1], reconstructed, call_id=call_id, run_id=run_id,
+        if _verify_response(paired[0][1], reconstructed, prefix, call_id=call_id, run_id=run_id,
                             runtime_attempt_id=runtime_attempt_id, artifact_index=artifact_index):
             return reconstructed
     except (ValueError, TypeError, KeyError, RuntimeError):
