@@ -32,7 +32,7 @@ export type ExportJobRecord = {
   selectionArtifactVersionId: string | null;
   selectionScreenId: string | null;
   selectionNodeIds: string[];
-  status: "queued" | "running" | "succeeded" | "failed" | "cancelled";
+  status: "queued" | "running" | "cancelling" | "succeeded" | "failed" | "cancelled";
   revision: number;
   options: unknown;
   failureCode: string | null;
@@ -68,6 +68,10 @@ export function mapExportJob(record: ExportJobRecord): ExportJob {
         sha256: record.outputBlob.sha256,
         fileName: outputFileName(record.id, record.format, record.packaging),
       };
+  // Blob quarantine changes the public projection even though the immutable
+  // ExportJob row has not been rewritten. Advance the public validator so a
+  // cached succeeded response cannot survive as a 304 after output disappears.
+  const publicRevision = outputUnavailable ? record.revision + 1 : record.revision;
   return exportJobSchema.parse({
     id: record.id,
     releaseId: requireValue(record.releaseId, "releaseId"),
@@ -76,7 +80,7 @@ export function mapExportJob(record: ExportJobRecord): ExportJob {
     packaging: record.packaging,
     selection,
     status: outputUnavailable ? "failed" : record.status,
-    revision: record.revision,
+    revision: publicRevision,
     options: publicOptions,
     output,
     failure: outputUnavailable

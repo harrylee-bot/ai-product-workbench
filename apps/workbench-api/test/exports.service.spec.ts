@@ -261,6 +261,8 @@ describe("ExportJob API invariants", () => {
     const result = await service.list("principal_1", "project_1");
     expect(result.items).toHaveLength(2);
     expect(result.items[0]).toMatchObject({ id: "export_broken", status: "failed", output: null, failure: { code: "EXPORT_OUTPUT_BLOB_NOT_READABLE" } });
+    expect(result.items[0]?.revision).toBe(1);
+    expect(result.items[1]?.revision).toBe(0);
     expect(result.items[1]).toMatchObject({ id: "export_1", status: "succeeded", output: { blobId: "blob_1" }, failure: null });
     await expect(service.get("principal_1", "export_broken")).resolves.toEqual(result.items[0]);
     await expect(service.getContent("principal_1", "export_broken")).rejects.toMatchObject({ status: 409 });
