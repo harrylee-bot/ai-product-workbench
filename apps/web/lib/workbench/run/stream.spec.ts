@@ -50,6 +50,26 @@ describe("Run SSE stream", () => {
     ]);
   });
 
+  it.each(["eof", "broken"])("returns to the snapshot owner after a productive %s disconnect when reconnects are disabled", async (end) => {
+    const frame = new TextEncoder().encode(serialize(event(1, "run.queued", { position: null })));
+    let sent = false;
+    const fetch = vi.fn(async () => {
+      if (sent) return sseResponse([serialize(event(2, "run.completed", { artifactCount: 0 }))]);
+      return new Response(new ReadableStream<Uint8Array>({
+        pull(controller) {
+          if (!sent) { sent = true; controller.enqueue(frame); }
+          else if (end === "broken") controller.error(new Error("connection lost"));
+          else controller.close();
+        },
+      }), { headers: { "content-type": "text/event-stream" } });
+    });
+    await expect(subscribeRunEvents({
+      runId: "run-1", baseUrl: "http://workbench.test/api/v1",
+      fetch, onEvent: () => undefined, maxReconnectAttempts: 0, reconnectDelayMs: 0,
+    })).rejects.toMatchObject({ name: "RunStreamDisconnectedError", lastSequence: 1 });
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
   it("rejects a sequence gap instead of presenting incomplete state", async () => {
     const request = readRunEventStream({
       runId: "run-1",

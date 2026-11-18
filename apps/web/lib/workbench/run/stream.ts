@@ -80,7 +80,6 @@ export async function subscribeRunEvents({
 
   while (true) {
     throwIfAborted(signal);
-    let receivedOnConnection = 0;
 
     try {
       const result = await readRunEventStream({
@@ -100,7 +99,7 @@ export async function subscribeRunEvents({
             throw new RunEventHandlerError(event, { cause: error });
           }
           cursor = event.sequence;
-          receivedOnConnection += 1;
+          consecutiveFailures = 0;
         },
       });
       cursor = result.lastSequence;
@@ -109,7 +108,7 @@ export async function subscribeRunEvents({
         return { lastSequence: cursor, terminalEvent: result.terminalEvent };
       }
 
-      consecutiveFailures = receivedOnConnection > 0 ? 0 : consecutiveFailures + 1;
+      consecutiveFailures += 1;
       if (consecutiveFailures > maxReconnectAttempts) {
         throw new RunStreamDisconnectedError(runId, cursor);
       }
@@ -127,7 +126,7 @@ export async function subscribeRunEvents({
       if (isAbortError(error) || signal?.aborted) throw error;
       if (!isRetryableStreamError(error)) throw error;
 
-      consecutiveFailures = receivedOnConnection > 0 ? 0 : consecutiveFailures + 1;
+      consecutiveFailures += 1;
       if (consecutiveFailures > maxReconnectAttempts) {
         throw new RunStreamDisconnectedError(runId, cursor, { cause: error });
       }
