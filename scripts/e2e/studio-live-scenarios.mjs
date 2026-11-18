@@ -60,18 +60,19 @@ export async function runStudioLiveScenarios({ page, browser, webOrigin, outDir,
       const [state] = await query("SELECT s.state, t.status AS turn_status, t.failure_code FROM workbench.requirement_sessions s LEFT JOIN workbench.requirement_turns t ON t.id=s.current_turn_id WHERE s.id=$1", [session.id]);
       if (state?.turn_status === "failed") throw Object.assign(new Error(`Requirement turn failed: ${state.failure_code}`), { fatal: true });
       if (state?.turn_status === "succeeded" && state.state !== "ready_to_confirm") {
-        result.discussionText = await page.locator(".studio-requirement").innerText().catch(() => "");
+        result.discussionText = await page.getByRole("region", { name: "需求交流", exact: true }).innerText().catch(() => "");
         throw Object.assign(new Error(`Sufficient request was not ready: ${state.state}`), { fatal: true });
       }
       return state?.state === "ready_to_confirm";
     }, "ready confirmation from real Flash", 180000, 1000);
     assert.equal(Number((await query("SELECT count(*) AS n FROM workbench.runs WHERE project_id=$1", [projectId]))[0].n), beforeRuns, "Ordinary discussion must not start a Run");
     result.ordinarySendCreatedNoRun = true;
-    await page.getByRole("region", { name: "本次改动确认", exact: true }).waitFor();
-    result.confirmationCard = await page.getByRole("region", { name: "本次改动确认", exact: true }).innerText();
+    const review = page.getByRole("article", { name: "本次改动确认", exact: true });
+    await review.waitFor();
+    result.confirmationCard = await review.innerText();
     assert.equal(await page.getByRole("checkbox", { name: "我同意将以上平台级改造纳入本次范围" }).count(), 0, "Increment must not unexpectedly add platform changes");
     const reply = page.waitForResponse(r => r.request().method() === "POST" && new URL(r.url()).pathname === `/api/v1/requirement-sessions/${session.id}/confirm`);
-    await page.getByRole("button", { name: "确认需求并生成", exact: true }).click();
+    await review.getByRole("button", { name: "确认需求并生成", exact: true }).click();
     const accepted = await reply;
     assert.ok(accepted.ok(), `Confirmation HTTP ${accepted.status()}`);
     const receipt = (await accepted.json()).confirmation;
