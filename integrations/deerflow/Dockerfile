@@ -110,7 +110,7 @@ RUN --network=none cd /app/backend \
 
 # Source metadata must not invalidate dependency layers on every app-only fix.
 ARG WORKBENCH_SOURCE_COMMIT
-ARG WORKBENCH_DEERFLOW_TOOL_SCOPE_PATCH_SHA256=9506de343d1aa4dec584e3d9ede894f1a551fa1e534e7f503fcb5bea4722f10a
+ARG WORKBENCH_DEERFLOW_TOOL_SCOPE_PATCH_SHA256=f89a8d52b4b58405f20037593a34e8ef1cca18d2dae4392a8ab2788d5cad21e2
 LABEL org.opencontainers.image.title="产品工作台 DeerFlow Runtime" \
       org.opencontainers.image.revision="${WORKBENCH_SOURCE_COMMIT}" \
       io.workbench.deerflow.base-image="${DEERFLOW_BASE_IMAGE}" \
