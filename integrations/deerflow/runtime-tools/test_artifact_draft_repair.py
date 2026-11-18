@@ -175,8 +175,17 @@ class ArtifactDraftRepairTests(unittest.TestCase):
         ack, artifact = self.publish("initial", draft=baseline)
         self.assertFalse(ack["ok"])
         self.assertNotIn("draft", artifact)
+        intro_path = "/content/sections/introduction"
+        intro = sections_to_write["introduction"]
+        usage_path = f"{intro_path}/usageScenarios"
+        usage = intro["usageScenarios"]
         ordered_steps = [
-            ("/content/sections/introduction", sections_to_write["introduction"]),
+            (intro_path, {"title": intro["title"]}),
+            (f"{intro_path}/background", intro["background"]),
+            (f"{intro_path}/scope", intro["scope"]),
+            (usage_path, {"title": usage["title"]}),
+            (f"{usage_path}/blocks", usage["blocks"]),
+            (f"{usage_path}/channelTable", usage["channelTable"]),
             ("/content/sections/businessRequirements", sections_to_write["businessRequirements"]),
             *[("/content/sections/businessRequirements/functionSections/-", section) for section in parts],
             ("/content/sections/degradation", sections_to_write["degradation"]),
@@ -186,7 +195,11 @@ class ArtifactDraftRepairTests(unittest.TestCase):
             if index and path.endswith("/-") and ordered_steps[index - 1][0] == path:
                 self.assertNotIn(path, ack["prdAssembly"]["missingPaths"])
             else:
-                self.assertEqual(ack["prdAssembly"]["nextOperation"], {"op": "add", "path": path})
+                expected = {"op": "add", "path": path}
+                if path in (intro_path, usage_path):
+                    expected["value"] = value
+                self.assertEqual(ack["prdAssembly"]["nextOperation"], expected)
+                self.assertIn("one small complete value", ack["repairInstruction"])
             ack, artifact = self.publish(f"add_{index}", repair=self.repair(ack, [
                 {"op": "add", "path": path, "value": value},
             ]))

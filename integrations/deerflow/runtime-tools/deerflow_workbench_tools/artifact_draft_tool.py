@@ -30,8 +30,11 @@ def workbench_artifact_draft_publish(
 
     Call this after an Artifact becomes complete enough to render. Publish another
     checkpoint only after its renderable content materially changes.
-    For a PRD, call workbench_generation_stage_update(stage="validating-prd")
-    immediately before the first draft call, after drafting-prd.
+    For a PRD, first wait for the validating-prd stage ACK after drafting-prd.
+    Send the initial PRD draft by itself with the actual document-level fields
+    and content.sections set to {}. Then assemble the sections through checksum-
+    bound repairs, using one small value per tool call. The validator accepts
+    only the complete PRD.
     For a new or edited Prototype, begin its real phases in this run with
     workbench_generation_stage_update in order: design-system, mapping-components,
     creating-flows, generating-ui. Record one phase per model tool-call batch and
@@ -52,7 +55,7 @@ def workbench_artifact_draft_publish(
 
     Args:
         artifact_index: Stable zero-based index used by the final Runtime result.
-        draft: One complete Runtime Artifact draft object, omitted when using repair.
+        draft: Initial PRD scaffold or one complete draft for another kind. Omit when using repair.
         repair: Local edits to the latest rejected candidate: baseCandidateChecksum and operations (at most 24, at most 64 KiB). Omit draft. Never edit kind, schemaVersion, or operation.
     """
     if isinstance(artifact_index, bool) or not isinstance(artifact_index, int):
@@ -158,8 +161,11 @@ def workbench_artifact_draft_publish(
             response["prdAssembly"] = assembly
             response["repairInstruction"] = (
                 "Continue assembling this PRD with separate, small repairs. Use one JSON Pointer "
-                "add for the next missing part with the latest candidateChecksum. When authoring "
-                "businessRequirements, start with its title, summary, pageLinks and an empty functionSections. "
+                "add for prdAssembly.nextOperation with the latest candidateChecksum. Copy the fixed value "
+                "when supplied. Otherwise write one small complete value at that path. Add the introduction "
+                "title, background, scope, and usageScenarios in separate calls. Add the usageScenarios title, "
+                "blocks, and channelTable separately. When authoring businessRequirements, start with its "
+                "title, summary, pageLinks and an empty functionSections. "
                 "Append one complete function section at a time at "
                 "/content/sections/businessRequirements/functionSections/-. If a section is large, "
                 "start with its header and append blocks individually. Add the remaining functions "
@@ -205,9 +211,27 @@ def _prd_assembly_progress(candidate: dict[str, Any], issues: list[Any]) -> dict
     if any(key in candidate for key in section_keys) or _misplaced_prd_sections(candidate, issues):
         return None
     base = "/content/sections"
-    missing = [f"{base}/{key}" for key in section_keys[:2] if key not in sections]
+    introduction_path = f"{base}/introduction"
+    usage_path = f"{introduction_path}/usageScenarios"
+    introduction = sections.get("introduction")
+    missing = []
+    if "introduction" not in sections:
+        missing.append(introduction_path)
+    elif isinstance(introduction, dict):
+        missing.extend(
+            f"{introduction_path}/{key}" for key in ("title", "background", "scope", "usageScenarios")
+            if key not in introduction
+        )
+        usage = introduction.get("usageScenarios")
+        if isinstance(usage, dict):
+            missing.extend(
+                f"{usage_path}/{key}" for key in ("title", "blocks", "channelTable")
+                if key not in usage
+            )
     business = sections.get("businessRequirements")
-    if isinstance(business, dict):
+    if "businessRequirements" not in sections:
+        missing.append(f"{base}/businessRequirements")
+    elif isinstance(business, dict):
         functions = f"{base}/businessRequirements/functionSections"
         if "functionSections" not in business:
             missing.append(functions)
@@ -216,7 +240,17 @@ def _prd_assembly_progress(candidate: dict[str, Any], issues: list[Any]) -> dict
     missing.extend(f"{base}/{key}" for key in section_keys[2:] if key not in sections)
     if not missing:
         return None
-    return {"missingPaths": missing, "nextOperation": {"op": "add", "path": missing[0]}}
+    next_path = missing[0]
+    operation: dict[str, Any] = {"op": "add", "path": next_path}
+    fixed_values = {
+        introduction_path: {"title": "1 引言"},
+        f"{introduction_path}/title": "1 引言",
+        usage_path: {"title": "1.3使用场景（必填）"},
+        f"{usage_path}/title": "1.3使用场景（必填）",
+    }
+    if next_path in fixed_values:
+        operation["value"] = fixed_values[next_path]
+    return {"missingPaths": missing, "nextOperation": operation}
 
 
 def _artifact_draft_repair_instruction(candidate: Any, issues: list[Any]) -> str:
