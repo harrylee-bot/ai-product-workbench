@@ -6032,7 +6032,7 @@ export interface components {
             detail: string | null;
         };
         /** @enum {string} */
-        ExportStatus: "queued" | "running" | "succeeded" | "failed" | "cancelled";
+        ExportStatus: "queued" | "running" | "cancelling" | "succeeded" | "failed" | "cancelled";
         /** @description Export timestamps, output, and failure fields match the durable lifecycle state; enforced by the runtime Zod contract. */
         ExportJob: {
             id: string;

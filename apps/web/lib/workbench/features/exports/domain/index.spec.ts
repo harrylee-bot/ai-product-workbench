@@ -113,3 +113,5 @@ describe("Export restore selection", () => {
     ])?.id).toBe("export-new");
   });
 });
+
+it('restores a cancelling export so cleanup polling survives refresh',()=>{const job={...base,status:'cancelling' as const};expect(selectLatestRestorableExport([job])).toBe(job);});

@@ -20,6 +20,7 @@ import { documentUrl } from "./relations";
 const exportStatus = {
   queued: "排队中",
   running: "生成中",
+  cancelling: "正在取消",
   succeeded: "可下载",
   failed: "失败",
   cancelled: "已取消",

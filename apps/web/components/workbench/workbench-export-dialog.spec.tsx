@@ -280,6 +280,33 @@ describe("ExportDialog persisted job state", () => {
     await waitFor(() => expect(onCancelExport).toHaveBeenCalledOnce());
   });
 
+  it("keeps an accepted generic cancellation in a non-actionable polling state", () => {
+    const onCancelExport = vi.fn(async () => undefined);
+    render(<ExportDialog
+      activeExport={exportJob({ format: "html", status: "cancelling" })}
+      activeExportSelection={selection}
+      busy={false}
+      capabilities={capabilities}
+      capabilitiesError={null}
+      capabilitiesPending={false}
+      error={null}
+      hasSelection
+      onCancelExport={onCancelExport}
+      onCopyCode={vi.fn()}
+      onDownload={vi.fn()}
+      onOpenChange={vi.fn()}
+      onRetryCapabilities={vi.fn(async () => undefined)}
+      onSelectAll={vi.fn()}
+      onStartExport={vi.fn()}
+      open
+      selection={selection}
+    />);
+
+    const action = screen.getByRole("button", { name: "正在取消 Copy code..." });
+    expect((action as HTMLButtonElement).disabled).toBe(true);
+    expect(onCancelExport).not.toHaveBeenCalled();
+  });
+
   it("reports an Export capability query failure and retries the capability query", async () => {
     const onRetryCapabilities = vi.fn(async () => undefined);
     render(<ExportDialog
@@ -313,7 +340,7 @@ function exportJob({
   status,
 }: {
   format: "html" | "react" | "docx" | "pdf";
-  status: "queued" | "succeeded";
+  status: "queued" | "running" | "cancelling" | "succeeded" | "failed" | "cancelled";
 }) {
   const timestamp = "2026-07-15T00:00:00.000Z";
   return {

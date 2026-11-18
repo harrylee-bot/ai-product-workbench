@@ -1,7 +1,7 @@
 import type { ExportJob } from "@workbench/workbench-contracts";
 
 export function needsExportPolling(job?: ExportJob) {
-  return job?.status === "queued" || job?.status === "running";
+  return job?.status === "queued" || job?.status === "running" || job?.status === "cancelling";
 }
 
 /** Pick the newest export whose progress or result is useful after refresh. */

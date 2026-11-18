@@ -144,6 +144,7 @@ export function ExportDialog({
     && exportSelectionsEqual(activeExportSelection, effectiveSelection);
   const exportRunning = activeExportMatches
     && (activeExport.status === "queued" || activeExport.status === "running");
+  const exportCancelling = activeExportMatches && activeExport.status === "cancelling";
   const exportSucceeded = activeExportMatches && activeExport.status === "succeeded";
   const downloadReady = exportSucceeded && descriptor.delivery === "download";
   const downloadFailed = downloadReady && Boolean(error);
@@ -160,9 +161,12 @@ export function ExportDialog({
   const exportButtonLabel = busy
     ? exportRunning
       ? `正在取消 ${selectedTarget}...`
+      : exportCancelling ? `正在取消 ${selectedTarget}...`
       : downloadReady ? "正在下载文件..." : "正在生成导出文件..."
     : exportRunning
       ? `取消导出 ${selectedTarget}`
+      : exportCancelling
+        ? `正在取消 ${selectedTarget}...`
       : exportSucceeded
         ? descriptor.delivery === "clipboard"
           ? "复制代码"
@@ -276,7 +280,7 @@ export function ExportDialog({
                 <button
                   aria-busy={busy}
                   className="h-[32px] w-full rounded-full bg-[#c9b3ff] text-[13px] font-semibold text-[#241832]"
-                  disabled={busy || ((!exportRunning && !exportSucceeded)
+                  disabled={busy || exportCancelling || ((!exportRunning && !exportSucceeded)
                     && (!selectedAvailability.available || capabilitiesPending))}
                   onClick={() => {
                     let operation: Promise<unknown>;

@@ -15,6 +15,7 @@ export const exportPackagingSchema = z.enum(["single_file", "zip"]);
 export const exportStatusSchema = z.enum([
   "queued",
   "running",
+  "cancelling",
   "succeeded",
   "failed",
   "cancelled",
@@ -147,6 +148,11 @@ export const exportJobSchema = z.object({
       path: ["status"],
       message: "Running exports require startedAt and cannot have terminal state",
     });
+  }
+  if (job.status === "cancelling" && (
+    job.finishedAt !== null || job.output !== null || job.failure !== null
+  )) {
+    context.addIssue({code:z.ZodIssueCode.custom,path:["status"],message:"Cancelling exports await executor cleanup and cannot carry terminal state"});
   }
   if (job.status === "succeeded" && (
     job.startedAt === null
