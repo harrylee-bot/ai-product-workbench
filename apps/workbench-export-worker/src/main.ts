@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import {
   exportCancelQueue,
   exportCancelQueueOptions,
@@ -53,6 +54,7 @@ async function main() {
   const loader = new ExportSourceLoader(storage, config);
   const browser = new BrowserExportService(config);
   const processor = new ExportProcessor(store, loader, storage, browser, config);
+  const workerId = `export-worker:${randomUUID()}`;
   const activeExports = new Map<string, Set<ActiveExportRun>>();
   await boss.work<ExportBuildJob>(exportBuildQueue, {
     includeMetadata: true,
@@ -86,7 +88,7 @@ async function main() {
       }, job.data, () => processor.process(payload.exportJobId, controller.signal, {
         retryCount: job.retryCount,
         retryLimit: job.retryLimit,
-      }));
+      }, workerId));
     } finally {
       job.signal.removeEventListener("abort", abortFromQueue);
       runs.delete(activeRun);

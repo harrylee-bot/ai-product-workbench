@@ -20,6 +20,7 @@ const suite = databaseUrl && existsSync(chromiumExecutablePath) ? describe : des
 suite("export cancellation PostgreSQL and browser fixture", () => {
   it("aborts an S3 write after API cancellation and only then publishes cancelled", async () => {
     const db = new PrismaClient({ datasourceUrl: databaseUrl! });
+    const remoteDb = new PrismaClient({ datasourceUrl: databaseUrl! });
     const suffix = `${Date.now()}_${Math.random().toString(36).slice(2)}`;
     let ownerId: string | undefined;
     let workspaceId: string | undefined;
@@ -145,6 +146,10 @@ suite("export cancellation PostgreSQL and browser fixture", () => {
         pendingBlobPrefix: "pending/exports",
         canonicalBlobPrefix: "blobs",
       });
+      const remoteStore = new PrismaExportStore(remoteDb, {
+        pendingBlobPrefix: "pending/exports",
+        canonicalBlobPrefix: "blobs",
+      });
       const request = exportRequest();
       const expectedOutput = await buildExport(request);
       outputSha256 = createHash("sha256").update(expectedOutput.bytes).digest("hex");
@@ -186,7 +191,7 @@ suite("export cancellation PostgreSQL and browser fixture", () => {
         { catalog: () => ({ formats: [] }) } as never,
       );
       controller = new AbortController();
-      processing = processor.process(exportJobId, controller.signal, { retryCount: 0, retryLimit: 0 });
+      processing = processor.process(exportJobId, controller.signal, { retryCount: 0, retryLimit: 0 }, "worker-a");
       let timeout: ReturnType<typeof setTimeout> | undefined;
       await Promise.race([
         putStarted,
@@ -196,7 +201,7 @@ suite("export cancellation PostgreSQL and browser fixture", () => {
 
       const accepted = await service.cancel(ownerId, exportJobId, 1);
       expect(accepted).toMatchObject({ status: "cancelling", revision: 2, finishedAt: null });
-      controller.abort(new Error("EXPORT_CANCEL_REQUESTED"));
+      await expect(remoteStore.acknowledgeCancellation(exportJobId)).resolves.toBe("pending");
       const result = await processing;
       expect(result).toMatchObject({ kind: "terminal", status: "cancelled" });
       expect(queue.sendInTransaction).toHaveBeenCalledWith(
@@ -206,7 +211,14 @@ suite("export cancellation PostgreSQL and browser fixture", () => {
         { singletonKey: exportJobId },
       );
       const completed = await db.exportJob.findUniqueOrThrow({ where: { id: exportJobId } });
-      expect(completed).toMatchObject({ status: "cancelled", outputBlobId: null });
+      expect(completed).toMatchObject({
+        status: "cancelled",
+        outputBlobId: null,
+        cancelRequestedAt: expect.any(Date),
+        cancellationAcknowledgedAt: expect.any(Date),
+        executionOwner: null,
+        executionLeaseId: null,
+      });
       expect(completed.finishedAt).not.toBeNull();
       const blob = await db.blob.findUnique({ where: { sha256_generation: { sha256: outputSha256!, generation: 1 } } });
       expect(blob).toMatchObject({ status: "pending" });
@@ -241,6 +253,7 @@ suite("export cancellation PostgreSQL and browser fixture", () => {
         }).catch(() => undefined);
         await db.$disconnect();
       }
+      await remoteDb.$disconnect();
     }
 
   }, 60_000);

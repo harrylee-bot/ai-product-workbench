@@ -528,6 +528,7 @@ export class ExportsService {
         },
         data: {
           status: "cancelling",
+          cancelRequestedAt: new Date(),
           revision: { increment: 1 },
         },
       });

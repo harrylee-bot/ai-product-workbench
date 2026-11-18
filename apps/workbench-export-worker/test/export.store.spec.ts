@@ -13,7 +13,7 @@ describe("PrismaExportStore", () => {
     };
     const store = new PrismaExportStore(db as never, prefixes());
     vi.spyOn(store, "loadRunning").mockResolvedValue({ id: "export-1" } as never);
-    await expect(store.start("export-1")).resolves.toEqual({ kind: "run", command: { id: "export-1" } });
+    await expect(store.start("export-1")).resolves.toMatchObject({ kind: "run", command: { id: "export-1" }, lease: { owner: "export-worker" } });
     expect(db.exportJob.updateMany).toHaveBeenCalledWith(expect.objectContaining({
       where: expect.objectContaining({ id: "export-1", status: "queued" }),
       data: expect.objectContaining({ status: "running", revision: { increment: 1 } }),
@@ -205,7 +205,7 @@ describe("PrismaExportStore", () => {
     const store = new PrismaExportStore({ exportJob } as never, prefixes());
     await expect(store.acknowledgeCancellation("export-1")).resolves.toBe("cancelled");
     expect(exportJob.updateMany).toHaveBeenCalledWith(expect.objectContaining({
-      where: { id: "export-1", status: "cancelling", outputBlobId: null, finishedAt: null },
+      where: expect.objectContaining({ id: "export-1", status: "cancelling", outputBlobId: null, finishedAt: null, OR: expect.any(Array) }),
       data: expect.objectContaining({ status: "cancelled", finishedAt: expect.any(Date), revision: { increment: 1 } }),
     }));
     expect(exportJob.findUnique).not.toHaveBeenCalled();

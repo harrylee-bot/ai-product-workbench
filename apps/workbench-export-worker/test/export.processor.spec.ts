@@ -182,7 +182,7 @@ describe("ExportProcessor", () => {
     test.store.status.mockResolvedValue("cancelling");
     await expect(test.processor.process("export-1", undefined, { retryCount: 0, retryLimit: 5 }))
       .resolves.toEqual({ kind: "terminal", status: "cancelled" });
-    expect(test.store.acknowledgeCancellation).toHaveBeenCalledWith("export-1");
+    expect(test.store.acknowledgeCancellation).toHaveBeenCalledWith("export-1", undefined);
     expect(test.storage.putVerified).not.toHaveBeenCalled();
     expect(test.store.publishSucceeded).not.toHaveBeenCalled();
   });

@@ -2247,6 +2247,11 @@ model ExportJob {
   createdAt                  DateTime                 @default(now()) @map("created_at")
   startedAt                  DateTime?                @map("started_at")
   finishedAt                 DateTime?                @map("finished_at")
+  cancelRequestedAt          DateTime?                @map("cancel_requested_at")
+  cancellationAcknowledgedAt DateTime?                @map("cancellation_acknowledged_at")
+  executionOwner             String?                  @map("execution_owner")
+  executionLeaseId           String?                  @map("execution_lease_id")
+  executionLeaseExpiresAt    DateTime?                @map("execution_lease_expires_at")
   updatedAt                  DateTime                 @updatedAt @map("updated_at")
   release                    ProjectRelease?          @relation(fields: [releaseId], references: [id], onDelete: Restrict, onUpdate: Restrict)
   createdBy                  Principal                @relation("ExportCreator", fields: [createdById], references: [id], onDelete: Restrict, onUpdate: Restrict)
@@ -2260,6 +2265,7 @@ model ExportJob {
   @@index([selectionArtifactVersionId])
   @@index([outputBlobId])
   @@index([status])
+  @@index([status, executionLeaseExpiresAt])
   @@map("export_jobs")
 }
 
