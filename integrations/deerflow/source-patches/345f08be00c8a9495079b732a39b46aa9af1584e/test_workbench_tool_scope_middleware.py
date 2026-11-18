@@ -2767,6 +2767,24 @@ class PrdToolJsonTests(unittest.TestCase):
         for invalid in [bad.replace('"artifact_index": 0', '"artifact_index": 1'), bad.replace('"kind": "prd"', '"kind": "prototype"'), bad.replace('"kind":', '"kind": null, "kind":'), bad[:-1], bad.replace('"degradation": {}','"different": {}')]:
             self.assertIsNone(decode_prd_draft_sections(invalid))
 
+    def test_recover_missing_block_list_and_section_closings(self):
+        from deerflow_workbench_tools.prd_draft_json import decode_prd_draft_sections
+        sections = {
+            "introduction": {"background": {"blocks": [{"text": "原始正文"}]}, "scope": {}},
+            "businessRequirements": {"functionSections": []},
+            "degradation": {},
+            "safetyBaseline": {},
+        }
+        args = {"artifact_index": 0, "draft": {"kind": "prd", "schemaVersion": 3, "content": {
+            "protocol": "workbench.prd.v3", "sections": sections,
+        }}}
+        valid = json.dumps(args, ensure_ascii=False)
+        bad = valid.replace('}]}, "scope"', '}}, "scope"').replace('[]}, "degradation"', '[], "degradation"')
+        decoded, edits = decode_prd_draft_sections(bad)
+        self.assertEqual(decoded, args)
+        self.assertEqual([edit["closing"] for edit in edits], ["]", "}"])
+        self.assertIsNone(decode_prd_draft_sections(bad.replace('"blocks"', '"unrecognized"')))
+
     @unittest.skipIf(USING_IMPORT_STUBS, "requires the real prefixed LangChain response")
     def test_invalid_draft_is_actually_routed_with_its_original_call_id(self):
         raw = '{"artifact_index":0,"draft":{"kind":"prd","schemaVersion":3,"content":{"protocol":"workbench.prd.v3","sections":{"introduction":{"a":1,"businessRequirements":{},"degradation":{},"safetyBaseline":{}}}}}'

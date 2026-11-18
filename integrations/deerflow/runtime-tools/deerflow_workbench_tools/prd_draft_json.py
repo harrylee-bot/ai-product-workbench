@@ -1,4 +1,4 @@
-"""Decode missing closing delimiters at fixed PRD v3 section boundaries."""
+"""Decode missing closing delimiters at fixed PRD v3 document boundaries."""
 
 import json
 import re
@@ -19,7 +19,8 @@ def _unique_object(items):
 
 
 def decode_prd_draft_sections(raw):
-    """Never add fields or values, close only containers before known siblings.
+    """Never add fields or values. Close sections before known siblings, and
+    close a section block list before the containing object ends.
 
     The raw call remains invalid if the section order or nesting is ambiguous.
     Its decoded arguments still have to pass the ordinary Draft tool and all
@@ -48,6 +49,15 @@ def decode_prd_draft_sections(raw):
             if len(stack) > 160:
                 return None
         elif value in ("}", "]"):
+            # A section's block list may end with an object followed directly
+            # by the containing section object's closing delimiter.
+            if (
+                value == "}" and prev == "}" and len(stack) >= 7
+                and stack[:4] == _SPINE and stack[4][1] in _SECTIONS
+                and stack[-2][0] == "{" and stack[-1] == ("[", '"blocks"')
+            ):
+                edits.append((token.start(), "]"))
+                stack.pop()
             if not stack or _CLOSE[stack.pop()[0]] != value:
                 return None
         before_prev, prev, prev_offset = prev, value, token.start()
