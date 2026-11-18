@@ -33,6 +33,8 @@ const runId = String(Date.now());
 const phase = process.env.WORKBENCH_STUDIO_LIVE_PHASE ?? "generation";
 assert.ok(["generation", "prd", "joint", "access", "files", "delivery"].includes(phase));
 const generates = ["generation", "prd", "joint"].includes(phase);
+const activityContract = process.env.WORKBENCH_STUDIO_LIVE_ACTIVITY_CONTRACT === "1";
+assert.ok(!activityContract || ["prd", "joint"].includes(phase), "The local activity contract applies to PRD and joint acceptance");
 const usesModelFixture = generates || phase === "access";
 const needsTemporal = generates || phase === "delivery";
 const suiteDirectory = { joint: "studio-live-joint", prd: "studio-live-prd", files: "file-delivery", delivery: "artifact-delivery" }[phase] ?? "studio-live-flash";
@@ -594,14 +596,29 @@ try {
       ...(python && { WORKBENCH_EXPORT_PYTHON_PATH: python }),
     }, serviceRoot);
   }
-  if (phase === "files") {
+  if (phase === "files" || activityContract) {
     const fileConfig = parseEnvFile(await readFile(requiredEnv("V2_FILE_PIPELINE_ENV_FILE"), "utf8"));
     assert.equal(fileConfig.WORKBENCH_FILE_SCAN_MODE, "clamav");
-    startService("file-worker", [path.join(serviceRoot, "apps/workbench-file-worker/dist/main.js")], {
+    const fileEnvironment = {
       ...fileConfig, ...common,
       WORKBENCH_FILE_PIPELINE_S3_ACCESS_KEY_ID: s3Env.V2_S3_ACCESS_KEY_ID,
       WORKBENCH_FILE_PIPELINE_S3_SECRET_ACCESS_KEY: s3Env.V2_S3_SECRET_ACCESS_KEY,
-    }, serviceRoot);
+    };
+    if (activityContract) await runCmd(
+      "contract-file-preflight",
+      [path.join(serviceRoot, "apps/workbench-file-worker/dist/healthcheck.js")],
+      serviceRoot,
+      fileEnvironment,
+    );
+    const fileWorker = startService("file-worker", [path.join(serviceRoot, "apps/workbench-file-worker/dist/main.js")], fileEnvironment, serviceRoot);
+    if (activityContract) {
+      evidence.checks.activityContractFileWorkerReady = await waitUntil(async () => {
+        if (fileWorker.exitCode !== null || fileWorker.signalCode !== null)
+          throw Object.assign(new Error("Contract file worker exited before opening its queues"), { fatal: true });
+        const log = await readFile(path.join(outDir, "service-file-worker.log"), "utf8");
+        return /\[file-worker\] listening .* with clamav scanner/u.test(log);
+      }, "Isolated contract file worker queues and ClamAV", 45000);
+    }
   }
   await health(`${apiBase}/system/live`);
   if (needsTemporal) await health(`http://127.0.0.1:${temporalPort}/healthz`);
@@ -689,7 +706,7 @@ try {
   if (phase === "generation" || phase === "joint") await runStudioLiveScenarios({ page, browser, webOrigin, outDir, runId, dbUrl, sql, waitUntil, evidence, step, runCmd, jointOnly: phase === "joint" });
   if (phase === "prd") {
     const { runStudioPrd } = await import("./studio-live-prd-scenarios.mjs");
-    await runStudioPrd({ page, webOrigin, outDir, runId, dbUrl, sql, waitUntil, evidence, step });
+    await runStudioPrd({ page, webOrigin, outDir, runId, dbUrl, sql, waitUntil, evidence, step, activityContract });
   }
   if (phase === "delivery") {
     const { runStudioDeliveryFixture } = await import("./studio-live-delivery-scenarios.mjs");

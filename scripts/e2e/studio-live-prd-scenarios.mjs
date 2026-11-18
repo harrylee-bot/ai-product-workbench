@@ -4,6 +4,9 @@ import { writeFile } from "node:fs/promises";
 import path from "node:path";
 import { canonicalJson } from "@workbench/workbench-contracts";
 import { publishPrd, auditPrd } from "./studio-live-prd-artifacts.mjs";
+import {
+  attachStudioActivityContract, auditStudioActivityContract, auditStudioActivityDiscussion,
+} from "./studio-live-activity-contract.mjs";
 
 const prompt =
   "在云溪营销极速发布平台已有的 Web 端活动管理列表，为策划人员增加渠道类型筛选。复用已有列表查询和区域权限，只扩展查询参数；全部、企微、短信三个选项，默认全部。切换筛选时保留其他查询条件并回到第一页；无匹配活动时显示空状态；查询失败保留当前筛选，允许原地重试。沿用当前设计规范和登录、导航、审核发布、报表，不新增角色、页面、外部系统或审批流程。只输出本次增量的需求文档，写明字段、权限、状态和逐条可运行的验收标准。";
@@ -21,12 +24,13 @@ export async function runStudioPrd({
   waitUntil,
   evidence,
   step,
+  activityContract = false,
 }) {
   const query = async (stmt, values = []) =>
     (await sql(stmt, values, dbUrl)).rows;
   const prd = (evidence.prd = {
     startedAt: new Date().toISOString(),
-    prompt,
+    prompt: activityContract ? prompt + " 请按本次所选的项目附件核对活动列表现有接口及本次查询参数扩展。" : prompt,
     events: [],
   });
   const save = (name, value) =>
@@ -76,6 +80,11 @@ export async function runStudioPrd({
   const project = (prd.projectId = new URL(page.url()).pathname
     .split("/")
     .at(-1));
+  if (activityContract) {
+    step("Upload and select the local project activity query contract");
+    prd.activityContract = await attachStudioActivityContract({ page, webOrigin, projectId: project, query, waitUntil });
+    await checkpoint();
+  }
   await waitUntil(
     async () =>
       (await page
@@ -86,7 +95,7 @@ export async function runStudioPrd({
   await page
     .getByRole("combobox", { name: "输出类型", exact: true })
     .selectOption("prd");
-  await page.getByRole("textbox", { name: "描述需求或修改" }).fill(prompt);
+  await page.getByRole("textbox", { name: "描述需求或修改" }).fill(prd.prompt);
   const sent = post(/\/requirement-sessions\/[^/]+\/messages$/);
   await page.getByRole("button", { name: "发送需求", exact: true }).click();
   const msg = await sent;
@@ -95,6 +104,7 @@ export async function runStudioPrd({
     msg.request().postDataJSON().generationRequest.modelId,
     "deepseek-flash",
   );
+  if (activityContract) assert.deepEqual(msg.request().postDataJSON().generationRequest.sourceIds, [prd.activityContract.sourceId]);
   const session = (prd.sessionId = (await msg.json()).id);
   await checkpoint();
   await waitUntil(
@@ -105,6 +115,10 @@ export async function runStudioPrd({
       );
       if (s?.status === "failed")
         throw fatal("Requirement discussion failed: " + s.failure_code);
+      if (s?.status === "succeeded" && activityContract) {
+        prd.activityDiscussion = await auditStudioActivityDiscussion({ query, source: prd.activityContract, sessionId: session });
+        await checkpoint();
+      }
       if (s?.status === "succeeded" && s.state !== "ready_to_confirm")
         throw fatal("Discussion needs clarification: " + s.state);
       return s?.state === "ready_to_confirm";
@@ -168,6 +182,7 @@ export async function runStudioPrd({
   assert.deepEqual(frozen.baseline.card.outputKinds, ["prd"]);
   assert.equal(frozen.plan_id, null);
   assert.ok(frozen.baseline.evidence.length && prd.frozenRelease);
+  if (activityContract) prd.activityContract = await auditStudioActivityContract({ query, source: prd.activityContract, frozen });
   await save("prd-confirmed-baseline.json", {
     card: frozen.baseline.card,
     evidence: frozen.baseline.evidence,
