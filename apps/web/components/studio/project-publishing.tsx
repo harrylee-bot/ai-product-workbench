@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
-import { useInfiniteQuery } from "@tanstack/react-query";
+import { useInfiniteQuery, useQueryClient } from "@tanstack/react-query";
 import type {
   CreateExportJobRequest,
   ProjectBootstrap,
@@ -35,9 +35,11 @@ export function ProjectPublishing({
 }) {
   const api = useWorkbenchReleasesApi(),
     exports = useWorkbenchExportsApi(),
-    action = useStudioAction();
+    action = useStudioAction(),
+    queryClient = useQueryClient();
   const projectId = bootstrap.project.id;
   const intents = useRef(new Map<string, { signature: string; key: string }>());
+  const authoritativeJobs = useRef(new Map<string, ExportJob>());
   const alive = useRef(true);
   useEffect(() => {
     alive.current = true;
@@ -68,6 +70,14 @@ export function ProjectPublishing({
       exports.listExportJobs(projectId, { cursor: pageParam, limit: 30 }),
     getNextPageParam: (page) => page.nextCursor ?? undefined,
     refetchInterval: 3000,
+  });
+  const jobItems = (jobs.data?.pages.flatMap((page) => page.items) ?? []).map((job) => {
+    const previous = authoritativeJobs.current.get(job.id);
+    if (previous?.status === "cancelling" && ["queued", "running"].includes(job.status)) {
+      return previous;
+    }
+    authoritativeJobs.current.set(job.id, job);
+    return job;
   });
   const createExport = async (
     request: CreateExportJobRequest,
@@ -200,9 +210,7 @@ export function ProjectPublishing({
             <button onClick={() => void jobs.refetch()}>重试导出列表</button>
           </p>
         )}
-        {jobs.data?.pages
-          .flatMap((page) => page.items)
-          .map((job) => (
+        {jobItems.map((job) => (
             <article
               className="studio-card"
               key={job.id}
@@ -254,9 +262,22 @@ export function ProjectPublishing({
                   disabled={action.busy}
                   onClick={() =>
                     void action.run(async () => {
-                      await exports.cancelExportJob(
+                      const result = await exports.cancelExportJob(
                         job.id,
                         `"${job.revision}"`,
+                      );
+                      authoritativeJobs.current.set(job.id, result.value);
+                      queryClient.setQueryData(
+                        ["studio", "export-jobs", projectId],
+                        (current: { pages?: Array<{ items: ExportJob[] }> } | undefined) => current
+                          ? {
+                              ...current,
+                              pages: current.pages?.map((page) => ({
+                                ...page,
+                                items: page.items.map((item) => item.id === job.id ? result.value : item),
+                              })),
+                            }
+                          : current,
                       );
                       await jobs.refetch();
                     }, "已提交取消请求，请以任务状态为准")
@@ -293,7 +314,7 @@ export function ProjectPublishing({
             加载更多导出
           </button>
         )}
-        {jobs.data?.pages[0]?.items.length === 0 && <p>尚无文档导出任务。</p>}
+        {jobItems.length === 0 && <p>尚无文档导出任务。</p>}
       </section>
     </>
   );
