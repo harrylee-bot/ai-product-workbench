@@ -20,22 +20,26 @@ export class TeiRerankerAdapter implements KnowledgeRerankerPort {
   }
 
   async rerank(input: KnowledgeRerankInput, signal?: AbortSignal): Promise<readonly KnowledgeRerankScore[]> {
-    await this.assertReady(input.candidates.length, signal);
-    const response = await this.client.requestJson("/rerank", {
-      method: "POST",
-      body: JSON.stringify({
-        query: input.query,
-        texts: input.candidates.map((candidate) => candidate.content),
-        truncate: false,
-        raw_scores: false,
-        return_text: false,
-      }),
-    }, signal);
-    return parseRerankerScores(response, input.candidates);
+    // TEI reserves one concurrency permit per query/document pair. A single
+    // otherwise legal client batch can exceed the server's permit capacity.
+    const batchSize = await this.assertReady(input.candidates.length, signal);
+    const scores: KnowledgeRerankScore[] = [];
+    for (let offset = 0; offset < input.candidates.length; offset += batchSize) {
+      const candidates = input.candidates.slice(offset, offset + batchSize);
+      const response = await this.client.requestJson("/rerank", {
+        method: "POST",
+        body: JSON.stringify({
+          query: input.query, texts: candidates.map(candidate => candidate.content),
+          truncate: false, raw_scores: false, return_text: false,
+        }),
+      }, signal);
+      scores.push(...parseRerankerScores(response, candidates));
+    }
+    return scores;
   }
 
-  async assertReady(minimumBatchSize: number, signal?: AbortSignal): Promise<void> {
-    if (!Number.isSafeInteger(minimumBatchSize) || minimumBatchSize < 1) {
+  async assertReady(candidateCount: number, signal?: AbortSignal): Promise<number> {
+    if (!Number.isSafeInteger(candidateCount) || candidateCount < 1) {
       throw new KnowledgeProviderError("KNOWLEDGE_RERANKER_BATCH_SIZE_INVALID", false);
     }
     const info = parseTeiRuntimeInfo(await this.client.requestJson("/info", { method: "GET" }, signal));
@@ -44,10 +48,11 @@ export class TeiRerankerAdapter implements KnowledgeRerankerPort {
       || info.model_sha !== this.config.modelRevision
       || info.version !== this.config.teiVersion
       || info.max_input_length < this.config.maximumInputTokens
-      || info.max_client_batch_size < minimumBatchSize
     ) {
       throw new KnowledgeProviderError("KNOWLEDGE_RERANKER_IDENTITY_MISMATCH", false);
     }
+    return Math.min(candidateCount, info.max_client_batch_size,
+      info.max_concurrent_requests ?? candidateCount, info.max_batch_requests ?? candidateCount);
   }
 }
 
