@@ -221,7 +221,7 @@ function Resources({
             <div>
               <h2>{source.label}</h2>
               <p>
-                {source.kind} ·{" "}
+                {{ file: "文件", design_md: "设计规范", url_snapshot: "网站快照", github_snapshot: "GitHub 仓库", figma_snapshot: "Figma 文件" }[source.kind]} ·{" "}
                 {
                   {
                     pending: "正在解析",
