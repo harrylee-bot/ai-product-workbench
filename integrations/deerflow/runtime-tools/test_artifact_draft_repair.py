@@ -64,6 +64,20 @@ class ArtifactDraftRepairTests(unittest.TestCase):
         self.assertNotIn("repair",artifact)
         self.assertEqual(latest_accepted_artifact_draft(self.runtime.state,run_id="run_1",runtime_attempt_id="attempt_1",artifact_index=0),self.draft)
 
+    def test_only_matching_prd_envelope_duplicates_can_be_removed(self):
+        rejected = copy.deepcopy(self.draft)
+        rejected.update({key: rejected["content"][key] for key in ("documentId", "protocol")})
+        ack, _ = self.publish("initial", draft=rejected)
+        self.assertFalse(ack["ok"])
+        expected = [{"op": "remove", "path": "/documentId"}, {"op": "remove", "path": "/protocol"}]
+        self.assertEqual(ack["envelopeRepair"], self.repair(ack, expected))
+        result, artifact = self.publish("repair1", repair=ack["envelopeRepair"])
+        self.assertTrue(result["ok"], result["issues"])
+        self.assertEqual(artifact["draft"], self.draft)
+        rejected["documentId"] = "different-id"
+        with self.assertRaisesRegex(ValueError, "PATH_FORBIDDEN"):
+            _apply_repair(rejected, ack["envelopeRepair"], ack["candidateChecksum"])
+
     def install_retrieval(self):
         citation = self.draft["citations"][0]
         name = "workbench_knowledge_retrieve"

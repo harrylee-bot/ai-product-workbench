@@ -431,6 +431,19 @@ def template_restore_operation(issue: Any) -> dict[str, str] | None:
         return None
     return {"op": "restore", "path": "/" + "/".join(str(part) for part in path)}
 
+def prd_envelope_duplicate_removals(candidate: Any, issues: list[Any]) -> list[dict[str, str]]:
+    if (
+        not isinstance(candidate, dict) or candidate.get("kind") != "prd" or candidate.get("schemaVersion") != 3
+        or not isinstance(content := candidate.get("content"), dict)
+        or not any(isinstance(issue, dict) and issue.get("path") == [] and issue.get("code") == "unrecognized_keys" for issue in issues)
+    ):
+        return []
+    return [
+        {"op": "remove", "path": "/" + key}
+        for key in ("documentId", "protocol")
+        if isinstance(candidate.get(key), str) and candidate[key] == content.get(key)
+    ]
+
 
 def _restore_template(candidate: dict[str, Any], operation: dict[str, Any], parts: list[str]) -> None:
     if candidate.get("kind") != "prd" or candidate.get("schemaVersion") != 3:
@@ -513,7 +526,12 @@ def _apply_repair(candidate: dict[str, Any], repair: Any, checksum: str,
         keys = {"op", "path", "value"} if op in {"add", "replace"} else {"op", "path", "from"} if op == "move" else {"op", "path"}
         if op not in {"add", "replace", "remove", "move", "restore", "restoreCitation"} or set(operation) != keys:
             _fail("OPERATION_INVALID")
-        parts = _pointer(operation["path"])
+        if op == "remove" and operation["path"] in ("/documentId", "/protocol"):
+            if operation not in prd_envelope_duplicate_removals(result, validate_runtime_artifact_draft(result)["issues"]):
+                _fail("PATH_FORBIDDEN")
+            parts = [operation["path"][1:]]
+        else:
+            parts = _pointer(operation["path"])
         before_operation = copy.deepcopy(result)
         try:
             if op == "restore":

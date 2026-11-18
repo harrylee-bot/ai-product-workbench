@@ -8,7 +8,7 @@ from langchain.tools import tool
 
 from deerflow.tools.types import Runtime
 
-from .artifact_draft_repair import resolve_artifact_draft_candidate, template_restore_operation, validate_retrieved_citations
+from .artifact_draft_repair import prd_envelope_duplicate_removals, resolve_artifact_draft_candidate, template_restore_operation, validate_retrieved_citations
 from .runtime_result_validator import validate_runtime_artifact_draft
 
 
@@ -34,7 +34,7 @@ def workbench_artifact_draft_publish(
     Send the initial PRD draft by itself with the actual document-level fields
     and content.sections set to {}. Then assemble the sections through checksum-
     bound repairs, using one small value per tool call. The validator accepts
-    only the complete PRD.
+    only the complete PRD. Keep documentId and protocol inside content only.
     For a new or edited Prototype, begin its real phases in this run with
     workbench_generation_stage_update in order: design-system, mapping-components,
     creating-flows, generating-ui. Record one phase per model tool-call batch and
@@ -171,6 +171,17 @@ def workbench_artifact_draft_publish(
                 "start with its header and append blocks individually. Add the remaining functions "
                 "from the confirmation before adding safetyBaseline. After all sections exist, "
                 "address the remaining validation issues."
+            )
+        envelope_operations = prd_envelope_duplicate_removals(draft, validation["issues"])
+        if envelope_operations:
+            response["envelopeRepair"] = {
+                "baseCandidateChecksum": validation["candidateChecksum"],
+                "operations": envelope_operations,
+            }
+            response["repairInstruction"] = (
+                "Copy envelopeRepair exactly to remove only the duplicate outer keys reported by the "
+                "validator. Keep their identical values inside content. Then follow the next ACK. "
+                + response["repairInstruction"]
             )
         template_operations = [operation for issue in validation["issues"]
                                if (operation := template_restore_operation(issue)) is not None]
