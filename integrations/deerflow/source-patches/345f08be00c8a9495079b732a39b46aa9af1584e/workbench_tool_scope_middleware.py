@@ -185,6 +185,7 @@ This PRD-only Workbench Run cannot resume free-form clarification. The ask_clari
 </workbench_prd_clarification_policy>"""
 _PROTOTYPE_CLARIFICATION_SYSTEM_POLICY = """<workbench_prototype_clarification_policy>
 This Workbench Prototype Run has a fixed, trusted input and cannot resume free-form clarification. The ask_clarification tool is unavailable. Do not ask a question or end early. Use the supplied workbench_context and verified transport references, make conservative assumptions for nonessential details, and complete the Prototype stages and final workbench_runtime_result_submit call.
+Implement the controls and observable behavior in the confirmed requirements, even for a new prototype with no source revision. Native search and select controls are kind="input", with inputType="search" or inputType="select". Select options require label, value, and disabled. Keep the declared bindings and actions when fixing rejected draft paths, and check the approved interactions before final submission.
 </workbench_prototype_clarification_policy>"""
 _LINKED_PRD_SYSTEM_POLICY = f"""<workbench_linked_prd_policy>
 This Workbench Run requests a linked PRD and Prototype. Free-form clarification is unavailable; record conservative typed assumptions for unsupported behavior. Complete the PRD reference reads and all PRD stages, then finish one validated PRD Draft. Keep that accepted Draft unchanged. Continue with the Prototype stages and a complete Prototype Draft at artifact_index 1 based on that PRD. Finally call workbench_runtime_result_submit with candidate containing protocol, a concise message, and artifacts copied from the two accepted ACKs' finalSubmissionArtifact fields in PRD/Prototype order. Each entry is {{"draftReference":{{"artifactIndex":0,"draftChecksum":"the exact accepted ACK checksum"}}}} with its own index and checksum. Do not rewrite accepted title, content, operation, or citations, invent a checksum, or mix a reference with artifact fields. The trusted tool resolves the explicit references and validates the complete unchanged Result. A PRD Draft alone does not finish this Run; there is no automatic PRD-only submission.
@@ -260,7 +261,9 @@ def _ordinary_model_stop(message: Any) -> bool:
     return not any(marker in text for marker in _FORCED_STOP_MARKERS)
 
 
-def _unrepaired_linked_draft(state: Any, run_id: str, attempt_id: str) -> dict[str, Any] | None:
+def _unrepaired_draft(
+    state: Any, run_id: str, attempt_id: str, artifact_kinds: tuple[str, ...] = ("prd", "prototype"),
+) -> dict[str, Any] | None:
     completed, invalid = _completed_tool_calls(state)
     if invalid:
         return None
@@ -284,17 +287,37 @@ def _unrepaired_linked_draft(state: Any, run_id: str, attempt_id: str) -> dict[s
         except (ValueError, RuntimeError, ImportError):
             return None
         if (
-            type(index) is not int or index not in (0, 1)
+            type(index) is not int or not 0 <= index < len(artifact_kinds)
             or call["args"].get("artifact_index") != index
             or not isinstance(candidate, Mapping)
-            or candidate.get("kind") != ("prd" if index == 0 else "prototype")
+            or candidate.get("kind") != artifact_kinds[index]
         ):
             continue
         if artifact.get("ok") is True:
             rejected.pop(index, None)
         elif artifact.get("ok") is False and isinstance(artifact.get("issues"), list) and artifact["issues"]:
-            rejected[index] = {"toolCallId": call["id"], "artifactIndex": index, "responseIndex": call["response_index"]}
+            rejected[index] = {
+                "toolCallId": call["id"], "artifactIndex": index, "responseIndex": call["response_index"],
+                "candidate": candidate, "issues": artifact["issues"],
+            }
     return max(rejected.values(), key=lambda item: item["responseIndex"], default=None)
+
+def _can_repair_prototype(rejected: Mapping[str, Any]) -> bool:
+    candidate = rejected["candidate"]
+    content = candidate.get("content")
+    operation = candidate.get("operation")
+    return (
+        candidate.get("kind") == "prototype" and type(candidate.get("schemaVersion")) is int
+        and candidate["schemaVersion"] == 1
+        and isinstance(operation, Mapping) and operation.get("kind") in ("create", "revise")
+        and isinstance(content, Mapping) and content.get("protocol") == "workbench.prototype.v1"
+        and all(isinstance(content.get(key), list) and content[key] for key in ("screens", "nodes"))
+        and all(
+            isinstance(issue, Mapping) and isinstance(issue.get("path"), list) and issue["path"]
+            and issue["path"][0] in ("content", "citations", "title")
+            for issue in rejected["issues"]
+        )
+    )
 
 
 def _is_llm_error_fallback_message(message: Any) -> bool:
@@ -1488,7 +1511,8 @@ class WorkbenchToolScopeMiddleware(AgentMiddleware[AgentState]):
         count = marker["count"] if marker else 0
         if not replay and count >= _PRD_TOOL_JSON_RETRY_LIMIT:
             return {"jump_to": "end"}
-        rejected = _unrepaired_linked_draft(history, self._run_id, self._runtime_attempt_id)
+        draft_kinds = ("prototype",) if kind == "prototype" and artifact_index == 0 else ("prd", "prototype")
+        rejected = _unrepaired_draft(history, self._run_id, self._runtime_attempt_id, draft_kinds)
         # The reducer replaces the malformed declaration using the same ID.
         # Neither wire arguments nor an unanswered tool call go back to the model.
         return {
@@ -1585,7 +1609,7 @@ class WorkbenchToolScopeMiddleware(AgentMiddleware[AgentState]):
         task_id = _value(_value(runtime, "execution_info"), "task_id")
         if any(not isinstance(value, str) or not value for value in (message_id, task_id)):
             return None
-        rejected = _unrepaired_linked_draft(state, self._run_id, self._runtime_attempt_id)
+        rejected = _unrepaired_draft(state, self._run_id, self._runtime_attempt_id)
         if rejected is None:
             return None
         marker = self._linked_recovery_marker(state)
@@ -1624,7 +1648,7 @@ class WorkbenchToolScopeMiddleware(AgentMiddleware[AgentState]):
         messages = _state_messages(request.state)
         if marker is None or marker.get("exhausted") or not messages or _value(messages[-1], "id") != marker["messageId"]:
             return None
-        rejected = _unrepaired_linked_draft(request.state, self._run_id, self._runtime_attempt_id)
+        rejected = _unrepaired_draft(request.state, self._run_id, self._runtime_attempt_id)
         if rejected is None or rejected["toolCallId"] != marker["toolCallId"]:
             return None
         return (
@@ -1899,7 +1923,23 @@ class WorkbenchToolScopeMiddleware(AgentMiddleware[AgentState]):
                 "Call the repair alone in a new tool-call batch so it can use the latest completed rejected candidate.",
             )
         args = _tool_args(request.tool_call.get("args"))
-        if request.tool_call.get("name") != ARTIFACT_DRAFT_TOOL_NAME or args.get("repair") is None:
+        if request.tool_call.get("name") != ARTIFACT_DRAFT_TOOL_NAME:
+            return None
+        if args.get("repair") is None:
+            draft = args.get("draft")
+            if (
+                self._prototype_enabled and self._run_id and self._runtime_attempt_id
+                and isinstance(draft, Mapping) and draft.get("kind") == "prototype"
+            ):
+                kinds = ("prd", "prototype") if self._prd_gate_enabled else ("prototype",)
+                rejected = _unrepaired_draft(request.state, self._run_id, self._runtime_attempt_id, kinds)
+                if rejected is not None and rejected["artifactIndex"] == args.get("artifact_index") and _can_repair_prototype(rejected):
+                    return _error_tool_message(
+                        request, "WORKBENCH_PROTOTYPE_DRAFT_REPAIR_REQUIRED",
+                        "Omit draft and call repair alone with the last rejected Prototype ACK's candidateChecksum "
+                        "as baseCandidateChecksum. Fix its issue paths in small JSON Patch groups. Preserve the original "
+                        "screens, controls, bindings, and actions while repairing their fields.",
+                    )
             return None
         try:
             _artifact_draft_from_declaration(

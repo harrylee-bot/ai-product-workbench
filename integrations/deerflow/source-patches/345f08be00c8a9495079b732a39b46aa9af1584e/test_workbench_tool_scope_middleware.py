@@ -2274,6 +2274,39 @@ class PrototypeStageAdmissionTests(unittest.TestCase):
         ), lambda _request: self.fail("parallel stage must wait for ACK"))
         self.assertIn("WORKBENCH_PROTOTYPE_STAGE_BATCH_INVALID", result.content)
 
+    def test_rejected_prototype_repairs_preserve_the_original_candidate(self):
+        tool = "workbench_artifact_draft_publish"
+        draft = {
+            "kind": "prototype", "schemaVersion": 1, "operation": {"kind": "create"},
+            "content": {"protocol": "workbench.prototype.v1", "screens": [{"id": "screen-main"}],
+                        "nodes": [{"id": "channel", "kind": "select"}]},
+        }
+        reduced = copy.deepcopy(draft)
+        reduced["content"]["nodes"] = [{"id": "label", "kind": "text"}]
+        for attempt, path, should_block in (
+            ("attempt-current", ["content", "nodes", 0, "kind"], True),
+            ("attempt-other", ["content", "nodes", 0, "kind"], False),
+            ("attempt-current", ["operation", "kind"], False),
+        ):
+            with self.subTest(attempt=attempt, path=path):
+                messages = self.stages()
+                append_tool_batch(messages, [call(tool, "authored", {"artifact_index": 0, "draft": draft})], [
+                    tool_message(tool, "authored", artifact={
+                        "protocol": "workbench.runtime.artifact-draft.v1", "ok": False,
+                        "runId": "run-current", "runtimeAttemptId": attempt, "toolCallId": "authored",
+                        "artifactIndex": 0, "issues": [{"path": path, "code": "invalid_value"}],
+                    }),
+                ])
+                args = {"artifact_index": 0, "draft": reduced}
+                if should_block:
+                    blocked = self.rejected(messages, tool, args, "WORKBENCH_PROTOTYPE_DRAFT_REPAIR_REQUIRED")
+                    self.assertIn("baseCandidateChecksum", blocked.content)
+                    self.assertEqual(draft["content"]["nodes"][0]["id"], "channel")
+                else:
+                    sentinel = object()
+                    req = request_in_state(messages, tool, "new-draft", args)
+                    self.assertIs(self.middleware.wrap_tool_call(req, lambda _: sentinel), sentinel)
+
     def test_patch_requires_the_current_run_checkpoint_for_the_same_artifact_and_screen(self):
         args = {"artifact_index": 0, "screen_id": "screen-main"}
         self.rejected(self.stages(), "workbench_prototype_patch_publish", args,
