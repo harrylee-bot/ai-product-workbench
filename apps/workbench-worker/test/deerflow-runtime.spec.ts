@@ -5613,6 +5613,9 @@ describe("DeerFlow runtime adapter", () => {
       expect(upload.url).toBe("http://gateway.test/api/threads/deer_thread_1/uploads");
       expect(upload.headers.get("X-DeerFlow-Owner-User-Id")).toBe("principal_1");
       expect(upload.headers.get("X-DeerFlow-Internal-Token")).toBe("internal");
+      const csrfToken = upload.headers.get("X-CSRF-Token");
+      expect(csrfToken).toMatch(/^[A-Za-z0-9_-]+$/u);
+      expect(upload.headers.get("Cookie")).toBe(`csrf_token=${csrfToken}`);
       expect(Number(upload.headers.get("content-length"))).toBe(upload.body.byteLength);
       expect(upload.headers.get("content-type")).toMatch(/^multipart\/form-data; boundary=/);
     }

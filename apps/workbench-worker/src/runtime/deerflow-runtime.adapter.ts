@@ -1739,7 +1739,7 @@ export class DeerFlowRuntimeAdapter implements RuntimePort {
         {
           method: "POST",
           headers: {
-            ...this.identityHeaders(runtimeTransportOwnerId),
+            ...this.jsonHeaders(runtimeTransportOwnerId),
             "content-type": multipart.contentType,
             "content-length": String(multipart.contentLength),
             accept: "application/json",
