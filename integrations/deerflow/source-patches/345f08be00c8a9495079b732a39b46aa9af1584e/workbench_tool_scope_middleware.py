@@ -1164,7 +1164,34 @@ def _tool_catalog_observation(visible: list[Any]) -> dict[str, Any]:
     }
 
 
-def _stamp_ai_message(message: AIMessage, observation: Mapping[str, Any]) -> AIMessage:
+def _decode_prd_draft_call(message: AIMessage) -> AIMessage:
+    invalid = message.invalid_tool_calls
+    if message.tool_calls or len(invalid) != 1 or message.content or message.response_metadata.get("finish_reason") != "tool_calls":
+        return message
+    call = invalid[0]
+    if call.get("name") != ARTIFACT_DRAFT_TOOL_NAME or not call.get("id"):
+        return message
+    for metadata in (message.additional_kwargs, message.response_metadata):
+        if any(metadata.get(key) for key in ("refusal", "safety_termination", "error", "deerflow_error_fallback")):
+            return message
+    from deerflow_workbench_tools.prd_draft_json import decode_prd_draft_sections
+    decoded = decode_prd_draft_sections(call.get("args"))
+    if decoded is None:
+        return message
+    args, edits = decoded
+    metadata = dict(message.response_metadata)
+    metadata["workbench_prd_tool_json_recovery"] = {
+        "originalSha256": hashlib.sha256(call["args"].encode()).hexdigest(), "insertedClosings": edits,
+    }
+    return message.model_copy(update={
+        "response_metadata": metadata, "invalid_tool_calls": [],
+        "tool_calls": [{"type": "tool_call", "id": call["id"], "name": ARTIFACT_DRAFT_TOOL_NAME, "args": args}],
+    })
+
+
+def _stamp_ai_message(message: AIMessage, observation: Mapping[str, Any], decode_prd: bool = False) -> AIMessage:
+    if decode_prd:
+        message = _decode_prd_draft_call(message)
     response_metadata = dict(message.response_metadata or {})
     response_metadata[_TOOL_CATALOG_METADATA_KEY] = dict(observation)
     return message.model_copy(update={"response_metadata": response_metadata})
@@ -1173,13 +1200,14 @@ def _stamp_ai_message(message: AIMessage, observation: Mapping[str, Any]) -> AIM
 def _stamp_model_response(
     response: ModelResponse[Any],
     observation: Mapping[str, Any],
+    decode_prd: bool,
 ) -> ModelResponse[Any]:
     result_messages = _value(response, "result")
     if not isinstance(result_messages, list):
         return response
     return ModelResponse(
         result=[
-            _stamp_ai_message(message, observation)
+            _stamp_ai_message(message, observation, decode_prd)
             if isinstance(message, AIMessage)
             else message
             for message in result_messages
@@ -1191,18 +1219,19 @@ def _stamp_model_response(
 def _stamp_catalog_observation(
     result: ModelCallResult,
     observation: Mapping[str, Any] | None,
+    decode_prd: bool = False,
 ) -> ModelCallResult:
     if observation is None:
         return result
     if isinstance(result, AIMessage):
-        return _stamp_ai_message(result, observation)
+        return _stamp_ai_message(result, observation, decode_prd)
     if isinstance(result, ExtendedModelResponse):
         return ExtendedModelResponse(
-            model_response=_stamp_model_response(result.model_response, observation),
+            model_response=_stamp_model_response(result.model_response, observation, decode_prd),
             command=result.command,
         )
     if isinstance(result, ModelResponse) and isinstance(_value(result, "result"), list):
-        return _stamp_model_response(result, observation)
+        return _stamp_model_response(result, observation, decode_prd)
     return result
 
 
@@ -2142,6 +2171,7 @@ class WorkbenchToolScopeMiddleware(AgentMiddleware[AgentState]):
         return _stamp_catalog_observation(
             handler(scoped_request),
             self._catalog_observation(scoped_request),
+            self._prd_gate_enabled and bool(self._run_id and self._runtime_attempt_id),
         )
 
     @hook_config(can_jump_to=["end", "model"])
@@ -2204,6 +2234,7 @@ class WorkbenchToolScopeMiddleware(AgentMiddleware[AgentState]):
         return _stamp_catalog_observation(
             await handler(scoped_request),
             self._catalog_observation(scoped_request),
+            self._prd_gate_enabled and bool(self._run_id and self._runtime_attempt_id),
         )
 
     @hook_config(can_jump_to=["end", "model"])
