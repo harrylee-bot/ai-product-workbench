@@ -196,6 +196,20 @@ describe("PrismaExportStore", () => {
       data: expect.objectContaining({ gcEligibleAt: expect.any(Date) }),
     }));
   });
+
+  it("confirms a cancellation only after executor cleanup", async () => {
+    const exportJob = {
+      updateMany: vi.fn(async () => ({ count: 1 })),
+      findUnique: vi.fn(),
+    };
+    const store = new PrismaExportStore({ exportJob } as never, prefixes());
+    await expect(store.acknowledgeCancellation("export-1")).resolves.toBe("cancelled");
+    expect(exportJob.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: { id: "export-1", status: "cancelling", outputBlobId: null, finishedAt: null },
+      data: expect.objectContaining({ status: "cancelled", finishedAt: expect.any(Date), revision: { increment: 1 } }),
+    }));
+    expect(exportJob.findUnique).not.toHaveBeenCalled();
+  });
 });
 
 function prefixes() {

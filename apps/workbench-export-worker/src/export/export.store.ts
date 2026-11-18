@@ -37,7 +37,7 @@ export class PrismaExportStore {
       select: { status: true },
     });
     if (!current) return { kind: "missing" as const };
-    if (["succeeded", "failed", "cancelled"].includes(current.status)) {
+    if (["succeeded", "failed", "cancelling", "cancelled"].includes(current.status)) {
       return { kind: "terminal" as const, status: current.status };
     }
     if (current.status === "queued") {
@@ -54,7 +54,7 @@ export class PrismaExportStore {
       if (claimed.count === 0) {
         const status = await this.status(exportJobId);
         if (!status) return { kind: "missing" };
-        if (["succeeded", "failed", "cancelled"].includes(status)) return { kind: "terminal", status };
+        if (["succeeded", "failed", "cancelling", "cancelled"].includes(status)) return { kind: "terminal", status };
         if (status !== "running") throw new Error("EXPORT_JOB_CLAIM_STATE_INVALID");
       }
     }
@@ -181,7 +181,7 @@ export class PrismaExportStore {
         if (job.outputBlobId !== output.blobId) throw new Error("EXPORT_OUTPUT_PUBLICATION_CONFLICT");
         return "succeeded" as const;
       }
-      if (job.status === "cancelled") return "cancelled" as const;
+      if (job.status === "cancelled" || job.status === "cancelling") return "cancelled" as const;
       if (job.status !== "running" || job.outputBlobId !== null) throw new Error("EXPORT_PUBLICATION_STATE_INVALID");
 
       const blob = await tx.blob.findUnique({ where: { id: output.blobId } });
@@ -252,6 +252,28 @@ export class PrismaExportStore {
     }, { maxWait: 10_000, timeout: 30_000 });
   }
 
+  async acknowledgeCancellation(exportJobId: string): Promise<"cancelled" | "pending" | "terminal"> {
+    const updated = await this.db.exportJob.updateMany({
+      where: {
+        id: exportJobId,
+        status: "cancelling",
+        outputBlobId: null,
+        finishedAt: null,
+      },
+      data: {
+        status: "cancelled",
+        finishedAt: new Date(),
+        revision: { increment: 1 },
+      },
+    });
+    if (updated.count === 1) return "cancelled";
+    const current = await this.db.exportJob.findUnique({
+      where: { id: exportJobId },
+      select: { status: true },
+    });
+    return current?.status === "cancelling" ? "pending" : "terminal";
+  }
+
   async fail(exportJobId: string, code: string, detail: string) {
     const updated = await this.db.exportJob.updateMany({
       where: { id: exportJobId, status: { in: ["queued", "running"] }, outputBlobId: null, finishedAt: null },
@@ -265,7 +287,7 @@ export class PrismaExportStore {
     });
     if (updated.count === 0) {
       const status = await this.status(exportJobId);
-      if (!status || !["succeeded", "failed", "cancelled"].includes(status)) throw new Error("EXPORT_FAILURE_PUBLICATION_LOST");
+      if (!status || !["succeeded", "failed", "cancelling", "cancelled"].includes(status)) throw new Error("EXPORT_FAILURE_PUBLICATION_LOST");
     }
   }
 
@@ -275,11 +297,12 @@ export class PrismaExportStore {
         OR: [
           { status: "queued" },
           { status: "running", startedAt: { lt: staleBefore } },
+          { status: "cancelling" },
         ],
       },
       orderBy: { updatedAt: "asc" },
       take: limit,
-      select: { id: true },
+      select: { id: true, status: true },
     });
   }
 }

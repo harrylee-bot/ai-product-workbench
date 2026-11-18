@@ -1,8 +1,12 @@
 import {
+  exportCancelQueue,
+  exportCancelQueueOptions,
+  exportCancelJobSchema,
   exportBuildJobSchema,
   exportBuildQueue,
   exportBuildQueueOptions,
   type ExportBuildJob,
+  type ExportCancelJob,
 } from "@workbench/workbench-contracts";
 import {
   initializeTelemetry,
@@ -39,6 +43,7 @@ async function main() {
   boss.on("warning", (warning) => console.warn("[export-worker:pg-boss]", warning));
   await boss.start();
   await boss.createQueue(exportBuildQueue, exportBuildQueueOptions);
+  await boss.createQueue(exportCancelQueue, exportCancelQueueOptions);
 
   const storage = new S3ExportStorageAdapter(
     config,
@@ -48,6 +53,7 @@ async function main() {
   const loader = new ExportSourceLoader(storage, config);
   const browser = new BrowserExportService(config);
   const processor = new ExportProcessor(store, loader, storage, browser, config);
+  const activeExports = new Map<string, Set<ActiveExportRun>>();
   await boss.work<ExportBuildJob>(exportBuildQueue, {
     includeMetadata: true,
     localConcurrency: config.concurrency,
@@ -56,17 +62,62 @@ async function main() {
   }, async (jobs) => {
     const job = jobs[0] as JobWithMetadata<ExportBuildJob> | undefined;
     if (!job) return;
+    const payload = exportBuildJobSchema.parse(queuePayload(job.data));
+    const controller = new AbortController();
+    let resolveDone!: () => void;
+    const activeRun: ActiveExportRun = {
+      controller,
+      done: new Promise<void>((resolve) => { resolveDone = resolve; }),
+    };
+    const runs = activeExports.get(payload.exportJobId) ?? new Set<ActiveExportRun>();
+    runs.add(activeRun);
+    activeExports.set(payload.exportJobId, runs);
+    const abortFromQueue = () => {
+      if (!controller.signal.aborted) controller.abort(job.signal.reason ?? new Error("EXPORT_QUEUE_ABORTED"));
+    };
+    if (job.signal.aborted) abortFromQueue();
+    else job.signal.addEventListener("abort", abortFromQueue, { once: true });
+    try {
+      return await traceQueueConsume({
+        destination: exportBuildQueue,
+        messageId: job.id,
+        retryCount: job.retryCount,
+        retryLimit: job.retryLimit,
+      }, job.data, () => processor.process(payload.exportJobId, controller.signal, {
+        retryCount: job.retryCount,
+        retryLimit: job.retryLimit,
+      }));
+    } finally {
+      job.signal.removeEventListener("abort", abortFromQueue);
+      runs.delete(activeRun);
+      if (runs.size === 0) activeExports.delete(payload.exportJobId);
+      resolveDone();
+    }
+  });
+
+  await boss.work<ExportCancelJob>(exportCancelQueue, {
+    includeMetadata: true,
+    localConcurrency: Math.max(1, config.concurrency),
+    pollingIntervalSeconds: 1,
+    notifyPollingIntervalSeconds: 15,
+  }, async (jobs) => {
+    const job = jobs[0] as JobWithMetadata<ExportCancelJob> | undefined;
+    if (!job) return;
+    const payload = exportCancelJobSchema.parse(queuePayload(job.data));
     return traceQueueConsume({
-      destination: exportBuildQueue,
+      destination: exportCancelQueue,
       messageId: job.id,
       retryCount: job.retryCount,
       retryLimit: job.retryLimit,
-    }, job.data, () => {
-      const payload = exportBuildJobSchema.parse(queuePayload(job.data));
-      return processor.process(payload.exportJobId, job.signal, {
-        retryCount: job.retryCount,
-        retryLimit: job.retryLimit,
-      });
+    }, job.data, async () => {
+      const runs = activeExports.get(payload.exportJobId);
+      if (runs && runs.size > 0) {
+        for (const run of runs) run.controller.abort(new Error("EXPORT_CANCEL_REQUESTED"));
+        await Promise.all([...runs].map((run) => run.done));
+      }
+      const acknowledged = await store.acknowledgeCancellation(payload.exportJobId);
+      if (acknowledged === "pending") throw new Error("EXPORT_CANCELLATION_ACK_PENDING");
+      return { status: "cancelled" as const };
     });
   });
 
@@ -75,16 +126,19 @@ async function main() {
     for (const candidate of candidates) {
       try {
         const data = exportBuildJobSchema.parse({ exportJobId: candidate.id });
-        await traceQueuePublish(exportBuildQueue, data, (tracedData) => boss.send(exportBuildQueue, tracedData, {
+        const queue = candidate.status === "cancelling" ? exportCancelQueue : exportBuildQueue;
+        const queueOptions = candidate.status === "cancelling" ? exportCancelQueueOptions : exportBuildQueueOptions;
+        await traceQueuePublish(queue, data, (tracedData) => boss.send(queue, tracedData, {
           singletonKey: candidate.id,
-          retryLimit: exportBuildQueueOptions.retryLimit,
-          retryDelay: exportBuildQueueOptions.retryDelay,
-          retryBackoff: exportBuildQueueOptions.retryBackoff,
-          retryDelayMax: exportBuildQueueOptions.retryDelayMax,
-          expireInSeconds: exportBuildQueueOptions.expireInSeconds,
+          retryLimit: queueOptions.retryLimit,
+          retryDelay: queueOptions.retryDelay,
+          retryBackoff: queueOptions.retryBackoff,
+          retryDelayMax: queueOptions.retryDelayMax,
+          expireInSeconds: queueOptions.expireInSeconds,
         }));
       } catch (error) {
-        console.error(`[export-worker:reconciler:${exportBuildQueue}:${candidate.id}]`, error);
+        const queue = candidate.status === "cancelling" ? exportCancelQueue : exportBuildQueue;
+        console.error(`[export-worker:reconciler:${queue}:${candidate.id}]`, error);
       }
     }
   };
@@ -116,6 +170,11 @@ async function main() {
   process.once("SIGTERM", () => void shutdown("SIGTERM").finally(() => process.exit(0)));
   console.log(`[export-worker] listening on ${exportBuildQueue}`);
 }
+
+type ActiveExportRun = {
+  controller: AbortController;
+  done: Promise<void>;
+};
 
 void main().catch(async (error) => {
   console.error("[export-worker] fatal", error);

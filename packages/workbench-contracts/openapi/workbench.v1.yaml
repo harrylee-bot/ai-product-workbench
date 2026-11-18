@@ -26261,13 +26261,13 @@ paths:
   /exports/{exportId}/cancel:
     post:
       operationId: cancelExportJob
-      summary: Queued or running Export job cancelled
+      summary: Cancellation accepted for a queued or running Export job
       parameters:
         - $ref: "#/components/parameters/ExportId"
         - $ref: "#/components/parameters/IfMatch"
       responses:
         "200":
-          description: Queued or running Export job cancelled
+          description: Cancellation accepted for a queued or running Export job
           headers:
             ETag:
               $ref: "#/components/headers/ETag"

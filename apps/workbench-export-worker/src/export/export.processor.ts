@@ -29,7 +29,11 @@ export class ExportProcessor {
     try {
       const started = await this.store.start(exportJobId);
       if (started.kind !== "run") return started;
-      if (signal?.aborted) throw abortError(signal);
+      if (signal?.aborted) {
+        const cancelled = await this.cancelIfRequested(exportJobId);
+        if (cancelled) return cancelled;
+        throw abortError(signal);
+      }
       const source = await this.sourceLoader.load(started.command, signal);
       const request: ExportBuildRequest = {
         format: started.command.format,
@@ -42,14 +46,19 @@ export class ExportProcessor {
           : {}),
       };
       const output = await buildExport(request, { signal });
-      if (signal?.aborted) throw abortError(signal);
+      if (signal?.aborted) {
+        const cancelled = await this.cancelIfRequested(exportJobId);
+        if (cancelled) return cancelled;
+        throw abortError(signal);
+      }
       if (output.bytes.byteLength <= 0 || output.bytes.byteLength > this.config.maximumOutputBytes) {
         throw new TerminalExportError("EXPORT_OUTPUT_SIZE_LIMIT_EXCEEDED", "Generated export output exceeded its byte limit");
       }
       if (output.validationTarget === "html") {
         await this.browser.validateHtml(output.validationBytes ?? output.bytes, exportJobId, signal);
       }
-      if (await this.store.status(exportJobId) === "cancelled") return { kind: "terminal", status: "cancelled" };
+      const cancelled = await this.cancelIfRequested(exportJobId);
+      if (cancelled) return cancelled;
       const identity = {
         sha256: createHash("sha256").update(output.bytes).digest("hex"),
         byteSize: output.bytes.byteLength,
@@ -66,8 +75,15 @@ export class ExportProcessor {
         throw error;
       }
       const published = await this.store.publishSucceeded(exportJobId, reservation);
+      if (published === "cancelled") {
+        await this.store.abandonOutput(reservation).catch(() => undefined);
+        await this.store.acknowledgeCancellation(exportJobId);
+        return { kind: "terminal", status: "cancelled" };
+      }
       return { kind: "published", status: published, blobId: reservation.blobId, fileName: output.fileName };
     } catch (error) {
+      const cancelled = await this.cancelIfRequested(exportJobId).catch(() => null);
+      if (cancelled) return cancelled;
       if (error instanceof TerminalExportError || terminalInfrastructureError(error)) {
         const code = error instanceof TerminalExportError ? error.code : infrastructureCode(error);
         const detail = error instanceof TerminalExportError ? error.safeDetail : boundedDetail(error);
@@ -80,6 +96,14 @@ export class ExportProcessor {
       }
       throw error;
     }
+  }
+
+  private async cancelIfRequested(exportJobId: string) {
+    const status = await this.store.status(exportJobId);
+    if (status === "cancelled") return { kind: "terminal" as const, status: "cancelled" as const };
+    if (status !== "cancelling") return null;
+    await this.store.acknowledgeCancellation(exportJobId);
+    return { kind: "terminal" as const, status: "cancelled" as const };
   }
 }
 

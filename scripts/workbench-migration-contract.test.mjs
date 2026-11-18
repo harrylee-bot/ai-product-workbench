@@ -34,6 +34,10 @@ const runtimeExecutionDurabilityMigration = await readFile(new URL(
   "../packages/workbench-db/prisma/migrations/20260719020000_runtime_execution_durability/migration.sql",
   import.meta.url,
 ), "utf8");
+const exportCancellationTransitionMigration = await readFile(new URL(
+  "../packages/workbench-db/prisma/migrations/20261118100000_export_job_cancellation_transition/migration.sql",
+  import.meta.url,
+), "utf8");
 const triggerSearchPathMigration = await readFile(new URL(
   "../packages/workbench-db/prisma/migrations/20260719050000_trigger_function_search_path_hardening/migration.sql",
   import.meta.url,
@@ -131,7 +135,7 @@ test("document export packaging expands the old check without disabling guards o
 test("Canvas grant snapshot digest migration is append-only and fences legacy grants", async () => {
   const migrationEntries = await readdir(migrationsDirectory, { withFileTypes: true });
   const migrationCount = migrationEntries.filter((entry) => entry.isDirectory()).length;
-  assert.equal(migrationCount, 97, "candidate migration inventory must be updated explicitly");
+  assert.equal(migrationCount, 98, "candidate migration inventory must be updated explicitly");
   assert(migrationEntries.some((entry) => (
     entry.isDirectory()
     && entry.name === "20260719010000_canvas_grant_snapshot_digest"
@@ -174,6 +178,15 @@ test("Canvas grant snapshot digest migration is append-only and fences legacy gr
   assert.match(canvasSnapshotDigestMigration, /CANVAS_AGENT_SESSION_SNAPSHOT_IMMUTABLE/u);
   assert.match(canvasSnapshotDigestMigration, /CANVAS_TOOL_GRANT_SNAPSHOT_IMMUTABLE/u);
   assert.match(canvasSnapshotDigestMigration, /CANVAS_TOOL_GRANT_SNAPSHOT_SCOPE_INVALID/u);
+});
+
+test("generic Export cancellation cannot skip executor cleanup", () => {
+  assert.match(exportCancellationTransitionMigration, /SET search_path = pg_catalog, workbench/u);
+  assert.match(exportCancellationTransitionMigration, /OLD\."status" = 'queued' AND NEW\."status" IN \('queued', 'running', 'failed', 'cancelling'\)/u);
+  assert.match(exportCancellationTransitionMigration, /OLD\."status" = 'running' AND NEW\."status" IN \('running', 'succeeded', 'failed', 'cancelling'\)/u);
+  assert.match(exportCancellationTransitionMigration, /OLD\."status"::text = 'cancelling' AND NEW\."status"::text = 'cancelled'/u);
+  assert.doesNotMatch(exportCancellationTransitionMigration, /OLD\."status" = 'queued'[^\n]+cancelled/u);
+  assert.doesNotMatch(exportCancellationTransitionMigration, /OLD\."status" = 'running'[^\n]+cancelled/u);
 });
 
 test("Project Preview initial screens remain distinct from Export cropping", () => {

@@ -9,6 +9,7 @@ export const fileExtractQueue = "file.extract";
 export const knowledgeReleaseBuildQueue = "knowledge.release.build";
 export const blobGcQueue = "blob.gc";
 export const exportBuildQueue = "export.build";
+export const exportCancelQueue = "export.cancel";
 export const importSourceProcessQueue = "import.source.process";
 
 export const importSourceProcessQueueOptions = {
@@ -32,6 +33,17 @@ export const exportBuildQueueOptions = {
   expireInSeconds: 15 * 60,
   heartbeatSeconds: 30,
   deleteAfterSeconds: 7 * 24 * 60 * 60,
+  notify: true,
+} as const;
+
+export const exportCancelQueueOptions = {
+  policy: "short",
+  retryLimit: 5,
+  retryDelay: 1,
+  retryBackoff: true,
+  retryDelayMax: 30,
+  expireInSeconds: 60,
+  deleteAfterSeconds: 24 * 60 * 60,
   notify: true,
 } as const;
 
@@ -326,6 +338,7 @@ export const blobGcJobSchema = z.object({
 export const exportBuildJobSchema = z.object({
   exportJobId: opaqueIdSchema,
 }).strict();
+export const exportCancelJobSchema = exportBuildJobSchema;
 
 export const importSourceProcessJobSchema = z.object({
   sourceId: opaqueIdSchema,
@@ -346,4 +359,5 @@ export type FileExtractJob = z.infer<typeof fileExtractJobSchema>;
 export type KnowledgeReleaseBuildJob = z.infer<typeof knowledgeReleaseBuildJobSchema>;
 export type BlobGcJob = z.infer<typeof blobGcJobSchema>;
 export type ExportBuildJob = z.infer<typeof exportBuildJobSchema>;
+export type ExportCancelJob = z.infer<typeof exportCancelJobSchema>;
 export type ImportSourceProcessJob = z.infer<typeof importSourceProcessJobSchema>;

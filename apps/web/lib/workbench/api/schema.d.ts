@@ -857,7 +857,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Queued or running Export job cancelled */
+        /** Cancellation accepted for a queued or running Export job */
         post: operations["cancelExportJob"];
         delete?: never;
         options?: never;
@@ -10984,7 +10984,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Queued or running Export job cancelled */
+            /** @description Cancellation accepted for a queued or running Export job */
             200: {
                 headers: {
                     ETag: components["headers"]["ETag"];

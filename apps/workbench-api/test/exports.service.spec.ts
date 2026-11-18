@@ -274,6 +274,37 @@ describe("ExportJob API invariants", () => {
     expect(Reflect.getMetadata(HTTP_CODE_METADATA, ExportsController.prototype.createPreviewToken)).toBe(200);
   });
 
+  it("accepts cancellation before executor cleanup and publishes the cancel command transactionally", async () => {
+    let job = queuedJob();
+    const tx = {
+      $queryRaw: vi.fn().mockResolvedValue([{ id: "project_1", revision: 0 }]),
+      projectMember: { findUnique: vi.fn().mockResolvedValue({ role: "editor" }) },
+      exportJob: {
+        updateMany: vi.fn().mockImplementation(async () => {
+          job = { ...job, status: "cancelling", revision: job.revision + 1 };
+          return { count: 1 };
+        }),
+        findUnique: vi.fn().mockImplementation(async () => job),
+      },
+    };
+    const db = {
+      exportJob: { findFirst: vi.fn().mockResolvedValue(job) },
+      projectRelease: { findUnique: vi.fn().mockResolvedValue({ projectId: "project_1" }) },
+      $transaction: vi.fn().mockImplementation((callback) => callback(tx)),
+    };
+    const queue = { sendInTransaction: vi.fn().mockResolvedValue("cancel-job-1") };
+
+    const result = await serviceWith(db, queue).cancel("principal_1", "export_1", 0);
+
+    expect(result).toMatchObject({ id: "export_1", status: "cancelling", revision: 1, finishedAt: null, output: null, failure: null });
+    expect(queue.sendInTransaction).toHaveBeenCalledWith(
+      tx,
+      "export.cancel",
+      { exportJobId: "export_1" },
+      { singletonKey: "export_1" },
+    );
+  });
+
   it("reports the fixed official-importer Figma capability without a deployment secret", () => {
     const capabilities = new ExportCapabilitiesConfig();
     expect(capabilities.catalog()).toEqual({

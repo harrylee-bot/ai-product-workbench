@@ -1,6 +1,8 @@
 import { Inject, Injectable } from "@nestjs/common";
 import { Prisma } from "@workbench/workbench-db";
 import {
+  exportCancelJobSchema,
+  exportCancelQueue,
   exportBuildJobSchema,
   exportBuildQueue,
   projectReleaseManifestSchema,
@@ -506,7 +508,7 @@ export class ExportsService {
   ): Promise<ExportJob> {
     const current = await this.findAuthorized(principalId, exportId, "edit");
     if (current.revision !== expectedRevision) throw revisionConflictProblem();
-    if (current.status === "cancelled") return mapExportJob(current);
+    if (current.status === "cancelled" || current.status === "cancelling") return mapExportJob(current);
     if (!["queued", "running"].includes(current.status)) {
       throw exportStateConflictProblem(`The Export cannot be cancelled while it is ${current.status}`);
     }
@@ -516,7 +518,7 @@ export class ExportsService {
       select: { projectId: true },
     });
     if (!release) throw notFoundProblem("Project release");
-    const cancelled = await this.db.$transaction(async (tx) => {
+    const cancelling = await this.db.$transaction(async (tx) => {
       await lockActiveProject(tx, release.projectId, principalId, "edit");
       const result = await tx.exportJob.updateMany({
         where: {
@@ -525,8 +527,7 @@ export class ExportsService {
           status: { in: ["queued", "running"] },
         },
         data: {
-          status: "cancelled",
-          finishedAt: new Date(),
+          status: "cancelling",
           revision: { increment: 1 },
         },
       });
@@ -539,9 +540,13 @@ export class ExportsService {
         if (latest.revision !== expectedRevision) throw revisionConflictProblem();
         throw exportStateConflictProblem(`The Export cannot be cancelled while it is ${latest.status}`);
       }
+      const payload = exportCancelJobSchema.parse({ exportJobId: exportId });
+      await this.queue.sendInTransaction(tx, exportCancelQueue, payload, {
+        singletonKey: exportId,
+      });
       return latest as ExportJobRecord;
     });
-    return mapExportJob(cancelled);
+    return mapExportJob(cancelling);
   }
 
   async getContent(
