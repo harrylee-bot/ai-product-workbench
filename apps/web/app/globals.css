@@ -1991,6 +1991,7 @@
 .studio-prd-diagram details {margin-top:12px;}
 .studio-prd-diagram summary {cursor:pointer;}
 .studio-requirement-input {display:flex;flex-direction:column;gap:10px;min-width:0;}
+.studio-generation-discussion > summary {min-height:44px;align-content:center;padding-inline:14px;cursor:pointer;color:var(--studio-text);font-size:13px;}
 .studio-requirement-discussion {max-height:min(44dvh,560px);overflow:auto;overscroll-behavior:contain;background:#fff;border:1px solid var(--studio-line);border-radius:16px;padding:18px;color:var(--studio-text);font-size:13px;line-height:1.65;scrollbar-gutter:stable;}
 .studio-requirement-discussion>header {display:flex;align-items:flex-start;justify-content:space-between;gap:12px;}
 .studio-requirement-discussion h2 {font-size:16px;margin:0;}
@@ -2031,3 +2032,14 @@
 .visual-draft-motion button { border:1px solid #d5dce7;border-radius:7px;padding:5px 10px;min-height:44px;background:white;color:#344054;cursor:pointer; }
 
 .studio-requirement-directory{display:flex;align-items:center;gap:8px;flex-wrap:wrap;min-width:0}.studio-requirement-directory label{display:flex;align-items:center;gap:8px;min-width:0;max-width:100%}.studio-requirement-directory select{min-height:44px;max-width:100%;min-width:0;flex:1;border:1px solid var(--studio-line);border-radius:8px;background:white;padding:6px;color:inherit}.studio-requirement-directory button{min-height:44px}
+
+.studio-input-settings-toggle {display:none;}
+.studio-input-settings {display:contents;}
+@media(max-width:767px) {
+  .visual-composer-dock:has(.studio-generation-discussion) .studio-composer-status-row {display:flex;align-items:center;gap:4px;}
+  .visual-composer-dock:has(.studio-generation-discussion) .visual-progress {flex:1;min-width:0;}
+  .studio-requirement-input:has(.studio-generation-discussion) {gap:2px;}
+  .studio-requirement-input:has(.studio-generation-discussion) .studio-input-settings-toggle {display:inline-flex;align-items:center;}
+  .studio-requirement-input:has(.studio-generation-discussion) .studio-input-settings[data-open=false] {display:none;}
+  .studio-workspace .visual-viewport:has(.visual-draft) {padding:8px;}
+}

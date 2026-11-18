@@ -1,4 +1,5 @@
 import { threadEntryVisibility } from "../threads/thread-entry-visibility.js";
+import { mapThreadEntry } from "../threads/thread.mapper.js";
 import { Injectable } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import { Prisma, type RequirementSession as Session } from '@workbench/workbench-db';
@@ -25,6 +26,35 @@ export class RequirementsService {
   return {items:await Promise.all(page.map(x=>this.snapshot(x))),nextCursor:rows.length>count&&last?Buffer.from(JSON.stringify({principalId,threadId,id:last.id,updatedAt:last.updatedAt.toISOString()})).toString('base64url'):null};
  }
  async get(principalId:string,sessionId:string){return this.snapshot(await this.authorize(principalId,sessionId));}
+ async listMessages(principalId: string, sessionId: string, cursor?: string, limit = 30) {
+   const session = await this.authorize(principalId, sessionId);
+   let before: number | undefined;
+   if (cursor !== undefined) {
+     try {
+       if (cursor.length > 2048 || !/^[A-Za-z0-9_-]+$/.test(cursor)) throw Error();
+       const position = JSON.parse(Buffer.from(cursor, 'base64url').toString('utf8'));
+       if (position.sessionId !== sessionId || position.principalId !== principalId ||
+           !Number.isSafeInteger(position.before) || position.before < 1) throw Error();
+       before = position.before;
+     } catch {
+       throw validationProblem('Invalid requirement message cursor');
+     }
+   }
+   const rows = await this.db.threadEntry.findMany({
+     where: {
+       threadId: session.threadId, requirementSessionId: sessionId, ...threadEntryVisibility(principalId),
+       ...(before === undefined ? {} : { sequence: { lt: before } }),
+     },
+     orderBy: { sequence: 'desc' },
+     take: limit + 1,
+   });
+   const items = rows.slice(0, limit).map(mapThreadEntry);
+   const last = items.at(-1);
+   const nextCursor = rows.length > limit && last
+     ? Buffer.from(JSON.stringify({ sessionId, principalId, before: last.sequence })).toString('base64url')
+     : null;
+   return { sessionId, items, nextCursor };
+ }
  async authorize(principalId:string,sessionId:string){
   const session=await this.db.requirementSession.findFirst({where:{id:sessionId,principalId}});if(!session)throw notFoundProblem('Requirement session');
   if(!await this.db.principal.findFirst({where:{id:principalId,status:'active'},select:{id:true}}))throw notFoundProblem('Requirement session');

@@ -16,13 +16,12 @@ const mocks = vi.hoisted(() => ({
   retryConfirmation: vi.fn(),
   turn: vi.fn(),
   prepare: vi.fn(),
-  listThreadEntries: vi.fn(),
+  messages: vi.fn(),
 }));
 vi.mock("@/lib/auth/workbench-auth", () => ({
   useWorkbenchAuth: () => ({ user: { id: "actor-one" } }),
 }));
 vi.mock("./requirement-api", () => ({ useStudioRequirementApi: () => mocks }));
-vi.mock("./api", () => ({ useWorkbenchProjectsApi: () => mocks }));
 vi.mock("./use-input-preparation", () => ({
   useStudioInputPreparation: () => ({ prepare: mocks.prepare, uploads: [] }),
 }));
@@ -152,10 +151,11 @@ beforeEach(() => {
     ),
   );
   mocks.prepare.mockResolvedValue(request);
-  mocks.listThreadEntries.mockResolvedValue({
+  mocks.messages.mockImplementation(async sessionId => ({
+    sessionId,
     items: [],
-    nextAfterSequence: null,
-  });
+    nextCursor: null,
+  }));
 });
 afterEach(() => {
   cleanup();
@@ -357,7 +357,7 @@ it("hides private snapshots and cached messages when authorization is revoked", 
   expect(hook.result.current.messages).toEqual([]);
   expect(hook.result.current.error?.message).toBe("Fixture failure");
 });
-it("reads new thread messages after the bootstrap sequence and labels older pagination separately", async () => {
+it("loads history for the selected discussion from newest to oldest and displays it chronologically", async () => {
   const entry = (sequence: number) => ({
     id: `entry-${sequence}`,
     threadId: "thread-one",
@@ -373,15 +373,17 @@ it("reads new thread messages after the bootstrap sequence and labels older pagi
     producedByRunId: null,
     createdAt: now,
   });
-  mocks.listThreadEntries.mockImplementation(async (_thread, options) => ({
-    items: options.afterSequence === 500 ? [entry(501)] : [entry(1)],
-    nextAfterSequence: options.afterSequence === 0 ? 1 : null,
+  mocks.list.mockResolvedValue({ items: [session()], nextCursor: null });
+  mocks.messages.mockImplementation(async (sessionId, options) => ({
+    sessionId,
+    items: options.cursor ? [entry(1)] : [entry(501), entry(500)],
+    nextCursor: options.cursor ? null : "older",
   }));
-  const hook = setup({ initialEntries: [entry(500)] });
+  const hook = setup();
   await waitFor(() => expect(hook.result.current.messages).toHaveLength(2));
-  expect(mocks.listThreadEntries).toHaveBeenCalledWith("thread-one", {
-    afterSequence: 500,
-    limit: 100,
+  expect(mocks.messages).toHaveBeenCalledWith("session-one", {
+    cursor: undefined,
+    limit: 50,
   });
   expect(hook.result.current.hasMore).toBe(true);
   await act(async () => {

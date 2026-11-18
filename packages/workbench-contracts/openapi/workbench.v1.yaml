@@ -22075,6 +22075,27 @@ components:
         - scope
         - checksum
       additionalProperties: false
+    RequirementMessages:
+      type: object
+      properties:
+        sessionId:
+          type: string
+          minLength: 1
+          maxLength: 128
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/ThreadEntry"
+          maxItems: 100
+        nextCursor:
+          type:
+            - string
+            - "null"
+      required:
+        - sessionId
+        - items
+        - nextCursor
+      additionalProperties: false
     RequirementTurn:
       type: object
       properties:
@@ -24430,6 +24451,35 @@ paths:
         "404":
           $ref: "#/components/responses/Problem"
   /requirement-sessions/{sessionId}/messages:
+    get:
+      operationId: listRequirementMessages
+      summary: Authorized discussion messages, newest sequences first
+      parameters:
+        - $ref: "#/components/parameters/RequirementSessionId"
+        - schema:
+            type: string
+          required: false
+          name: cursor
+          in: query
+        - schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 30
+          required: false
+          name: limit
+          in: query
+      responses:
+        "200":
+          description: Authorized discussion messages, newest sequences first
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RequirementMessages"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
     post:
       operationId: postRequirementMessage
       summary: Requirement snapshot

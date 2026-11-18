@@ -1,11 +1,12 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
-import { useInfiniteQuery, useQueryClient } from "@tanstack/react-query";
+import { replaceEqualDeep, useInfiniteQuery, useQueryClient, type InfiniteData } from "@tanstack/react-query";
 import type {
   CreateExportJobRequest,
   ProjectBootstrap,
   ProjectRelease,
   ExportJob,
+  ExportJobList,
 } from "@workbench/workbench-contracts";
 import {
   useWorkbenchExportsApi,
@@ -26,6 +27,27 @@ const exportStatus = {
   cancelled: "已取消",
 };
 const shareStatus = { active: "有效", revoked: "已撤销", expired: "已过期" };
+
+// Both the cancel receipt and list refresh write this same project-scoped cache.
+function mergeExportPages(previous: unknown, incoming: unknown) {
+  const current = previous as InfiniteData<ExportJobList> | undefined;
+  const next = incoming as InfiniteData<ExportJobList>;
+  if (!current) return next;
+  const known = new Map(current.pages.flatMap(page => page.items.map(job => [job.id, job] as const)));
+  const pages = next.pages.map(page => ({
+    ...page,
+    items: page.items.map(job => {
+      const seen = known.get(job.id);
+      if (!seen) return job;
+      if (seen.revision > job.revision) return seen;
+      if (seen.finishedAt && !job.finishedAt) return seen;
+      if (seen.status === "cancelling" && (job.status === "queued" || job.status === "running")) return seen;
+      return job;
+    }),
+  }));
+  return replaceEqualDeep(current, { ...next, pages });
+}
+
 export function ProjectPublishing({
   bootstrap,
   canEdit,
@@ -39,7 +61,6 @@ export function ProjectPublishing({
     queryClient = useQueryClient();
   const projectId = bootstrap.project.id;
   const intents = useRef(new Map<string, { signature: string; key: string }>());
-  const authoritativeJobs = useRef(new Map<string, ExportJob>());
   const alive = useRef(true);
   useEffect(() => {
     alive.current = true;
@@ -70,15 +91,9 @@ export function ProjectPublishing({
       exports.listExportJobs(projectId, { cursor: pageParam, limit: 30 }),
     getNextPageParam: (page) => page.nextCursor ?? undefined,
     refetchInterval: 3000,
+    structuralSharing: mergeExportPages,
   });
-  const jobItems = (jobs.data?.pages.flatMap((page) => page.items) ?? []).map((job) => {
-    const previous = authoritativeJobs.current.get(job.id);
-    if (previous?.status === "cancelling" && ["queued", "running"].includes(job.status)) {
-      return previous;
-    }
-    authoritativeJobs.current.set(job.id, job);
-    return job;
-  });
+  const jobItems = jobs.data?.pages.flatMap((page) => page.items) ?? [];
   const createExport = async (
     request: CreateExportJobRequest,
     operation = "export",
@@ -266,7 +281,6 @@ export function ProjectPublishing({
                         job.id,
                         `"${job.revision}"`,
                       );
-                      authoritativeJobs.current.set(job.id, result.value);
                       queryClient.setQueryData(
                         ["studio", "export-jobs", projectId],
                         (current: { pages?: Array<{ items: ExportJob[] }> } | undefined) => current

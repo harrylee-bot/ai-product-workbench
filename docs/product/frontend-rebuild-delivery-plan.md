@@ -13,10 +13,10 @@
 | FR-01 | A · 项目 → 页面、文档、资料、运行 | C/workspace.tsx、C/onlook/main.tsx、app/(workbench)/studio/[projectId]/page.tsx | 待验收，统一壳已挂载 | 综合浏览器验证 7 视图及 4 个面板 | 项目 bootstrap · 验证新候选切换与恢复 |
 | FR-02 | A · 默认浅色舞台及侧面板 | C/onlook/main.tsx、app/globals.css | 待验收，浅色与紧凑布局已实现 | stage2-comprehensive-20m 桌面主区 95.8% | 无 · 用新候选复拍展开和收起状态 |
 | FR-03 | D · 首页、左栏、Composer 补充输入及交付菜单 | C/home.tsx、C/project-views.tsx、C/context-library.tsx、C/project-publishing.tsx | 待验收，入口已挂载 | 综合浏览器覆盖面板及一级入口，media/variants/history 各有流程 | 项目、资料、运行、产物、导入、发布 · 逐项操作实际账户 |
-| FR-04 | A · 舞台下方 Composer 与专注预览 | C/workspace.tsx、C/composer.tsx、C/onlook/chat-input.tsx | 待开发，舞台居中、文本增长与收起已实现。生成时默认展开的讨论卡仍会压缩可见草稿 | 综合浏览器面板切换偏差 ≤4 px，长输入仍可访问页面底部 | 无 · 精简空闲讨论区，保留澄清和确认可达。复核窄屏和软键盘下的输入与停止 |
+| FR-04 | A · 舞台下方 Composer 与专注预览 | C/requirement-input.tsx、C/workspace.tsx、C/onlook/chat-input.tsx | 生成期间收起空闲讨论，保留输入、停止、澄清与确认；窄屏可展开输入设置 | studio-integrated-stage-final 实测桌面草稿可见高度 569.5 px，展开讨论时 383.5 px；390×480 聚焦输入后 164.5 px | 待实际设备软键盘与读屏复核 |
 | FR-05 | A · Composer 的附件、来源、模型、设计及三种输出 | C/composer.tsx、C/context-library.tsx、S/use-input-preparation.ts | 待接入，输入与错误恢复已接到正式接口形状 | requirement-workflow 验三种输出，input/media 验附件状态及实际选择文件 | 存储、解析、授权来源、模型目录 · 真实上传并核对固定引用 |
 | FR-06 | A · 从版本或元素进入修改，Composer 切新建或清除上下文 | C/workspace.tsx、C/requirement-input.tsx、S/composer-session.ts | 待验收，有固定版本与引用、按上下文保留草稿 | requirement-workflow 的固定版本修改；variants 手机操作 | 版本关系、模型能力 · 真实核对修改请求和源版本 |
-| FR-07 | A · 展开讨论历史、运行时继续输入 | C/requirement-discussion.tsx、C/composer.tsx、S/composer-session.ts | 待验收，历史、后续需求及 IME 保护已实现 | history 展示 105 条记录，requirement-workflow 验证追加 | Thread/Entry、后续会话 · 验证运行中追加及重载 |
+| FR-07 | A · 当前讨论历史、生成中追加 | C/requirement-discussion.tsx、S/use-requirement-discussion.ts | 已接单会话消息 API，按操作者、Thread 和会话保存查询，倒序分页后按时间正序展示 | session-messages-http-postgres 验证交错会话、翻页、追加、刷新；studio-integrated-discussion 验三路径的后续消息 | 待真实生成和设备联验 |
 | FR-08 | B · 讨论确认卡及固定输入详情 | C/requirement-discussion.tsx、S/requirement-view-adapter.ts | 待接入，单次确认取代旧 Plan 审批 | requirement-workflow 的确认及重复动作场景 | 用户授权摘要/CAS/固定确认 · 实际核对卡片与 Run |
 | FR-09 | A · Composer 上方进度及详情 | C/workspace.tsx、S/run.ts | 待验收，阶段来自服务状态。耗时与进度分开 | 综合浏览器 SSE 及历史运行视图 | Run 进度流 · 核对实际阶段链与未知总量 |
 | FR-10 | A · 生成时的草稿与 Swarm 动效开关 | C/page-stage.tsx、C/draft-projection.tsx、C/swarm/engine.ts | 待接入，真实投影事件可驱动节点变化；真实模型样本待取得 | stage2-comprehensive-20m 记录 SSE 驱动的可见变化与舞台截图 | Worker 投影、Flash · 真实终态前两次变化与事件对应 |
@@ -83,7 +83,7 @@
 | AC-22 | 失效资料、模型或设计选项 · C/context-library.tsx | 待接入。资料失败、来源分页、模型/设计恢复 | 解析、授权、模型目录 · 真实故障 |
 | AC-23 | 创建、访问、撤销、到期和无效链接 · C/public-prototype.tsx | 待接入。swarm-public 有受控匿名与失效操作 | 分享实际凭据 · 真自然到期及无私人读取 |
 | AC-24 | 交付面板下载 HTML/React · C/actions.tsx | 待接入。当前有校验逻辑及真实验收入口 | S3/Export Worker · 字节、hash、安装、构建与交互 |
-| AC-25 | 导出取消、失败与重试 · C/project-publishing.tsx | 待接入。已接受取消回执有定向回归。FE-L015 待开发：防止迟到的 queued/running 覆盖已完成的 cancelled | 取消和清理终态 · 确认无成功产物、重试不重复 |
+| AC-25 | 交付面板 · C/project-publishing.tsx | FE-L015 组件回归通过。三种终态均能抵御迟到活动页，关闭并重新进入面板仍正确，新 ID 可独立取消 | Worker 清理确认、真实导出文件与重试链路继续验收 |
 | AC-26 | 新登录/邀请/分享与回退 · C/project-route.tsx | 待验收。真实注册与邀请接受（验证邮箱用测试前置状态） | Auth/邮件/公开路由 · 补真实登录及历史导航 |
 | AC-27 | 局部错误、撤权和编辑冲突 · C/document-view.tsx、S/project-access.ts | 待验收。已有真实撤权及受控冲突恢复 | HTTP 错误与权限 · 验证各类局部状态 |
 | AC-28 | 五个视口及手机输入与交付 · C/onlook/main.tsx | 待验收。综合浏览器仅有模拟键盘，media 五视口 | 无 · Studio 五视口与移动 Safari 真软键盘 |
@@ -105,13 +105,13 @@
 | AC-44 | 双标签 CAS、角色和资料范围 · S/project-access.ts、S/use-requirement-discussion.ts | 待验收。真实撤权/草稿；受控 CAS | 同候选真双标签和授权来源拒绝 |
 | AC-45 | 生成中续写、停止/重试并确认后续 · C/workspace.tsx | 待接入。受控追加不会启动下一 Run | 真实取消、重试与后续确认 · 核对冻结内容 |
 | AC-46 | 成品对照确认卡与知识发布历史 · C/document-view.tsx、C/relations.tsx | 待接入。现有关系可导航，真实语义待核对 | 两种真实产物 · 对比增量规则与出典 |
-| AC-47 | 小屏长讨论、分页、IME 与键盘 · C/requirement-sessions.tsx、C/composer.tsx | 待验收。既有历史与输入受控浏览器证据 | 长会话 · 小屏键盘、分页及恢复联验 |
+| AC-47 | 小屏讨论、分页、IME 与键盘 · C/requirement-input.tsx、C/composer.tsx | 390×480 缩短视口已测，聚焦可继续输入并保留草稿区。单会话 keyset 分页真实 HTTP 已测 | 实际移动软键盘、VoiceOver 与长讨论全键盘操作待验证 |
 | AC-48 | 实际检索/模型失败、重连和三种输出 · S/requirement-api.ts | 待接入。前端走正式服务端接口。当前缺真实生成证据 | 唯一 Flash、检索与依赖 · 真失败恢复 |
 | AC-49 | 从真实生成到四类文件交付 · C/workspace.tsx、C/project-publishing.tsx | 待接入。受控舞台及局部访问证据已取得 | Flash、Worker、存储 · 真模型持续变化、最终交互及导出检查 |
 | AC-50 | 对照服务、Web、GitHub 身份 · S/requirement-api.ts、lib/workbench/api/schema.d.ts | 待接入。导出取消 OpenAPI 已同步并通过生成校验。统一运行和全量验收待完成 | 固定源树/运行证明 · 随联合候选验收与集成交付 |
 
 ## 当前工作顺序
 
-1. A 已验证草稿首屏、切页、窗口边界、动效和冻结交接。剩余压缩生成期间空闲讨论区，并用真模型复核展示。
+1. A 已验证草稿首屏、切页、窗口边界、动效和冻结交接。生成期间空闲讨论区与窄屏设置已收起，剩余真模型与实际设备复核。
 2. B 联验讨论就绪、确认摘要、后续要求与运行恢复。C 补看页、差异、几何、批注及冻结版本的操作链。
 3. D 从新入口完成真实资料、文档、媒体和交付。E 汇总 Safari、VoiceOver、移动软键盘与固定候选性能。现有本地访问实测与受控 UI 证据分别保留。

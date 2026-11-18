@@ -8,17 +8,28 @@ import type { ComponentProps, ReactNode } from "react";
  * only; the single explicit confirm callback owns generation. */
 export function RequirementInput({
   discussion,
+  generationActive = false,
   composer,
   children,
 }: {
   discussion: ComponentProps<typeof RequirementDiscussion>;
+  generationActive?: boolean;
 } & (
   | { composer: StudioComposerProps; children?: never }
   | { composer?: never; children: ReactNode }
 )) {
+  const { view } = discussion;
+  const compact = generationActive &&
+    (view.status === "discussing" || view.status === "generating") &&
+    !view.questions.length && !view.confirmationPending && !view.generationStarting;
   return (
     <div className="studio-requirement-input">
-      <RequirementDiscussion {...discussion} />
+      {compact ? (
+        <details key={view.scopeKey} className="studio-generation-discussion">
+          <summary>查看需求讨论</summary>
+          <RequirementDiscussion {...discussion} />
+        </details>
+      ) : <RequirementDiscussion {...discussion} />}
       {children}
       {composer && (
         <StudioComposer

@@ -269,7 +269,6 @@ export function StudioWorkspace({
     contextKey: discussionKey,
     canEdit,
     enabled: composerSession.ready,
-    initialEntries: bootstrap.entries,
     operation: {
       workflow:
         artifactContext?.workflow ?? initialRequest?.workflow ?? "generate",
@@ -1585,6 +1584,7 @@ export function StudioWorkspace({
         }
         bottomBar={
           <footer className="visual-composer-dock" data-focused={focused}>
+            <div className="studio-composer-status-row">
             {(running || progress.error) && (
               <div className="visual-progress" role="status">
                 <span className={running ? "visual-pulse" : ""} />
@@ -1637,6 +1637,7 @@ export function StudioWorkspace({
             >
               {focused ? "展开输入框" : "专注预览"}
             </button>
+            </div>
             <div hidden={focused}>
               {composerSession.storageError && (
                 <p role="alert">{composerSession.storageError}</p>
@@ -1780,6 +1781,7 @@ export function StudioWorkspace({
               />
               {composerSession.ready && (
                 <RequirementInput
+                  generationActive={running || isActiveRun(direct.run)}
                   discussion={{
                     view: discussionView,
                     canEdit,

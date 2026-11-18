@@ -7,6 +7,7 @@ import {
   confirmRequirementRequestSchema,
   requirementSessionSchema,
   requirementSessionsSchema,
+  requirementMessagesSchema,
   requirementDiscussionRequestSchema,
 } from "@workbench/workbench-contracts";
 import type { WorkbenchApiClient } from "@/lib/workbench/api/client";
@@ -32,6 +33,12 @@ export class StudioRequirementApi {
       r.data,
       "list requirement discussions",
     );
+  }
+  async messages(sessionId: string, query: { cursor?: string; limit?: number }) {
+    const r = await this.api.GET("/requirement-sessions/{sessionId}/messages", {
+      params: { path: { sessionId }, query },
+    });
+    return parseContract(requirementMessagesSchema, r.data, "read requirement messages");
   }
   async get(sessionId: string) {
     const r = await this.api.GET("/requirement-sessions/{sessionId}", {

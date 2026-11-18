@@ -21,6 +21,12 @@ export class RequirementsController {
  async create(@CurrentPrincipal() p:AuthenticatedPrincipal,@Param('threadId') threadId:string,@Headers('idempotency-key') k:string|undefined,@Body(new ZodValidationPipe(createRequirementSessionRequestSchema)) body:z.infer<typeof createRequirementSessionRequestSchema>,@Res({passthrough:true}) response:Response){return this.reply(response,await this.sessions.create(p.id,threadId,key(k),body.generationRequest,body.context));}
  @Get('requirement-sessions/:sessionId')
  async get(@CurrentPrincipal() p:AuthenticatedPrincipal,@Param('sessionId') sessionId:string,@Res({passthrough:true}) response:Response){return this.reply(response,await this.sessions.get(p.id,sessionId));}
+ @Get('requirement-sessions/:sessionId/messages')
+ listMessages(@CurrentPrincipal() principal: AuthenticatedPrincipal, @Param('sessionId') sessionId: string,
+   @Res({passthrough:true}) response: Response, @Query('cursor') cursor?: string, @Query('limit') limit?: string) {
+   response.setHeader('Cache-Control', 'private, no-store');
+   return this.sessions.listMessages(principal.id, sessionId, cursor, parseLimit(limit, 100));
+ }
  @Post('requirement-sessions/:sessionId/messages') @HttpCode(202)
  async message(@CurrentPrincipal() p:AuthenticatedPrincipal,@Param('sessionId') id:string,@Headers('idempotency-key') k:string|undefined,@Headers('if-match') tag:string|undefined,@Body(new ZodValidationPipe(postRequirementMessageRequestSchema)) body:z.infer<typeof postRequirementMessageRequestSchema>,@Res({passthrough:true}) response:Response){return this.reply(response,await this.sessions.message(p.id,id,key(k),parseIfMatch(tag),body));}
  @Post('requirement-sessions/:sessionId/confirm') @HttpCode(202)

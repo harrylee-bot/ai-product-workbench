@@ -351,7 +351,8 @@ const evidence = [
     checksum: "a".repeat(64),
   },
 ];
-const addEntry = (text, assistant = false) =>
+const entrySessions = new WeakMap();
+const addEntry = (sessionId, text, assistant = false) => {
   entries.push({
     id: `entry-${entries.length + 1}`,
     threadId: thread.id,
@@ -367,6 +368,8 @@ const addEntry = (text, assistant = false) =>
     producedByRunId: null,
     createdAt: now,
   });
+  entrySessions.set(entries.at(-1), sessionId);
+};
 const results = {
   evidence:
     "Actual mounted Studio with fixed-contract API fixtures; no backend/model acceptance",
@@ -470,26 +473,34 @@ await context.route("**/api/v1/**", async (route) => {
     const id = path.split("/requirement-sessions/")[1]?.split("/")[0];
     const value = sessions.find((item) => item.id === id);
     assert(value, `Unknown requirement ${path}`);
+    if (method === "GET" && path.endsWith("/messages")) {
+      const query = new URL(route.request().url()).searchParams;
+      const before = Number(query.get("cursor") ?? Number.MAX_SAFE_INTEGER);
+      const limit = Number(query.get("limit") ?? 30);
+      const rows = entries.filter(entry => entrySessions.get(entry) === id && entry.sequence < before).reverse();
+      const items = rows.slice(0, limit);
+      return json(route, { sessionId: id, items, nextCursor: rows.length > limit ? String(items.at(-1).sequence) : null });
+    }
     if (method === "GET") return json(route, value);
     assert.equal(route.request().headers()["if-match"], `"${value.revision}"`);
     const body = route.request().postDataJSON();
     if (path.endsWith("/messages")) {
       messages.push(body);
-      addEntry(body.text);
+      addEntry(id, body.text);
       value.revision++;
       value.generationRequest = body.generationRequest;
       value.confirmation = null;
       if (body.text.includes("先了解")) {
         value.card = null;
         value.state = "needs_clarification";
-        addEntry("想了解现有平台的哪个模块？", true);
+        addEntry(id, "想了解现有平台的哪个模块？", true);
       } else {
         value.card = cardFor(body.generationRequest);
         value.state = "ready_to_confirm";
         value.summaryVersion++;
         value.summaryChecksum = "a".repeat(64);
         value.evidence = evidence;
-        addEntry("已整理为现有平台上的增量改动，请核对摘要。", true);
+        addEntry(id, "已整理为现有平台上的增量改动，请核对摘要。", true);
       }
       return json(route, requirementSessionSchema.parse(value), 202);
     }
@@ -1025,6 +1036,10 @@ try {
       updatedAt: "2026-11-14T00:00:00Z",
     },
   ];
+  for (let index = 1; index <= 54; index++) {
+    addEntry("saved-discussion", "当前会话第 " + index + " 条");
+    addEntry("older-discussion", "其他会话第 " + index + " 条");
+  }
   const createCount = createCalls.length;
   await page.goto(
     `${origin}/studio/${projectId}?plan=${root.id}&revision=${revisionId}`,
@@ -1038,8 +1053,27 @@ try {
   await directory.waitFor();
   assert(directoryCursors.includes("100"));
   assert.equal(await directory.inputValue(), "saved-discussion");
+  const history = page.locator(".studio-requirement-history");
+  await history.locator("summary").filter({hasText:"50 条"}).waitFor();
+  if (await history.getAttribute("open") === null) await history.locator("summary").click();
+  await history.getByText("当前会话第 54 条", {exact:true}).waitFor();
+  assert.equal(await history.getByText("当前会话第 1 条", {exact:true}).count(), 0);
+  await history.getByRole("button", {name:"加载更多交流"}).click();
+  await history.getByText("当前会话第 1 条", {exact:true}).waitFor();
+  assert.equal(await history.getByText(/^其他会话第/).count(), 0);
+  assert.equal(await history.locator("li").count(), 54);
+  addEntry("saved-discussion", "刷新后追加的消息");
+  await page.reload();
+  await history.locator("summary").filter({hasText:"50 条"}).waitFor();
+  if (await history.getAttribute("open") === null) await history.locator("summary").click();
+  await history.getByText("刷新后追加的消息", {exact:true}).waitFor();
   await directory.selectOption("older-discussion");
   await page.getByText("更早的范围讨论", { exact: true }).waitFor();
+  await history.locator("summary").filter({hasText:"50 条"}).waitFor();
+  if (await history.getAttribute("open") === null) await history.locator("summary").click();
+  await history.getByText("其他会话第 54 条", {exact:true}).waitFor();
+  assert.equal(await history.getByText(/^当前会话第/).count(), 0);
+  results.checks.push("Mounted per-session history shows 50 newest messages, loads 4 older messages, refreshes a new arrival and isolates 54 interleaved messages from another session");
   assert.equal(createCalls.length, createCount);
   results.checks.push(
     "Directory restores a matching discussion beyond 100 unrelated source sessions and switches among loaded matching discussions without creating a duplicate",

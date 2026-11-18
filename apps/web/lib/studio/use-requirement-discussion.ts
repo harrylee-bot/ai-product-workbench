@@ -22,7 +22,6 @@ import {
   createIdempotencyKey,
   type Versioned,
 } from "@/lib/workbench/transport/contracts";
-import { useWorkbenchProjectsApi } from "./api";
 import { useStudioRequirementApi } from "./requirement-api";
 import { studioRecordKey, useStudioStoredRecord } from "./stored-record";
 import { useStudioInputPreparation } from "./use-input-preparation";
@@ -112,7 +111,6 @@ export function useRequirementDiscussion({
   contextKey,
   canEdit,
   enabled = true,
-  initialEntries = [],
   operation,
 }: {
   projectId: string;
@@ -121,14 +119,12 @@ export function useRequirementDiscussion({
   contextKey: string;
   canEdit: boolean;
   enabled?: boolean;
-  initialEntries?: readonly ThreadEntry[];
   operation?: Pick<
     StudioSubmission,
     "workflow" | "artifactTargets" | "generationIntent" | "prdScreenPlan"
   >;
 }) {
   const api = useStudioRequirementApi(),
-    projects = useWorkbenchProjectsApi(),
     client = useQueryClient();
   const { user } = useWorkbenchAuth();
   const input = useStudioInputPreparation(projectId);
@@ -280,54 +276,29 @@ export function useRequirementDiscussion({
       baseline: confirmedBaseline,
     });
   }, [accessDenied, enabled, confirmedBaseline, local, sessionId]);
-  const entriesKey = [...queryPrefix, "entries"];
-  const seed = initialEntries.filter((entry) => entry.threadId === threadId);
-  // Bootstrap supplies the latest 500 entries. Read new messages from that
-  // sequence, independently of the ASC cursor used for older history.
-  const tail = useQuery({
-    queryKey: [...entriesKey, "live"],
-    enabled: enabled && !!user && !!threadId && !accessDenied,
-    queryFn: async () => {
-      let current = mergeEntries(
-        seed,
-        client.getQueryData<ThreadEntry[]>([...entriesKey, "live"]) ?? [],
-      );
-      for (let page = 0; page < 5; page++) {
-        const result = await projects.listThreadEntries(threadId, {
-          afterSequence: current.at(-1)?.sequence ?? 0,
-          limit: 100,
-        });
-        if (result.items.some((entry) => entry.threadId !== threadId))
-          throw new Error("交流记录不属于当前项目对话");
-        current = mergeEntries(current, result.items);
-        if (result.nextAfterSequence === null) break;
-      }
-      return current;
-    },
-    refetchInterval: snapshot.data?.value.state === "analyzing" ? 1500 : 5000,
-    retry: false,
-  });
   const history = useInfiniteQuery({
-    queryKey: [...entriesKey, "history"],
-    enabled: false,
-    initialPageParam: 0,
+    queryKey: [...queryPrefix, "entries", sessionId],
+    enabled: enabled && !!user && !!sessionId && !!snapshot.data && !accessDenied,
+    initialPageParam: undefined as string | undefined,
     queryFn: async ({ pageParam }) => {
-      const result = await projects.listThreadEntries(threadId, {
-        afterSequence: pageParam,
-        limit: 50,
-      });
-      if (result.items.some((entry) => entry.threadId !== threadId))
-        throw new Error("交流记录不属于当前项目对话");
-      return result;
+      const page = await api.messages(sessionId, { cursor: pageParam, limit: 50 });
+      if (page.sessionId !== sessionId || page.items.some(entry => entry.threadId !== threadId))
+        throw new Error("交流记录与当前需求讨论不匹配");
+      return page;
     },
-    getNextPageParam: (page) => page.nextAfterSequence ?? undefined,
+    getNextPageParam: page => page.nextCursor ?? undefined,
     retry: false,
   });
+  const messageRevision = snapshot.data?.value.revision;
+  useEffect(() => {
+    if (messageRevision !== undefined && enabled && !accessDenied)
+      void client.invalidateQueries({ queryKey: [...queryPrefix, "entries", sessionId] });
+  }, [client, identity, sessionId, messageRevision, enabled, accessDenied]);
   const privateDenied =
-    accessDenied || denied(tail.error) || denied(history.error);
+    accessDenied || denied(history.error);
   useEffect(() => {
     if (!privateDenied) return;
-    const error = [list.error, snapshot.error, tail.error, history.error].find(
+    const error = [list.error, snapshot.error, history.error].find(
       denied,
     );
     if (error) setAccessFailure({ identity, error });
@@ -626,18 +597,8 @@ export function useRequirementDiscussion({
   const messages =
     privateDenied || !enabled
       ? []
-      : mergeEntries(
-          seed,
-          tail.data ?? [],
-          history.data?.pages.flatMap((page) => page.items) ?? [],
-        );
-  const firstSeed = seed[0]?.sequence ?? 1;
-  const lastHistorical = history.data?.pages.at(-1);
-  const hasMore =
-    firstSeed > 1 &&
-    (!lastHistorical ||
-      (!!lastHistorical.nextAfterSequence &&
-        (lastHistorical.items.at(-1)?.sequence ?? 0) < firstSeed - 1));
+      : mergeEntries(history.data?.pages.flatMap(page => page.items) ?? []);
+  const hasMore = !!history.hasNextPage;
   return {
     snapshot: privateDenied || !enabled ? undefined : snapshot.data?.value,
     messages,
@@ -694,8 +655,7 @@ export function useRequirementDiscussion({
     turn,
     loadMore: async () => {
       if (privateDenied || !enabled) return;
-      if (!history.data) await history.refetch();
-      else await history.fetchNextPage();
+      if (history.hasNextPage && !history.isFetching) await history.fetchNextPage({ cancelRefetch: false });
     },
     uploads: input.uploads,
     retryUpload: input.retryUpload,
@@ -709,7 +669,6 @@ export function useRequirementDiscussion({
       (revoked ? accessFailure.error : null) ??
       snapshot.error ??
       list.error ??
-      tail.error ??
       history.error,
     storageError: local.error,
     command: local.value?.command,
@@ -742,8 +701,7 @@ export function useRequirementDiscussion({
       setAccessFailure(null);
       await Promise.all([
         list.refetch(),
-        ...(sessionId ? [snapshot.refetch()] : []),
-        tail.refetch(),
+        ...(sessionId ? [snapshot.refetch(), history.refetch()] : []),
       ]);
     },
   };

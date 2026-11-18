@@ -39,6 +39,7 @@ export function ChatInput({
   const [isComposing, setIsComposing] = useState(false),
     [isDragging, setIsDragging] = useState(false),
     [sending, setSending] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const sendingRef=useRef(false);
   const inputEmpty = !value.trim();
   useEffect(() => {
@@ -142,7 +143,8 @@ export function ChatInput({
         >
           <Camera size={17} />
         </button>
-        {controls}
+        <button className="studio-input-settings-toggle" type="button" aria-expanded={settingsOpen} onClick={() => setSettingsOpen(open => !open)}>输入设置</button>
+        <div className="studio-input-settings" data-open={settingsOpen}>{controls}</div>
         <button
           type="button"
           className="studio-send"

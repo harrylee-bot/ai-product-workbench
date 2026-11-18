@@ -138,7 +138,7 @@ schemaVersion 1 使用服务端共享导出渲染器生成完整交互 HTML，�
 
 ## 增量需求交流与一次确认生成（服务端合同 v1）
 
-普通消息先进入需求交流。先创建/选定已有 Thread，再 `POST /threads/{threadId}/requirement-sessions`（Idempotency-Key，正文 `{generationRequest: StartRunRequest}`）。此处的 request 是输入配置，创建会话不发起生成。会话按操作者、项目和 Thread 隔离。`GET /threads/{threadId}/requirement-sessions` 只返回当前操作者的会话，按 cursor/limit 分页（默认30，最大100），返回 nextCursor；游标绑定用户和 Thread；`GET /requirement-sessions/{sessionId}` 返回完整快照及 ETag。前端依据服务端 state，不按文字长短或完整度评分决定进入生成。
+普通消息先进入需求交流。先创建/选定已有 Thread，再 `POST /threads/{threadId}/requirement-sessions`（Idempotency-Key，正文 `{generationRequest: StartRunRequest}`）。此处的 request 是输入配置，创建会话不发起生成。会话按操作者、项目和 Thread 隔离。`GET /threads/{threadId}/requirement-sessions` 只返回当前操作者的会话，按 cursor/limit 分页（默认30，最大100），返回 nextCursor；游标绑定用户和 Thread；`GET /requirement-sessions/{sessionId}` 返回完整快照及 ETag。当前讨论使用 `GET /requirement-sessions/{sessionId}/messages`，返回 `{sessionId, items, nextCursor}`。服务端校验会话归属、项目访问权限和条目可见性，按 Thread 内唯一的 sequence 倒序读取当前会话。默认 30 条，最大 100 条。下一页使用原样传回的游标，跨用户或会话复用游标返回 400。界面按时间正序排列，可按需加载更早消息，重新读取首页可见后续新消息。前端依据服务端 state，不按文字长短或完整度评分决定进入生成。
 
 `POST /requirement-sessions/{sessionId}/messages` 要求 Idempotency-Key、If-Match，正文 `{text, generationRequest?, intent: "discuss" | "confirm_suggestion"}`，返回 202 快照。可随消息调整输入/输出/模型/资料/设计，生成模型保留产品支持列表中的用户选择，并固定其身份。需求分析内部默认 Flash 是服务端成本配置；Flash-only 仅约束本轮实际测试，不删减产品的生成模型选择能力。消息保存到现有 ThreadEntry；普通分析有独立持久回执和取消/失败状态，不创建产物 Run。新消息立即使旧摘要确认失效，并取代仍在分析的旧消息；迟到模型响应不能覆盖新版本。生成已开始时新增消息开启下一轮讨论，已经冻结的 Run 输入不变。
 

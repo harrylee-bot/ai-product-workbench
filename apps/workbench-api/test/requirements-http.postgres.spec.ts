@@ -116,6 +116,29 @@ suite('New generation flow over actual HTTP and PostgreSQL',()=>{
   return {thread,generationRequest,created,path:`/requirement-sessions/${created.value.id}`};
  }
  const confirmationBody=(value:any)=>({summaryVersion:value.summaryVersion,summaryChecksum:value.summaryChecksum,acceptedAssumptionIds:[],acceptedPlatformChanges:false});
+ it('pages a single requirement discussion across appends and checks its owner on each read', async () => {
+  const thread = await db.thread.create({data: {projectId: fixture.projectId, createdById: fixture.ownerId, title: 'Discussion paging'}});
+  const generationRequest = startRunRequestSchema.parse({prompt:'增加渠道筛选',modelId:'deepseek-flash',workflow:'generate',targetSurface:'web',designStyle:{kind:'automatic'},sourceIds:[],requestedArtifactKinds:['prd']});
+  const newSession = () => http('POST', `/threads/${thread.id}/requirement-sessions`, {body:{generationRequest}, key:randomUUID(), status:201});
+  let a = await newSession();
+  const b = await newSession();
+  const url = (id: string) => `/requirement-sessions/${id}/messages`;
+  const send = (s: typeof a, text: string) => http('POST', url(s.value.id), {etag:s.etag!, key:randomUUID(), body:{text,intent:'discuss'},status:202});
+  a = await send(a, '第一条');
+  await send(b, '另一次讨论');
+  a = await send(a, '第二条');
+  const head = await http('GET', url(a.value.id) + '?limit=1');
+  expect(head.headers.get('cache-control')).toBe('private, no-store');
+  expect(head.value).toMatchObject({sessionId:a.value.id, items:[{content:{text:'第二条'}}],nextCursor:expect.any(String)});
+  a = await send(a, '第三条');
+  const page = '?limit=1&cursor=' + encodeURIComponent(head.value.nextCursor);
+  const older = await http('GET', url(a.value.id) + page);
+  expect(older.value).toMatchObject({items:[{content:{text:'第一条'}}],nextCursor:null});
+  expect((await http('GET', url(a.value.id))).value.items.map((entry: {content:{text:string}}) => entry.content.text)).toEqual(['第三条','第二条','第一条']);
+  await http('GET', url(b.value.id) + page, {status:400});
+  await http('GET', url(a.value.id) + page, {principal:fixture.outsiderId,status:404});
+  await http('GET', url(a.value.id) + '?limit=101', {status:400});
+ });
  it('resumes standalone multipart upload across API restart, verifies bytes and creates a ready source',async()=>{
   const body={fileName:'增量规则.md',declaredMediaType:'text/markdown',byteSize:sourceBytes.length,sha256:sha(sourceBytes)},key=randomUUID();
   const first=await http('POST',`/projects/${fixture.projectId}/file-upload-sessions`,{body,key,status:201});

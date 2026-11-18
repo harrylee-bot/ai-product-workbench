@@ -63,7 +63,8 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        /** Authorized discussion messages, newest sequences first */
+        get: operations["listRequirementMessages"];
         put?: never;
         /** Requirement snapshot */
         post: operations["postRequirementMessage"];
@@ -8461,6 +8462,11 @@ export interface components {
             scope: "platform" | "template" | "regional" | "prototype" | "uncertain";
             checksum: string;
         };
+        RequirementMessages: {
+            sessionId: string;
+            items: components["schemas"]["ThreadEntry"][];
+            nextCursor: string | null;
+        };
         RequirementTurn: {
             id: string;
             sessionId: string;
@@ -9211,6 +9217,33 @@ export interface operations {
                     "application/json": components["schemas"]["RequirementSession"];
                 };
             };
+            404: components["responses"]["Problem"];
+        };
+    };
+    listRequirementMessages: {
+        parameters: {
+            query?: {
+                cursor?: string;
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                sessionId: components["parameters"]["RequirementSessionId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Authorized discussion messages, newest sequences first */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RequirementMessages"];
+                };
+            };
+            400: components["responses"]["Problem"];
             404: components["responses"]["Problem"];
         };
     };

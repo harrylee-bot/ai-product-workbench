@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { threadEntrySchema } from "./threads.js";
 import { isoDateTimeSchema, opaqueIdSchema, revisionSchema } from "./common.js";
 import { startRunRequestSchema,startRunRequestObjectSchema } from "./runs.js";
 import { prototypeFeedbackAnchorSchema } from "./visual-prototype.js";
@@ -59,6 +60,11 @@ export const createRequirementSessionRequestSchema=z.object({generationRequest:r
 export const postRequirementMessageRequestSchema=z.object({text:text(12000),generationRequest:requirementDiscussionRequestSchema.optional(),intent:z.enum(["discuss","confirm_suggestion"]).default("discuss")}).strict();
 export const confirmRequirementRequestSchema=z.object({summaryVersion:z.number().int().positive(),summaryChecksum:z.string().regex(/^[a-f0-9]{64}$/),acceptedAssumptionIds:z.array(text(80)).max(30),acceptedPlatformChanges:z.boolean()}).strict();
 export const requirementSessionsSchema=z.object({items:z.array(requirementSessionSchema).max(100),nextCursor:z.string().nullable()}).strict();
+export const requirementMessagesSchema = z.object({
+  sessionId: opaqueIdSchema,
+  items: z.array(threadEntrySchema).max(100),
+  nextCursor: z.string().nullable(),
+}).strict();
 export type RequirementCard=z.infer<typeof requirementCardSchema>;
 export type RequirementContext=z.infer<typeof requirementContextSchema>;
 export type RequirementEvidence=z.infer<typeof requirementEvidenceSchema>;

@@ -67,7 +67,11 @@ assert(Object.keys(contract.paths).length === 125, "Workbench v1 must expose exa
 const operationCount = Object.values(contract.paths).reduce((count, pathItem) => (
   count + ["get", "post", "put", "patch", "delete"].filter((method) => pathItem?.[method]).length
 ), 0);
-assert(operationCount === 150, "Workbench v1 must expose exactly 150 generated operations for the unified confirmation flow");
+assert(operationCount === 151, "Workbench v1 must expose 151 generated operations including session-scoped message history");
+const messages = contract.paths["/requirement-sessions/{sessionId}/messages"]?.get;
+assert(messages?.operationId === "listRequirementMessages" && messages.security === undefined, "Session messages require the authenticated list operation");
+assert(messages.responses["200"].content["application/json"].schema.$ref === "#/components/schemas/RequirementMessages", "Session history requires its scoped paged response");
+assert(["cursor", "limit"].every(name => messages.parameters.some(parameter => parameter.in === "query" && parameter.name === name)), "Session messages require cursor pagination");
 const feedbackLocations = contract.paths["/projects/{projectId}/prototype-v2/revisions/{revisionId}/feedback-locations"]?.get;
 assert(feedbackLocations?.responses?.["200"]?.content?.["application/json"]?.schema?.$ref === "#/components/schemas/PrototypeFeedbackLocations", "Feedback locations must return the source-bound resolution contract");
 assert(feedbackLocations.parameters?.some((parameter) => parameter.name === "sourceRevisionId" && parameter.in === "query" && parameter.required), "Feedback locations must require an explicit source revision");

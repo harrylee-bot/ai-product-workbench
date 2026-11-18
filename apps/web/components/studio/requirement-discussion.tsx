@@ -195,7 +195,7 @@ function DiscussionBody({
         className="studio-requirement-history"
         open={view.messages.length > 0 && !review}
       >
-        <summary>项目交流记录 · {view.messages.length} 条</summary>
+        <summary>本次需求讨论 · {view.messages.length} 条</summary>
         {view.hasEarlierMessages && (
           <button
             type="button"

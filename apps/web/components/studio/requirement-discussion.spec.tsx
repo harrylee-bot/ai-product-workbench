@@ -268,7 +268,7 @@ it("keeps generation baseline distinct from subsequent messages and escapes sour
     },
   ];
   show(view);
-  fireEvent.click(screen.getByText("项目交流记录 · 1 条"));
+  fireEvent.click(screen.getByText("本次需求讨论 · 1 条"));
   expect(screen.getByText(/后续讨论，未纳入本次生成/)).toBeVisible();
   expect(screen.getByText('<script>alert("x")</script>')).toBeVisible();
   expect(document.querySelector("script")).toBeNull();
