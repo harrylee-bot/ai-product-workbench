@@ -48,13 +48,17 @@ export async function attachStudioActivityContract({ page, webOrigin, projectId,
   assert.equal(row.extraction_status, "ready");
   assert.match(row.parser_version, /docling-serve/u);
   await page.goto(studio);
+  await selectStudioActivityContract(page, name);
+  return { name, sourceId: row.source_id, blobId: row.blob_id, sha256: row.checksum, scanner: row.scanner, parser: row.parser_version };
+}
+
+export async function selectStudioActivityContract(page, sourceLabel) {
   const composer = page.getByLabel("需求输入");
   const picker = composer.getByRole("button", { name: /^资料(?: \d+)?$/u });
   await picker.click();
-  await composer.getByRole("checkbox", { name: name + " · ready", exact: true }).check();
+  await composer.getByRole("checkbox", { name: sourceLabel + " · ready", exact: true }).check();
   await picker.click();
   assert.equal(await picker.getAttribute("aria-expanded"), "false");
-  return { name, sourceId: row.source_id, blobId: row.blob_id, sha256: row.checksum, scanner: row.scanner, parser: row.parser_version };
 }
 
 export async function auditStudioActivityContract({ query, source, frozen }) {
