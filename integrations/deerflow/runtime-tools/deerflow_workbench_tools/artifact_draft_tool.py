@@ -153,7 +153,7 @@ def workbench_artifact_draft_publish(
         response["repairHints"] = _artifact_draft_repair_hints(
             draft, validation["issues"], validation.get("repairHints", []), validation["candidateChecksum"],
         )
-        assembly = _prd_assembly_progress(draft)
+        assembly = _prd_assembly_progress(draft, validation["issues"])
         if assembly:
             response["prdAssembly"] = assembly
             response["repairInstruction"] = (
@@ -193,7 +193,7 @@ def workbench_artifact_draft_publish(
     return json.dumps(response, ensure_ascii=False, separators=(",", ":")), artifact
 
 
-def _prd_assembly_progress(candidate: dict[str, Any]) -> dict[str, Any] | None:
+def _prd_assembly_progress(candidate: dict[str, Any], issues: list[Any]) -> dict[str, Any] | None:
     document = candidate.get("content")
     if (candidate.get("kind") != "prd" or candidate.get("schemaVersion") != 3
             or not isinstance(document, dict) or document.get("protocol") != "workbench.prd.v3"):
@@ -201,8 +201,11 @@ def _prd_assembly_progress(candidate: dict[str, Any]) -> dict[str, Any] | None:
     sections = document.get("sections")
     if not isinstance(sections, dict):
         return None
+    section_keys = ("introduction", "businessRequirements", "degradation", "safetyBaseline")
+    if any(key in candidate for key in section_keys) or _misplaced_prd_sections(candidate, issues):
+        return None
     base = "/content/sections"
-    missing = [f"{base}/{key}" for key in ("introduction", "businessRequirements") if key not in sections]
+    missing = [f"{base}/{key}" for key in section_keys[:2] if key not in sections]
     business = sections.get("businessRequirements")
     if isinstance(business, dict):
         functions = f"{base}/businessRequirements/functionSections"
@@ -210,7 +213,7 @@ def _prd_assembly_progress(candidate: dict[str, Any]) -> dict[str, Any] | None:
             missing.append(functions)
         elif business["functionSections"] == []:
             missing.append(f"{functions}/-")
-    missing.extend(f"{base}/{key}" for key in ("degradation", "safetyBaseline") if key not in sections)
+    missing.extend(f"{base}/{key}" for key in section_keys[2:] if key not in sections)
     if not missing:
         return None
     return {"missingPaths": missing, "nextOperation": {"op": "add", "path": missing[0]}}
