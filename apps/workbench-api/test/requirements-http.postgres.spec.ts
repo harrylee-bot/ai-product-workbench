@@ -165,6 +165,11 @@ suite('New generation flow over actual HTTP and PostgreSQL',()=>{
   const message=await http('POST',path+'/messages',{body:{text:generationRequest.prompt},key:randomUUID(),etag:created.etag!,status:202});expect(message.headers.get('cache-control')).toBe('private, no-store');
   expect(await db.run.count({where:{threadId:thread.id}})).toBe(0);await processor.tick(created.value.id);
   const ready=await http('GET',path);expect(ready.value.state,JSON.stringify(ready.value.activeTurn)).toBe('ready_to_confirm');expect(model.analyze.mock.calls.at(-1)?.[0].context.sourceContents.readings[0].text).toBe(sourceBytes.toString());
+  const modelEvidence=model.analyze.mock.calls.at(-1)?.[0].context.evidence[0];
+  const [publishedEvidence]=ready.value.evidence;
+  expect(modelEvidence.id).toMatch(/^K[a-f0-9]{8}$/u);
+  expect(modelEvidence.id).not.toBe(publishedEvidence.id);
+  expect(ready.value.card.existingCapabilities[0].evidenceIds).toEqual([publishedEvidence.id]);
   await http('GET',path,{principal:fixture.outsiderId,status:404});
   const body=confirmationBody(ready.value),key=randomUUID();
   await http('POST',path+'/confirm',{body,key:randomUUID(),status:428});
@@ -173,6 +178,8 @@ suite('New generation flow over actual HTTP and PostgreSQL',()=>{
   await http('POST',path+'/confirm',{body,key:randomUUID(),etag:ready.etag!,principal:fixture.outsiderId,status:404});
   await Promise.all(Array.from({length:3},()=>http('POST',path+'/confirm',{body,key,etag:ready.etag!,status:202})));
   await processor.tick(created.value.id);const started=await http('GET',path);expect(started.value.confirmation.status).toBe('started');
+  const frozen=await db.requirementConfirmation.findUniqueOrThrow({where:{id:started.value.confirmation.id}});
+  expect(frozen.baseline).toMatchObject({card:{existingCapabilities:[{evidenceIds:[publishedEvidence.id]}]}});
   const run=await db.run.findUniqueOrThrow({where:{id:started.value.confirmation.runId},include:{sourceSnapshots:true}});expect(await db.run.count({where:{threadId:thread.id}})).toBe(1);expect(run.sourceSnapshots[0]?.checksum).toBe(sha(sourceBytes));
   expect((await http('POST',path+'/confirm',{body,key,etag:ready.etag!,status:202})).value.confirmation.runId).toBe(run.id);
   expect((run.request as any).requestedArtifactKinds).toEqual(kinds);await expect(db.$transaction(tx=>confirmedRequirementBaseline(tx,run,startRunRequestSchema.parse(run.request)))).resolves.toMatchObject({confirmationId:started.value.confirmation.id});

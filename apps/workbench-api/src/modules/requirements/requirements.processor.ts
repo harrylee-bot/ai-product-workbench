@@ -7,7 +7,7 @@ import { RequirementsService } from './requirements.service.js';
 import { RequirementModel } from './requirement-model.js';
 import { KnowledgeRetrievalError } from '../knowledge/knowledge-retrieval.types.js';
 import { RequirementKnowledge } from './requirement-knowledge.js';
-import { isReady, validateAnalysis, requirementProblem, RequirementModelOutputError } from './requirement-policy.js';
+import { isReady, validateAnalysis, requirementEvidenceForModel, requirementProblem, RequirementModelOutputError } from './requirement-policy.js';
 import { RequirementContextReader } from './requirement-context-reader.js';
 import { RunsService } from '../runs/runs.service.js';
 import { PrototypeV2Service } from '../prototypes/prototype-v2.service.js';
@@ -98,7 +98,7 @@ export class RequirementsProcessor implements OnModuleInit,OnModuleDestroy {
    const query=[...new Set([input.message.text,userHistory[0]??'',...userHistory.slice(-3)].filter(Boolean))].join('\n');
    const knowledge=await this.knowledge.retrieve(turn.principalId,turn.projectId,query,controller.signal);
    const messages=input.entries.filter(x=>x.role==='user'||x.role==='assistant').map(x=>({role:x.role as 'user'|'assistant',content:x.content.text??''}));messages.push({role:'user',content:input.message.text});
-   const modelContext={configuration:request,context,projectContext,sourceContents,evidence:knowledge.evidence};
+   const modelContext={configuration:request,context,projectContext,sourceContents,evidence:requirementEvidenceForModel(knowledge.evidence)};
    if(JSON.stringify(modelContext).length>100000)throw requirementProblem('REQUIREMENT_CONTEXT_LIMIT',429);
    const result=await this.model.analyze({messages,context:modelContext},controller.signal);
    const analysis=validateAnalysis(result.value,knowledge.evidence);

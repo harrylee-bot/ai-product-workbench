@@ -1,5 +1,5 @@
 import { describe,it,expect } from 'vitest';
-import { assertConfirmed,isReady,validateAnalysis } from '../src/modules/requirements/requirement-policy.js';
+import { assertConfirmed,isReady,requirementEvidenceForModel,validateAnalysis } from '../src/modules/requirements/requirement-policy.js';
 import { classifyEvidenceScope, requirementSearchExcerpt } from '../src/modules/requirements/requirement-knowledge.js';
 import type { RequirementCard,RequirementEvidence } from '@workbench/workbench-contracts';
 export const evidence:RequirementEvidence[]=[{id:'cite-1',releaseId:'release-1',releaseVersion:1,documentId:'doc-1',chunkId:'chunk-1',sourcePath:'01-产品架构/产品能力地图.md',title:'活动平台',quote:'活动管理包括列表、新建和复制。',scope:'platform',checksum:'a'.repeat(64)}];
@@ -18,6 +18,45 @@ describe('Incremental requirement boundary',()=>{
  it.each(['scope','workflow','permission','financial','external_dependency','platform'] as const)('blocks critical %s even if model says nonblocking',impact=>expect(isReady({...card,issues:[{id:'gap',kind:'missing',question:'请确认影响',impact,blocking:false,evidenceIds:[]}]},evidence)).toBe(false));
  it('cannot generate without published evidence',()=>expect(isReady(card,[])).toBe(false));
  it('rejects forged citations',()=>expect(()=>validateAnalysis({reply:'已知',card:{...card,existingCapabilities:[{...card.existingCapabilities[0],evidenceIds:['forged']}]}},evidence)).toThrow());
+ it('exposes deterministic short evidence handles and restores all structured references to the published ID',()=>{
+  const [projected]=requirementEvidenceForModel(evidence);
+  expect(projected.id).toMatch(/^K[a-f0-9]{8}$/u);
+  expect(requirementEvidenceForModel(evidence)).toEqual([projected]);
+  expect(projected).toEqual({id:projected.id,releaseVersion:1,sourcePath:evidence[0].sourcePath,title:evidence[0].title,quote:evidence[0].quote,scope:'platform'});
+  const analysis=validateAnalysis({reply:'同一证据核对',card:{
+   ...card,existingCapabilities:[{...card.existingCapabilities[0],evidenceIds:[projected.id]}],
+   assumptions:[{id:'assumption',text:'仅调整参数',evidenceIds:[projected.id]}],
+   issues:[{id:'question',kind:'missing',question:'请确认界面文案',impact:'presentation',blocking:false,evidenceIds:[projected.id]}],
+  }},evidence);
+  expect(analysis.card?.existingCapabilities?.[0].evidenceIds).toEqual(['cite-1']);
+  expect(analysis.card?.assumptions?.[0].evidenceIds).toEqual(['cite-1']);
+  expect(analysis.card?.issues?.[0].evidenceIds).toEqual(['cite-1']);
+  expect(validateAnalysis({reply:'兼容原引用',card},evidence).card?.existingCapabilities?.[0].evidenceIds).toEqual(['cite-1']);
+ });
+ it('does not let a generated handle rebind an exact published ID',()=>{
+  const [projected]=requirementEvidenceForModel(evidence);
+  const sameSet=[...evidence,{...evidence[0],id:projected.id}];
+  const [first,second]=requirementEvidenceForModel(sameSet);
+  expect(first.id).not.toBe(projected.id);
+  expect(second.id).not.toBe(first.id);
+  const claim={...card.existingCapabilities[0],evidenceIds:[projected.id,first.id]};
+  expect(validateAnalysis({reply:'锚定来源',card:{...card,existingCapabilities:[claim]}},sameSet)
+   .card?.existingCapabilities?.[0].evidenceIds).toEqual([projected.id,'cite-1']);
+ });
+ it('rejects handles outside this evidence set and attachment identifiers',()=>{
+  const [foreign]=requirementEvidenceForModel([{...evidence[0],releaseId:'other-release',id:'other-citation'}]);
+  for(const id of [foreign.id,'source_attachment','活动列表查询接口.md']){
+   const claim={...card.existingCapabilities[0],evidenceIds:[id]};
+   expect(()=>validateAnalysis({reply:'引用未授权来源',card:{...card,existingCapabilities:[claim]}},evidence)).toThrow(expect.objectContaining({phase:'evidence_id'}));
+  }
+ });
+ it('applies the canonical scope gate after resolving a short handle',()=>{
+  const regional=[{...evidence[0],scope:'regional' as const}];
+  const [{id}]=requirementEvidenceForModel(regional);
+  const claim={...card.existingCapabilities[0],evidenceIds:[id]};
+  expect(()=>validateAnalysis({reply:'误用于全平台',card:{...card,existingCapabilities:[claim]}},regional))
+   .toThrow(expect.objectContaining({response:expect.objectContaining({code:'REQUIREMENT_EVIDENCE_SCOPE_MISMATCH'})}));
+ });
  it('does not promote regional evidence to platform facts',()=>expect(()=>validateAnalysis({reply:'已知',card},[{...evidence[0],scope:'regional'}])).toThrow());
  it('requires explicit acceptance for suggested assumptions',()=>expect(()=>assertConfirmed({...card,assumptions:[{id:'assumption',text:'默认不改变原数据范围',evidenceIds:[]}]},evidence,[],false)).toThrow());
  it('requires explicit platform-change consent',()=>expect(()=>assertConfirmed({...card,platformChanges:['重组跨省权限']},evidence,[],false)).toThrow());
