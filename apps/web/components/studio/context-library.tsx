@@ -1,6 +1,6 @@
 "use client";
-import { useState } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useRef, useState } from "react";
+import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   sourcePrototypeInputSchema,
   designSystemDocumentSchema,
@@ -26,12 +26,19 @@ export function ContextImports({
   const [title, setTitle] = useState(""),
     [color, setColor] = useState("#2563eb"),
     [principle, setPrinciple] = useState("");
-  const catalog = useQuery({
-    queryKey: ["studio", "design-catalog", bootstrap.project.workspaceId],
-    queryFn: () =>
-      designs.listDesignSystemCatalog(bootstrap.project.workspaceId),
+  const projectId = bootstrap.project.id;
+  const imports = useRef({ projectId, keys: new Map<string, string>() });
+  if (imports.current.projectId !== projectId) imports.current = { projectId, keys: new Map() };
+  const [imported, setImported] = useState({ projectId, versions: new Set<string>() });
+  const catalog = useInfiniteQuery({
+    queryKey: ["studio", "design-catalog", bootstrap.project.workspaceId, "infinite"],
+    initialPageParam: undefined as string | undefined,
+    queryFn: ({ pageParam }) =>
+      designs.listDesignSystemCatalog(bootstrap.project.workspaceId, { cursor: pageParam, limit: 30 }),
+    getNextPageParam: page => page.nextCursor ?? undefined,
     staleTime: 30000,
   });
+  const catalogItems = [...new Map((catalog.data?.pages.flatMap(page => page.items) ?? []).map(item => [item.artifactVersionId, item])).values()];
   const refresh = () =>
     client.invalidateQueries({
       queryKey: workbenchQueryKeys.bootstraps(bootstrap.project.id),
@@ -168,36 +175,43 @@ export function ContextImports({
       </details>
       <details>
         <summary>从工作区设计库导入</summary>
-        {catalog.error ? (
+        {catalog.error && (
           <p role="alert">
             {catalog.error.message}
-            <button onClick={() => void catalog.refetch()}>重试</button>
+            <button disabled={catalog.isFetching} onClick={() => void (catalog.isFetchNextPageError ? catalog.fetchNextPage({ cancelRefetch: false }) : catalog.refetch())}>重试加载设计库</button>
           </p>
-        ) : catalog.isPending ? (
+        )}
+        {catalog.isPending && (
           <p>正在加载…</p>
-        ) : (
-          catalog.data?.items.map((item) => (
+        )}
+        <p>已载入 {catalogItems.length} 项设计</p>
+        {catalogItems.map((item) => (
             <div className="studio-card" key={item.artifactVersionId}>
               <strong>{item.artifactTitle}</strong>
               <p>
                 {item.projectTitle} · 版本 {item.version}
               </p>
               <button
-                disabled={!canEdit || action.busy}
+                disabled={!canEdit || action.busy || imported.projectId === projectId && imported.versions.has(item.artifactVersionId)}
                 onClick={() =>
                   void action.run(async () => {
-                    await designs.importDesignSystem(bootstrap.project.id, {
+                    const scope = imports.current;
+                    let key = scope.keys.get(item.artifactVersionId);
+                    if (!key) { key = `studio-design-import:${crypto.randomUUID()}`; scope.keys.set(item.artifactVersionId, key); }
+                    await designs.importDesignSystem(projectId, {
                       sourceArtifactVersionId: item.artifactVersionId,
-                    });
+                    }, key);
+                    if (imports.current !== scope) return;
+                    setImported(current => ({ projectId, versions: new Set([...(current.projectId === projectId ? current.versions : []), item.artifactVersionId]) }));
                     await refresh();
                   }, "设计系统已加入项目")
                 }
               >
-                加入项目
+                {imported.projectId === projectId && imported.versions.has(item.artifactVersionId) ? "已加入项目" : "加入项目"}
               </button>
             </div>
-          ))
-        )}
+        ))}
+        {catalog.hasNextPage && <button disabled={catalog.isFetching} onClick={() => void catalog.fetchNextPage({ cancelRefetch: false })}>{catalog.isFetchingNextPage ? "正在加载设计…" : "加载更多设计"}</button>}
       </details>
     </section>
   );
