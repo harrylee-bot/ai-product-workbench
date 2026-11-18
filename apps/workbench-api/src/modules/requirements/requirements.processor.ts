@@ -77,7 +77,9 @@ export class RequirementsProcessor implements OnModuleInit,OnModuleDestroy {
      const feedback=await tx.prototypeFeedback.findMany({where:{id:{in:revisionContext.feedbackIds},projectId:s.projectId,revisionId:revisionContext.revisionId,status:'open'}});
      if(feedback.length!==revisionContext.feedbackIds.length)throw requirementProblem('REQUIREMENT_SOURCE_CHANGED');
      if(revisionContext.anchor){const index=feedbackAnchorIndex(revision);const anchor=revisionContext.anchor;if(anchor.sourceRevisionId!==revision.id||anchor.scope==='unresolved'||!index.pages.has(anchor.pageId)||anchor.scope==='node'&&index.nodes?.get(anchor.nodeId)!==anchor.pageId)throw requirementProblem('REQUIREMENT_SOURCE_CHANGED');}
-     source={revisionId:revision.id,documentSha256:revision.documentSha256,document:revision.sourceDocument,feedback,anchor:revisionContext.anchor};
+     // The resolver has compared the exact sourceDocument with the first target.
+     // Its contents are supplied once through the verified ArtifactVersion.
+     source={revisionId:revision.id,documentSha256:revision.documentSha256,artifactTarget:request.artifactTargets[0],feedback,anchor:revisionContext.anchor};
     }
     request=await this.runs.resolveOutputOperations(tx,s.projectId,request);
     // Query only this project. Missing and foreign IDs receive the same
