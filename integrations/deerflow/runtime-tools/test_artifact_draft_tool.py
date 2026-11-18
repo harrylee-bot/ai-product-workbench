@@ -122,6 +122,48 @@ class ArtifactDraftToolTests(unittest.TestCase):
         self.assertTrue(any(issue["path"] == ["title"] for issue in response["issues"]))
         self.assertNotIn("draft", artifact)
 
+    def test_prototype_graph_ack_repairs_only_the_reported_links(self) -> None:
+        draft = copy.deepcopy(self.draft)
+        root, form, *_ = draft["content"]["nodes"]
+        missing_child = "node-not-present"
+        root["childIds"] = []
+        form["childIds"].append(missing_child)
+        json_ack, receipt = workbench_artifact_draft_publish.func(self.runtime, 0, draft)
+        ack = json.loads(json_ack)
+        self.assertFalse(receipt["ok"])
+        repair = ack["prototypeGraphRepair"]
+        self.assertEqual(repair, {
+            "baseCandidateChecksum": ack["candidateChecksum"],
+            "operations": [
+                {"op": "add", "path": "/content/nodes/0/childIds/-", "value": form["id"]},
+                {"op": "remove", "path": "/content/nodes/1/childIds/2"},
+            ],
+        })
+
+        self.runtime.tool_call_id = "graph_repair_1"
+        self.runtime.state = {"messages": [
+            {"type": "human"},
+            {"type": "ai", "tool_calls": [{"name": "workbench_artifact_draft_publish",
+                "id": "call_1", "args": {"artifact_index": 0, "draft": draft}}]},
+            {"type": "tool", "name": "workbench_artifact_draft_publish", "tool_call_id": "call_1",
+                "status": "success", "content": json_ack, "artifact": receipt},
+            {"type": "ai", "tool_calls": [{"name": "workbench_artifact_draft_publish",
+                "id": "graph_repair_1", "args": {"artifact_index": 0, "repair": repair}}]},
+        ]}
+        _, repaired = workbench_artifact_draft_publish.func(self.runtime, 0, repair=repair)
+        self.assertTrue(repaired["ok"])
+        self.assertEqual(repaired["draft"], self.draft)
+
+    def test_prototype_graph_ack_does_not_guess_links_for_duplicate_node_ids(self) -> None:
+        draft = copy.deepcopy(self.draft)
+        root, form, *_ = draft["content"]["nodes"]
+        root["childIds"] = []
+        form["childIds"].append("node-not-present")
+        draft["content"]["nodes"].append(copy.deepcopy(form))
+        json_ack, receipt = workbench_artifact_draft_publish.func(self.runtime, 0, draft)
+        self.assertFalse(receipt["ok"])
+        self.assertNotIn("prototypeGraphRepair", json.loads(json_ack))
+
     def test_checkbox_repair_names_the_variable_and_preserves_false_without_coercion(self) -> None:
         invalid = copy.deepcopy(self.draft)
         input_node = next(

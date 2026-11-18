@@ -9,7 +9,13 @@ from langchain.tools import tool
 
 from deerflow.tools.types import Runtime
 
-from .artifact_draft_repair import prd_envelope_duplicate_removals, resolve_artifact_draft_candidate, template_restore_operation, validate_retrieved_citations
+from .artifact_draft_repair import (
+    MAX_REPAIR_OPERATIONS,
+    prd_envelope_duplicate_removals,
+    resolve_artifact_draft_candidate,
+    template_restore_operation,
+    validate_retrieved_citations,
+)
 from .runtime_result_validator import validate_runtime_artifact_draft
 
 
@@ -157,6 +163,18 @@ def workbench_artifact_draft_publish(
         response["repairHints"] = _artifact_draft_repair_hints(
             draft, validation["issues"], validation.get("repairHints", []), validation["candidateChecksum"],
         )
+        link_operations = _prototype_graph_link_repairs(draft, validation["issues"])
+        if link_operations:
+            response["prototypeGraphRepair"] = {
+                "baseCandidateChecksum": validation["candidateChecksum"],
+                "operations": link_operations,
+            }
+            response["repairInstruction"] = (
+                "Copy prototypeGraphRepair as repair to reconnect existing nodes and remove only references "
+                "to missing nodes. If confirmed controls, navigation or result bindings are still unimplemented, "
+                "include the next small complete pieces in the same repair before acceptance. Never replace /content. "
+                + response["repairInstruction"]
+            )
         assembly = _prd_assembly_progress(draft, validation["issues"])
         if assembly:
             response["prdAssembly"] = assembly
@@ -202,6 +220,56 @@ def workbench_artifact_draft_publish(
                 + response["repairInstruction"]
             )
     return json.dumps(response, ensure_ascii=False, separators=(",", ":")), artifact
+
+
+def _prototype_graph_link_repairs(candidate: dict[str, Any], issues: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Offer repairs only for uniquely resolved, validator-reported graph links."""
+    content = candidate.get("content")
+    if candidate.get("kind") != "prototype" or not isinstance(content, dict):
+        return []
+    nodes = content.get("nodes")
+    screens = content.get("screens")
+    if not isinstance(nodes, list) or not isinstance(screens, list):
+        return []
+    if any(not isinstance(node, dict) or not isinstance(node.get("id"), str) for node in nodes):
+        return []
+    index_by_id = {node["id"]: index for index, node in enumerate(nodes)}
+    if len(index_by_id) != len(nodes):
+        return []
+    roots = {screen["rootNodeId"] for screen in screens if isinstance(screen, dict)
+             and isinstance(screen.get("rootNodeId"), str)}
+    children = {
+        index: node["childIds"] for index, node in enumerate(nodes)
+        if node.get("kind") in ("frame", "form", "button") and isinstance(node.get("childIds"), list)
+        and all(isinstance(child, str) for child in node["childIds"])
+    }
+    operations: list[dict[str, Any]] = []
+    paths: set[tuple[int, str]] = set()
+    for issue in issues:
+        path = issue.get("path")
+        if (issue.get("code") != "custom" or not isinstance(path, list) or len(path) != 4
+                or path[:2] != ["content", "nodes"] or type(path[2]) is not int
+                or not 0 <= path[2] < len(nodes) or path[3] not in ("parentId", "childIds")):
+            continue
+        index, field = path[2:]
+        if (index, field) in paths:
+            continue
+        node = nodes[index]
+        message = issue.get("message", "")
+        if field == "parentId" and message == "parent childIds must include the node":
+            paths.add((index, field))
+            parent_id = node.get("parentId")
+            parent = index_by_id.get(parent_id) if isinstance(parent_id, str) else None
+            if (parent in children and parent != index and node["id"] not in roots
+                    and nodes[parent].get("screenId") == node.get("screenId")
+                    and not any(node["id"] in ids for ids in children.values())):
+                operations.append({"op": "add", "path": f"/content/nodes/{parent}/childIds/-", "value": node["id"]})
+        elif field == "childIds" and index in children and isinstance(message, str) and message.startswith("unknown child node: "):
+            paths.add((index, field))
+            for offset, child in reversed(list(enumerate(children[index]))):
+                if child not in index_by_id:
+                    operations.append({"op": "remove", "path": f"/content/nodes/{index}/childIds/{offset}"})
+    return operations[:MAX_REPAIR_OPERATIONS]
 
 
 def _prd_assembly_progress(candidate: dict[str, Any], issues: list[Any]) -> dict[str, Any] | None:
