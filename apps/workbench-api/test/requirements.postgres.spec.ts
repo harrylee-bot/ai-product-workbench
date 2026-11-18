@@ -162,6 +162,16 @@ suite('Requirement discussions with actual PostgreSQL; fixture model and workflo
   expect(discussionReplay.confirmation).toBeNull();
   expect(await db.requirementTurn.count({where:{sessionId:s.id}})).toBe(2);
  });
+ it('replays a turn action against its original target after another tab has advanced',async()=>{
+  const s=await create();
+  const first=await service.message(fixture.ownerId,s.id,'first-turn',s.revision,{text:'开始讨论',intent:'discuss'});
+  const turnId=first.activeTurn!.id;
+  const cancelled=await service.action(fixture.ownerId,s.id,turnId,'cancel-first',first.revision,'cancel');
+  const second=await service.message(fixture.ownerId,s.id,'later-turn',cancelled.revision,{text:'补充渠道规则',intent:'discuss'});
+  const replay=await service.action(fixture.ownerId,s.id,turnId,'cancel-first',first.revision,'cancel');
+  expect(replay.activeTurn).toMatchObject({id:turnId,status:'cancelled'});
+  expect((await service.get(fixture.ownerId,s.id)).activeTurn?.id).toBe(second.activeTurn?.id);
+ });
  it('paginates sessions with tied timestamps and rejects cross-user or cross-thread cursors',async()=>{
   const s=await create(),ids=[s.id];
   for(let i=0;i<3;i++)ids.push((await service.create(fixture.ownerId,s.threadId,randomUUID(),s.generationRequest)).id);
