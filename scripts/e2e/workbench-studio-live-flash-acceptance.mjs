@@ -703,7 +703,7 @@ try {
     }
   });
 
-  if (phase === "generation" || phase === "joint") await runStudioLiveScenarios({ page, browser, webOrigin, outDir, runId, dbUrl, sql, waitUntil, evidence, step, runCmd, jointOnly: phase === "joint" });
+  if (phase === "generation" || phase === "joint") await runStudioLiveScenarios({ page, browser, webOrigin, outDir, runId, dbUrl, sql, waitUntil, evidence, step, runCmd, jointOnly: phase === "joint", activityContract });
   if (phase === "prd") {
     const { runStudioPrd } = await import("./studio-live-prd-scenarios.mjs");
     await runStudioPrd({ page, webOrigin, outDir, runId, dbUrl, sql, waitUntil, evidence, step, activityContract });

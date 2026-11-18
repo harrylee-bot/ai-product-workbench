@@ -7,12 +7,15 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { tmpdir } from "node:os";
 import { unzipSync } from "fflate";
+import {
+  attachStudioActivityContract, auditStudioActivityContract, auditStudioActivityDiscussion,
+} from "./studio-live-activity-contract.mjs";
 
 const digest = bytes => createHash("sha256").update(bytes).digest("hex");
 const increment = "在云溪营销极速发布平台现有活动管理列表中，为策划人员增加渠道类型筛选。只筛当前角色已授权区域内活动，已有登录、导航、审核发布和报表保持不变。筛选项为全部、企微、短信，默认全部；与现有分页联动，改变筛选重置第一页，空结果提示无匹配活动，失败保留条件可重试。复用当前活动列表查询能力，仅扩展筛选参数，不接新外部系统，不改业务流程。目标为Web端，沿用原设计规范。";
 const interactionSpec = "原型交互验收：列表页包含标签为渠道类型的原生select、全部/企微/短信三个选项，和占位文字搜索活动的搜索框。提供企微活动与短信活动各两条，切换渠道后真实隐藏其他渠道的行。输入搜索词真实按活动名称过滤，不存在的名称显示无匹配活动；清空搜索恢复列表。点击活动旁查看详情打开第二个活动详情页，详情提供返回列表按钮，点击后可返回。两页均可实际操作，不新增登录页或报表页。";
 
-export async function runStudioLiveScenarios({ page, browser, webOrigin, outDir, runId, dbUrl, sql, waitUntil, evidence, step, runCmd, jointOnly = false }) {
+export async function runStudioLiveScenarios({ page, browser, webOrigin, outDir, runId, dbUrl, sql, waitUntil, evidence, step, runCmd, jointOnly = false, activityContract = false }) {
   const query = async (text, values = []) => (await sql(text, values, dbUrl)).rows;
   const api = async (method, url, body) => page.evaluate(async ({ method, url, body, key }) => {
     const response = await fetch(`/api/v1${url}`, { method, headers: { "content-type": "application/json", "Idempotency-Key": key }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
@@ -40,9 +43,10 @@ export async function runStudioLiveScenarios({ page, browser, webOrigin, outDir,
     return id;
   }
 
-  async function discussAndGenerate(projectId, output, prompt, label) {
+  async function discussAndGenerate(projectId, output, prompt, label, source) {
     step(`${label}: discuss, review, confirm once, and observe real generation`);
     const result = { label, projectId, output, status: "running", intermediate: [] };
+    if (source) result.activityContract = source;
     evidence.scenarios.push(result);
     if (output === "prd") return generate(result, prompt);
     const fileName = `${label}-generation.webm`;
@@ -61,7 +65,7 @@ export async function runStudioLiveScenarios({ page, browser, webOrigin, outDir,
   }
 
   async function generate(result, prompt) {
-    const { projectId, output, label } = result;
+    const { projectId, output, label, activityContract: source } = result;
     const beforeRuns = Number((await query("SELECT count(*) AS n FROM workbench.runs WHERE project_id=$1", [projectId]))[0].n);
     await page.getByRole("combobox", { name: "输出类型", exact: true }).selectOption(output);
     await page.getByRole("textbox", { name: "描述需求或修改" }).fill(prompt);
@@ -73,10 +77,15 @@ export async function runStudioLiveScenarios({ page, browser, webOrigin, outDir,
     result.sessionId = session.id;
     const discussionBody = sent.request().postDataJSON();
     assert.equal(discussionBody.generationRequest.modelId, "deepseek-flash");
+    if (source) assert.deepEqual(discussionBody.generationRequest.sourceIds, [source.sourceId]);
     assert.equal(Object.hasOwn(discussionBody.generationRequest, "outputOperations"), false, "Discussion must not submit server-resolved output operations");
     await waitUntil(async () => {
       const [state] = await query("SELECT s.state, t.status AS turn_status, t.failure_code FROM workbench.requirement_sessions s LEFT JOIN workbench.requirement_turns t ON t.id=s.current_turn_id WHERE s.id=$1", [session.id]);
       if (state?.turn_status === "failed") throw Object.assign(new Error(`Requirement turn failed: ${state.failure_code}`), { fatal: true });
+      if (state?.turn_status === "succeeded" && source) {
+        result.activityDiscussion = await auditStudioActivityDiscussion({ query, source, sessionId: session.id });
+        await checkpoint();
+      }
       if (state?.turn_status === "succeeded" && state.state !== "ready_to_confirm") {
         result.discussionText = await page.getByRole("region", { name: "需求交流", exact: true }).innerText().catch(() => "");
         throw Object.assign(new Error(`Sufficient request was not ready: ${state.state}`), { fatal: true });
@@ -119,6 +128,7 @@ export async function runStudioLiveScenarios({ page, browser, webOrigin, outDir,
     result.outputOperations = outputOperations;
     assert.ok(frozen.input_snapshot.knowledgeReleaseId, "Confirmation pins a published knowledge release");
     assert.ok(frozen.baseline.evidence?.length, "Confirmation includes real authorized knowledge evidence");
+    if (source) result.activityContract = await auditStudioActivityContract({ query, source, frozen });
     await checkpoint();
     const seen = new Set();
     await waitUntil(async () => {
@@ -241,7 +251,9 @@ export async function runStudioLiveScenarios({ page, browser, webOrigin, outDir,
   }
   if (scope === "all" || scope === "joint") {
     const jointProject = await createProject("联合");
-    const joint = await discussAndGenerate(jointProject, "both", increment + "同时输出需求文档和交互原型，范围与术语一致。" + interactionSpec, "joint");
+    const source = activityContract ? await attachStudioActivityContract({ page, webOrigin, projectId: jointProject, query, waitUntil }) : undefined;
+    const contractPrompt = source ? "请按本次所选的项目附件核对现有接口和查询参数。原型演示中的四条活动都有已知渠道，历史空渠道的产品规则写入需求文档。" : "";
+    const joint = await discussAndGenerate(jointProject, "both", increment + "同时输出需求文档和交互原型，范围与术语一致。" + interactionSpec + contractPrompt, "joint", source);
     const { auditJointOutputs } = await import("./studio-live-joint-outputs.mjs");
     evidence.joint = await auditJointOutputs(query, api, joint, page.frameLocator(".visual-paper iframe"));
     await checkpoint();
