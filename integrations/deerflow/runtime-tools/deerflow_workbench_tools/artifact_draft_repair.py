@@ -10,6 +10,7 @@ import hashlib
 import json
 import re
 from collections.abc import Mapping
+from functools import lru_cache
 from typing import Any
 
 from .runtime_result_validator import MAX_CANDIDATE_BYTES, validate_runtime_artifact_draft
@@ -290,6 +291,18 @@ def _unexecuted_response(message: Any) -> bool:
             and content.startswith("Error:"))
 
 
+@lru_cache(maxsize=32)
+def _validate_history_json(run_id: str, runtime_attempt_id: str, body: str) -> dict[str, Any]:
+    # Replays revisit the same earlier candidates for every incremental repair.
+    # The bundled schema is immutable. The IDs keep reuse within one attempt.
+    return validate_runtime_artifact_draft(json.loads(body))
+
+
+def _validate_history_candidate(run_id: str, runtime_attempt_id: str, candidate: dict[str, Any]) -> dict[str, Any]:
+    body = json.dumps(candidate, ensure_ascii=False, separators=(",", ":"), allow_nan=False)
+    return _validate_history_json(run_id, runtime_attempt_id, body)
+
+
 def _verify_response(message: Any, candidate: dict[str, Any], state: Any, *, call_id: str,
                      run_id: str, runtime_attempt_id: str, artifact_index: int) -> tuple[bool, str]:
     if _value(message, "name") != DRAFT_TOOL or _value(message, "status") != "success":
@@ -320,7 +333,8 @@ def _verify_response(message: Any, candidate: dict[str, Any], state: Any, *, cal
             or ack.get("artifactIndex") != artifact_index or not _checksum(ack.get("candidateChecksum"))):
         _fail("ACK_INVALID")
     validation = validate_retrieved_citations(
-        validate_runtime_artifact_draft(candidate), state, run_id, runtime_attempt_id, candidate,
+        _validate_history_candidate(run_id, runtime_attempt_id, candidate),
+        state, run_id, runtime_attempt_id, candidate,
     )
     if validation.get("ok") is not ok or validation.get("candidateChecksum") != ack["candidateChecksum"]:
         _fail("BASE_CHECKSUM_MISMATCH")
@@ -330,7 +344,7 @@ def _verify_response(message: Any, candidate: dict[str, Any], state: Any, *, cal
         persisted = artifact.get("draft")
         if not isinstance(persisted, dict) or artifact.get("draftChecksum") != ack["candidateChecksum"]:
             _fail("RESPONSE_INVALID")
-        persisted_validation = validate_runtime_artifact_draft(persisted)
+        persisted_validation = _validate_history_candidate(run_id, runtime_attempt_id, persisted)
         if persisted_validation.get("ok") is not True or persisted_validation.get("candidateChecksum") != ack["candidateChecksum"]:
             _fail("BASE_CHECKSUM_MISMATCH")
     elif _json(artifact.get("issues")) != _json(validation.get("issues")):
