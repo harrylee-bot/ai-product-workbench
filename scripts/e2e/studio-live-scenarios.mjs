@@ -188,15 +188,32 @@ export async function runStudioLiveScenarios({ page, browser, webOrigin, outDir,
     const prototype = await discussAndGenerate(prototypeProject, "prototype", increment + "只输出交互原型。" + interactionSpec, "prototype");
     step("Save real anchored feedback and generate a derived revision through discussion");
     const [sourceRevision] = await query("SELECT id FROM workbench.prototype_revisions WHERE plan_id=$1 ORDER BY created_at DESC LIMIT 1", [prototype.planId]);
+    const canvas = page.frameLocator(".visual-paper iframe");
+    const revisionText = "仅显示当前授权区域内的活动";
+    const feedbackBody = `渠道筛选区域增加说明文字：${revisionText}。保持原有筛选、搜索与详情交互。`;
+    assert.equal(await canvas.getByText(revisionText, { exact: false }).count(), 0);
     await page.getByRole("button", { name: "选择元素", exact: true }).click();
-    await page.frameLocator(".visual-paper iframe").locator("[data-wb-node]").first().click();
-    await page.getByRole("textbox", { name: "当前版本批注", exact: true }).fill("渠道筛选区域增加说明文字：仅显示当前授权区域内的活动。保持原有筛选、搜索与详情交互。");
+    const channelControl = canvas.getByRole("combobox", { name: "渠道类型", exact: true });
+    const selectedNodeId = await channelControl.evaluate(element => element.closest("[data-wb-node]")?.dataset.wbNode);
+    assert.ok(selectedNodeId);
+    await channelControl.click();
+    await page.getByRole("textbox", { name: "当前版本批注", exact: true }).fill(feedbackBody);
     await page.getByRole("button", { name: "保存批注", exact: true }).click();
     await page.getByRole("checkbox", { name: "用于本次修改", exact: true }).first().check();
+    const [feedback] = await query("SELECT id,anchor FROM workbench.prototype_feedback WHERE revision_id=$1 AND body=$2", [sourceRevision.id, feedbackBody]);
+    assert.equal(feedback?.anchor?.scope, "node");
+    assert.equal(feedback.anchor.sourceRevisionId, sourceRevision.id);
+    assert.equal(feedback.anchor.nodeId, selectedNodeId);
     await page.getByRole("button", { name: "讨论所选 1 条批注", exact: true }).click();
     const revision = await discussAndGenerate(prototypeProject, "prototype", "按照所选批注，仅在渠道筛选区域增加说明文字：仅显示当前授权区域内的活动。保持已有页面、功能和样式，不更改权限逻辑，不新增平台能力。" + interactionSpec, "revision");
     const [child] = await query("SELECT source_revision_id FROM workbench.prototype_plans WHERE id=$1", [revision.planId]);
     assert.equal(child.source_revision_id, sourceRevision.id);
+    const [session] = await query("SELECT context FROM workbench.requirement_sessions WHERE id=$1", [revision.sessionId]);
+    assert.equal(session.context.revisionId, sourceRevision.id);
+    assert.deepEqual(session.context.feedbackIds, [feedback.id]);
+    await canvas.getByText(revisionText, { exact: false }).first().waitFor({ state: "visible" });
+    evidence.revisionFeedback = { sourceRevisionId: sourceRevision.id, feedbackId: feedback.id,
+      sourceNodeId: selectedNodeId, revisionRunId: revision.runId, visibleText: revisionText };
     evidence.checks.fixedSourceFeedbackRevision = true;
 
     await page.locator(".studio-top-actions").getByRole("button", { name: "版本", exact: true }).click();
