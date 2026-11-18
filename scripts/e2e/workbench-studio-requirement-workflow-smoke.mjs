@@ -1,5 +1,5 @@
 // Mounted Studio requirement workflow against fixed-contract API fixtures. No model calls.
-import { chromium } from "playwright";
+const { chromium, webkit } = await import(process.env.WORKBENCH_E2E_PLAYWRIGHT_MODULE ?? "playwright");
 import { mkdir, writeFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import assert from "node:assert/strict";
@@ -375,9 +375,11 @@ const results = {
   errors: [],
   revisionReads: [],
 };
-const browser = await chromium.launch({
+const engine = process.env.WORKBENCH_E2E_BROWSER ?? "chromium";
+assert.ok(["chromium", "webkit"].includes(engine));
+const browser = await (engine === "webkit" ? webkit : chromium).launch({
   headless: true,
-  executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE,
+  executablePath: engine === "webkit" ? process.env.PLAYWRIGHT_WEBKIT_EXECUTABLE : process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE,
 });
 const context = await browser.newContext({
   viewport: { width: 1440, height: 900 },
