@@ -678,6 +678,119 @@ class DraftRepairScopeTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(accepted_declaration["args"], {"artifact_index": 0, "repair": repair})
 
 
+    @unittest.skipIf(USING_IMPORT_STUBS, "requires real ToolNode and LangGraph")
+    async def test_real_graph_can_assemble_prd_through_rejected_candidate_checksums(self):
+        from langchain.agents import create_agent
+        from langchain_core.language_models.fake_chat_models import FakeMessagesListChatModel
+        from langchain_core.messages import AIMessage, ToolMessage
+        from langchain_core.outputs import ChatGeneration, ChatResult
+        from deerflow_workbench_tools.artifact_draft_tool import workbench_artifact_draft_publish
+        from deerflow_workbench_tools.runtime_result_tool import workbench_runtime_result_submit
+        from deerflow_workbench_tools.runtime_result_validator import validate_runtime_artifact_draft
+
+        fixture_path = Path(os.environ.get(
+            "WORKBENCH_PRD_TEST_FIXTURE",
+            PATCH_ROOT.parents[1] / "test-fixtures" / "prd-runtime-result.example.json",
+        ))
+        original = json.loads(fixture_path.read_text(encoding="utf-8"))["artifacts"][0]
+        self.assertTrue(validate_runtime_artifact_draft(original)["ok"])
+        scaffold = copy.deepcopy(original)
+        scaffold["content"]["sections"] = {}
+        sections = original["content"]["sections"]
+        business = sections["businessRequirements"]
+        prefix = "/content/sections"
+        function_path = prefix + "/businessRequirements/functionSections"
+        first_function = business["functionSections"][0]
+        additions = [
+            (prefix + "/introduction", sections["introduction"]),
+            (prefix + "/businessRequirements", {**business, "functionSections": []}),
+            (function_path + "/-", {**first_function, "blocks": first_function["blocks"][:-1]}),
+            (function_path + "/0/blocks/-", first_function["blocks"][-1]),
+            *[(function_path + "/-", section) for section in business["functionSections"][1:]],
+            (prefix + "/degradation", sections["degradation"]),
+            (prefix + "/safetyBaseline", sections["safetyBaseline"]),
+        ]
+        draft_tool = workbench_artifact_draft_publish.name
+        test = self
+
+        class SegmentModel(FakeMessagesListChatModel):
+            def bind_tools(self, tools, *, tool_choice=None, **kwargs):
+                return self
+
+            def _generate(self, messages, stop=None, run_manager=None, **kwargs):
+                system = next(message for message in messages if message.type == "system")
+                test.assertIn("draft.content.sections to {}", system.text)
+                prior = [message for message in messages if isinstance(message, ToolMessage) and message.name == draft_tool]
+                args = {"artifact_index": 0}
+                if prior:
+                    test.assertEqual(prior[-1].status, "success", prior[-1].content)
+
+                    ack = json.loads(prior[-1].content)
+                    if ack["ok"]:
+                        test.assertEqual(len(prior), len(additions) + 1)
+                        return ChatResult(generations=[ChatGeneration(message=AIMessage(content="PRD accepted"))])
+                    path, value = additions[len(prior) - 1]
+                    args["repair"] = {
+                        "baseCandidateChecksum": ack["candidateChecksum"],
+                        "operations": [{"op": "add", "path": path, "value": value}],
+                    }
+                else:
+                    args["draft"] = scaffold
+                message = AIMessage(content="", tool_calls=[call(draft_tool, f"segment-{len(prior)}", args)])
+                return ChatResult(generations=[ChatGeneration(message=message)])
+
+        scope = {"runId": "run-auto", "runtimeAttemptId": "attempt-auto"}
+        knowledge_content = json.dumps({
+            "protocol": "workbench.knowledge-retrieval-result.v1",
+            "evidence": {"release": {"id": "fixture-release"}, "routeScope": "production", "mode": "hybrid"},
+            "items": [{"citation": citation} for citation in original["citations"]],
+        })
+        knowledge_receipt = {
+            **scope, "protocol": "workbench.knowledge-receipt.v1", "toolCallId": "fixture-knowledge",
+            "releaseId": "fixture-release", "contentSha256": hashlib.sha256(knowledge_content.encode()).hexdigest(),
+        }
+        warm_history = automatic_prd_request().state["messages"][:-2]
+        append_tool_batch(warm_history, [call(KNOWLEDGE_TOOL_NAME, "fixture-knowledge", {})], [
+            tool_message(KNOWLEDGE_TOOL_NAME, "fixture-knowledge", knowledge_content, artifact=knowledge_receipt),
+        ])
+
+        for kinds in (["prd"], ["prd", "prototype"]):
+            with self.subTest(kinds=kinds):
+                graph = create_agent(
+                    SegmentModel(responses=[]),
+                    tools=[workbench_artifact_draft_publish, workbench_runtime_result_submit],
+                    middleware=[self.middleware(kinds)],
+                )
+                result = await graph.ainvoke(
+                    {"messages": copy.deepcopy(warm_history)},
+                    config={"recursion_limit": 200},
+                    context={"workbench": {**scope, "requestedArtifactKinds": kinds}},
+                )
+                responses = [message for message in result["messages"] if isinstance(message, ToolMessage)]
+                drafts = [message for message in responses if message.name == draft_tool]
+                self.assertEqual(len(drafts), len(additions) + 1)
+                for rejected in drafts[:-1]:
+                    self.assertEqual(rejected.status, "success")
+                    self.assertFalse(rejected.artifact["ok"])
+                    self.assertNotIn("draft", rejected.artifact)
+                    self.assertNotIn("finalSubmissionArtifact", json.loads(rejected.content))
+                self.assertTrue(drafts[-1].artifact["ok"])
+                self.assertEqual(drafts[-1].artifact["draft"], original)
+                submissions = [message for message in responses if message.name == RUNTIME_RESULT_TOOL_NAME]
+                if kinds == ["prd"]:
+                    self.assertEqual(len(submissions), 1)
+                    self.assertTrue(submissions[0].artifact["ok"])
+                    self.assertEqual(submissions[0].artifact["result"]["artifacts"], [original])
+                else:
+                    self.assertEqual(submissions, [])
+                    declarations = [
+                        call for message in result["messages"] if isinstance(message, AIMessage)
+                        for call in message.tool_calls if call["name"] == draft_tool
+                    ]
+                    self.assertEqual(len(declarations), len(additions) + 1)
+                    self.assertTrue(all("repair" in call["args"] and "draft" not in call["args"] for call in declarations[1:]))
+
+
 class PrototypeTransportContextTests(unittest.IsolatedAsyncioTestCase):
     marker = "<workbench_prototype_transport_context>"
     reference_directory = SKILL_ROOT / "workbench" / "references"

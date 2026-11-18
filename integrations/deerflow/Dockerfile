@@ -77,13 +77,15 @@ COPY deploy/deerflow-extensions.production.json /app/backend/extensions_config.w
 # The base image must contain the exact audited upstream sources. Apply the
 # deterministic patch, run its contracts against the image's real
 # LangChain/LangGraph dependencies, then verify the resulting file hashes.
-RUN test "${DEERFLOW_SOURCE_COMMIT}" = "345f08be00c8a9495079b732a39b46aa9af1584e" \
+RUN --mount=type=bind,source=integrations/deerflow/test-fixtures/prd-runtime-result.example.json,target=/tmp/prd-runtime-result.example.json \
+    test "${DEERFLOW_SOURCE_COMMIT}" = "345f08be00c8a9495079b732a39b46aa9af1584e" \
     && python3 /opt/workbench/deerflow/source-patch/apply.py \
       --root /app/backend/packages/harness \
       --gateway-root /app/backend \
       --source-commit "${DEERFLOW_SOURCE_COMMIT}" \
     && cd /app/backend \
     && PYTHONPATH=/app/backend/packages/harness:/app/backend \
+      WORKBENCH_PRD_TEST_FIXTURE=/tmp/prd-runtime-result.example.json \
       uv run --no-sync python /opt/workbench/deerflow/source-patch/test_workbench_tool_scope_middleware.py \
     && PYTHONPATH=/app/backend/packages/harness:/app/backend \
       uv run --no-sync python /opt/workbench/deerflow/source-patch/test_workbench_request_context.py \
@@ -110,7 +112,7 @@ RUN --network=none cd /app/backend \
 
 # Source metadata must not invalidate dependency layers on every app-only fix.
 ARG WORKBENCH_SOURCE_COMMIT
-ARG WORKBENCH_DEERFLOW_TOOL_SCOPE_PATCH_SHA256=f89a8d52b4b58405f20037593a34e8ef1cca18d2dae4392a8ab2788d5cad21e2
+ARG WORKBENCH_DEERFLOW_TOOL_SCOPE_PATCH_SHA256=6388ef44cbbfdb2fa303588e9f945b98be715c94152c8eb1a8c080f572146df8
 LABEL org.opencontainers.image.title="产品工作台 DeerFlow Runtime" \
       org.opencontainers.image.revision="${WORKBENCH_SOURCE_COMMIT}" \
       io.workbench.deerflow.base-image="${DEERFLOW_BASE_IMAGE}" \
