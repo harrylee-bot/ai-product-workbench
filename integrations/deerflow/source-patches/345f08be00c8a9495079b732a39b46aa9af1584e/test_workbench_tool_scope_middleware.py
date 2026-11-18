@@ -842,6 +842,36 @@ class DraftRepairScopeTests(unittest.IsolatedAsyncioTestCase):
             runtime.execution_info.task_id = f"task-{count}"
         self.assertEqual(middleware.after_model(state, runtime), {"jump_to": "end"})
 
+        checksum = "a" * 64
+        append_tool_batch(messages, [
+            call("workbench_artifact_draft_publish", "scaffold", {
+                "artifact_index": 0, "draft": {"kind": "prd", "content": {"sections": {}}},
+            }),
+        ], [tool_message(
+            "workbench_artifact_draft_publish", "scaffold",
+            content=json.dumps({
+                "protocol": "workbench.runtime.artifact-draft-ack.v1", "ok": False,
+                "artifactIndex": 0, "candidateChecksum": checksum,
+            }),
+            artifact={
+                "protocol": "workbench.runtime.artifact-draft.v1", "ok": False,
+                "runId": "run-auto", "runtimeAttemptId": "attempt-auto", "toolCallId": "scaffold",
+                "artifactIndex": 0, "issues": [{"path": ["content", "sections", "introduction"]}],
+            },
+        )])
+        state["messages"] = [*messages, invalid()]
+        progressed = middleware.after_model(state, runtime)[key]
+        self.assertEqual(progressed["count"], 1)
+        self.assertEqual(progressed["totalAttempts"], limit + 1)
+        self.assertEqual(progressed["candidateChecksum"], checksum)
+        self.assertTrue(progressed["repair"])
+        runtime.execution_info.task_id = "same-candidate-new-model-task"
+        state[key] = {**progressed, "count": limit}
+        self.assertEqual(middleware.after_model(state, runtime), {"jump_to": "end"})
+        state[key] = {**progressed, "candidateChecksum": "b" * 64,
+                      "totalAttempts": middleware_module._DRAFT_TOOL_JSON_TOTAL_RETRY_LIMIT}
+        self.assertEqual(middleware.after_model(state, runtime), {"jump_to": "end"})
+
 
 class PrototypeTransportContextTests(unittest.IsolatedAsyncioTestCase):
     marker = "<workbench_prototype_transport_context>"

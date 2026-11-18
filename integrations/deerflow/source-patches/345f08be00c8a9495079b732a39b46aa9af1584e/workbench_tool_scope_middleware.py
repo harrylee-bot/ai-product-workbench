@@ -209,6 +209,7 @@ _LINKED_DRAFT_RECOVERY_KEY = "workbench_linked_draft_recovery"
 _LINKED_DRAFT_RECOVERY_LIMIT = 2
 _PRD_TOOL_JSON_RETRY_KEY = "workbench_prd_tool_json_retry"
 _PRD_TOOL_JSON_RETRY_LIMIT = 3
+_DRAFT_TOOL_JSON_TOTAL_RETRY_LIMIT = 12
 _DRAFT_TOOL_JSON_RETRY_MAX_LEAD_IN = 256
 _FORCED_STOP_MARKERS = ("[TOKEN BUDGET EXCEEDED]", "[FORCED STOP]", "[LOOP DETECTED]")
 
@@ -296,9 +297,18 @@ def _unrepaired_draft(
         if artifact.get("ok") is True:
             rejected.pop(index, None)
         elif artifact.get("ok") is False and isinstance(artifact.get("issues"), list) and artifact["issues"]:
+            try:
+                ack = json.loads(_tool_content(call["response"]) or "")
+            except ValueError:
+                ack = None
+            checksum = ack.get("candidateChecksum") if (
+                isinstance(ack, Mapping) and ack.get("protocol") == "workbench.runtime.artifact-draft-ack.v1"
+                and ack.get("ok") is False and ack.get("artifactIndex") == index
+            ) else None
             rejected[index] = {
                 "toolCallId": call["id"], "artifactIndex": index, "responseIndex": call["response_index"],
                 "candidate": candidate, "issues": artifact["issues"],
+                "candidateChecksum": checksum if isinstance(checksum, str) and re.fullmatch("[a-f0-9]{64}", checksum) else None,
             }
     return max(rejected.values(), key=lambda item: item["responseIndex"], default=None)
 
@@ -1426,9 +1436,13 @@ class WorkbenchToolScopeMiddleware(AgentMiddleware[AgentState]):
             marker.get("runId"), marker.get("runtimeAttemptId")
         ) != (self._run_id, self._runtime_attempt_id):
             return None
+        total = marker.get("totalAttempts", marker.get("count"))
+        checksum = marker.get("candidateChecksum")
         if (
             type(marker.get("count")) is not int
             or not 1 <= marker["count"] <= _PRD_TOOL_JSON_RETRY_LIMIT
+            or type(total) is not int or not marker["count"] <= total <= _DRAFT_TOOL_JSON_TOTAL_RETRY_LIMIT
+            or (checksum is not None and (not isinstance(checksum, str) or not re.fullmatch("[a-f0-9]{64}", checksum)))
             or any(not isinstance(marker.get(key), str) or not marker[key] for key in ("messageId", "taskId"))
             or type(marker.get("repair")) is not bool
             or marker.get("kind", "prd") not in ("prd", "prototype")
@@ -1507,12 +1521,17 @@ class WorkbenchToolScopeMiddleware(AgentMiddleware[AgentState]):
             return None
         kind, artifact_index = target
         marker = self._prd_tool_json_retry_marker(state)
-        replay = marker is not None and marker["taskId"] == task_id and marker.get("kind", "prd") == kind
-        count = marker["count"] if marker else 0
-        if not replay and count >= _PRD_TOOL_JSON_RETRY_LIMIT:
-            return {"jump_to": "end"}
         draft_kinds = ("prototype",) if kind == "prototype" and artifact_index == 0 else ("prd", "prototype")
         rejected = _unrepaired_draft(history, self._run_id, self._runtime_attempt_id, draft_kinds)
+        repair = rejected is not None and rejected["artifactIndex"] == artifact_index
+        checksum = rejected["candidateChecksum"] if repair else None
+        same_kind = marker is not None and marker.get("kind", "prd") == kind
+        same_candidate = same_kind and (checksum is None or marker.get("candidateChecksum") == checksum)
+        count = marker["count"] if same_candidate else 0
+        total = marker.get("totalAttempts", marker["count"]) if marker else 0
+        replay = same_candidate and marker["taskId"] == task_id
+        if not replay and (count >= _PRD_TOOL_JSON_RETRY_LIMIT or total >= _DRAFT_TOOL_JSON_TOTAL_RETRY_LIMIT):
+            return {"jump_to": "end"}
         # The reducer replaces the malformed declaration using the same ID.
         # Neither wire arguments nor an unanswered tool call go back to the model.
         return {
@@ -1521,8 +1540,8 @@ class WorkbenchToolScopeMiddleware(AgentMiddleware[AgentState]):
             _PRD_TOOL_JSON_RETRY_KEY: {
                 "runId": self._run_id, "runtimeAttemptId": self._runtime_attempt_id,
                 "messageId": message_id, "taskId": task_id, "count": count if replay else count + 1,
-                "kind": kind,
-                "repair": rejected is not None and rejected["artifactIndex"] == artifact_index,
+                "kind": kind, "repair": repair, "totalAttempts": total if replay else total + 1,
+                "candidateChecksum": checksum if checksum is not None or not same_candidate else marker.get("candidateChecksum"),
             },
         }
 
