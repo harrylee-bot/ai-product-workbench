@@ -222,7 +222,7 @@ const gatewayContextPatch = patchManifest.gatewaySources[0];
 assert(
   gatewayContextPatch.path === "app/gateway/services.py"
     && gatewayContextPatch.upstreamSha256 === "8379c34eeb2ddb46270b0e937035d5ee032dab68459b36b10435d28b8e2ab601"
-    && gatewayContextPatch.patchedSha256 === "9f61dd5fd9c1f1496590bcc372d696f4c5a685a2dbe492d837c15c7f995e7889",
+    && gatewayContextPatch.patchedSha256 === "7b9dbcceeb6907af1fd3a0b0f1ea664cd823ff2fdc0880899f953d8a06792786",
   "DeerFlow Gateway context patch must bind the audited upstream and patched hashes",
 );
 assert(
@@ -231,6 +231,7 @@ assert(
       && replacement.anchor.includes("merge_run_context_overrides")
       && replacement.insertion.includes("_WORKBENCH_SECRET_KEYS")
       && replacement.insertion.includes('"requestedArtifactKinds"')
+      && replacement.insertion.includes('"outputOperations"')
       && replacement.insertion.includes("_WORKBENCH_REQUESTED_ARTIFACT_KINDS")
       && replacement.insertion.includes("_is_trusted_internal_caller")
   ))
@@ -465,6 +466,7 @@ assert(
 );
 assert(
   patchRequestContextTestSource.includes("test_trusted_linked_scope_receives_a_bounded_budget_in_either_order")
+    && patchRequestContextTestSource.includes("test_confirmed_output_operations_reach_tools_with_their_exact_targets")
     && patchRequestContextTestSource.includes("test_exact_trusted_prototype_scope_receives_a_bounded_budget")
     && patchRequestContextTestSource.includes("test_real_lead_graph_completes_minimal_prototype_only_with_delivery_budget")
     && patchRequestContextTestSource.includes("test_real_edit_graph_recovers_from_early_and_same_batch_publication_without_side_effects")

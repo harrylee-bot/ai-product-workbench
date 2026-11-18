@@ -1,10 +1,17 @@
 import { describe,it,expect } from 'vitest';
 import { assertConfirmed,isReady,validateAnalysis } from '../src/modules/requirements/requirement-policy.js';
-import { classifyEvidenceScope } from '../src/modules/requirements/requirement-knowledge.js';
+import { classifyEvidenceScope, requirementSearchExcerpt } from '../src/modules/requirements/requirement-knowledge.js';
 import type { RequirementCard,RequirementEvidence } from '@workbench/workbench-contracts';
 export const evidence:RequirementEvidence[]=[{id:'cite-1',releaseId:'release-1',releaseVersion:1,documentId:'doc-1',chunkId:'chunk-1',sourcePath:'01-产品架构/产品能力地图.md',title:'活动平台',quote:'活动管理包括列表、新建和复制。',scope:'platform',checksum:'a'.repeat(64)}];
 export const card:RequirementCard={goal:'为活动列表新增渠道筛选',platform:'既有活动平台',modules:['活动管理'],roles:['策划'],existingCapabilities:[{description:'复用活动列表',evidenceIds:['cite-1'],scope:'platform'}],reuse:['原列表'],changes:['增加渠道筛选'],affectedPages:['活动列表'],affectedFlows:['按渠道筛选'],targetSurface:'web',designConstraints:['保留现有导航'],outputKinds:['prd','prototype'],assumptions:[],issues:[],platformChanges:[],preserved:['原有区域权限']};
 describe('Incremental requirement boundary',()=>{
+ it('keeps long requirement search within the pinned encoder budget and includes later context',()=>{
+  const query='开头渠道规则。'+'📄资格审核'.repeat(150)+'结尾区域范围。';
+  const excerpt=requirementSearchExcerpt(query,250);
+  expect(Buffer.byteLength(excerpt)).toBeLessThanOrEqual(250);
+  expect(excerpt).toMatch(/^开头渠道规则/u);expect(excerpt).toMatch(/结尾区域范围。$/u);
+  expect(excerpt).not.toContain('�');expect(requirementSearchExcerpt('渠道筛选',250)).toBe('渠道筛选');
+ });
  it('keeps partial discussion out of generation',()=>expect(isReady(null,evidence)).toBe(false));
  it('permits a grounded incremental addition',()=>expect(isReady(card,evidence)).toBe(true));
  it('cannot count retrieval alone as a complete requirement',()=>expect(isReady({existingCapabilities:card.existingCapabilities},evidence)).toBe(false));

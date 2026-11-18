@@ -18,7 +18,10 @@ export class RequirementModel {
   if(model!=='deepseek-flash')throw requirementProblem('REQUIREMENT_MODEL_NOT_ALLOWED',503);
   const url=new URL(base);if(url.protocol!=='https:'||url.username||url.password||url.search||url.hash)throw requirementProblem('REQUIREMENT_MODEL_UNAVAILABLE',503);
   const format=JSON.stringify(requirementAnalysisSchema.toJSONSchema());
-  const response=await fetch(base.replace(/\/$/,'')+'/chat/completions',{method:'POST',signal,headers:{'content-type':'application/json',authorization:`Bearer ${key}`},body:JSON.stringify({model,messages:[{role:'system',content:REQUIREMENT_SYSTEM_PROMPT+'\nJSON schema:\n'+format},{role:'user',content:JSON.stringify({context:input.context,discussion:input.messages})}],response_format:{type:'json_object'},max_tokens:8000,stream:false,thinking:{type:'disabled'},temperature:0.1})});
+  const response=await fetch(base.replace(/\/$/,'')+'/chat/completions',{method:'POST',signal,headers:{'content-type':'application/json',authorization:`Bearer ${key}`},body:JSON.stringify({model,messages:[{role:'system',content:REQUIREMENT_SYSTEM_PROMPT+'\nJSON schema:\n'+format},{role:'user',content:JSON.stringify({context:input.context,discussion:input.messages})}],response_format:{type:'json_object'},max_tokens:8000,stream:false,thinking:{type:'disabled'},temperature:0.1})}).catch(error=>{
+   if(signal.aborted)throw error;
+   throw requirementProblem('REQUIREMENT_MODEL_UNAVAILABLE',503);
+  });
   if(!response.ok){await response.body?.cancel();throw requirementProblem('REQUIREMENT_MODEL_UNAVAILABLE',503);}
   const reader=response.body?.getReader();if(!reader)throw requirementProblem('REQUIREMENT_MODEL_OUTPUT_INVALID',503);
   const buffers:Uint8Array[]=[];let bytes=0;

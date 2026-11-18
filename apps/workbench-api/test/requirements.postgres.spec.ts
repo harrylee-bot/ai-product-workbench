@@ -80,6 +80,32 @@ suite('Requirement discussions with actual PostgreSQL; fixture model and workflo
   if(kinds.includes('prototype')){const derived=await db.prototypePlan.findUniqueOrThrow({where:{id:done.confirmation!.planId!}});expect(derived.rootPlanId).toBeNull();expect(derived.contentVersion).toBe(1);expect(derived.status).toBe('approved');}else expect(done.confirmation?.planId).toBeNull();
   expect((await service.confirm(fixture.ownerId,s.id,'draft-confirm',reviewed.revision,accept(reviewed))).confirmation?.runId).toBe(run.id);
  });
+ it('keeps the confirmed run snapshot after a project file is replaced and removed', async () => {
+  const original = await discussionWithSource(['prd'], true);
+  const second = await discussionWithSource(['prd'], true);
+  const sources = new ImportSourcesService(db as never, access, queue as never);
+  const old = await sources.get(fixture.ownerId, original.request.sourceIds[0]!);
+  const next = await sources.get(fixture.ownerId, second.request.sourceIds[0]!);
+  if (next.descriptor?.kind !== 'file') throw new Error('Expected a file source');
+  await service.message(fixture.ownerId, original.s.id, randomUUID(), 0, { text: '保留原资料内容', intent: 'discuss' });
+  await original.job.tick(original.s.id);
+  const reviewed = await service.get(fixture.ownerId, original.s.id);
+  await service.confirm(fixture.ownerId, reviewed.id, randomUUID(), reviewed.revision, accept(reviewed));
+  await original.job.tick(reviewed.id);
+  await original.job.tick(reviewed.id);
+  const { confirmation } = await service.get(fixture.ownerId, reviewed.id);
+  const frozen = () => db.$transaction(tx => runs.prototypeInputFromRun(tx, fixture.projectId, confirmation!.runId!));
+  const before = await frozen();
+  expect(before.snapshot.sources[0]).toMatchObject({sourceId: old.id, checksum: old.checksum});
+  const key = randomUUID();
+  const request = {kind:'file' as const, fileAssetId:next.descriptor.fileAssetId, replaces:{sourceId:old.id,revision:old.revision}};
+  const created = await sources.create(fixture.ownerId,fixture.projectId,key,request);
+  expect(created.checksum).not.toBe(old.checksum);
+  expect(await sources.create(fixture.ownerId,fixture.projectId,key,request)).toEqual(created);
+  await expect(sources.create(fixture.ownerId,fixture.projectId,randomUUID(),request)).rejects.toMatchObject({status:412});
+  await sources.delete(fixture.ownerId,created.id,created.revision);
+  expect(await frozen()).toEqual(before);
+ });
  it('preserves stored unconfirmed input but refuses runtime execution or retry',async()=>{
   const s=await create(['prd']);
   const row=await db.run.create({data:{projectId:s.projectId,threadId:s.threadId,createdById:fixture.ownerId,knowledgeReleaseId:fixture.releaseId,idempotencyKey:randomUUID(),requestHash:'a'.repeat(64),requestId:randomUUID(),traceId:randomUUID(),modelId:s.generationRequest.modelId,request:s.generationRequest as never}});
@@ -113,6 +139,38 @@ suite('Requirement discussions with actual PostgreSQL; fixture model and workflo
   await expect(service.message(fixture.ownerId,s.id,'lost-message',0,{...body,text:'另一个请求'})).rejects.toMatchObject({status:409});
   const next=await service.message(fixture.ownerId,s.id,'next-message',first.revision,{text:'仅显示当前用户可见区域',intent:'discuss'});
   expect((await db.requirementTurn.findUniqueOrThrow({where:{id:first.activeTurn!.id}})).status).toBe('superseded');expect(next.activeTurn?.id).not.toBe(first.activeTurn?.id);
+ });
+ it('recovers the original message turn and its own suggestion confirmation after another tab advances',async()=>{
+  const s=await create(['prd']);
+  const firstInput={text:'只增加渠道筛选',intent:'confirm_suggestion' as const};
+  const secondInput={text:'继续调整筛选展示',intent:'discuss' as const};
+  const first=await service.message(fixture.ownerId,s.id,'first-suggestion',s.revision,firstInput);
+  const job=processor({...baseCard,outputKinds:['prd']});
+  await job.tick(s.id);
+  const generated=await service.get(fixture.ownerId,s.id);
+  expect(generated.confirmation?.status).toBe('started');
+  const second=await service.message(fixture.ownerId,s.id,'second-discussion',generated.revision,secondInput);
+  const replay=await service.message(fixture.ownerId,s.id,'first-suggestion',s.revision,firstInput);
+  expect(replay.activeTurn?.id).toBe(first.activeTurn?.id);
+  expect(replay.confirmation?.id).toBe(generated.confirmation?.id);
+  expect((await service.get(fixture.ownerId,s.id)).activeTurn?.id).toBe(second.activeTurn?.id);
+  await job.tick(s.id);
+  const reviewed=await service.get(fixture.ownerId,s.id);
+  await service.confirm(fixture.ownerId,s.id,'manual-confirmation',reviewed.revision,accept(reviewed));
+  const discussionReplay=await service.message(fixture.ownerId,s.id,'second-discussion',generated.revision,secondInput);
+  expect(discussionReplay.activeTurn?.id).toBe(second.activeTurn?.id);
+  expect(discussionReplay.confirmation).toBeNull();
+  expect(await db.requirementTurn.count({where:{sessionId:s.id}})).toBe(2);
+ });
+ it('replays a turn action against its original target after another tab has advanced',async()=>{
+  const s=await create();
+  const first=await service.message(fixture.ownerId,s.id,'first-turn',s.revision,{text:'开始讨论',intent:'discuss'});
+  const turnId=first.activeTurn!.id;
+  const cancelled=await service.action(fixture.ownerId,s.id,turnId,'cancel-first',first.revision,'cancel');
+  const second=await service.message(fixture.ownerId,s.id,'later-turn',cancelled.revision,{text:'补充渠道规则',intent:'discuss'});
+  const replay=await service.action(fixture.ownerId,s.id,turnId,'cancel-first',first.revision,'cancel');
+  expect(replay.activeTurn).toMatchObject({id:turnId,status:'cancelled'});
+  expect((await service.get(fixture.ownerId,s.id)).activeTurn?.id).toBe(second.activeTurn?.id);
  });
  it('paginates sessions with tied timestamps and rejects cross-user or cross-thread cursors',async()=>{
   const s=await create(),ids=[s.id];

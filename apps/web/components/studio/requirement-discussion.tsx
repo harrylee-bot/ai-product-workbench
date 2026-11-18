@@ -26,6 +26,8 @@ const knowledgeLabels = {
   missing: "知识依据不足，未找到不代表平台没有此能力",
   conflict: "知识来源存在差异，请核对各自适用范围",
   restricted: "部分资料无法访问，需要有权限的依据",
+  unavailable: "知识检索暂时不可用，请稍后重试本次分析。",
+  "source-changed": "选定资料状态已变化，请重新核对资料后再分析。",
   searching: "正在核对平台能力依据…",
   "not-provided": "当前尚未返回可核对的知识引用",
 };

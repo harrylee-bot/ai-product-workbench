@@ -85,9 +85,9 @@ export class RequirementsService {
  }
  async message(principalId:string,sessionId:string,key:string,revision:number,input:PostRequirementMessageRequest){
   validateIdempotencyKey(key);
-  await this.transaction(principalId,sessionId,async(tx,s)=>{
+  const receiptTurnId=await this.transaction(principalId,sessionId,async(tx,s)=>{
    const previous=await tx.requirementTurn.findUnique({where:{sessionId_idempotencyKey:{sessionId,idempotencyKey:key}}});
-   if(previous){if(previous.requestHash!==hashRequest(input))throw idempotencyConflictProblem();return;}
+   if(previous){if(previous.requestHash!==hashRequest(input))throw idempotencyConflictProblem();return previous.id;}
    if(s.revision!==revision)throw revisionConflictProblem();
    const request=requirementDiscussionRequestSchema.parse(input.generationRequest??s.generationRequest);this.allowed(request);
    await tx.$executeRaw(Prisma.sql`SELECT pg_advisory_xact_lock(hashtextextended(${`requirements-quota:${principalId}`},0))`);
@@ -103,7 +103,18 @@ export class RequirementsService {
    const thread=await tx.thread.update({where:{id:s.threadId},data:{entrySequence:{increment:1},revision:{increment:1}}});
    await tx.threadEntry.create({data:{threadId:s.threadId,sequence:thread.entrySequence,role:'user',kind:'message',requirementSessionId:sessionId,audiencePrincipalId:principalId,content:{protocol:'workbench.entry.v1',type:'user.prompt',text:input.text,sourceIds:request.sourceIds}}});
    await tx.requirementSession.update({where:{id:sessionId},data:{state:'analyzing',revision:{increment:1},generationRequest:json(request),currentTurnId:turnId,confirmationId:null}});
-  });return this.get(principalId,sessionId);
+   return turnId;
+  });
+  return this.turnReceipt(principalId,sessionId,receiptTurnId,input.intent==='confirm_suggestion');
+ }
+ private async turnReceipt(principalId:string,sessionId:string,turnId:string,includeSuggestion:boolean){
+  const session=await this.authorize(principalId,sessionId);
+  // Mutations acknowledge their own action, even after a different tab has
+  // advanced this session. The session GET remains the current projection.
+  const confirmation=includeSuggestion
+   ? await this.db.requirementConfirmation.findUnique({where:{sessionId_idempotencyKey:{sessionId,idempotencyKey:`message-confirm:${turnId}`}},select:{id:true}})
+   : null;
+  return this.snapshot({...session,currentTurnId:turnId,confirmationId:confirmation?.id??null});
  }
  async action(principalId:string,sessionId:string,turnId:string,key:string,revision:number,action:'cancel'|'retry'){
   validateIdempotencyKey(key);
@@ -120,7 +131,7 @@ export class RequirementsService {
    await tx.requirementTurn.update({where:{id:turnId},data:action==='retry'?{status:'queued',inputRevision:s.revision+1,failureCode:null,leaseOwner:null,leaseExpiresAt:null,finishedAt:null}:{status:'cancelled',finishedAt:new Date(),leaseExpiresAt:null}});
    await tx.requirementSession.update({where:{id:sessionId},data:{state:action==='retry'?'analyzing':'discussing',revision:{increment:1}}});
    await tx.requirementActionReceipt.create({data:{id:id(),principalId,sessionId,idempotencyKey:key,requestHash:hash}});
-  });return this.get(principalId,sessionId);
+  });return this.turnReceipt(principalId,sessionId,turnId,true);
  }
  async confirm(principalId:string,sessionId:string,key:string,revision:number,input:ConfirmRequirementRequest){
   validateIdempotencyKey(key);let receiptId:string|null=null;

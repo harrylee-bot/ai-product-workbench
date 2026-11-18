@@ -5,6 +5,7 @@ import { requirementDiscussionRequestSchema,startRunRequestSchema, requirementCo
 import { hashRequest } from '../../common/idempotency.js';
 import { RequirementsService } from './requirements.service.js';
 import { RequirementModel } from './requirement-model.js';
+import { KnowledgeRetrievalError } from '../knowledge/knowledge-retrieval.types.js';
 import { RequirementKnowledge } from './requirement-knowledge.js';
 import { isReady, validateAnalysis, requirementProblem } from './requirement-policy.js';
 import { RequirementContextReader } from './requirement-context-reader.js';
@@ -76,9 +77,17 @@ export class RequirementsProcessor implements OnModuleInit,OnModuleDestroy {
      const feedback=await tx.prototypeFeedback.findMany({where:{id:{in:revisionContext.feedbackIds},projectId:s.projectId,revisionId:revisionContext.revisionId,status:'open'}});
      if(feedback.length!==revisionContext.feedbackIds.length)throw requirementProblem('REQUIREMENT_SOURCE_CHANGED');
      if(revisionContext.anchor){const index=feedbackAnchorIndex(revision);const anchor=revisionContext.anchor;if(anchor.sourceRevisionId!==revision.id||anchor.scope==='unresolved'||!index.pages.has(anchor.pageId)||anchor.scope==='node'&&index.nodes?.get(anchor.nodeId)!==anchor.pageId)throw requirementProblem('REQUIREMENT_SOURCE_CHANGED');}
-     source={revisionId:revision.id,documentSha256:revision.documentSha256,document:revision.sourceDocument,feedback,anchor:revisionContext.anchor};
+     // The resolver has compared the exact sourceDocument with the first target.
+     // Its contents are supplied once through the verified ArtifactVersion.
+     source={revisionId:revision.id,documentSha256:revision.documentSha256,artifactTarget:request.artifactTargets[0],feedback,anchor:revisionContext.anchor};
     }
     request=await this.runs.resolveOutputOperations(tx,s.projectId,request);
+    // Query only this project. Missing and foreign IDs receive the same
+    // response, so this check cannot disclose another project's sources.
+    if(request.sourceIds.length){
+     const visible=await tx.importSource.count({where:{projectId:s.projectId,id:{in:request.sourceIds}}});
+     if(visible!==request.sourceIds.length)throw requirementProblem('REQUIREMENT_SOURCE_UNAVAILABLE',409);
+    }
     const snapshot=await this.runs.captureGenerationInput(tx,s.projectId,{...request,prompt:"Discussion context authorization check only"});
     const project=await tx.project.findUniqueOrThrow({where:{id:s.projectId},select:{id:true,title:true}});
     return {project,snapshot,source};
@@ -86,7 +95,7 @@ export class RequirementsProcessor implements OnModuleInit,OnModuleDestroy {
    const sourceContents=this.contextReader?await this.contextReader.read(turn.projectId,projectContext.snapshot,request,controller.signal):{readings:[],artifactTargets:[]};
    if(!this.contextReader&&(request.sourceIds.length||request.artifactTargets.length))throw requirementProblem('REQUIREMENT_SOURCE_TEXT_UNAVAILABLE');
    const userHistory=input.entries.filter(x=>x.role==='user').map(x=>x.content.text??'');
-   const query=[input.message.text,userHistory[0]??'',...userHistory.slice(-3)].join('\n').slice(0,2000);
+   const query=[...new Set([input.message.text,userHistory[0]??'',...userHistory.slice(-3)].filter(Boolean))].join('\n');
    const knowledge=await this.knowledge.retrieve(turn.principalId,turn.projectId,query,controller.signal);
    const messages=input.entries.filter(x=>x.role==='user'||x.role==='assistant').map(x=>({role:x.role as 'user'|'assistant',content:x.content.text??''}));messages.push({role:'user',content:input.message.text});
    const modelContext={configuration:request,context,projectContext,sourceContents,evidence:knowledge.evidence};
@@ -123,8 +132,10 @@ export class RequirementsProcessor implements OnModuleInit,OnModuleDestroy {
  }
 }
 function safeFailure(error:unknown){
+ if(error instanceof KnowledgeRetrievalError)return 'REQUIREMENT_KNOWLEDGE_UNAVAILABLE';
  if(error&&typeof error==='object'&&'getResponse' in error&&typeof error.getResponse==='function'){
-  const response=error.getResponse() as {code?:string};if(response.code?.startsWith('REQUIREMENT_'))return response.code;
+  const response=error.getResponse() as {code?:string};if(response.code==='RUN_IMPORT_SOURCE_NOT_READY')return 'REQUIREMENT_SOURCE_CHANGED';
+  if(response.code?.startsWith('REQUIREMENT_'))return response.code;
  }
  return 'REQUIREMENT_ANALYSIS_UNAVAILABLE';
 }

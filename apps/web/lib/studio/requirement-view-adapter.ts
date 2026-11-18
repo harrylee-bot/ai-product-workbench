@@ -8,6 +8,13 @@ import type {
   RequirementFactView,
 } from "./requirements-view";
 
+const knowledgeFailures: Partial<Record<string, RequirementDiscussionView["knowledgeStatus"]>> = {
+  REQUIREMENT_SOURCE_UNAVAILABLE: "restricted",
+  REQUIREMENT_KNOWLEDGE_UNAVAILABLE: "unavailable",
+  REQUIREMENT_SOURCE_CHANGED: "source-changed",
+  REQUIREMENT_SOURCE_TEXT_UNAVAILABLE: "source-changed",
+};
+
 /** Map the fixed backend contract to display props. Incomplete cards stay
  * incomplete; model-authored changes are never relabelled as user facts. */
 export function requirementView(
@@ -28,6 +35,8 @@ export function requirementView(
       : options.generationBaseline;
   const full = requirementCardSchema.safeParse(card);
   const issues = card?.issues ?? [];
+  const turn = session?.activeTurn;
+  const knowledgeFailure = turn?.status === "failed" && turn.failureCode ? knowledgeFailures[turn.failureCode] : undefined;
   const active =
     session?.activeTurn &&
     ["queued", "running"].includes(session.activeTurn.status);
@@ -95,7 +104,7 @@ export function requirementView(
       version: source.releaseVersion,
       scope: source.scope,
     })),
-    knowledgeStatus: active
+    knowledgeStatus: knowledgeFailure ?? (active
       ? "searching"
       : issues.some((issue) => issue.kind === "conflict")
         ? "conflict"
@@ -103,7 +112,7 @@ export function requirementView(
           ? "missing"
           : session?.evidence.length
             ? "available"
-            : "not-provided",
+            : "not-provided"),
     canConfirm:
       !!session &&
       session.state === "ready_to_confirm" &&

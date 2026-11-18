@@ -17,6 +17,7 @@ import pg from "pg";
 import { chromium } from "playwright";
 import { verifyStudioRuntime } from "../test-support/studio-live-runtime.mjs";
 import { runStudioLiveScenarios } from "./studio-live-scenarios.mjs";
+import { runStudioLiveFileScenarios } from "./studio-live-file-scenarios.mjs";
 import { runStudioLiveAccessScenarios } from "./studio-live-access-scenarios.mjs";
 import { startLiveKnowledgeFixture } from "../test-support/studio-live-knowledge.mjs";
 import {
@@ -30,14 +31,18 @@ import {
 const root = path.resolve(fileURLToPath(new URL("../../", import.meta.url)));
 const runId = String(Date.now());
 const phase = process.env.WORKBENCH_STUDIO_LIVE_PHASE ?? "generation";
-assert.ok(["generation", "access"].includes(phase));
-const outDir = path.join(root, "output/audit/1.0.0/studio-live-flash", runId);
+assert.ok(["generation", "access", "files", "delivery"].includes(phase));
+const usesModelFixture = phase === "generation" || phase === "access";
+const needsTemporal = phase === "generation" || phase === "delivery";
+const suiteDirectory = { files: "file-delivery", delivery: "artifact-delivery" }[phase] ?? "studio-live-flash";
+const auditRoot = path.join(root, "output/audit/1.0.0");
+const outDir = path.join(auditRoot, suiteDirectory, runId);
 await mkdir(outDir, { recursive: true });
-await writeFile(path.join(root, "output/audit/1.0.0/studio-live-flash-latest.json"), JSON.stringify({ runId, outDir }));
+await writeFile(path.join(auditRoot, `${suiteDirectory}-latest.json`), JSON.stringify({ runId, outDir }));
 const dbName = `workbench_studio_live_test_${runId}`;
 // All credentials and machine-specific locations are supplied externally.
 const requiredEnv = (key) => { assert.ok(process.env[key], `${key} is required`); return process.env[key]; };
-const checkAccess = phase === "access" || Boolean(process.env.WORKBENCH_STUDIO_LIVE_MAILBOX_URL);
+const checkAccess = phase === "access" || (phase === "generation" && Boolean(process.env.WORKBENCH_STUDIO_LIVE_MAILBOX_URL));
 const mailboxOrigin = checkAccess ? new URL(requiredEnv("WORKBENCH_STUDIO_LIVE_MAILBOX_URL")) : null;
 const smtpUrl = checkAccess ? new URL(requiredEnv("WORKBENCH_STUDIO_LIVE_SMTP_URL")) : null;
 if (checkAccess) {
@@ -51,11 +56,11 @@ assert.ok(["127.0.0.1", "localhost", "::1"].includes(dbAddress.hostname), "Use a
 const dbUrlObject = new URL(adminDbUrl); dbUrlObject.pathname = `/${dbName}`; dbUrlObject.searchParams.set("schema", "workbench");
 const dbUrl = dbUrlObject.toString();
 const handoffDir = requiredEnv("V2_TLS_DIRECTORY");
-const providerEnvFile = requiredEnv("V2_PROVIDER_ENV_FILE");
-const inferenceEnvFile = requiredEnv("V2_INFERENCE_ENV_FILE");
+const providerEnvFile = usesModelFixture ? requiredEnv("V2_PROVIDER_ENV_FILE") : null;
+const inferenceEnvFile = usesModelFixture ? requiredEnv("V2_INFERENCE_ENV_FILE") : null;
 const s3EnvFile = requiredEnv("V2_S3_ENV_FILE");
-const requirementsConfigPath = requiredEnv("WORKBENCH_STUDIO_LIVE_REQUIREMENTS_CONFIG");
-const publishedPath = requiredEnv("WORKBENCH_STUDIO_LIVE_PUBLISHED_KNOWLEDGE");
+const requirementsConfigPath = usesModelFixture ? requiredEnv("WORKBENCH_STUDIO_LIVE_REQUIREMENTS_CONFIG") : null;
+const publishedPath = usesModelFixture ? requiredEnv("WORKBENCH_STUDIO_LIVE_PUBLISHED_KNOWLEDGE") : null;
 const serviceRoot = path.resolve(requiredEnv("WORKBENCH_STUDIO_LIVE_SERVICE_ROOT"));
 const expectedBackendCommit = requiredEnv("WORKBENCH_STUDIO_LIVE_BACKEND_COMMIT");
 const node = process.execPath;
@@ -70,7 +75,7 @@ const evidence = {
   runId,
   phase,
   evidenceLevel:
-    phase === "generation" ? "isolated-real-studio-stack-model-retrieval-and-object-storage" : "isolated-real-studio-authentication-and-project-permissions",
+    phase === "generation" ? "isolated-real-studio-stack-model-retrieval-and-object-storage" : phase === "delivery" ? "isolated-real-export-workers-with-fixed-versioned-inputs" : phase === "files" ? "isolated-real-studio-file-upload-scan-and-extraction" : "isolated-real-studio-authentication-and-project-permissions",
   browserApiInterception: false,
   allowedModelId: "deepseek-flash",
   forbiddenModelIds: ["deepseek-pro", "deepseek-v4-pro"],
@@ -311,12 +316,18 @@ try {
   const modifiedServiceFiles = execFileSync("git", ["diff", "--name-only", "HEAD", "--", "apps/*/src", "packages/*/src", "packages/workbench-db/prisma"], { cwd: serviceRoot, encoding: "utf8" }).trim();
   assert.equal(modifiedServiceFiles, "", "Backend runtime sources must match the fixed commit");
   assert.equal(await readFile(path.join(serviceRoot, "packages/workbench-contracts/openapi/workbench.v1.yaml"), "utf8"), await readFile(path.join(root, "packages/workbench-contracts/openapi/workbench.v1.yaml"), "utf8"), "Frontend and backend must consume the same shared wire contract");
-  const requirementsConfig = JSON.parse(await readFile(requirementsConfigPath, "utf8"));
+  const requirementsConfig = requirementsConfigPath ? JSON.parse(await readFile(requirementsConfigPath, "utf8")) : { model: "deepseek-flash" };
   assert.ok(["deepseek-flash", "deepseek-4.1-flash"].includes(requirementsConfig.model));
   const localTls = await loadTls(handoffDir);
-  const providerEnv = parseEnvFile(await readFile(providerEnvFile, "utf8"));
+  // The file and delivery suites run no model service. The API requires an origin
+  // for its model catalog, so isolate that dependency on an unused local port.
+  const localModelOrigin = !usesModelFixture ? `http://127.0.0.1:${await freePort()}` : null;
+  const providerEnv = providerEnvFile ? parseEnvFile(await readFile(providerEnvFile, "utf8")) : {
+    V2_PROVIDER_MODEL_ID: "deepseek-flash", V2_PROVIDER_GATEWAY_URL: localModelOrigin,
+    V2_PROVIDER_URL: localModelOrigin, V2_PROVIDER_TOKEN: randomBytes(32).toString("hex"),
+  };
   const s3Env = parseEnvFile(await readFile(s3EnvFile, "utf8"));
-  const inferenceEnv = parseEnvFile(await readFile(inferenceEnvFile, "utf8"));
+  const inferenceEnv = inferenceEnvFile ? parseEnvFile(await readFile(inferenceEnvFile, "utf8")) : {};
   assert.equal(
     providerEnv.V2_PROVIDER_MODEL_ID,
     "deepseek-flash",
@@ -449,7 +460,7 @@ try {
       secretAccessKey: s3Env.V2_S3_SECRET_ACCESS_KEY,
     },
   });
-  if (phase === "generation") {
+  if (phase !== "access") {
     await s3.send(new CreateBucketCommand({ Bucket: bucket }));
     externalStorage = { client: s3, bucket };
   } else s3.destroy();
@@ -467,7 +478,7 @@ try {
   await localTls.proxy({
     port: s3TlsPort,
     upstreamPort: s3Port,
-    publicOrigin: `https://localhost:${s3TlsPort}`,
+    publicOrigin: `https://127.0.0.1:${s3TlsPort}`,
     listenHost: "127.0.0.1",
   });
   await localTls.proxy({
@@ -482,6 +493,7 @@ try {
     ...knowledge.environment,
     NODE_ENV: "test",
     NODE_EXTRA_CA_CERTS: localTls.caPath,
+    ...(phase === "delivery" && { WORKBENCH_KNOWLEDGE_TOOL_SECRET: secret }),
     WORKBENCH_WEB_ORIGIN: webOrigin,
     WORKBENCH_S3_BUCKET: bucket,
     WORKBENCH_S3_REGION: s3Env.V2_S3_REGION || "us-east-1",
@@ -499,7 +511,7 @@ try {
     WORKBENCH_EXPORT_CHROMIUM_PATH: chromiumPath,
     WORKBENCH_PROTOTYPE_ARTIFACT_S3_BUCKET: bucket,
     WORKBENCH_PROTOTYPE_ARTIFACT_S3_PREFIX: "studio-live",
-    WORKBENCH_TEMPORAL_ADDRESS: requiredEnv("WORKBENCH_STUDIO_LIVE_TEMPORAL_ADDRESS"),
+    WORKBENCH_TEMPORAL_ADDRESS: phase === "files" ? `127.0.0.1:${temporalPort}` : requiredEnv("WORKBENCH_STUDIO_LIVE_TEMPORAL_ADDRESS"),
     WORKBENCH_TEMPORAL_TASK_QUEUE: `studio-live-${runId}`,
     WORKBENCH_TEMPORAL_WORKER_HEALTH_PORT: String(temporalPort),
     WORKBENCH_TEMPORAL_WORKFLOW_START_URL: `http://127.0.0.1:${temporalPort}/workflows/start`,
@@ -530,7 +542,7 @@ try {
       s3Env.V2_S3_SECRET_ACCESS_KEY;
   }
 
-  step(phase === "generation" ? "Start API, Temporal V3 Worker (deepseek-flash), and Preview service" : "Start real API and Preview for account/permission checks, without model workers");
+  step(phase === "generation" ? "Start API, Temporal V3 Worker (deepseek-flash), and Preview service" : "Start real API and Preview without model workers");
   startService(
     "api",
     [path.join(serviceRoot, "apps/workbench-api/dist/main.js")],
@@ -545,7 +557,7 @@ try {
     },
     outDir,
   );
-  if (phase === "generation") startService(
+  if (needsTemporal) startService(
     "temporal",
     [path.join(serviceRoot, "apps/workbench-worker/dist/prototypes/temporal-worker-main.js")],
     common,
@@ -563,10 +575,27 @@ try {
   );
   if (phase === "generation") {
     startService("runtime-worker", [path.join(serviceRoot, "apps/workbench-worker/dist/main.js")], common, serviceRoot);
-    startService("export-worker", [path.join(serviceRoot, "apps/workbench-export-worker/dist/main.js")], common, serviceRoot);
+  }
+  if (needsTemporal) {
+    const office = process.env.WORKBENCH_STUDIO_LIVE_OFFICE_BIN;
+    const python = process.env.WORKBENCH_EXPORT_PYTHON_PATH;
+    startService("export-worker", [path.join(serviceRoot, "apps/workbench-export-worker/dist/main.js")], {
+      ...common,
+      ...(office && { WORKBENCH_SOFFICE_PATH: office }),
+      ...(python && { WORKBENCH_EXPORT_PYTHON_PATH: python }),
+    }, serviceRoot);
+  }
+  if (phase === "files") {
+    const fileConfig = parseEnvFile(await readFile(requiredEnv("V2_FILE_PIPELINE_ENV_FILE"), "utf8"));
+    assert.equal(fileConfig.WORKBENCH_FILE_SCAN_MODE, "clamav");
+    startService("file-worker", [path.join(serviceRoot, "apps/workbench-file-worker/dist/main.js")], {
+      ...fileConfig, ...common,
+      WORKBENCH_FILE_PIPELINE_S3_ACCESS_KEY_ID: s3Env.V2_S3_ACCESS_KEY_ID,
+      WORKBENCH_FILE_PIPELINE_S3_SECRET_ACCESS_KEY: s3Env.V2_S3_SECRET_ACCESS_KEY,
+    }, serviceRoot);
   }
   await health(`${apiBase}/system/live`);
-  if (phase === "generation") await health(`http://127.0.0.1:${temporalPort}/healthz`);
+  if (needsTemporal) await health(`http://127.0.0.1:${temporalPort}/healthz`);
   await health(`http://127.0.0.1:${previewPort}/healthz`);
 
   step("Build and start new Studio Next.js production bundle");
@@ -609,7 +638,7 @@ try {
   );
   await health(`${webOrigin}/login`);
   if (phase === "generation") await health(`${apiBase}/system/ready`);
-  else evidence.generationReadiness = "Not asserted in account/permission phase; external model, retrieval and storage remain unavailable.";
+  else if (phase === "access") evidence.generationReadiness = "Not asserted in account/permission phase; external model, retrieval and storage remain unavailable.";
 
   browser = await chromium.launch({
     headless: true,
@@ -649,6 +678,11 @@ try {
   });
 
   if (phase === "generation") await runStudioLiveScenarios({ page, browser, webOrigin, outDir, runId, dbUrl, sql, waitUntil, evidence, step, runCmd });
+  if (phase === "delivery") {
+    const { runStudioDeliveryFixture } = await import("./studio-live-delivery-scenarios.mjs");
+    await runStudioDeliveryFixture({ page, browser, webOrigin, previewOrigin, outDir, runId, dbUrl, waitUntil, evidence, step, s3, bucket, chromiumPath, runCmd });
+  }
+  if (phase === "files") await runStudioLiveFileScenarios({ page, browser, webOrigin, outDir, runId, dbUrl, sql, waitUntil, evidence, step, s3, bucket });
   if (checkAccess) {
     const accessEvidence = phase === "access" ? evidence : { checks: {} };
     const accessPage = phase === "access" ? page : await browser.newPage();
@@ -668,7 +702,7 @@ try {
     assert.deepEqual(evidence.networkErrors.filter(item => !evidence.unavailableGenerationDependencies.includes(item)), []);
   }
   evidence.status = "passed";
-  step(phase === "generation" ? "Completed Studio real-stack deepseek-flash acceptance scenario" : "Completed real local account and permission checks; no generation or storage acceptance");
+  step(phase === "generation" ? "Completed Studio real-stack deepseek-flash acceptance scenario" : phase === "delivery" ? "Completed fixed-source artifact delivery" : phase === "files" ? "Completed real Studio file delivery" : "Completed real local account and permission checks; no generation or storage acceptance");
 } catch (error) {
   evidence.status = "failed";
   evidence.failure = error.stack || String(error);

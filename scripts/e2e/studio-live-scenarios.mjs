@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
-import { readFile, writeFile, mkdir, mkdtemp, rm } from "node:fs/promises";
+import { readFile, writeFile, mkdir, mkdtemp, rm, stat } from "node:fs/promises";
 import http from "node:http";
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
@@ -44,6 +44,24 @@ export async function runStudioLiveScenarios({ page, browser, webOrigin, outDir,
     step(`${label}: discuss, review, confirm once, and observe real generation`);
     const result = { label, projectId, output, status: "running", intermediate: [] };
     evidence.scenarios.push(result);
+    if (output === "prd") return generate(result, prompt);
+    const fileName = `${label}-generation.webm`;
+    const videoPath = path.join(outDir, fileName);
+    await page.screencast.start({ path: videoPath, size: { width: 1440, height: 900 } });
+    result.recording = { fileName, startedAt: new Date().toISOString() };
+    try {
+      return await generate(result, prompt);
+    } finally {
+      await page.screencast.stop();
+      result.recording.finishedAt = new Date().toISOString();
+      result.recording.bytes = (await stat(videoPath)).size;
+      assert.ok(result.recording.bytes > 0, "The Studio recording must contain browser frames");
+      await checkpoint();
+    }
+  }
+
+  async function generate(result, prompt) {
+    const { projectId, output, label } = result;
     const beforeRuns = Number((await query("SELECT count(*) AS n FROM workbench.runs WHERE project_id=$1", [projectId]))[0].n);
     await page.getByRole("combobox", { name: "输出类型", exact: true }).selectOption(output);
     await page.getByRole("textbox", { name: "描述需求或修改" }).fill(prompt);
@@ -60,18 +78,19 @@ export async function runStudioLiveScenarios({ page, browser, webOrigin, outDir,
       const [state] = await query("SELECT s.state, t.status AS turn_status, t.failure_code FROM workbench.requirement_sessions s LEFT JOIN workbench.requirement_turns t ON t.id=s.current_turn_id WHERE s.id=$1", [session.id]);
       if (state?.turn_status === "failed") throw Object.assign(new Error(`Requirement turn failed: ${state.failure_code}`), { fatal: true });
       if (state?.turn_status === "succeeded" && state.state !== "ready_to_confirm") {
-        result.discussionText = await page.locator(".studio-requirement").innerText().catch(() => "");
+        result.discussionText = await page.getByRole("region", { name: "需求交流", exact: true }).innerText().catch(() => "");
         throw Object.assign(new Error(`Sufficient request was not ready: ${state.state}`), { fatal: true });
       }
       return state?.state === "ready_to_confirm";
     }, "ready confirmation from real Flash", 180000, 1000);
     assert.equal(Number((await query("SELECT count(*) AS n FROM workbench.runs WHERE project_id=$1", [projectId]))[0].n), beforeRuns, "Ordinary discussion must not start a Run");
     result.ordinarySendCreatedNoRun = true;
-    await page.getByRole("region", { name: "本次改动确认", exact: true }).waitFor();
-    result.confirmationCard = await page.getByRole("region", { name: "本次改动确认", exact: true }).innerText();
+    const review = page.getByRole("article", { name: "本次改动确认", exact: true });
+    await review.waitFor();
+    result.confirmationCard = await review.innerText();
     assert.equal(await page.getByRole("checkbox", { name: "我同意将以上平台级改造纳入本次范围" }).count(), 0, "Increment must not unexpectedly add platform changes");
     const reply = page.waitForResponse(r => r.request().method() === "POST" && new URL(r.url()).pathname === `/api/v1/requirement-sessions/${session.id}/confirm`);
-    await page.getByRole("button", { name: "确认需求并生成", exact: true }).click();
+    await review.getByRole("button", { name: "确认需求并生成", exact: true }).click();
     const accepted = await reply;
     assert.ok(accepted.ok(), `Confirmation HTTP ${accepted.status()}`);
     const receipt = (await accepted.json()).confirmation;
@@ -103,10 +122,30 @@ export async function runStudioLiveScenarios({ page, browser, webOrigin, outDir,
       const [run] = await query("SELECT status, request, knowledge_release_id FROM workbench.runs WHERE id=$1", [frozen.run_id]);
       if (["failed", "cancelled", "waiting_input"].includes(run?.status)) throw Object.assign(new Error(`Generation reached ${run.status}`), { fatal: true });
       if (run?.status !== "succeeded" && output !== "prd") {
-        const nodes = await page.locator(".visual-draft [data-draft-node]").evaluateAll(elements => elements.map(el => ({ id: el.dataset.draftNode, text: el.childNodes[0]?.textContent, style: el.getAttribute("style") })));
+        const nodes = await page.locator(".visual-draft [data-draft-node]").evaluateAll(elements => elements.flatMap(el => {
+          const rect = el.getBoundingClientRect();
+          const stage = el.closest(".visual-viewport")?.getBoundingClientRect();
+          if (!stage || !el.checkVisibility() || !rect.width || !rect.height ||
+              Math.min(rect.bottom, stage.bottom, innerHeight) <= Math.max(rect.top, stage.top, 0) ||
+              Math.min(rect.right, stage.right, innerWidth) <= Math.max(rect.left, stage.left, 0)) return [];
+          const text = Array.from(el.childNodes).filter(node => node.nodeType === Node.TEXT_NODE).map(node => node.textContent).join("");
+          return [{ page: el.closest("[data-draft-page]").dataset.draftPage, id: el.dataset.draftNode, text, style: el.getAttribute("style") }];
+        }));
         const signature = digest(JSON.stringify(nodes));
         if (nodes.length && !seen.has(signature)) {
-          seen.add(signature); result.intermediate.push({ at: new Date().toISOString(), signature, nodeCount: nodes.length });
+          const observedAt = new Date().toISOString();
+          const [source] = await query(
+            `SELECT e.sequence, e.occurred_at, e.payload->>'attempt' AS attempt
+               FROM workbench.run_events e JOIN workbench.runs r ON r.id=e.run_id AND r.status='running'
+              WHERE e.run_id=$1 AND e.type='artifact.preview.updated'
+                AND EXISTS (SELECT 1 FROM jsonb_array_elements(e.payload->'preview'->'screens') AS screen
+                             WHERE screen->>'id'=$2 AND (screen->'nodes') @> $3::jsonb)
+              ORDER BY e.sequence DESC LIMIT 1`,
+            [frozen.run_id, nodes[0].page, JSON.stringify(nodes.map(({ id, text }) => ({ id, text })))],
+          );
+          if (!source) return false;
+          seen.add(signature);
+          result.intermediate.push({ at: observedAt, signature, nodeCount: nodes.length, pageId: nodes[0].page, eventSequence: source.sequence, attempt: source.attempt, eventAt: source.occurred_at });
           if (result.intermediate.length <= 3) await page.screenshot({ path: path.join(outDir, `${label}-intermediate-${result.intermediate.length}.png`) });
         }
       }
@@ -128,7 +167,7 @@ export async function runStudioLiveScenarios({ page, browser, webOrigin, outDir,
     assert.ok(retrievals.some(row => row.status === "succeeded" && row.response?.items?.length), "Actual generation must retrieve authorized knowledge");
     result.retrievals = retrievals.map(row => ({ id: row.id, status: row.status, citationIds: row.response?.items?.map(item => item.citation.id) ?? [] }));
     if (output !== "prd") {
-      assert.ok(result.intermediate.length >= 2, "At least two distinct visible intermediate projections before completion");
+      assert.ok(new Set(result.intermediate.map(sample => sample.eventSequence)).size >= 2, "At least two distinct Run events must produce visible changes before completion");
       await waitUntil(async () => (await page.frameLocator(".visual-paper iframe").locator("[data-wb-screen]").count()) > 0, "Final generated iframe", 60000);
       await verifyActivityInteraction(page.frameLocator(".visual-paper iframe"));
       result.finalInteraction = true;
@@ -138,37 +177,50 @@ export async function runStudioLiveScenarios({ page, browser, webOrigin, outDir,
     return result;
   }
 
-  const prototypeProject = await createProject("原型");
-  const prototype = await discussAndGenerate(prototypeProject, "prototype", increment + "只输出交互原型。" + interactionSpec, "prototype");
-  step("Save real anchored feedback and generate a derived revision through discussion");
-  const [sourceRevision] = await query("SELECT id FROM workbench.prototype_revisions WHERE plan_id=$1 ORDER BY created_at DESC LIMIT 1", [prototype.planId]);
-  await page.getByRole("button", { name: "选择元素", exact: true }).click();
-  await page.frameLocator(".visual-paper iframe").locator("[data-wb-node]").first().click();
-  await page.getByRole("textbox", { name: "当前版本批注", exact: true }).fill("渠道筛选区域增加说明文字：仅显示当前授权区域内的活动。保持原有筛选、搜索与详情交互。");
-  await page.getByRole("button", { name: "保存批注", exact: true }).click();
-  await page.getByRole("checkbox", { name: "用于本次修改", exact: true }).first().check();
-  await page.getByRole("button", { name: "讨论所选 1 条批注", exact: true }).click();
-  const revision = await discussAndGenerate(prototypeProject, "prototype", "按照所选批注，仅在渠道筛选区域增加说明文字：仅显示当前授权区域内的活动。保持已有页面、功能和样式，不更改权限逻辑，不新增平台能力。" + interactionSpec, "revision");
-  const [child] = await query("SELECT source_revision_id FROM workbench.prototype_plans WHERE id=$1", [revision.planId]);
-  assert.equal(child.source_revision_id, sourceRevision.id);
-  evidence.checks.fixedSourceFeedbackRevision = true;
+  const scope = process.env.WORKBENCH_STUDIO_LIVE_GENERATION_SCOPE ?? "all";
+  assert.ok(["all", "prototype", "prd", "joint"].includes(scope), "Unknown Studio generation scope");
+  evidence.generationScope = scope;
+  const ids = [];
+  if (scope === "all" || scope === "prototype") {
+    const prototypeProject = await createProject("原型");
+    const prototype = await discussAndGenerate(prototypeProject, "prototype", increment + "只输出交互原型。" + interactionSpec, "prototype");
+    step("Save real anchored feedback and generate a derived revision through discussion");
+    const [sourceRevision] = await query("SELECT id FROM workbench.prototype_revisions WHERE plan_id=$1 ORDER BY created_at DESC LIMIT 1", [prototype.planId]);
+    await page.getByRole("button", { name: "选择元素", exact: true }).click();
+    await page.frameLocator(".visual-paper iframe").locator("[data-wb-node]").first().click();
+    await page.getByRole("textbox", { name: "当前版本批注", exact: true }).fill("渠道筛选区域增加说明文字：仅显示当前授权区域内的活动。保持原有筛选、搜索与详情交互。");
+    await page.getByRole("button", { name: "保存批注", exact: true }).click();
+    await page.getByRole("checkbox", { name: "用于本次修改", exact: true }).first().check();
+    await page.getByRole("button", { name: "讨论所选 1 条批注", exact: true }).click();
+    const revision = await discussAndGenerate(prototypeProject, "prototype", "按照所选批注，仅在渠道筛选区域增加说明文字：仅显示当前授权区域内的活动。保持已有页面、功能和样式，不更改权限逻辑，不新增平台能力。" + interactionSpec, "revision");
+    const [child] = await query("SELECT source_revision_id FROM workbench.prototype_plans WHERE id=$1", [revision.planId]);
+    assert.equal(child.source_revision_id, sourceRevision.id);
+    evidence.checks.fixedSourceFeedbackRevision = true;
 
-  await page.locator(".studio-top-actions").getByRole("button", { name: "版本", exact: true }).click();
-  await page.getByRole("button", { name: "确认版本", exact: true }).click();
-  await page.getByText(/已确认/).first().waitFor();
-  await page.locator(".studio-top-actions").getByRole("button", { name: "分享 / 导出", exact: true }).click();
-  await verifyPrototypeDelivery(prototypeProject, revision);
-
-  const prdProject = await createProject("文档");
-  await discussAndGenerate(prdProject, "prd", increment + "只输出需求文档，包括字段、状态、筛选逻辑、权限边界、异常处理和验收条件。", "prd");
-  await verifyDocumentDelivery(prdProject, "prd");
-  const jointProject = await createProject("联合");
-  await discussAndGenerate(jointProject, "both", increment + "同时输出需求文档和交互原型，范围与术语一致。" + interactionSpec, "joint");
-  await verifyDocumentDelivery(jointProject, "joint");
-  const ids = [prototypeProject, prdProject, jointProject];
+    await page.locator(".studio-top-actions").getByRole("button", { name: "版本", exact: true }).click();
+    await page.getByRole("button", { name: "确认版本", exact: true }).click();
+    await page.getByText(/已确认/).first().waitFor();
+    await page.locator(".studio-top-actions").getByRole("button", { name: "分享 / 导出", exact: true }).click();
+    await verifyPrototypeDelivery(prototypeProject, revision);
+    ids.push(prototypeProject);
+  }
+  if (scope === "all" || scope === "prd") {
+    const prdProject = await createProject("文档");
+    await discussAndGenerate(prdProject, "prd", increment + "只输出需求文档，包括字段、状态、筛选逻辑、权限边界、异常处理和验收条件。", "prd");
+    await verifyDocumentDelivery(prdProject, "prd");
+    ids.push(prdProject);
+  }
+  if (scope === "all" || scope === "joint") {
+    const jointProject = await createProject("联合");
+    await discussAndGenerate(jointProject, "both", increment + "同时输出需求文档和交互原型，范围与术语一致。" + interactionSpec, "joint");
+    await verifyDocumentDelivery(jointProject, "joint");
+    ids.push(jointProject);
+  }
   const runs = await query("SELECT id,status,request->>'modelId' AS model_id FROM workbench.runs WHERE project_id=ANY($1::text[])", [ids]);
   const turns = await query("SELECT id,status,model_id FROM workbench.requirement_turns WHERE project_id=ANY($1::text[])", [ids]);
-  assert.ok(runs.length >= 4 && turns.length >= 4);
+  const expectedRuns = scope === "all" ? 4 : scope === "prototype" ? 2 : 1;
+  assert.equal(runs.length, expectedRuns, "One Run per confirmed generation");
+  assert.ok(turns.length >= expectedRuns);
   assert.ok([...runs, ...turns].every(item => item.model_id === "deepseek-flash"));
   evidence.runs = runs; evidence.turns = turns; evidence.checks.allDatabaseRunsAndTurnsUsedFlash = true;
 
@@ -215,7 +267,7 @@ export async function runStudioLiveScenarios({ page, browser, webOrigin, outDir,
     const directory = await mkdtemp(path.join(tmpdir(), "studio-export-run-"));
     try {
       const entries = unzipSync(await readFile(downloads.react.path));
-      assert.ok(entries["package.json"] && entries["src/main.jsx"]);
+      assert.ok(entries["package.json"] && entries["index.html"], "React export must include an installable project and its browser entry");
       for (const [name, bytes] of Object.entries(entries)) {
         const destination = path.resolve(directory, name);
         assert.ok(destination.startsWith(directory + path.sep), "ZIP path must remain inside extraction root");
@@ -225,10 +277,10 @@ export async function runStudioLiveScenarios({ page, browser, webOrigin, outDir,
       assert.ok(npmCli, "Provide the existing npm CLI for export installation");
       const environment = { PATH: `${path.dirname(process.execPath)}:/usr/bin:/bin`, NPM_CONFIG_USERCONFIG: "/dev/null", NPM_CONFIG_CACHE: path.join(directory, ".npm-cache") };
       await runCmd("react-install", [npmCli, "install", "--ignore-scripts", "--no-audit", "--no-fund"], directory, environment);
-      await runCmd("react-build", [npmCli, "run", "build", "--", "--base=./"], directory, environment);
+      await runCmd("react-build", [npmCli, "run", "build", "--", "--base=./", "--outDir", "acceptance-build"], directory, environment);
       await withStaticServer(directory, async origin => {
         const standalone = await browser.newPage();
-        try { await standalone.goto(`${origin}/dist/index.html`); await verifyActivityInteraction(standalone); }
+        try { await standalone.goto(`${origin}/acceptance-build/index.html`); await verifyActivityInteraction(standalone); }
         finally { await standalone.close(); }
       });
       await withStaticServer(outDir, async origin => {

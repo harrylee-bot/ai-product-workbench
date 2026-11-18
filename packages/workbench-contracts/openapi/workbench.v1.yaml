@@ -12141,6 +12141,19 @@ components:
               type: string
               minLength: 1
               maxLength: 128
+            replaces:
+              type: object
+              properties:
+                sourceId:
+                  type: string
+                  minLength: 1
+                  maxLength: 128
+                revision:
+                  $ref: "#/components/schemas/Revision"
+              required:
+                - sourceId
+                - revision
+              additionalProperties: false
             label:
               type: string
               minLength: 1
