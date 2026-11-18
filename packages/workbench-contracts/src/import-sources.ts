@@ -135,6 +135,7 @@ export const importSourceSchema = z.object({
 const fileSourceRequest = z.object({
   kind: z.literal("file"),
   fileAssetId: opaqueIdSchema,
+  replaces: z.object({ sourceId: opaqueIdSchema, revision: revisionSchema }).strict().optional(),
   label: z.string().trim().min(1).max(240).optional(),
 }).strict();
 

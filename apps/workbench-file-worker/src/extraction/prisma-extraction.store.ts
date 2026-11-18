@@ -394,10 +394,14 @@ export class PrismaExtractionStore implements ExtractionStore {
         orderBy: { generation: "desc" },
       });
       if (active) {
+        // Markdown has no binary signature. If Docling preserves the input
+        // bytes exactly, its normalized result shares the verified text Blob.
+        const plainMarkdown = active.status === "ready" && active.mediaType === "text/plain"
+          && identity.kind === "markdown" && identity.mediaType === "text/markdown";
         if (
           active.status === "quarantined"
           || safeByteSize(active.byteSize) !== identity.byteSize
-          || active.mediaType !== identity.mediaType
+          || (active.mediaType !== identity.mediaType && !plainMarkdown)
         ) {
           throw new TerminalExtractionError("failed", "FILE_EXTRACTION_OUTPUT_IDENTITY_CONFLICT", "A normalized output digest conflicts with an unavailable Blob");
         }

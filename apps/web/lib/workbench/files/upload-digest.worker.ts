@@ -1,6 +1,7 @@
 /// <reference lib="webworker" />
 
-import { createSHA256 } from "hash-wasm";
+import { sha256 } from "@noble/hashes/sha2.js";
+import { bytesToHex } from "@noble/hashes/utils.js";
 
 type DigestWorkerRequest = {
   type: "hash";
@@ -29,7 +30,7 @@ async function hash({ blob, chunkSize }: DigestWorkerRequest) {
   if (!Number.isSafeInteger(chunkSize) || chunkSize <= 0) {
     throw new Error("UPLOAD_DIGEST_WORKER_CHUNK_SIZE_INVALID");
   }
-  const hasher = await createSHA256();
+  const hasher = sha256.create();
   let offset = 0;
   while (offset < blob.size) {
     const end = Math.min(blob.size, offset + chunkSize);
@@ -37,7 +38,7 @@ async function hash({ blob, chunkSize }: DigestWorkerRequest) {
     offset = end;
     post({ type: "progress", bytesHashed: offset });
   }
-  post({ type: "complete", digest: hasher.digest("hex") });
+  post({ type: "complete", digest: bytesToHex(hasher.digest()) });
 }
 
 function post(message: DigestWorkerResponse) {

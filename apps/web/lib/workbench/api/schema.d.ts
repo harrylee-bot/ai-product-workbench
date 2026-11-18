@@ -5616,6 +5616,10 @@ export interface components {
             /** @enum {string} */
             kind: "file";
             fileAssetId: string;
+            replaces?: {
+                sourceId: string;
+                revision: components["schemas"]["Revision"];
+            };
             label?: string;
         } | {
             /** @enum {string} */
