@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from types import SimpleNamespace
 import unittest
 
@@ -548,6 +549,73 @@ class WorkbenchPrototypeGraphBudgetTests(unittest.IsolatedAsyncioTestCase):
                                       "budget": config["recursion_limit"], "networkModelCalls": 0}))
         finally:
             pop_current_app_config()
+
+
+class WorkbenchFlashWireTests(unittest.TestCase):
+    def test_flash_profile_tracks_non_thinking_mode_on_continuing_tool_turn(self):
+        import httpx
+        from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
+
+        from deerflow.config.app_config import AppConfig
+        from deerflow.config.model_config import ModelConfig
+        from deerflow.models.factory import create_chat_model
+
+        received = []
+
+        def reply(request):
+            received.append(json.loads(request.content))
+            return httpx.Response(200, json={
+                "id": "fixture-completion",
+                "created": 1,
+                "model": "deepseek-flash",
+                "object": "chat.completion",
+                "choices": [{
+                    "index": 0,
+                    "finish_reason": "stop",
+                    "message": {"role": "assistant", "content": "fixture response"},
+                }],
+            })
+
+        messages = [
+            HumanMessage(content="Verify the local fixture"),
+            AIMessage(content="", tool_calls=[{
+                "id": "fixture-tool-call", "name": "read_fixture", "args": {},
+            }]),
+            ToolMessage(content="fixture contents", tool_call_id="fixture-tool-call"),
+        ]
+        for profile in ("deepseek-flash", "other-flash-profile"):
+            with self.subTest(profile=profile), httpx.Client(transport=httpx.MockTransport(reply)) as client:
+                model_config = ModelConfig(
+                    name=profile,
+                    use="langchain_openai:ChatOpenAI",
+                    model="deepseek-flash",
+                    api_key="fixture-only-key",
+                    base_url="https://provider.fixture.test/v1",
+                    supports_thinking=False,
+                    extra_body={"parallel_tool_calls": False},
+                )
+                model = create_chat_model(
+                    profile,
+                    app_config=AppConfig(
+                        models=[model_config],
+                        sandbox={"use": "deerflow.sandbox.local:LocalSandboxProvider"},
+                    ),
+                    attach_tracing=False,
+                    http_client=client,
+                )
+                bound = model.bind_tools([{
+                    "name": "read_fixture", "description": "Read the local fixture",
+                    "parameters": {"type": "object", "properties": {}},
+                }])
+                self.assertEqual(bound.invoke(messages).content, "fixture response")
+                body = received[-1]
+                self.assertEqual(body["model"], "deepseek-flash")
+                self.assertFalse(body["parallel_tool_calls"])
+                self.assertEqual(body["messages"][-1]["tool_call_id"], "fixture-tool-call")
+                if profile == "deepseek-flash":
+                    self.assertEqual(body["thinking"], {"type": "disabled"})
+                else:
+                    self.assertNotIn("thinking", body)
 
 
 if __name__ == "__main__":

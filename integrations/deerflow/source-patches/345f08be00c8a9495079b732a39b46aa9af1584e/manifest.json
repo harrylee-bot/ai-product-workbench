@@ -19,6 +19,18 @@
   },
   "additionalSources": [
     {
+      "path": "deerflow/models/factory.py",
+      "upstreamSha256": "1ccd4b57c6f54a90667cf8af5ec92f4b2629915f4ef1c403e8525893e0d13840",
+      "patchedSha256": "a39797fa5847ae742f2b5075bea51d0a7de74eaf9a29b1349d0507f3e57bc518",
+      "replacements": [
+        {
+          "anchor": "    # Normalize the api_base -> base_url alias FIRST, so the downstream OpenAI-compatible\n",
+          "insertion": "    # Workbench's non-thinking Flash profile uses the generic OpenAI adapter.\n    # DeepSeek enables thinking by default and then requires reasoning replay\n    # across tool turns. The disabled profile must set the provider wire flag.\n    if (\n        not thinking_enabled\n        and not model_config.supports_thinking\n        and name == \"deepseek-flash\"\n        and model_config.use == \"langchain_openai:ChatOpenAI\"\n        and model_settings_from_config.get(\"model\") in {\"deepseek-flash\", \"deepseek-4.1-flash\"}\n    ):\n        model_settings_from_config[\"extra_body\"] = {\n            **(model_settings_from_config.get(\"extra_body\") or {}),\n            \"thinking\": {\"type\": \"disabled\"},\n        }\n\n",
+          "position": "before"
+        }
+      ]
+    },
+    {
       "path": "deerflow/tools/builtins/task_tool.py",
       "upstreamSha256": "b650fa0815fa0be406c2f612670cb71687f4df15aed6c8195545998381ff9e7d",
       "patchedSha256": "b46460b3aff7000d66530fd5023026b2427d7aa973bd29061ccd72a46537be30",
@@ -197,7 +209,7 @@
     "sha256": "31e6bcb8c6af6465573499bc71a767e03f9593fc6fc11af2197485d7bcb8329e"
   },
   "requestContextTest": {
-    "sha256": "28eec4d9cbe1469148d541920f4db9fed0cd3ce0b74545028cb4cec7c6aadaf4"
+    "sha256": "2362ef1e9c8be163af9f423b14728ee87b3c79c9da17febecf71680d75213e09"
   },
   "upgradeTest": {
     "sha256": "f8e66ac1e62356df06630e54151ae7b33795a5a7967daede2b75f5452f408ebf"
