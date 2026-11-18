@@ -69,6 +69,8 @@ export type RequirementDiscussionView = {
     | "missing"
     | "conflict"
     | "restricted"
+    | "unavailable"
+    | "source-changed"
     | "searching"
     | "not-provided";
   // Authoritative result of server readiness + latest input/summary binding.

@@ -43,6 +43,17 @@ it("does not manufacture a complete card or infer missing knowledge from an earl
   expect(view.knowledgeStatus).toBe("not-provided");
 });
 
+it.each([
+  ["REQUIREMENT_SOURCE_UNAVAILABLE", "restricted"],
+  ["REQUIREMENT_SOURCE_CHANGED", "source-changed"],
+  ["REQUIREMENT_KNOWLEDGE_UNAVAILABLE", "unavailable"],
+])("displays the server's %s without exposing source details", (failureCode, knowledgeStatus) => {
+  const now = "2026-11-17T00:00:00Z";
+  const activeTurn = { id: "turn-one", sessionId: "session-one", inputRevision: 1, status: "failed",
+    modelId: "deepseek-flash", attempt: 1, failureCode, inputTokens: null, outputTokens: null, createdAt: now, finishedAt: now };
+  expect(requirementView(session({ activeTurn }), options)).toMatchObject({ knowledgeStatus, canConfirm: false, evidence: [] });
+});
+
 it("distinguishes explicitly unaffected dimensions from missing fields", () => {
   const known = requirementView(
     session({ card: { affectedPages: [], affectedFlows: [] } }),
