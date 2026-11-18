@@ -56,6 +56,11 @@ export async function runStudioPrd({
   });
   step("Register a distinct Studio account and start a PRD-only discussion");
   await page.goto(webOrigin + "/register");
+  await waitUntil(
+    async () => (await page.locator("#username").count()) === 1,
+    "Registration form hydrated",
+    30000,
+  );
   await page.locator("#username").fill("prd_" + runId);
   await page.locator("#email").fill("prd_" + runId + "@example.test");
   await page
