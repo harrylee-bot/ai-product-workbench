@@ -1,5 +1,6 @@
 // Mounted Studio requirement workflow against fixed-contract API fixtures. No model calls.
 const { chromium, webkit } = await import(process.env.WORKBENCH_E2E_PLAYWRIGHT_MODULE ?? "playwright");
+import { checkStudioExperience } from "./studio-experience-checks.mjs";
 import { mkdir, writeFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import assert from "node:assert/strict";
@@ -384,8 +385,10 @@ const browser = await (engine === "webkit" ? webkit : chromium).launch({
   headless: true,
   executablePath: engine === "webkit" ? process.env.PLAYWRIGHT_WEBKIT_EXECUTABLE : process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE,
 });
+const touch = process.env.WORKBENCH_E2E_TOUCH_VIEWPORT === "1";
 const context = await browser.newContext({
   viewport: { width: 1440, height: 900 },
+  ...(touch && { isMobile: true, hasTouch: true, deviceScaleFactor: 3 }),
 });
 await context.addCookies([
   {
@@ -816,31 +819,50 @@ await context.route("**/api/v1/**", async (route) => {
   results.unknown.push(`${method} ${path}`);
   return json(route, { status: 404, title: "Fixture route missing" }, 404);
 });
+// Reset origin storage in a document with no product code. Loading Studio just to
+// delete its active IndexedDB store races with the bootstrap for the next case.
+const resetURL = new URL("/__e2e_storage_reset", origin).href;
+await context.route(resetURL, route => route.fulfill({ contentType: "text/html", body: "<!doctype html>" }));
 const page = await context.newPage();
 page.setDefaultTimeout(12000);
-page.on("pageerror", (e) => results.errors.push(e.message));
+page.on("pageerror", (error) => results.errors.push(error.stack || String(error)));
 const prompt = page.getByRole("textbox", { name: "描述需求或修改" });
 const button = (name) => page.getByRole("button", { name, exact: true });
 try {
   for (const outputKind of ["both", "prd", "prototype"]) {
     sessions = [];
     entries = [];
-    await page.goto(
-      `${origin}/studio/${projectId}?plan=${root.id}&revision=${revisionId}`,
-    );
+    await page.goto(resetURL);
     await page.evaluate(async () => {
       sessionStorage.clear();
-      await new Promise((resolve) => {
+      await new Promise((resolve, reject) => {
         const request = indexedDB.deleteDatabase(
           "workbench-studio-composer-v1",
         );
         request.onsuccess = resolve;
-        request.onerror = resolve;
-        request.onblocked = resolve;
+        request.onerror = () => reject(request.error);
+        request.onblocked = () => reject(new Error("Composer database reset blocked"));
       });
     });
-    await page.reload();
+    const studioUrl = `${origin}/studio/${projectId}?plan=${root.id}&revision=${revisionId}`;
+    const testExperience = outputKind === "both" && process.env.WORKBENCH_E2E_STUDIO_EXPERIENCE === "1";
+    if (testExperience) {
+      // Refresh while bootstrap is releasing the dependent queries. Keep this
+      // separate from storage setup and capture every outgoing-document error.
+      const bootstrapDone = () => page.waitForResponse(response =>
+        response.ok() && new URL(response.url()).pathname === `/api/v1/projects/${projectId}/bootstrap`);
+      await Promise.all([bootstrapDone(), page.goto(studioUrl, { waitUntil: "commit" })]);
+      for (let attempt = 0; attempt < 3; attempt++)
+        await Promise.all([bootstrapDone(), page.reload({ waitUntil: "commit" })]);
+      results.rapidReloads = 3;
+    } else {
+      await page.goto(studioUrl);
+    }
     await prompt.waitFor();
+    if (testExperience) {
+      results.experience = await checkStudioExperience({ page, output, engine, browserVersion: browser.version(), touch });
+      assert.equal(messages.length, 0);
+    }
     await page.evaluate(() =>
       sessionStorage.setItem(
         "workbench:studio:principal-1:input-project:submission",
@@ -1052,16 +1074,23 @@ try {
   });
   await directory.waitFor();
   assert(directoryCursors.includes("100"));
+  await page.waitForFunction(() => document.querySelector('select[aria-label="需求讨论"]')?.value === "saved-discussion");
   assert.equal(await directory.inputValue(), "saved-discussion");
   const history = page.locator(".studio-requirement-history");
   await history.locator("summary").filter({hasText:"50 条"}).waitFor();
   if (await history.getAttribute("open") === null) await history.locator("summary").click();
   await history.getByText("当前会话第 54 条", {exact:true}).waitFor();
   assert.equal(await history.getByText("当前会话第 1 条", {exact:true}).count(), 0);
-  await history.getByRole("button", {name:"加载更多交流"}).click();
+  const summary = history.locator("summary");
+  await summary.focus();
+  await page.keyboard.press(engine === "webkit" && process.platform === "darwin" ? "Alt+Tab" : "Tab");
+  const loadOlder = history.getByRole("button", {name:"加载更多交流"});
+  assert(await loadOlder.evaluate(el => el === document.activeElement));
+  await page.keyboard.press("Enter");
   await history.getByText("当前会话第 1 条", {exact:true}).waitFor();
   assert.equal(await history.getByText(/^其他会话第/).count(), 0);
   assert.equal(await history.locator("li").count(), 54);
+  assert(await summary.evaluate(el => el === document.activeElement), "Last page restores focus to history summary");
   addEntry("saved-discussion", "刷新后追加的消息");
   await page.reload();
   await history.locator("summary").filter({hasText:"50 条"}).waitFor();

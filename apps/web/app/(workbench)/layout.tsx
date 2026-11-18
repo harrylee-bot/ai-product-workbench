@@ -24,9 +24,10 @@ export default function Layout({ children }: { children: React.ReactNode }) {
 
 function WorkbenchDataProviders({ children }: { children: React.ReactNode }) {
   const { user } = useWorkbenchAuth();
+  const pathname = usePathname();
   return (
     <WorkbenchQueryProvider privateCacheNamespace={user?.id ?? null}>
-      <WorkbenchTransportProvider>
+      <WorkbenchTransportProvider observeDocumentReads={pathname?.startsWith("/studio/")}>
         {children}
       </WorkbenchTransportProvider>
     </WorkbenchQueryProvider>
@@ -43,7 +44,12 @@ function WorkbenchAuthenticatedShell({ children }: { children: React.ReactNode }
     if (!loading && !user) {
       const query = searchParams.toString();
       const next = safeAuthReturnPath(`${pathname}${query ? `?${query}` : ""}${window.location.hash}`);
-      router.replace(authRouteWithReturnPath("/login", next));
+      // An interrupted session read can briefly look signed out on an outgoing
+      // document. Only the shell that renders again should navigate to login.
+      const frame = window.requestAnimationFrame(() =>
+        router.replace(authRouteWithReturnPath("/login", next)),
+      );
+      return () => window.cancelAnimationFrame(frame);
     }
   }, [loading, pathname, router, searchParams, user]);
 

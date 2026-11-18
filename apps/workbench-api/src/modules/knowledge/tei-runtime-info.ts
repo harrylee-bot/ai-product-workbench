@@ -7,6 +7,8 @@ const teiRuntimeInfoSchema = z.object({
   version: z.string().min(1),
   max_input_length: z.number().int().positive(),
   max_batch_tokens: z.number().int().positive(),
+  max_concurrent_requests: z.number().int().positive().optional(),
+  max_batch_requests: z.number().int().positive().nullish(),
   max_client_batch_size: z.number().int().positive(),
   auto_truncate: z.literal(false),
 }).passthrough();

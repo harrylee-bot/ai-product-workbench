@@ -70,6 +70,21 @@ describe("Knowledge TEI adapters", () => {
     ]);
   });
 
+  it("reranks every candidate in bounded batches and resolves each batch's local indexes", async () => {
+    const sizes: number[] = [];
+    const candidates = Array.from({ length: 20 }, (_, index) => ({ chunkId: String(index), content: String(index) }));
+    const request = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      if (String(input).endsWith("/info")) return jsonResponse({ ...rerankerInfo(), max_batch_requests: 8, max_concurrent_requests: 16 });
+      const { texts } = JSON.parse(String(init?.body)) as { texts: string[] };
+      sizes.push(texts.length);
+      if (texts.length > 16) return Response.json({}, { status: 429 });
+      return jsonResponse(texts.map((text, index) => ({ index, score: Number(text) / 20 })).reverse());
+    });
+    const scores = await new TeiRerankerAdapter(rerankerConfig(), request).rerank({ query: "活动", candidates });
+    expect(sizes).toEqual([8, 8, 4]);
+    expect(Object.fromEntries(scores.map(x => [x.chunkId, x.score]))).toEqual(Object.fromEntries(candidates.map(x => [x.chunkId, Number(x.content) / 20])));
+  });
+
   it("drops provider response details from failures", async () => {
     const request = vi.fn(async () => jsonResponse({ secret: "provider-secret", detail: "raw failure" }, 503));
     const adapter = new TeiQueryEmbeddingAdapter({

@@ -17,7 +17,7 @@ function ProjectAccess({ projectId }: { projectId: string }) {
       <h1>正在核验项目访问权限</h1>
       <p role={access.checking ? "status" : "alert"}>{access.checking ? "正在重新读取项目权限…" : access.error}</p>
       <button disabled={access.checking} onClick={() => void access.verify()}>重新核验权限</button>
-      <Link href="/">返回项目</Link>
+      <Link href="/" prefetch={false}>返回项目</Link>
     </main>
   );
   if (query.isPending)
@@ -36,7 +36,7 @@ function ProjectAccess({ projectId }: { projectId: string }) {
         <h1>无法打开项目</h1>
         <p>{query.error?.message}</p>
         <button onClick={() => void query.refetch()}>重试</button>
-        <Link href="/">返回项目</Link>
+        <Link href="/" prefetch={false}>返回项目</Link>
       </main>
     );
   const data = query.data.value,

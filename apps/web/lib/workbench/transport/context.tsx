@@ -1,11 +1,12 @@
 "use client";
 
-import { createContext, type ReactNode, useContext, useMemo } from "react";
+import { createContext, type ReactNode, useContext, useEffect, useMemo } from "react";
 
 import {
   createWorkbenchApiClient,
   type WorkbenchApiClient,
 } from "../api";
+import { createDocumentReads } from "./document-reads";
 import { getWorkbenchApiBaseUrl } from "../api/config";
 
 export type WorkbenchTransport = {
@@ -17,17 +18,23 @@ const WorkbenchTransportContext = createContext<WorkbenchTransport | null>(null)
 
 export function WorkbenchTransportProvider({
   children,
+  observeDocumentReads = false,
 }: {
   children: ReactNode;
+  observeDocumentReads?: boolean;
 }) {
+  const reads = useMemo(createDocumentReads, []);
+  useEffect(() => {
+    if (observeDocumentReads) return reads.observe();
+  }, [observeDocumentReads, reads]);
   const value = useMemo<WorkbenchTransport>(() => {
     const baseUrl = getWorkbenchApiBaseUrl();
-    const api = createWorkbenchApiClient({ baseUrl });
+    const api = createWorkbenchApiClient({ baseUrl, fetch: reads.fetch });
     return {
       api,
       baseUrl,
     };
-  }, []);
+  }, [reads]);
 
   return (
     <WorkbenchTransportContext.Provider value={value}>

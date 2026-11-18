@@ -123,6 +123,37 @@ class WorkbenchRequestContextTests(unittest.TestCase):
         )))
         self.assertFalse(_is_trusted_internal_caller(None))
 
+    def test_confirmed_output_operations_reach_tools_with_their_exact_targets(self) -> None:
+        operations = [
+            {"kind": "prd", "operation": {"kind": "create"}},
+            {"kind": "prototype", "operation": {"kind": "revise", "target": {
+                "artifactId": "prototype-1", "artifactVersionId": "version-2",
+                "screenIds": ["screen-b", "screen-a"],
+            }}},
+        ]
+        scope = {
+            "runId": "run-1", "runtimeAttemptId": "attempt-1",
+            "requestedArtifactKinds": ["prd", "prototype"], "outputOperations": operations,
+            "knowledgeEnabled": True, "canvasTools": None, "prototypePatchBaselines": [],
+        }
+        config = build_run_config("thread-1", None, None)
+        merge_run_context_overrides(config, {
+            "workbench": scope, "secrets": {"WORKBENCH_KNOWLEDGE_CAPABILITY": "test-capability"},
+        }, allow_workbench_context=True)
+        self.assertEqual(config["context"].get("workbench"), scope)
+        _apply_workbench_lead_recursion_limit(config, trusted_internal_caller=True)
+        self.assertEqual(config["recursion_limit"], _WORKBENCH_LINKED_LEAD_GRAPH_RECURSION_LIMIT)
+        self.assertNotIn("workbench", config["configurable"])
+        for invalid in ([], [operations[0]], [{"kind": "prd", "operation": {"kind": "revise"}}],
+                        [operations[0], {"kind": "prototype", "operation": {"kind": "erase"}}]):
+            with self.subTest(operations=invalid):
+                config = build_run_config("thread-1", None, None)
+                merge_run_context_overrides(
+                    config, {"workbench": {**scope, "outputOperations": invalid}},
+                    allow_workbench_context=True,
+                )
+                self.assertNotIn("workbench", config.get("context", {}))
+
     def test_exact_trusted_prd_scope_receives_the_named_recursion_budget(self) -> None:
         self.assertEqual(_DEFAULT_LEAD_GRAPH_RECURSION_LIMIT, 100)
         self.assertEqual(_WORKBENCH_PRD_LEAD_GRAPH_RECURSION_LIMIT, 200)

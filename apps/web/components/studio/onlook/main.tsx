@@ -3,7 +3,7 @@
 // Modified: Workbench service boundary, scoped state, accessible light UI.
 // See third_party/onlook for original source, license and modification ledger.
 "use client";
-import type { ReactNode } from "react";
+import { useEffect, useRef, type ReactNode } from "react";
 
 /** Onlook editor composition with the conversation docked below the available canvas. */
 export function Main({
@@ -21,8 +21,32 @@ export function Main({
   canvas: ReactNode;
   bottomBar: ReactNode;
 }) {
+  const shell = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const element = shell.current;
+    const viewport = window.visualViewport;
+    if (!element || !viewport) return;
+    const syncViewport = () => {
+      // The iOS keyboard can shrink and pan only the visual viewport.
+      // Leave pinch zoom to the browser so the canvas remains pannable.
+      if (viewport.scale === 1) {
+        element.style.setProperty("--studio-visible-height", `${viewport.height}px`);
+        element.style.setProperty("--studio-visible-top", `${viewport.offsetTop}px`);
+      } else {
+        element.style.removeProperty("--studio-visible-height");
+        element.style.removeProperty("--studio-visible-top");
+      }
+    };
+    syncViewport();
+    viewport.addEventListener("resize", syncViewport);
+    viewport.addEventListener("scroll", syncViewport);
+    return () => {
+      viewport.removeEventListener("resize", syncViewport);
+      viewport.removeEventListener("scroll", syncViewport);
+    };
+  }, []);
   return (
-    <div className="studio-shell" data-editor-foundation="onlook">
+    <div ref={shell} className="studio-shell" data-editor-foundation="onlook">
       <header className="studio-topbar">{topBar}</header>
       <div className="studio-body">
         <div className="studio-left-panel">{leftPanel}</div>
