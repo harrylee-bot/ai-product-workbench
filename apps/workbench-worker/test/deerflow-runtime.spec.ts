@@ -5549,7 +5549,8 @@ describe("DeerFlow runtime adapter", () => {
         return Response.json({
           files: [{
             virtual_path: `/mnt/user-data/uploads/upload-${index}.bin`,
-            markdown_virtual_path: `/mnt/user-data/uploads/upload-${index}.md`,
+            markdown_virtual_path: index === 1 ? null : `/mnt/user-data/uploads/upload-${index}.md`,
+            markdownVirtualPath: null,
             artifact_url: "https://must-not-leak.example/private",
           }],
         });
@@ -5623,6 +5624,7 @@ describe("DeerFlow runtime adapter", () => {
     expect(uploads[1]?.body.includes(extracted)).toBe(true);
     const serialized = JSON.stringify(runRequest);
     expect(serialized).toContain("/mnt/user-data/uploads/upload-1.bin");
+    expect(serialized).not.toContain("/mnt/user-data/uploads/upload-1.md");
     expect(serialized).toContain("/mnt/user-data/uploads/upload-2.md");
     expect(serialized).toContain('\\"workflow\\":\\"redesign\\"');
     expect(serialized).toContain('\\"targetSurface\\":\\"web\\"');

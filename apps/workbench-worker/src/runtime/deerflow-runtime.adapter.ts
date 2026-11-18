@@ -195,8 +195,8 @@ const gatewayUploadResponseSchema = z.object({
   files: z.array(z.object({
     virtual_path: z.string().optional(),
     virtualPath: z.string().optional(),
-    markdown_virtual_path: z.string().optional(),
-    markdownVirtualPath: z.string().optional(),
+    markdown_virtual_path: z.string().nullish(),
+    markdownVirtualPath: z.string().nullish(),
   }).passthrough()).length(1),
 }).passthrough();
 
@@ -2065,8 +2065,8 @@ export function normalizeUploadVirtualPath(value: string | undefined) {
   return normalized;
 }
 
-function optionalUploadVirtualPath(value: string | undefined) {
-  return value === undefined ? null : normalizeUploadVirtualPath(value);
+function optionalUploadVirtualPath(value: string | null | undefined) {
+  return value === null || value === undefined ? null : normalizeUploadVirtualPath(value);
 }
 
 function safeVirtualPathSegment(segment: string) {
