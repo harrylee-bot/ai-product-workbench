@@ -79,3 +79,58 @@ def decode_prd_draft_sections(raw):
     if not isinstance(content, dict) or content.get("protocol") != "workbench.prd.v3":
         return None
     return args, [{"offset": at, "closing": closing} for at, closing in edits]
+
+
+def decode_prd_page_links_repair(raw):
+    """Recover a single uniquely decodable page-links add without changing its text."""
+    if not isinstance(raw, str) or not 0 < len(raw.encode("utf-8")) <= 65_536:
+        return None
+    try:
+        json.loads(raw, object_pairs_hook=_unique_object)
+    except json.JSONDecodeError as error:
+        if error.msg != "Expecting ',' delimiter":
+            return None
+        failure_offset = error.pos
+    except (ValueError, RecursionError):
+        return None
+    else:
+        return None
+
+    recovered = {}
+    for token in _TOKENS.finditer(raw):
+        offset = token.start()
+        if offset > failure_offset:
+            break
+        if not offset or offset < failure_offset - 2 or token[0] not in ("}", "]") or raw[offset - 1] not in ("}", "]"):
+            continue
+        for closing in ("]}", "}]"):
+            try:
+                args = json.loads(raw[:offset] + closing + raw[offset:], object_pairs_hook=_unique_object)
+                if not _is_page_links_repair(args):
+                    continue
+                identity = json.dumps(args, sort_keys=True, allow_nan=False)
+            except (ValueError, RecursionError):
+                continue
+            recovered.setdefault(identity, (args, [{"offset": offset, "closing": closing}]))
+    return next(iter(recovered.values())) if len(recovered) == 1 else None
+
+
+def _is_page_links_repair(args):
+    if (not isinstance(args, dict) or set(args) != {"artifact_index", "repair"}
+            or type(args["artifact_index"]) is not int or args["artifact_index"] != 0):
+        return False
+    repair = args["repair"]
+    if (not isinstance(repair, dict) or set(repair) != {"baseCandidateChecksum", "operations"}
+            or not isinstance(repair["baseCandidateChecksum"], str)
+            or re.fullmatch(r"[0-9a-f]{64}", repair["baseCandidateChecksum"]) is None):
+        return False
+    operations = repair["operations"]
+    if not isinstance(operations, list) or len(operations) != 1 or not isinstance(operations[0], dict):
+        return False
+    operation = operations[0]
+    if (set(operation) != {"op", "path", "value"} or operation["op"] != "add"
+            or operation["path"] != "/content/sections/businessRequirements/pageLinks"):
+        return False
+    value = operation["value"]
+    return (isinstance(value, dict) and set(value) == {"title", "blocks"}
+            and value["title"] == "2.1页面链接" and isinstance(value["blocks"], list) and bool(value["blocks"]))

@@ -9,6 +9,7 @@ from unittest.mock import patch
 
 from test_artifact_draft_tool import anonymous_acceptance_collision, workbench_artifact_draft_publish
 from deerflow_workbench_tools.knowledge_tool import workbench_knowledge_retrieve
+from deerflow_workbench_tools.prd_draft_json import decode_prd_page_links_repair
 from deerflow_workbench_tools.runtime_result_tool import workbench_runtime_result_submit
 from deerflow_workbench_tools.artifact_draft_repair import (
     ArtifactDraftRepairPathError,
@@ -19,6 +20,33 @@ from deerflow_workbench_tools.artifact_draft_repair import (
 )
 
 ROOT = Path(__file__).resolve().parents[3]
+
+
+class PrdDraftWireRepairTests(unittest.TestCase):
+    def test_recovers_only_the_unique_page_links_operation(self):
+        operation = {
+            "op": "add",
+            "path": "/content/sections/businessRequirements/pageLinks",
+            "value": {"title": "2.1页面链接", "blocks": [{
+                "id": "pages", "type": "bulletList", "items": [{
+                    "id": "activity-list", "content": [
+                        {"type": "text", "text": "活动列表 \"筛选\"", "marks": []},
+                    ],
+                }],
+            }]},
+        }
+        args = {"artifact_index": 0, "repair": {"baseCandidateChecksum": "a" * 64, "operations": [operation]}}
+        complete = json.dumps(args, ensure_ascii=False, separators=(",", ":"))
+        raw = complete.replace('"marks":[]}]}', '"marks":[]}', 1)
+        with self.assertRaises(json.JSONDecodeError):
+            json.loads(raw)
+        decoded, edits = decode_prd_page_links_repair(raw)
+        self.assertEqual(decoded, args)
+        self.assertEqual(len(edits), 1)
+        self.assertIsNone(decode_prd_page_links_repair(complete))
+        self.assertIsNone(decode_prd_page_links_repair(raw.replace("/pageLinks", "/summary")))
+        self.assertIsNone(decode_prd_page_links_repair(raw.replace('"op":"add"', '"op":"remove"')))
+        self.assertIsNone(decode_prd_page_links_repair(raw.replace('"artifact_index":0', '"artifact_index":0,"artifact_index":0')))
 
 
 class ArtifactDraftRepairTests(unittest.TestCase):

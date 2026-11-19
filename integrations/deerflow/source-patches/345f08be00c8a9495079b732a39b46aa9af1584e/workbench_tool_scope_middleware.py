@@ -1249,8 +1249,9 @@ def _decode_prd_draft_call(message: AIMessage) -> AIMessage:
     for metadata in (message.additional_kwargs, message.response_metadata):
         if any(metadata.get(key) for key in ("refusal", "safety_termination", "error", "deerflow_error_fallback")):
             return message
-    from deerflow_workbench_tools.prd_draft_json import decode_prd_draft_sections
-    decoded = decode_prd_draft_sections(call.get("args"))
+    from deerflow_workbench_tools.prd_draft_json import decode_prd_draft_sections, decode_prd_page_links_repair
+    raw = call.get("args")
+    decoded = decode_prd_draft_sections(raw) or decode_prd_page_links_repair(raw)
     if decoded is None:
         return message
     args, edits = decoded

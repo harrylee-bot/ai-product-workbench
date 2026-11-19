@@ -15,7 +15,7 @@
   },
   "toolScopeMiddleware": {
     "path": "deerflow/agents/middlewares/workbench_tool_scope_middleware.py",
-    "sha256": "8d278deb551e21f30c08a340ec6ae0a643778b8151266c120471de61f0a1f465"
+    "sha256": "8b4465dcb4d3d84589f630648f772099126167410a95a66f2c01597872d419a9"
   },
   "additionalSources": [
     {
