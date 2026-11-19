@@ -2586,8 +2586,9 @@ class LinkedFinalReferenceTests(unittest.IsolatedAsyncioTestCase):
                 messages[-1]["artifact"]["artifactIndex"] = 0
                 request.runtime.context["workbench"]["requestedArtifactKinds"] = ["prototype"]
                 request.runtime.execution_info = types.SimpleNamespace(task_id="first-stop")
+                name = "workbench_prototype_patch_publish"
+                request.tools.append(FakeTool(name))
                 if changed_after_checkpoint:
-                    name = "workbench_prototype_patch_publish"
                     append_tool_batch(messages, [call(name, "new-patch")], [
                         tool_message(name, "new-patch", artifact={"ok": True}),
                     ])
@@ -2597,7 +2598,7 @@ class LinkedFinalReferenceTests(unittest.IsolatedAsyncioTestCase):
                                   return_value=({**candidate, "artifacts": drafts[1:]}, [])):
                     scoped = middleware.wrap_model_call(request, lambda actual: actual)
                     self.assertEqual(marker in scoped.system_message.text, not changed_after_checkpoint)
-                    self.assertIn("workbench_prototype_patch_publish", middleware_module.PROTOTYPE_ONLY_TOOL_NAMES)
+                    self.assertIn(name, [tool.name for tool in scoped.tools])
                     messages.append({"type": "ai", "id": "stop", "content": "Done", "tool_calls": [],
                                      "response_metadata": {"finish_reason": "stop"}})
                     update = middleware.after_model(request.state, request.runtime)
