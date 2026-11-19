@@ -37,6 +37,12 @@ if command -v apk >/dev/null 2>&1; then
       echo "timeout is required for bounded Alpine package installation" >&2
       exit 1
     fi
+    set -- --no-cache
+    if [ -n "${WORKBENCH_CONTAINER_APK_CACHE_DIR:-}" ] && [ -d "$WORKBENCH_CONTAINER_APK_CACHE_DIR" ]; then
+      case "$(apk cache --help 2>&1 || true)" in
+        *--cache-packages*) set -- --cache-dir "$WORKBENCH_CONTAINER_APK_CACHE_DIR" --cache-packages ;;
+      esac
+    fi
     # Package names are restricted by the allowlist above. The build runner
     # uses a bounded mirror fallback because the proxy occasionally truncates
     # one Alpine CDN response while the same request succeeds on a mirror.
@@ -53,7 +59,7 @@ if command -v apk >/dev/null 2>&1; then
       # deadline also catches a response that keeps trickling data. -k is
       # supported by Alpine BusyBox and GNU timeout and bounds TERM handling.
       # shellcheck disable=SC2086
-      if timeout -k 10 "$APK_TIMEOUT_SECONDS" apk add --no-cache --timeout 30 $alpine_packages; then
+      if timeout -k 10 "$APK_TIMEOUT_SECONDS" apk add "$@" --timeout 30 $alpine_packages; then
         alpine_installed=1
         break
       fi

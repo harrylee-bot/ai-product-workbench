@@ -1,6 +1,7 @@
 ARG NODE_IMAGE=node:22-alpine
 
 FROM ${NODE_IMAGE} AS dependencies
+ARG TARGETARCH
 WORKDIR /app
 ENV NPM_CONFIG_UPDATE_NOTIFIER=false \
     NPM_CONFIG_AUDIT=false \
@@ -10,7 +11,8 @@ ENV NPM_CONFIG_UPDATE_NOTIFIER=false \
     PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
 
 COPY --chmod=0555 deploy/prepare-node-image.sh /usr/local/bin/prepare-node-image
-RUN prepare-node-image ca-certificates openssl
+RUN --mount=type=cache,id=workbench-export-apk-${TARGETARCH},target=/var/cache/workbench-apk,sharing=locked \
+  WORKBENCH_CONTAINER_APK_CACHE_DIR=/var/cache/workbench-apk prepare-node-image ca-certificates openssl
 
 COPY package.json package-lock.json tsconfig.base.json ./
 COPY apps/workbench-export-worker/package.json apps/workbench-export-worker/package.json
@@ -44,6 +46,7 @@ RUN npm prune --omit=dev --no-audit --no-fund \
   && rm -rf /root/.npm
 
 FROM ${NODE_IMAGE} AS runner
+ARG TARGETARCH
 WORKDIR /app
 ENV NODE_ENV=production \
     HOME=/tmp \
@@ -62,7 +65,9 @@ ENV NODE_ENV=production \
 COPY --chmod=0555 deploy/prepare-node-image.sh /usr/local/bin/prepare-node-image
 # Reuse the verified certificate bundle for the renderer package downloads.
 COPY --from=dependencies /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
-RUN prepare-node-image ca-certificates openssl chromium fonts-dejavu-core fonts-noto-cjk \
+RUN --mount=type=cache,id=workbench-export-apk-${TARGETARCH},target=/var/cache/workbench-apk,sharing=locked \
+  WORKBENCH_CONTAINER_APK_CACHE_DIR=/var/cache/workbench-apk \
+  prepare-node-image ca-certificates openssl chromium fonts-dejavu-core fonts-noto-cjk \
     python3 python3-lxml python3-pillow python3-virtualenv libreoffice-writer
 
 COPY deploy/workbench-export-python-requirements.txt /tmp/workbench-export-python-requirements.txt

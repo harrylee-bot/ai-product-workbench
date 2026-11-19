@@ -85,6 +85,33 @@ test("the Node image helper installs the document renderer dependencies on Alpin
   assert.deepEqual(packageCalls, ["apk add --no-cache --timeout 30 python3 py3-lxml py3-pillow py3-virtualenv libreoffice-writer font-noto-cjk"]);
 });
 
+for (const supportsPackageCache of [true, false]) {
+  test(`the image helper ${supportsPackageCache ? "reuses the mounted APK package cache" : "supports images with the older APK command"}`, async (t) => {
+    const fixture = await mkdtemp(path.join(os.tmpdir(), "workbench-image-cache-"));
+    t.after(() => rm(fixture, { recursive: true, force: true }));
+    const cache = path.join(fixture, "packages");
+    const log = path.join(fixture, "apk.log");
+    await mkdir(cache);
+    await symlink(timeoutExecutable, path.join(fixture, "timeout"));
+    for (const command of ["npm", "sed"]) {
+      await writeFile(path.join(fixture, command), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+    }
+    const help = supportsPackageCache ? "--cache-packages" : "--cache-dir";
+    await writeFile(path.join(fixture, "apk"), `#!/bin/sh
+if [ "$1" = cache ]; then printf '%s\\n' '${help}'; exit 0; fi
+printf '%s\\n' "$@" > "$WORKBENCH_TEST_LOG"
+`, { mode: 0o755 });
+    const result = spawnSync("/bin/sh", [helper, "chromium"], {
+      encoding: "utf8",
+      env: { ...process.env, PATH: fixture, WORKBENCH_CONTAINER_APK_CACHE_DIR: cache, WORKBENCH_TEST_LOG: log },
+    });
+    assert.equal(result.status, 0, result.stderr);
+    const cacheArguments = supportsPackageCache ? ["--cache-dir", cache, "--cache-packages"] : ["--no-cache"];
+    assert.deepEqual((await readFile(log, "utf8")).trim().split("\n"),
+      ["add", ...cacheArguments, "--timeout", "30", "chromium"]);
+  });
+}
+
 test("the image helper still rejects unapproved Alpine packages before installing anything", async (t) => {
   const fixture = await mkdtemp(path.join(os.tmpdir(), "workbench-rejected-image-package-"));
   t.after(() => rm(fixture, { recursive: true, force: true }));
