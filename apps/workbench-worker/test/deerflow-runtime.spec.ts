@@ -6,6 +6,7 @@ import {
   applyPrototypePatch,
   canonicalJson,
   canonicalPrototypeScreenProjection,
+  projectPrototypeGenerationPreview,
   projectPrototypeScreen,
   runtimeResultSchema,
   type CanvasAgentToolDescriptor,
@@ -380,11 +381,13 @@ function rejectedArtifactDraftToolMessages(
     toolCallId = "rejected-draft-call",
     runId = "run_1",
     runtimeAttemptId = "attempt_1",
+    preview,
   }: {
     artifactIndex?: number;
     toolCallId?: string;
     runId?: string;
     runtimeAttemptId?: string;
+    preview?: string;
   } = {},
 ) {
   const envelope = {
@@ -394,9 +397,11 @@ function rejectedArtifactDraftToolMessages(
     toolCallId,
     artifactIndex,
     ok: false,
+    ...(preview === undefined ? {} : { previewChecksum: sha256(preview) }),
   };
   return declaredToolMessages("workbench_artifact_draft_publish", toolCallId, {
     ...envelope,
+    ...(preview === undefined ? {} : { preview }),
     issues: [{ code: "custom", path: ["content"], message: "private generated content" }],
     checksum: sha256(canonicalJson(envelope)),
   });
@@ -2989,6 +2994,53 @@ describe("DeerFlow runtime adapter", () => {
     expect(events
       .filter((event) => event.type === "generation.stage")
       .map((event) => event.stage)).toEqual(["screen-streaming"]);
+  });
+
+  it("emits changed prototype repair previews in causal order without publishing rejected drafts", async () => {
+    const draft = minimalPrototypeArtifact();
+    const preview = projectPrototypeGenerationPreview(0, draft)!;
+    const first = (id: string) => rejectedArtifactDraftToolMessages({ toolCallId: id, preview: JSON.stringify(preview) });
+    const changed = projectPrototypeGenerationPreview(0, {
+      ...draft, content: { ...draft.content, nodes: draft.content.nodes.map((node) => ({ ...node, name: "Activity list" })) },
+    })!;
+    const second = rejectedArtifactDraftToolMessages({ toolCallId: "preview-repair", preview: JSON.stringify(changed) });
+    const result = { protocol: "workbench.runtime.result.v1" as const, message: "Prototype ready", artifacts: [draft] };
+    const started = [{ type: "human", content: "current turn" }, ...first("preview-initial")];
+    const repairing = [...started, ...first("preview-equivalent"), ...second];
+    const done = [...repairing, ...artifactDraftToolMessages(draft), ...validatedResultToolMessages(result)];
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request, init: RequestInit = {}) => {
+      const url = new URL(String(input));
+      if (url.pathname === "/api/threads/deer_thread_1/runs" && (init.method ?? "GET") === "GET") return Response.json([]);
+      if (url.pathname === "/api/threads/deer_thread_1/runs/stream" && init.method === "POST") {
+        return runtimeStreamResponse([started, repairing, done].map((messages, index) => ({
+          id: `repaired-preview-${index}`, event: "values", data: { messages },
+        })));
+      }
+      throw new Error(`Unexpected request: ${init.method ?? "GET"} ${url}`);
+    }));
+    const runtimeObserver = observer();
+    const adapter = new DeerFlowRuntimeAdapter(workerConfig(), { getObject: vi.fn() } as never);
+    await expect(adapter.execute(execution({
+      request: { ...execution().request, requestedArtifactKinds: ["prototype"] },
+    }), runtimeObserver)).resolves.toMatchObject({ message: "Prototype ready" });
+    const events = runtimeObserver.onEvent.mock.calls.map(([event]) => event);
+    const firstArtifact = events.findIndex((event) => event.type === "artifact.draft");
+    expect(events.slice(0, firstArtifact).filter((event) => event.type === "artifact.preview")).toEqual([
+      { type: "artifact.preview", preview },
+      { type: "artifact.preview", preview: changed },
+    ]);
+    expect(events.filter((event) => event.type === "artifact.draft").every((event) => (
+      event.type === "artifact.draft" && event.draft.kind === "prototype"
+      && event.draft.content.nodes[0]?.name === draft.content.nodes[0]?.name
+    ))).toBe(true);
+  });
+
+  it("rejects a prototype repair preview whose content differs from the scoped receipt", () => {
+    const preview = projectPrototypeGenerationPreview(0, minimalPrototypeArtifact())!;
+    const messages = rejectedArtifactDraftToolMessages({ preview: JSON.stringify(preview) });
+    Object.assign(messages[1]!.artifact as Record<string, unknown>, { preview: JSON.stringify({ ...preview, title: "Tampered" }) });
+    expect(() => resolveRuntimeResult({ messages: [{ type: "human", content: "current turn" }, ...messages] }, ["prototype"], execution()))
+      .toThrow("RUNTIME_ARTIFACT_DRAFT_PREVIEW_SCOPE_INVALID");
   });
 
   it("emits ordered trusted Prototype patches once between complete checkpoints", async () => {

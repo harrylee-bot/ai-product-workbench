@@ -9,6 +9,8 @@ import {
   canvasAgentToolResultSchema,
   canonicalPrototypeScreenProjection,
   canonicalJson,
+  generationPreviewSchema,
+  MAX_PROTOTYPE_DRAFT_PREVIEW_BYTES,
   PROTOTYPE_PATCH_MAX_REVISION,
   jsonValueSchema,
   knowledgeToolReferenceSchema,
@@ -19,6 +21,7 @@ import {
   runtimePrototypePatchInputSchema,
   runtimeResultSchema,
   type ApprovalOption,
+  type GenerationPreview,
   type JsonValue,
   type PrototypeDocument,
   type PrototypePatchCheckpointScreen,
@@ -260,6 +263,8 @@ const artifactDraftArtifactSchema = z.discriminatedUnion("ok", [
     ...artifactDraftArtifactScopeShape,
     ok: z.literal(false),
     issues: z.array(jsonValueSchema).max(10_000),
+    preview: z.string().min(1).max(MAX_PROTOTYPE_DRAFT_PREVIEW_BYTES).optional(),
+    previewChecksum: z.string().regex(/^[0-9a-f]{64}$/u).optional(),
   }).strict(),
 ]);
 
@@ -628,6 +633,7 @@ export class DeerFlowRuntimeAdapter implements RuntimePort {
       Extract<RuntimeProgressEvent, { type: "generation.stage" }>["stage"]
     > = [];
     const emittedDraftSources = new Map<string, string>();
+    const emittedDraftPreviewSources = new Map<string, string>();
     const emittedPatchSources = new Map<string, string>();
     const patchRevisions = baselineState.revisions;
     const pendingRecoveryRevisions = baselineState.recoveryRevisions;
@@ -689,7 +695,7 @@ export class DeerFlowRuntimeAdapter implements RuntimePort {
       return true;
     };
     const emitCheckpointDrafts = async (
-      submissions: ReturnType<typeof validatedArtifactDraftSubmissions>,
+      submissions: ReturnType<typeof validatedArtifactDraftSubmissions>["checkpoints"],
       assertReferenceEvidence: (draft: RuntimeArtifactDraft, declarationIndex: number) => void,
     ) => {
       for (const submission of submissions) {
@@ -840,7 +846,7 @@ export class DeerFlowRuntimeAdapter implements RuntimePort {
     };
     const processArtifactState = async (state: unknown) => {
       const stageSubmissions = extractGenerationStageProgress(state, execution);
-      const checkpointSubmissions = validatedArtifactDraftSubmissions(state, execution);
+      const { checkpoints, previews: draftPreviews } = validatedArtifactDraftSubmissions(state, execution);
       const patchSubmissions = validatedPrototypePatchSubmissions(state, execution);
       const resultSubmissions = validatedRuntimeSubmissions(state, execution);
       if (resultSubmissions.length > 1) throw new Error("RUNTIME_RESULT_SUBMISSION_MULTIPLE");
@@ -888,8 +894,13 @@ export class DeerFlowRuntimeAdapter implements RuntimePort {
           messageIndex: submission.messageIndex,
           submission,
         })),
-        ...checkpointSubmissions.map((submission) => ({
+        ...checkpoints.map((submission) => ({
           kind: "checkpoint" as const,
+          messageIndex: submission.messageIndex,
+          submission,
+        })),
+        ...draftPreviews.map((submission) => ({
+          kind: "preview" as const,
           messageIndex: submission.messageIndex,
           submission,
         })),
@@ -911,6 +922,15 @@ export class DeerFlowRuntimeAdapter implements RuntimePort {
         }
         if (event.kind === "checkpoint") {
           await emitCheckpointDrafts([event.submission], assertReferenceEvidence);
+          continue;
+        }
+        if (event.kind === "preview") {
+          const { preview, toolCallId, checksum } = event.submission;
+          const seen = emittedDraftPreviewSources.get(toolCallId);
+          if (seen !== undefined && seen !== checksum) throw new Error("RUNTIME_ARTIFACT_DRAFT_PREVIEW_SOURCE_CONFLICT");
+          if (seen !== undefined || resultToolCallId || latestCheckpoints.has(preview.artifactIndex)) continue;
+          emittedDraftPreviewSources.set(toolCallId, checksum);
+          if (generationPreview.accept(preview)) await emitEvent({ type: "artifact.preview", preview });
           continue;
         }
         if (event.kind === "patch") {
@@ -2222,15 +2242,20 @@ function validatedArtifactDraftSubmissions(
 ) {
   const messages = runtimeMessages(finalState);
   const currentTurnStart = currentTurnStartIndex(messages);
-  if (currentTurnStart < 0) return [];
-
-  const submissions: Array<{
+  const checkpoints: Array<{
     artifactIndex: number;
     draft: RuntimeArtifactDraft;
     toolCallId: string;
     declarationIndex: number;
     messageIndex: number;
   }> = [];
+  const previews: Array<{
+    preview: GenerationPreview;
+    toolCallId: string;
+    checksum: string;
+    messageIndex: number;
+  }> = [];
+  if (currentTurnStart < 0) return { checkpoints, previews };
   for (const trusted of trustedToolMessages(
     messages,
     currentTurnStart,
@@ -2246,7 +2271,8 @@ function validatedArtifactDraftSubmissions(
       toolCallId: parsed.data.toolCallId,
       artifactIndex: parsed.data.artifactIndex,
       ok: parsed.data.ok,
-      ...(parsed.data.ok ? { draftChecksum: parsed.data.draftChecksum } : {}),
+      ...(parsed.data.ok ? { draftChecksum: parsed.data.draftChecksum } :
+        parsed.data.previewChecksum === undefined ? {} : { previewChecksum: parsed.data.previewChecksum }),
     };
     if (
       parsed.data.runId !== execution.runId
@@ -2260,10 +2286,27 @@ function validatedArtifactDraftSubmissions(
     if (parsed.data.runtimeAttemptId !== execution.runtimeAttemptId) continue;
     if (!parsed.data.ok) {
       rejectedDraftIndexes?.add(parsed.data.artifactIndex);
+      const { preview, previewChecksum, artifactIndex } = parsed.data;
+      if (preview !== undefined || previewChecksum !== undefined) {
+        if (preview === undefined || Buffer.byteLength(preview) > MAX_PROTOTYPE_DRAFT_PREVIEW_BYTES
+          || createHash("sha256").update(preview).digest("hex") !== previewChecksum) {
+          throw new Error("RUNTIME_ARTIFACT_DRAFT_PREVIEW_SCOPE_INVALID");
+        }
+        let rawPreview: unknown;
+        try { rawPreview = JSON.parse(preview); } catch (cause) {
+          throw new Error("RUNTIME_ARTIFACT_DRAFT_PREVIEW_INVALID", { cause });
+        }
+        const projection = generationPreviewSchema.safeParse(rawPreview);
+        if (!projection.success || projection.data.kind !== "prototype" || projection.data.artifactIndex !== artifactIndex
+          || projection.data.markdown !== "" || !projection.data.screens.some((screen) => screen.nodes.length)) {
+          throw new Error("RUNTIME_ARTIFACT_DRAFT_PREVIEW_INVALID");
+        }
+        previews.push({ preview: projection.data, toolCallId: trusted.toolCallId, checksum: previewChecksum, messageIndex: trusted.messageIndex });
+      }
       continue;
     }
     rejectedDraftIndexes?.delete(parsed.data.artifactIndex);
-    submissions.push({
+    checkpoints.push({
       artifactIndex: parsed.data.artifactIndex,
       draft: parsed.data.draft,
       toolCallId: trusted.toolCallId,
@@ -2271,7 +2314,7 @@ function validatedArtifactDraftSubmissions(
       messageIndex: trusted.messageIndex,
     });
   }
-  return submissions;
+  return { checkpoints, previews };
 }
 
 function validatedPrototypePatchSubmissions(

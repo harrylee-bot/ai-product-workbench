@@ -174,6 +174,23 @@ class ArtifactDraftToolTests(unittest.TestCase):
             {"op": "add", "path": "/content/nodes/0/clipContent", "value": False},
         ])
 
+    def test_rejected_prototype_receipt_carries_only_the_scoped_preview(self) -> None:
+        draft = copy.deepcopy(self.draft)
+        del draft["content"]["nodes"][0]["clipContent"]
+        draft["content"]["nodes"][0]["name"] = "Preview wbkg1.private.marker"
+        content, receipt = workbench_artifact_draft_publish.func(self.runtime, 1, draft)
+        preview = json.loads(receipt["preview"])
+
+        self.assertFalse(receipt["ok"])
+        self.assertNotIn("draft", receipt)
+        self.assertNotIn("preview", json.loads(content))
+        self.assertEqual(receipt["previewChecksum"], hashlib.sha256(receipt["preview"].encode("utf-8")).hexdigest())
+        self.assertLessEqual(len(receipt["preview"].encode("utf-8")), 24_000)
+        self.assertEqual(preview["artifactIndex"], 1)
+        self.assertEqual(preview["kind"], "prototype")
+        self.assertEqual(preview["screens"][0]["nodes"][0]["text"], "Preview [已隐藏]")
+        self.assertNotIn("actionIds", preview["screens"][0]["nodes"][0])
+
     def test_checkbox_repair_names_the_variable_and_preserves_false_without_coercion(self) -> None:
         invalid = copy.deepcopy(self.draft)
         input_node = next(

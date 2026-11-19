@@ -11,6 +11,7 @@ from typing import Any
 VALIDATION_PROTOCOL = "workbench.runtime.validation.v1"
 MAX_CANDIDATE_BYTES = 2_000_000
 MAX_VALIDATOR_OUTPUT_BYTES = 65_536
+MAX_PROTOTYPE_DRAFT_PREVIEW_BYTES = 24_000
 
 
 class RuntimeResultValidatorError(RuntimeError):
@@ -31,6 +32,7 @@ def validate_runtime_prototype_patch(candidate: dict[str, Any]) -> dict[str, Any
 def _validate_candidate(
     candidate: dict[str, Any],
     mode: str | None = None,
+    artifact_index: int | None = None,
 ) -> dict[str, Any]:
     encoded = json.dumps(candidate, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
     if len(encoded) > MAX_CANDIDATE_BYTES:
@@ -47,6 +49,8 @@ def _validate_candidate(
         command = [node, str(bundle)]
         if mode is not None:
             command.append(mode)
+        if artifact_index is not None:
+            command.append(str(artifact_index))
         completed = subprocess.run(
             command,
             input=encoded,
@@ -76,6 +80,11 @@ def _validate_candidate(
         or not _valid_repair_hints(result.get("repairHints", []), result["artifactChecksums"])
     ):
         raise RuntimeResultValidatorError("WORKBENCH_RUNTIME_VALIDATOR_OUTPUT_INVALID")
+    if "preview" in result:
+        preview = result["preview"]
+        if (mode != "draft-preview" or result["ok"] or not isinstance(preview, str)
+                or not 0 < len(preview.encode("utf-8")) <= MAX_PROTOTYPE_DRAFT_PREVIEW_BYTES):
+            raise RuntimeResultValidatorError("WORKBENCH_RUNTIME_VALIDATOR_OUTPUT_INVALID")
     return result
 
 
@@ -112,12 +121,14 @@ def _valid_repair_hints(hints: object, checksums: list[str]) -> bool:
     return True
 
 
-def validate_runtime_artifact_draft(candidate: dict[str, Any]) -> dict[str, Any]:
-    result = validate_runtime_result({
+def validate_runtime_artifact_draft(
+    candidate: dict[str, Any], *, preview_artifact_index: int | None = None,
+) -> dict[str, Any]:
+    result = _validate_candidate({
         "protocol": "workbench.runtime.result.v1",
         "message": "",
         "artifacts": [candidate],
-    })
+    }, mode="draft-preview" if preview_artifact_index is not None else None, artifact_index=preview_artifact_index)
     artifact_checksums = result["artifactChecksums"]
     if len(artifact_checksums) != 1:
         raise RuntimeResultValidatorError("WORKBENCH_RUNTIME_VALIDATOR_OUTPUT_INVALID")

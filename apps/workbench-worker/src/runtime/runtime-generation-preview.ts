@@ -1,8 +1,9 @@
 import {
   generationPreviewSchema,
+  generationPreviewText as text,
+  projectPrototypeGenerationPreview,
   prdChannelLabels,
   type GenerationPreview,
-  type GenerationPreviewNode,
 } from "@workbench/workbench-contracts";
 import { parse } from "partial-json";
 
@@ -11,14 +12,6 @@ const PREVIEW_SAMPLE_INTERVAL_MS = 300;
 const record = (value: unknown): RecordValue => value !== null && typeof value === "object" && !Array.isArray(value)
   ? value as RecordValue : {};
 const array = (value: unknown): unknown[] => Array.isArray(value) ? value : [];
-const text = (value: unknown, limit = 2_000): string => typeof value === "string"
-  ? value.replace(/wb(?:kg|ct)1\.[A-Za-z0-9_.-]*/gu, "[已隐藏]").slice(0, limit) : "";
-const numeric = (value: unknown, fallback = 0) => typeof value === "number" && Number.isFinite(value)
-  ? Math.max(-16_384, Math.min(16_384, value)) : fallback;
-const literal = (value: unknown) => record(value).value ?? value;
-const color = (value: unknown) => /^(?:#[a-fA-F0-9]{3,8}|transparent|white|black)$/.test(text(literal(value)))
-  ? text(literal(value)) : null;
-
 /** Samples tool argument streams before the first validated Artifact exists.
  * Raw token frames are consumed in memory, not written to the durable event inbox.
  */
@@ -62,63 +55,35 @@ export class RuntimeGenerationPreview {
         if (!this.kinds.includes(String(draft.kind))) continue;
         const preview = projectGenerationPreview(candidate.index as number, draft);
         if (!preview) continue;
-        const signature = JSON.stringify(preview);
-        const published = this.published.get(preview.artifactIndex);
-        if (published && (signature === published.value || now - published.at < PREVIEW_SAMPLE_INTERVAL_MS)) continue;
-        this.published.set(preview.artifactIndex, { at: now, value: signature });
-        previews.push(preview);
+        if (this.accept(preview, now)) previews.push(preview);
       }
     }
     return previews;
   }
+
+  accept(preview: GenerationPreview, sampledAt?: number): boolean {
+    if (!this.kinds.includes(preview.kind)) return false;
+    const signature = JSON.stringify(preview);
+    const published = this.published.get(preview.artifactIndex);
+    if (published && (
+      signature === published.value
+      || (sampledAt !== undefined && sampledAt - published.at < PREVIEW_SAMPLE_INTERVAL_MS)
+    )) return false;
+    this.published.set(preview.artifactIndex, { at: sampledAt ?? this.now(), value: signature });
+    return true;
+  }
 }
 
 export function projectGenerationPreview(artifactIndex: number, draft: RecordValue): GenerationPreview | null {
-  if (draft.kind !== "prd" && draft.kind !== "prototype") return null;
+  if (draft.kind === "prototype") return projectPrototypeGenerationPreview(artifactIndex, draft);
+  if (draft.kind !== "prd") return null;
   const content = record(draft.content);
   const title = text(draft.title ?? content.title, 240);
   if (!title) return null;
-  const preview = {
-    artifactIndex, kind: draft.kind, title,
-    markdown: draft.kind === "prd" ? prdMarkdown(content).slice(0, 48_000) : "",
-    screens: draft.kind === "prototype" ? array(content.screens).slice(0, 4).flatMap((value) => {
-      const screen = record(value);
-      const id = text(screen.id, 160);
-      if (!id) return [];
-      return [{
-        id, name: text(screen.name, 240),
-        width: Math.max(1, numeric(record(screen.viewport).width, 390)),
-        height: Math.max(1, numeric(record(screen.viewport).height, 844)),
-        nodes: array(content.nodes).filter((node) => record(node).screenId === id && record(node).visible !== false)
-          .slice(0, 120).flatMap(projectNode),
-      }];
-    }) : [],
-  };
-  const parsed = generationPreviewSchema.safeParse(preview);
+  const parsed = generationPreviewSchema.safeParse({
+    artifactIndex, kind: "prd", title, markdown: prdMarkdown(content).slice(0, 48_000), screens: [],
+  });
   return parsed.success ? parsed.data : null;
-}
-
-function projectNode(value: unknown): GenerationPreviewNode[] {
-  const node = record(value);
-  const layout = record(node.layout);
-  const style = record(node.style);
-  const typography = record(style.typography);
-  const id = text(node.id, 160);
-  const kind = node.kind;
-  if (!id || !["frame", "form", "text", "button", "input", "image", "shape", "icon"].includes(String(kind))) return [];
-  return [{
-    id, parentId: text(node.parentId, 160) || null, kind: kind as GenerationPreviewNode["kind"],
-    text: text(node.text ?? node.label ?? node.placeholder ?? node.name),
-    x: numeric(literal(layout.x)), y: numeric(literal(layout.y)),
-    width: layout.width == null ? null : Math.max(0, numeric(literal(layout.width))),
-    height: layout.height == null ? null : Math.max(0, numeric(literal(layout.height))),
-    absolute: layout.mode === "absolute", direction: layout.direction === "row" ? "row" : "column",
-    gap: Math.max(0, numeric(literal(layout.gap))),
-    padding: Math.max(0, numeric(literal(record(layout.padding).top))),
-    fill: color(style.fill), color: color(typography.color),
-    fontSize: typography.fontSize == null ? null : Math.max(1, Math.min(120, numeric(literal(typography.fontSize), 14))),
-    radius: Math.max(0, numeric(literal(record(style.radii).topLeft))),
-  }];
 }
 
 function prdMarkdown(content: RecordValue): string {

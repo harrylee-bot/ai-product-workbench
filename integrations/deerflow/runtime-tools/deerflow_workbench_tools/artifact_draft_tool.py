@@ -102,7 +102,8 @@ def workbench_artifact_draft_publish(
         raise ValueError("WORKBENCH_ARTIFACT_DRAFT_KIND_NOT_REQUESTED")
 
     validation = validate_retrieved_citations(
-        validate_runtime_artifact_draft(draft), getattr(runtime, "state", None), run_id, runtime_attempt_id, draft,
+        validate_runtime_artifact_draft(draft, preview_artifact_index=artifact_index if draft_kind == "prototype" else None),
+        getattr(runtime, "state", None), run_id, runtime_attempt_id, draft,
     )
     payload: dict[str, Any] = {
         "protocol": ARTIFACT_DRAFT_PROTOCOL,
@@ -117,6 +118,9 @@ def workbench_artifact_draft_publish(
         if not isinstance(draft_checksum, str):
             raise ValueError("WORKBENCH_ARTIFACT_DRAFT_CHECKSUM_MISSING")
         payload["draftChecksum"] = draft_checksum
+    preview = validation.get("preview")
+    if validation["ok"] is False and preview is not None:
+        payload["previewChecksum"] = hashlib.sha256(preview.encode("utf-8")).hexdigest()
     artifact = {
         **payload,
         "checksum": hashlib.sha256(_canonical_json(payload).encode("utf-8")).hexdigest(),
@@ -125,6 +129,8 @@ def workbench_artifact_draft_publish(
         artifact["draft"] = draft
     else:
         artifact["issues"] = validation["issues"]
+        if preview is not None:
+            artifact["preview"] = preview
     response = {
         "protocol": "workbench.runtime.artifact-draft-ack.v1",
         "ok": validation["ok"],

@@ -1,6 +1,10 @@
 import { createHash } from "node:crypto";
 import { canonicalJson } from "../../../packages/workbench-contracts/src/canonical-json.js";
 import {
+  MAX_PROTOTYPE_DRAFT_PREVIEW_BYTES,
+  projectPrototypeGenerationPreview,
+} from "../../../packages/workbench-contracts/src/generation-preview.js";
+import {
   assertPrototypePatchPayloadSize,
   runtimePrototypePatchInputSchema,
 } from "../../../packages/workbench-contracts/src/prototype-patches.js";
@@ -14,6 +18,7 @@ import {
 } from "../../../packages/workbench-contracts/src/prd.js";
 
 const MAX_INPUT_BYTES = 2_000_000;
+const MAX_OUTPUT_BYTES = 65_536;
 const MAX_ISSUES = 100;
 
 type ValidationIssue = {
@@ -53,11 +58,16 @@ async function main() {
   }
 
   const mode = process.argv[2] ?? "runtime-result";
+  const draftPreviewIndex = mode === "draft-preview" ? Number(process.argv[3]) : null;
+  if (draftPreviewIndex !== null && (!Number.isInteger(draftPreviewIndex) || draftPreviewIndex < 0 || draftPreviewIndex > 19)) {
+    throw new Error("RUNTIME_DRAFT_PREVIEW_INDEX_INVALID");
+  }
+  const isRuntimeResult = mode === "runtime-result" || mode === "draft-preview";
   const candidateChecksum = canonicalChecksum(candidate);
-  const artifactChecksums = mode === "runtime-result"
+  const artifactChecksums = isRuntimeResult
     ? candidateArtifacts(candidate).map(canonicalChecksum)
     : [];
-  const schema = mode === "runtime-result"
+  const schema = isRuntimeResult
     ? runtimeResultSchema
     : mode === "prototype-patch"
       ? runtimePrototypePatchInputSchema
@@ -133,7 +143,23 @@ async function main() {
     // artifact issues (whose strict protocol remains unchanged).
     issues: issues.map(({ acceptanceCoverage: _coverage, directoryEntries: _directory, authoredTextPaths: _textPaths, ...issue }) => issue),
     ...(repairHints.length ? { repairHints } : {}),
-  });
+  }, draftPreviewIndex === null ? undefined : serializePrototypePreview(draftPreviewIndex, candidateArtifacts(candidate)[0]));
+}
+
+function serializePrototypePreview(index: number, draft: unknown): string | undefined {
+  const preview = projectPrototypeGenerationPreview(index, draft);
+  if (!preview || !preview.screens.some((screen) => screen.nodes.length)) return undefined;
+  const bounded = { ...preview, screens: preview.screens.map((screen) => ({ ...screen, nodes: [] as typeof screen.nodes })) };
+  const screenBudget = Math.floor((MAX_PROTOTYPE_DRAFT_PREVIEW_BYTES - Buffer.byteLength(JSON.stringify(bounded))) / bounded.screens.length);
+  for (const [screenIndex, screen] of preview.screens.entries()) {
+    let remaining = screenBudget;
+    for (const node of screen.nodes) {
+      remaining -= Buffer.byteLength(JSON.stringify(node)) + 1;
+      if (remaining < 0) break;
+      bounded.screens[screenIndex]!.nodes.push(node);
+    }
+  }
+  return bounded.screens.some((screen) => screen.nodes.length) ? JSON.stringify(bounded) : undefined;
 }
 
 function normalizeZodIssue(rawIssue: unknown, parentPath: readonly unknown[] = []): unknown {
@@ -310,8 +336,10 @@ function writeResult(result: {
   candidateChecksum: string | null;
   artifactChecksums: string[];
   repairHints?: unknown[];
-}) {
-  process.stdout.write(`${JSON.stringify(result)}\n`);
+}, preview?: string) {
+  const withPreview = preview === undefined ? null : JSON.stringify({ ...result, preview });
+  const body = withPreview && Buffer.byteLength(withPreview) < MAX_OUTPUT_BYTES ? withPreview : JSON.stringify(result);
+  process.stdout.write(`${body}\n`);
 }
 
 function canonicalChecksum(value: unknown) {

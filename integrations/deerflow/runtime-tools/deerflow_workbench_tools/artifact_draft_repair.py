@@ -13,7 +13,11 @@ from collections.abc import Mapping
 from functools import lru_cache
 from typing import Any
 
-from .runtime_result_validator import MAX_CANDIDATE_BYTES, validate_runtime_artifact_draft
+from .runtime_result_validator import (
+    MAX_CANDIDATE_BYTES,
+    MAX_PROTOTYPE_DRAFT_PREVIEW_BYTES,
+    validate_runtime_artifact_draft,
+)
 
 DRAFT_TOOL = "workbench_artifact_draft_publish"
 DRAFT_PROTOCOL = "workbench.runtime.artifact-draft.v1"
@@ -363,6 +367,11 @@ def _verify_response(message: Any, candidate: dict[str, Any], state: Any, *, cal
     }
     if ok:
         envelope["draftChecksum"] = artifact.get("draftChecksum")
+    elif "preview" in artifact or "previewChecksum" in artifact:
+        preview = artifact.get("preview")
+        if not isinstance(preview, str) or not 0 < len(preview.encode("utf-8")) <= MAX_PROTOTYPE_DRAFT_PREVIEW_BYTES:
+            _fail("RESPONSE_INVALID")
+        envelope["previewChecksum"] = hashlib.sha256(preview.encode("utf-8")).hexdigest()
     if any(type(artifact.get(key)) is not type(value) or artifact.get(key) != value for key, value in envelope.items()):
         _fail("SCOPE_MISMATCH")
     if artifact.get("checksum") != hashlib.sha256(_json(envelope).encode("utf-8")).hexdigest():
