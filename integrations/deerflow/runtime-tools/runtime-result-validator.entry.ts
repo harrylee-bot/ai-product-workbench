@@ -23,7 +23,19 @@ type ValidationIssue = {
   expectedType?: string;
   expectedValue?: string;
   acceptanceCoverage?: PrdAcceptanceCoverageDiagnostic;
+  directoryEntries?: string[];
+  authoredTextPaths?: Array<ValidationIssue["path"]>;
 };
+
+type DraftRepairHint = {
+  artifactIndex: number;
+  candidateChecksum: string;
+  path: ValidationIssue["path"];
+} & (
+  { acceptanceCoverage: PrdAcceptanceCoverageDiagnostic }
+  | { directoryEntries: string[] }
+  | { authoredTextPaths: Array<ValidationIssue["path"]> }
+);
 
 async function main() {
   const input = await readFileHandle();
@@ -80,13 +92,22 @@ async function main() {
   }
   const issues = actionableIssues(parsed.error.issues.map((issue) => normalizeZodIssue(issue)), candidate);
   let repairHintBytes = 0;
-  const repairHints = issues.flatMap((issue) => {
+  const repairHints = issues.flatMap<DraftRepairHint>((issue) => {
     const [root, index, content] = issue.path;
-    const coverage = issue.acceptanceCoverage;
-    if (!coverage || root !== "artifacts" || typeof index !== "number" || content !== "content") return [];
-    return [{
+    if (root !== "artifacts" || typeof index !== "number" || content !== "content") return [];
+    const base = {
       artifactIndex: index,
       candidateChecksum: artifactChecksums[index]!,
+    };
+    if (issue.directoryEntries) {
+      return [{ ...base, path: ["content", "tableOfContents", "entries"], directoryEntries: issue.directoryEntries }];
+    }
+    if (issue.authoredTextPaths) {
+      return [{ ...base, path: ["content"], authoredTextPaths: issue.authoredTextPaths.map((path) => ["content", ...path]) }];
+    }
+    const coverage = issue.acceptanceCoverage;
+    if (!coverage) return [];
+    return [{ ...base,
       path: issue.path.slice(2),
       acceptanceCoverage: {
         ...coverage,
@@ -97,7 +118,8 @@ async function main() {
         })),
       },
     }];
-  }).filter((hint, index, all) => all.findIndex((other) => other.artifactIndex === hint.artifactIndex) === index)
+  }).filter((hint, index, all) => all.findIndex((other) =>
+    other.artifactIndex === hint.artifactIndex && other.path[1] === hint.path[1]) === index)
     .filter((hint) => {
       repairHintBytes += Buffer.byteLength(JSON.stringify(hint), "utf8");
       return repairHintBytes <= 24_000;
@@ -109,7 +131,7 @@ async function main() {
     artifactChecksums,
     // Coverage metadata belongs in repair guidance, never in controlled
     // artifact issues (whose strict protocol remains unchanged).
-    issues: issues.map(({ acceptanceCoverage: _coverage, ...issue }) => issue),
+    issues: issues.map(({ acceptanceCoverage: _coverage, directoryEntries: _directory, authoredTextPaths: _textPaths, ...issue }) => issue),
     ...(repairHints.length ? { repairHints } : {}),
   });
 }
@@ -211,12 +233,30 @@ function validationIssue(rawIssue: Record<string, unknown>, candidate: unknown):
   }
   const fixedValue = prdFixedValue(issue, candidate);
   if (fixedValue !== undefined) issue.expectedValue = fixedValue;
+  const directoryEntries = prdDirectoryEntries(issue, candidate);
+  if (directoryEntries) issue.directoryEntries = directoryEntries;
   if (rawIssue.code === "custom" && isRecord(rawIssue.params) && isRecord(rawIssue.params.acceptanceCoverage)) {
     // This parameter is produced by the SSOT refinement, never by candidate
     // fields. The normalized union traversal preserves it at the exact path.
     issue.acceptanceCoverage = rawIssue.params.acceptanceCoverage as PrdAcceptanceCoverageDiagnostic;
   }
+  if (rawIssue.code === "custom" && isRecord(rawIssue.params) && Array.isArray(rawIssue.params.authoredTextPaths)) {
+    issue.authoredTextPaths = rawIssue.params.authoredTextPaths;
+  }
   return issue;
+}
+
+function prdDirectoryEntries(issue: ValidationIssue, candidate: unknown): string[] | undefined {
+  const [root, index, content, tableOfContents, entries] = issue.path;
+  if (issue.code !== "custom" || root !== "artifacts" || typeof index !== "number"
+    || content !== "content" || tableOfContents !== "tableOfContents" || entries !== "entries") return undefined;
+  const draft = candidateArtifacts(candidate)[index];
+  if (!isRecord(draft) || draft.kind !== "prd" || draft.schemaVersion !== 3 || !isRecord(draft.content)) return undefined;
+  const sections = draft.content.sections;
+  const business = isRecord(sections) ? sections.businessRequirements : undefined;
+  const functions = isRecord(business) ? business.functionSections : undefined;
+  if (!Array.isArray(functions) || !functions.every((section) => isRecord(section) && typeof section.title === "string")) return undefined;
+  return prdTableOfContentsEntriesForV3(functions.map((section) => section.title));
 }
 
 function prdFixedValue(issue: ValidationIssue, candidate: unknown): string | undefined {

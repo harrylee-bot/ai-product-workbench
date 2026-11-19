@@ -1663,9 +1663,18 @@ class WorkbenchToolScopeMiddleware(AgentMiddleware[AgentState]):
             raise ValueError("WORKBENCH_LINKED_DRAFT_REPAIR_STATE_INVALID")
         return marker
 
-    def _recover_linked_draft_stop(self, state: AgentState, runtime: Any) -> dict[str, Any] | None:
+    def _rejected_draft_for_recovery(self, state: Any, runtime: Any) -> dict[str, Any] | None:
+        if self._linked_recovery_scope(runtime):
+            return _unrepaired_draft(state, self._run_id, self._runtime_attempt_id)
+        if self._requested_artifact_kinds == frozenset({"prototype"}) and self._prototype_transport_ready(state, runtime):
+            rejected = _unrepaired_draft(state, self._run_id, self._runtime_attempt_id, ("prototype",))
+            if rejected is not None and _can_repair_prototype(rejected):
+                return rejected
+        return None
+
+    def _recover_rejected_draft_stop(self, state: AgentState, runtime: Any) -> dict[str, Any] | None:
         if (
-            not self._linked_recovery_scope(runtime)
+            not self._prototype_enabled
             or state.get("jump_to") is not None
             or state.get("__interrupt__")
             or state.get("interrupts")
@@ -1679,7 +1688,7 @@ class WorkbenchToolScopeMiddleware(AgentMiddleware[AgentState]):
         task_id = _value(_value(runtime, "execution_info"), "task_id")
         if any(not isinstance(value, str) or not value for value in (message_id, task_id)):
             return None
-        rejected = _unrepaired_draft(state, self._run_id, self._runtime_attempt_id)
+        rejected = self._rejected_draft_for_recovery(state, runtime)
         if rejected is None:
             return None
         marker = self._linked_recovery_marker(state)
@@ -1711,16 +1720,24 @@ class WorkbenchToolScopeMiddleware(AgentMiddleware[AgentState]):
             },
         }
 
-    def _linked_repair_policy(self, request: ModelRequest) -> str | None:
-        if not self._linked_recovery_scope(request.runtime):
-            return None
+    def _rejected_draft_repair_policy(self, request: ModelRequest) -> str | None:
         marker = self._linked_recovery_marker(request.state)
         messages = _state_messages(request.state)
         if marker is None or marker.get("exhausted") or not messages or _value(messages[-1], "id") != marker["messageId"]:
             return None
-        rejected = _unrepaired_draft(request.state, self._run_id, self._runtime_attempt_id)
+        rejected = self._rejected_draft_for_recovery(request.state, request.runtime)
         if rejected is None or rejected["toolCallId"] != marker["toolCallId"]:
             return None
+        if not self._linked_draft_recovery_enabled:
+            return (
+                "<workbench_prototype_draft_repair>\n"
+                "The Prototype Draft was rejected. Use the latest ACK's candidateChecksum as "
+                "baseCandidateChecksum, copy any applicable prototypeGraphRepair, and fix the precise "
+                "reported fields in one repair-only call. Preserve the confirmed screens, controls, "
+                "bindings and actions. Once the complete Draft validates, copy finalSubmissionArtifact "
+                "into workbench_runtime_result_submit. Continue with the tool before ending the turn.\n"
+                "</workbench_prototype_draft_repair>"
+            )
         semantic_guidance = ""
         if rejected["candidate"].get("kind") == "prd":
             for issue in rejected["issues"]:
@@ -1812,6 +1829,12 @@ class WorkbenchToolScopeMiddleware(AgentMiddleware[AgentState]):
                 return None
             drafts.append(receipt["draft"])
             references.append({"draftReference": {"artifactIndex": index, "draftChecksum": checksum}})
+        scope = _value(_value(runtime, "context"), "workbench")
+        operations = _value(scope, "outputOperations")
+        if operations is not None and operations != [
+            {"kind": draft.get("kind"), "operation": draft.get("operation")} for draft in drafts
+        ]:
+            return None
         candidate = {
             "protocol": _RUNTIME_RESULT_PROTOCOL,
             "message": "需求文档与原型已生成。" if linked else "原型已生成。",
@@ -1917,7 +1940,7 @@ class WorkbenchToolScopeMiddleware(AgentMiddleware[AgentState]):
                     if system_text.strip()
                     else policy
                 ))
-        repair_policy = self._draft_tool_json_retry_policy(request) or self._linked_repair_policy(request)
+        repair_policy = self._draft_tool_json_retry_policy(request) or self._rejected_draft_repair_policy(request)
         if repair_policy is not None:
             system_message = overrides.get("system_message", request.system_message)
             system_text = system_message.text if system_message is not None else ""
@@ -2547,7 +2570,7 @@ class WorkbenchToolScopeMiddleware(AgentMiddleware[AgentState]):
             return {"jump_to": "end"}
         return (
             self._recover_draft_tool_json(state, runtime)
-            or self._recover_linked_draft_stop(state, runtime)
+            or self._recover_rejected_draft_stop(state, runtime)
             or self._recover_result_stop(state, runtime)
         )
 
@@ -2618,7 +2641,7 @@ class WorkbenchToolScopeMiddleware(AgentMiddleware[AgentState]):
             return {"jump_to": "end"}
         return (
             self._recover_draft_tool_json(state, runtime)
-            or self._recover_linked_draft_stop(state, runtime)
+            or self._recover_rejected_draft_stop(state, runtime)
             or self._recover_result_stop(state, runtime)
         )
 

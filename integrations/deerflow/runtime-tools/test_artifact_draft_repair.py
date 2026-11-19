@@ -403,12 +403,27 @@ class ArtifactDraftRepairTests(unittest.TestCase):
     def test_restores_canonical_directory_entries(self):
         invalid = copy.deepcopy(self.draft)
         entries = invalid["content"]["tableOfContents"]["entries"]
-        entries[-2:] = ["改写的降级标题", "改写的安全标题"]
+        entries[6] = "2.2 改写的功能标题"
+        entries[-2:] = ["改写的降级标题", "改写的安全标题", "多余条目"]
         ack, _ = self.publish("initial", draft=invalid)
-        self.assertEqual(len(ack["templateRepair"]["operations"]), 2)
+        self.assertEqual(ack["templateRepair"]["operations"], [
+            {"op": "restore", "path": "/content/tableOfContents/entries"},
+        ])
+        self.assertNotIn("directoryEntries", json.dumps(ack))
         result, artifact = self.publish("restore", repair=ack["templateRepair"])
         self.assertTrue(result["ok"], result["issues"])
         self.assertEqual(artifact["draft"], self.draft)
+        with self.assertRaisesRegex(ValueError, "TEMPLATE_PATH_FORBIDDEN"):
+            _apply_repair(self.draft, self.repair(result, ack["templateRepair"]["operations"]), result["candidateChecksum"])
+
+    def test_reports_exact_inherited_shorthand_field_without_echoing_content(self):
+        draft = copy.deepcopy(self.draft)
+        path = ["content", "sections", "businessRequirements", "summary", 0, "text"]
+        draft["content"]["sections"]["businessRequirements"]["summary"][0]["text"] = "复用 PRIVATE_BODY 规则"
+        ack, _ = self.publish("initial", draft=draft)
+        self.assertFalse(ack["ok"])
+        self.assertIn(path, [hint["path"] for hint in ack["repairHints"]])
+        self.assertNotIn("PRIVATE_BODY", json.dumps(ack))
 
     def test_rejects_stale_or_forged_bases_and_all_identity_edits(self):
         for operation in (

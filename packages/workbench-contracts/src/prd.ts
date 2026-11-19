@@ -1022,20 +1022,29 @@ function refinePrdTemplateDocument(
   }
 
 
+  const textFields = [...stringFields(document)];
   for (const placeholder of prdForbiddenPlaceholders) {
-    if (stringValues(document).some((value) => value.includes(placeholder))) {
+    if (textFields.some(({ value }) => value.includes(placeholder))) {
       addIssue(context, [], `PRD must not contain placeholder wording: ${placeholder}`);
     }
   }
   for (const pattern of prdForbiddenPlaceholderPatterns) {
-    if (stringValues(document).some((value) => pattern.test(value))) {
+    if (textFields.some(({ value }) => pattern.test(value))) {
       addIssue(context, [], `PRD must not contain placeholder wording matching ${pattern.source}`);
     }
   }
-  for (const pattern of prdWeakStandalonePatterns) {
-    if (stringValues(document).some((value) => pattern.test(value.trim()))) {
-      addIssue(context, [], `PRD must spell out inherited or changed behavior instead of using ${pattern.source}`);
-    }
+  const shorthand = prdWeakStandalonePatterns.map((pattern) => ({
+    pattern,
+    paths: textFields.filter(({ value }) => pattern.test(value.trim())).map(({ path }) => path),
+  })).filter(({ paths }) => paths.length > 0);
+  const authoredTextPaths = shorthand.flatMap(({ paths }) => paths).slice(0, 32);
+  for (const { pattern } of shorthand) {
+    context.addIssue({
+      code: "custom",
+      path: [],
+      message: `PRD must spell out inherited or changed behavior instead of using ${pattern.source}`,
+      params: { authoredTextPaths },
+    });
   }
 }
 
@@ -1202,11 +1211,14 @@ function inlinePlainText(inlines: readonly z.infer<typeof prdInlineSchema>[]) {
   }).join("");
 }
 
-function stringValues(value: unknown): string[] {
-  if (typeof value === "string") return [value];
-  if (Array.isArray(value)) return value.flatMap(stringValues);
-  if (value && typeof value === "object") return Object.values(value).flatMap(stringValues);
-  return [];
+function* stringFields(value: unknown, path: AcceptancePath = []): Iterable<{ path: AcceptancePath; value: string }> {
+  if (typeof value === "string") {
+    yield { path, value };
+  } else if (Array.isArray(value)) {
+    for (const [index, item] of value.entries()) yield* stringFields(item, [...path, index]);
+  } else if (value && typeof value === "object") {
+    for (const [key, item] of Object.entries(value)) yield* stringFields(item, [...path, key]);
+  }
 }
 
 function splitEvidenceText(value: string): string[] {

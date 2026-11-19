@@ -164,6 +164,16 @@ class ArtifactDraftToolTests(unittest.TestCase):
         self.assertFalse(receipt["ok"])
         self.assertNotIn("prototypeGraphRepair", json.loads(json_ack))
 
+    def test_prototype_graph_ack_restores_missing_frame_clip_flag(self) -> None:
+        draft = copy.deepcopy(self.draft)
+        del draft["content"]["nodes"][0]["clipContent"]
+        content, receipt = workbench_artifact_draft_publish.func(self.runtime, 0, draft)
+        ack = json.loads(content)
+        self.assertFalse(receipt["ok"])
+        self.assertEqual(ack["prototypeGraphRepair"]["operations"], [
+            {"op": "add", "path": "/content/nodes/0/clipContent", "value": False},
+        ])
+
     def test_checkbox_repair_names_the_variable_and_preserves_false_without_coercion(self) -> None:
         invalid = copy.deepcopy(self.draft)
         input_node = next(

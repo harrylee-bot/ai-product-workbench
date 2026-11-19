@@ -80,17 +80,36 @@ def _validate_candidate(
 
 
 def _valid_repair_hints(hints: object, checksums: list[str]) -> bool:
-    if not isinstance(hints, list) or len(hints) > len(checksums):
+    if not isinstance(hints, list) or len(hints) > 3 * len(checksums):
         return False
-    return all(
-        isinstance(hint, dict)
-        and type(hint.get("artifactIndex")) is int
-        and 0 <= hint["artifactIndex"] < len(checksums)
-        and hint.get("candidateChecksum") == checksums[hint["artifactIndex"]]
-        and hint.get("path") == ["content", "sections", "businessRequirements", "functionSections"]
-        and isinstance(hint.get("acceptanceCoverage"), dict)
-        for hint in hints
-    )
+    seen = set()
+    for hint in hints:
+        if (not isinstance(hint, dict) or type(hint.get("artifactIndex")) is not int
+                or not 0 <= (index := hint["artifactIndex"]) < len(checksums)
+                or hint.get("candidateChecksum") != checksums[index]):
+            return False
+        path = hint.get("path")
+        if path == ["content", "sections", "businessRequirements", "functionSections"]:
+            valid = isinstance(hint.get("acceptanceCoverage"), dict)
+        elif path == ["content", "tableOfContents", "entries"]:
+            entries = hint.get("directoryEntries")
+            valid = isinstance(entries, list) and 9 <= len(entries) <= 58 and all(
+                isinstance(entry, str) and 0 < len(entry) <= 240 for entry in entries
+            )
+        elif path == ["content"]:
+            paths = hint.get("authoredTextPaths")
+            valid = isinstance(paths, list) and 1 <= len(paths) <= 32 and all(
+                isinstance(field, list) and 2 <= len(field) <= 24 and field[0] == "content"
+                and all(type(part) is int or (isinstance(part, str) and 0 < len(part) <= 96) for part in field)
+                for field in paths
+            )
+        else:
+            return False
+        key = (index, tuple(path))
+        if not valid or key in seen:
+            return False
+        seen.add(key)
+    return True
 
 
 def validate_runtime_artifact_draft(candidate: dict[str, Any]) -> dict[str, Any]:

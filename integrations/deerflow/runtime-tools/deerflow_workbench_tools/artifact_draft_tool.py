@@ -15,6 +15,7 @@ from .artifact_draft_repair import (
     prd_envelope_duplicate_removals,
     resolve_artifact_draft_candidate,
     template_restore_operation,
+    template_restore_operations,
     validate_retrieved_citations,
 )
 from .runtime_result_validator import validate_runtime_artifact_draft
@@ -171,8 +172,8 @@ def workbench_artifact_draft_publish(
                 "operations": link_operations,
             }
             response["repairInstruction"] = (
-                "Copy prototypeGraphRepair as repair to reconnect existing nodes and remove only references "
-                "to missing nodes. If confirmed controls, navigation or result bindings are still unimplemented, "
+                "Copy prototypeGraphRepair as repair to fill missing frame fields or correct existing graph links. "
+                "If confirmed controls, navigation or result bindings are still unimplemented, "
                 "include the next small complete pieces in the same repair before acceptance. Never replace /content. "
                 + response["repairInstruction"]
             )
@@ -196,8 +197,7 @@ def workbench_artifact_draft_publish(
                 "validator. Keep their identical values inside content. Then follow the next ACK. "
                 + response["repairInstruction"]
             )
-        template_operations = [operation for issue in validation["issues"]
-                               if (operation := template_restore_operation(issue)) is not None]
+        template_operations = template_restore_operations(validation)
         citation_operations = [issue["citationRepair"] for issue in validation["issues"] if "citationRepair" in issue]
         if citation_operations:
             response["citationRepair"] = {
@@ -226,16 +226,16 @@ def workbench_artifact_draft_publish(
                 "operations": template_operations[:24],
             }
             response["repairInstruction"] = (
-                "First copy templateRepair exactly as the repair argument. Its restore "
-                "operations load fixed template text from the contract without retyping "
-                "expectedValue. Then address any remaining business issues from the next ACK. "
+                "First copy templateRepair exactly as the repair argument. Restore loads contract text "
+                "or rebuilds the directory from the current section headings. Then address any "
+                "remaining business issues from the next ACK. "
                 + response["repairInstruction"]
             )
     return json.dumps(response, ensure_ascii=False, separators=(",", ":")), artifact
 
 
 def _prototype_graph_link_repairs(candidate: dict[str, Any], issues: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Offer repairs only for uniquely resolved, validator-reported graph links."""
+    """Offer repairs for validator-reported graph links and missing frame fields."""
     content = candidate.get("content")
     if candidate.get("kind") != "prototype" or not isinstance(content, dict):
         return []
@@ -259,14 +259,21 @@ def _prototype_graph_link_repairs(candidate: dict[str, Any], issues: list[dict[s
     paths: set[tuple[int, str]] = set()
     for issue in issues:
         path = issue.get("path")
-        if (issue.get("code") != "custom" or not isinstance(path, list) or len(path) != 4
+        if (not isinstance(path, list) or len(path) != 4
                 or path[:2] != ["content", "nodes"] or type(path[2]) is not int
-                or not 0 <= path[2] < len(nodes) or path[3] not in ("parentId", "childIds")):
+                or not 0 <= path[2] < len(nodes)):
             continue
         index, field = path[2:]
         if (index, field) in paths:
             continue
         node = nodes[index]
+        if (field == "clipContent" and issue.get("code") == "invalid_type"
+                and issue.get("expectedType") == "boolean" and node.get("kind") == "frame" and field not in node):
+            paths.add((index, field))
+            operations.append({"op": "add", "path": f"/content/nodes/{index}/clipContent", "value": False})
+            continue
+        if issue.get("code") != "custom":
+            continue
         message = issue.get("message", "")
         if field == "parentId" and message == "parent childIds must include the node":
             paths.add((index, field))
@@ -520,10 +527,15 @@ def _artifact_draft_repair_hints(
         "Counts describe the full candidate; truncated means only some paths are shown."
     )
     for hint in validator_hints or []:
-        if (isinstance(hint, dict) and hint.get("path") == acceptance_path
-                and isinstance(candidate_checksum, str) and hint.get("candidateChecksum") == candidate_checksum
-                and isinstance(hint.get("acceptanceCoverage"), dict)):
+        if not isinstance(hint, dict) or not candidate_checksum or hint.get("candidateChecksum") != candidate_checksum:
+            continue
+        if hint.get("path") == acceptance_path and isinstance(hint.get("acceptanceCoverage"), dict):
             append({**hint, "instruction": acceptance_instruction})
+        for field in hint.get("authoredTextPaths", []):
+            append({
+                "path": field,
+                "instruction": "Replace this shorthand with the confirmed behavior and its observable conditions. Preserve the surrounding block and existing references. Do not invent additional scope.",
+            })
 
     inline_shape = '[{type:"text",text:string,marks:[]}]'
     paragraph_shape = '{id:string,type:"paragraph",content:' + inline_shape + '}'
@@ -580,6 +592,16 @@ def _artifact_draft_repair_hints(
         ):
             continue
         code = issue.get("code")
+        if code == "custom" and len(path) == 6 and path[:4] == ["content", "sections", "safetyBaseline", "rows"] and path[-1] == "applicability":
+            append({
+                "path": path,
+                "instruction": "Recheck this topic against the existing requirement body. Use 是 with an evidence note for an established safeguard, 否 only with concrete same-topic remediation already specified in the body, or 不涉及 with null remarks when the topic has no applicable behavior. Update applicability and remarks together without adding unsupported requirements.",
+            })
+        if code == "custom" and len(path) == 8 and path[:6] == ["content", "sections", "introduction", "usageScenarios", "channelTable", "rows"] and path[-1] == "enabled":
+            append({
+                "path": path,
+                "instruction": "Reconcile the channel row with the confirmed distribution scope and the usage-scenario body. Describe an internal Web management surface separately from user-facing distribution channels. Keep the confirmed scope unchanged.",
+            })
         if (code == "custom"
                 and path == ["content", "sections", "businessRequirements", "functionSections"]
                 and isinstance(issue.get("message"), str)

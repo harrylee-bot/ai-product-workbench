@@ -21,6 +21,7 @@ ACK_PROTOCOL = "workbench.runtime.artifact-draft-ack.v1"
 MAX_REPAIR_OPERATIONS = 24
 MAX_REPAIR_BYTES = 65_536
 MAX_HISTORY_DRAFTS = 32
+PRD_DIRECTORY_PATH = ("content", "tableOfContents", "entries")
 _ROOT_MOVE_SOURCES = frozenset({
     "degradation", "safetyBaseline", "introduction",
     "businessRequirements", "functionSections", "sections",
@@ -473,6 +474,27 @@ def template_restore_operation(issue: Any) -> dict[str, str] | None:
         return None
     return {"op": "restore", "path": "/" + "/".join(str(part) for part in path)}
 
+
+def _directory_repair_entries(validation: dict[str, Any]) -> list[str] | None:
+    return next((
+        hint["directoryEntries"] for hint in validation.get("repairHints", [])
+        if hint["path"] == list(PRD_DIRECTORY_PATH)
+        and hint["candidateChecksum"] == validation["candidateChecksum"]
+    ), None)
+
+
+def template_restore_operations(validation: dict[str, Any]) -> list[dict[str, str]]:
+    directory = _directory_repair_entries(validation)
+    operations = []
+    for issue in validation["issues"]:
+        if directory is not None and issue["path"][:3] == list(PRD_DIRECTORY_PATH):
+            continue
+        if (operation := template_restore_operation(issue)) is not None:
+            operations.append(operation)
+    if directory is not None:
+        operations.append({"op": "restore", "path": "/" + "/".join(PRD_DIRECTORY_PATH)})
+    return operations
+
 def prd_envelope_duplicate_removals(candidate: Any, issues: list[Any]) -> list[dict[str, str]]:
     if (
         not isinstance(candidate, dict) or candidate.get("kind") != "prd" or candidate.get("schemaVersion") != 3
@@ -492,12 +514,18 @@ def _restore_template(candidate: dict[str, Any], operation: dict[str, Any], part
         _fail("TEMPLATE_PATH_FORBIDDEN")
     # Recompute after earlier operations. Never trust model-supplied expected text
     # or stale directory indexes from an ACK before a section move.
-    issues = validate_runtime_artifact_draft(candidate)["issues"]
-    matches = [issue for issue in issues if template_restore_operation(issue) == operation]
-    if len(matches) != 1:
-        _fail("TEMPLATE_PATH_FORBIDDEN")
+    validation = validate_runtime_artifact_draft(candidate)
+    if tuple(parts) == PRD_DIRECTORY_PATH:
+        value = _directory_repair_entries(validation)
+        if value is None:
+            _fail("TEMPLATE_PATH_FORBIDDEN")
+    else:
+        matches = [issue for issue in validation["issues"] if template_restore_operation(issue) == operation]
+        if len(matches) != 1:
+            _fail("TEMPLATE_PATH_FORBIDDEN")
+        value = matches[0]["expectedValue"]
     parent, key = _parent(candidate, parts)
-    _write(candidate, parts, matches[0]["expectedValue"], replace=not isinstance(parent, dict) or key in parent)
+    _write(candidate, parts, value, replace=not isinstance(parent, dict) or key in parent)
 
 
 def _update_inline_citation_ids(value: Any, old_id: str, new_id: str) -> None:
