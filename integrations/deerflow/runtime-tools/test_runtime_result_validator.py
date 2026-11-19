@@ -35,6 +35,49 @@ class RuntimeResultValidatorTests(unittest.TestCase):
         self.assertRegex(result["candidateChecksum"], r"^[0-9a-f]{64}$")
         self.assertEqual(len(result["artifactChecksums"]), 1)
 
+    def test_rejects_a_shared_category_predicate_for_distinct_rows(self) -> None:
+        candidate = copy.deepcopy(self.example)
+        draft = candidate["artifacts"][0]
+        document = draft["content"]
+        root, _, selector, button = document["nodes"]
+        selector["inputType"] = "select"
+        selector["options"] = [
+            {"value": value, "label": label, "disabled": False}
+            for value, label in (("all", "All"), ("open", "Open"), ("closed", "Closed"))
+        ]
+        document["variables"][0]["initialValue"] = "all"
+        variable = {"kind": "variable", "path": document["variables"][0]["path"]}
+        def test_option(value):
+            return {"kind": "equals", "left": variable, "right": {"kind": "literal", "value": value}}
+        group = {**root, "id": "list", "parentId": root["id"], "childIds": [], "bindingIds": ["shared-filter"]}
+        root["childIds"].append(group["id"])
+        document["nodes"].append(group)
+        row_labels = []
+        for index, name in enumerate(("Open", "Closed")):
+            row = {**root, "id": f"row-{index}", "parentId": group["id"], "childIds": [], "bindingIds": []}
+            marker = {key: value for key, value in row.items() if key not in ("childIds", "clipContent")}
+            marker.update(id=f"label-{index}", parentId=row["id"], kind="text", text=name, maxLines=None)
+            detail = {**button, "id": f"detail-{index}", "parentId": row["id"],
+                      "buttonType": "button", "bindingIds": [], "actionIds": [], "motionIds": []}
+            row["childIds"].extend([marker["id"], detail["id"]])
+            group["childIds"].append(row["id"])
+            document["nodes"].extend([row, marker, detail])
+            row_labels.append(marker)
+        document["bindings"].append({
+            "id": "shared-filter", "nodeId": group["id"], "property": "visible",
+            "source": {"kind": "expression", "expression": {"kind": "or", "operands": [test_option("all"), test_option("open")]}},
+        })
+
+        result = validate_runtime_artifact_draft(draft)
+        self.assertFalse(result["ok"])
+        self.assertEqual([issue["path"] for issue in result["issues"]], [["content", "bindings", 2]])
+        row_labels[1]["text"] = "Open"
+        self.assertTrue(validate_runtime_result(candidate)["ok"])
+        row_labels[1]["text"] = "Closed"
+        group["bindingIds"].clear()
+        document["bindings"].pop()
+        self.assertTrue(validate_runtime_result(candidate)["ok"])
+
     def test_typography_color_uses_the_same_literal_and_token_contract(self) -> None:
         candidate = copy.deepcopy(self.example)
         content = candidate["artifacts"][0]["content"]
