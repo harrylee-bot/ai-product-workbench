@@ -466,13 +466,22 @@ export class DeerFlowRuntimeAdapter implements RuntimePort {
       ) return;
       const candidateExternalRunId = externalRunId;
       const operation = (async () => {
+        // Release a stalled probe before the next heartbeat. The SDK timeout
+        // is shared with long requests and can exceed the stream idle budget.
+        const probeController = new AbortController();
+        const probeSignal = AbortSignal.any([providerHeartbeatSignal, probeController.signal]);
+        const probeTimeout = setTimeout(
+          () => probeController.abort(),
+          Math.floor(providerHeartbeatIntervalMs / 2),
+        );
+        probeTimeout.unref?.();
         try {
           const providerRun = await client.runs.get(
             execution.externalThreadId,
             candidateExternalRunId,
-            { signal: providerHeartbeatSignal },
+            { signal: probeSignal },
           );
-          if (providerHeartbeatStopped || providerHeartbeatSignal.aborted) return;
+          if (providerHeartbeatStopped || probeSignal.aborted) return;
           lastProviderStatus = providerRun.status;
           // SSE comments are intentionally discarded by the SDK. A successful
           // status probe is still provider activity and must keep the outer idle
@@ -497,6 +506,8 @@ export class DeerFlowRuntimeAdapter implements RuntimePort {
           }
           // The stream remains authoritative. Transient status-probe failures
           // must not turn a healthy provider run into a synthetic failure.
+        } finally {
+          clearTimeout(probeTimeout);
         }
       })();
       providerHeartbeatInFlight = operation;

@@ -4720,6 +4720,86 @@ describe("DeerFlow runtime adapter", () => {
     expect(runtimeObserver.onExternalFinalization).toHaveBeenCalledTimes(1);
   }, 10_000);
 
+  it("retries the provider heartbeat after one stalled status request", async () => {
+    vi.useFakeTimers();
+    const cleanup = new AbortController();
+    let executionSettled: Promise<unknown> | undefined;
+    try {
+      const runId = "external_run_stalled_heartbeat";
+      const runPath = `/api/threads/deer_thread_1/runs/${runId}`;
+      const streamOpened = deferred();
+      let probeCount = 0;
+      let stalledProbeAborted = false;
+      const finalState = {
+        messages: [
+          { type: "human", content: "current turn" },
+          ...validatedResultToolMessages({
+            protocol: "workbench.runtime.result.v1",
+            message: "done",
+            artifacts: [],
+          }, "stalled-heartbeat-result"),
+        ],
+      };
+      vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request, init: RequestInit = {}) => {
+        const url = new URL(String(input));
+        if (url.pathname === runPath) {
+          probeCount += 1;
+          if (probeCount === 1) return Response.json(runtimeRun(runId));
+          if (probeCount === 2) {
+            return await new Promise<Response>((_resolve, reject) => {
+              init.signal?.addEventListener("abort", () => {
+                stalledProbeAborted = true;
+                reject(init.signal?.reason);
+              }, { once: true });
+            });
+          }
+          return Response.json({ ...runtimeRun(runId), status: "success" });
+        }
+        if (url.pathname === `${runPath}/stream`) {
+          streamOpened.resolve();
+          return openRuntimeStreamResponse([{
+            id: "stalled-heartbeat-initial",
+            event: "values",
+            data: { messages: [{ type: "human", content: "current turn" }] },
+          }], { runId, signal: init.signal });
+        }
+        if (url.pathname === "/api/threads/deer_thread_1/state") {
+          return Response.json({ values: finalState });
+        }
+        throw new Error(`Unexpected request: ${init.method ?? "GET"} ${url}`);
+      }));
+      const adapter = new DeerFlowRuntimeAdapter({
+        ...workerConfig(),
+        deerFlowTimeoutMs: 600_000,
+        deerFlowSubmissionTimeoutMs: 60_000,
+        deerFlowIdleTimeoutMs: 60_000,
+      }, { getObject: vi.fn() } as never);
+      const runtimeObserver = observer();
+      const result = adapter.execute(execution({
+        request: { ...execution().request, modelId: "deepseek-flash" },
+        submission: {
+          mode: "join",
+          externalRunId: runId,
+          lastExternalEventId: null,
+          providerIdempotencyKey: "wbrt:test-attempt-key",
+        },
+      }), runtimeObserver, cleanup.signal);
+      executionSettled = result.catch((error: unknown) => error);
+
+      await streamOpened.promise;
+      await vi.advanceTimersByTimeAsync(40_000);
+
+      expect(stalledProbeAborted).toBe(true);
+      expect(probeCount).toBe(3);
+      await expect(result).resolves.toMatchObject({ protocol: "workbench.runtime.result.v1", message: "done" });
+      expect(runtimeObserver.onExternalFinalization).toHaveBeenCalledTimes(1);
+    } finally {
+      cleanup.abort();
+      await executionSettled;
+      vi.useRealTimers();
+    }
+  });
+
   it("fails an open stream when the provider heartbeat observes a missing Run", async () => {
     vi.useFakeTimers();
     try {
