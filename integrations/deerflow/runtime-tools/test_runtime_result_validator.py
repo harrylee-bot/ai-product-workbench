@@ -35,7 +35,7 @@ class RuntimeResultValidatorTests(unittest.TestCase):
         self.assertRegex(result["candidateChecksum"], r"^[0-9a-f]{64}$")
         self.assertEqual(len(result["artifactChecksums"]), 1)
 
-    def test_rejects_a_shared_category_predicate_for_distinct_rows(self) -> None:
+    def _category_list(self):
         candidate = copy.deepcopy(self.example)
         draft = candidate["artifacts"][0]
         document = draft["content"]
@@ -53,6 +53,7 @@ class RuntimeResultValidatorTests(unittest.TestCase):
         root["childIds"].append(group["id"])
         document["nodes"].append(group)
         row_labels = []
+        detail_buttons = []
         for index, name in enumerate(("Open", "Closed")):
             row = {**root, "id": f"row-{index}", "parentId": group["id"], "childIds": [], "bindingIds": []}
             marker = {key: value for key, value in row.items() if key not in ("childIds", "clipContent")}
@@ -63,11 +64,17 @@ class RuntimeResultValidatorTests(unittest.TestCase):
             group["childIds"].append(row["id"])
             document["nodes"].extend([row, marker, detail])
             row_labels.append(marker)
+            detail_buttons.append(detail)
         document["bindings"].append({
             "id": "shared-filter", "nodeId": group["id"], "property": "visible",
             "source": {"kind": "expression", "expression": {"kind": "or", "operands": [test_option("all"), test_option("open")]}},
         })
+        return candidate, group, row_labels, detail_buttons
 
+    def test_rejects_a_shared_category_predicate_for_distinct_rows(self) -> None:
+        candidate, group, row_labels, _ = self._category_list()
+        draft = candidate["artifacts"][0]
+        document = draft["content"]
         result = validate_runtime_artifact_draft(draft)
         self.assertFalse(result["ok"])
         self.assertEqual([issue["path"] for issue in result["issues"]], [["content", "bindings", 2]])
@@ -76,6 +83,80 @@ class RuntimeResultValidatorTests(unittest.TestCase):
         row_labels[1]["text"] = "Closed"
         group["bindingIds"].clear()
         document["bindings"].pop()
+        self.assertTrue(validate_runtime_result(candidate)["ok"])
+
+    def test_reports_inert_row_buttons_even_after_the_shared_filter_is_removed(self) -> None:
+        candidate, group, _, buttons = self._category_list()
+        draft = candidate["artifacts"][0]
+        document = draft["content"]
+        group["bindingIds"].clear()
+        document["bindings"].pop()
+        self.assertTrue(validate_runtime_result(candidate)["ok"])
+
+        list_screen = document["screens"][0]
+        detail_screen = {
+            **list_screen, "id": "screen-details", "route": "/details",
+            "rootNodeId": "details-root", "initialStateId": None,
+        }
+        back_text = {
+            **next(node for node in document["nodes"] if node["kind"] == "text"),
+            "id": "details-back", "parentId": detail_screen["rootNodeId"], "screenId": detail_screen["id"],
+            "actionIds": ["return-to-list"], "text": "Back",
+        }
+        detail_root = {
+            **document["nodes"][0], "id": detail_screen["rootNodeId"], "screenId": detail_screen["id"],
+            "childIds": [back_text["id"]],
+        }
+        document["screens"].append(detail_screen)
+        document["nodes"].extend([detail_root, back_text])
+        document["actions"].append({
+            "id": "return-to-list", "kind": "navigate", "event": "click",
+            "nodeId": back_text["id"], "targetScreenId": list_screen["id"],
+        })
+        before = copy.deepcopy(draft)
+        result = validate_runtime_artifact_draft(draft)
+        self.assertFalse(result["ok"])
+        self.assertEqual([issue["path"] for issue in result["issues"]], [
+            ["content", "nodes", document["nodes"].index(button), "actionIds"] for button in buttons
+        ])
+        self.assertEqual(draft, before)
+
+        draft["operation"] = {"kind": "revise", "target": {
+            "artifactId": "old-artifact", "artifactVersionId": "old-version", "screenIds": [detail_screen["id"]],
+        }}
+        self.assertTrue(validate_runtime_result(candidate)["ok"])
+        draft["operation"] = {"kind": "create"}
+
+        for index, button in enumerate(buttons):
+            action_id = f"open-detail-{index}"
+            button["actionIds"] = [action_id]
+            document["actions"].append({
+                "id": action_id, "kind": "navigate", "event": "click",
+                "nodeId": button["id"], "targetScreenId": detail_screen["id"],
+            })
+        self.assertTrue(validate_runtime_result(candidate)["ok"])
+
+    def test_a_working_peer_requires_only_other_enabled_row_buttons_to_work(self) -> None:
+        candidate, group, _, [first, second] = self._category_list()
+        draft = candidate["artifacts"][0]
+        document = draft["content"]
+        group["bindingIds"].clear()
+        document["bindings"].pop()
+        first["actionIds"] = ["open-external"]
+        document["actions"].append({
+            "id": "open-external", "kind": "openUrl", "event": "press", "nodeId": first["id"],
+            "url": "https://example.com/", "target": "sameWindow",
+        })
+        result = validate_runtime_artifact_draft(draft)
+        self.assertFalse(result["ok"])
+        self.assertEqual([issue["path"] for issue in result["issues"]], [
+            ["content", "nodes", document["nodes"].index(second), "actionIds"]
+        ])
+        second["bindingIds"] = ["disabled-row-control"]
+        document["bindings"].append({
+            "id": "disabled-row-control", "nodeId": second["id"], "property": "enabled",
+            "source": {"kind": "literal", "value": False},
+        })
         self.assertTrue(validate_runtime_result(candidate)["ok"])
 
     def test_typography_color_uses_the_same_literal_and_token_contract(self) -> None:

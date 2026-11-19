@@ -16,7 +16,7 @@ import {
   prdTableOfContentsEntriesForV3,
   type PrdAcceptanceCoverageDiagnostic,
 } from "../../../packages/workbench-contracts/src/prd.js";
-import { categoryFilterIssues } from "./prototype-filter-validation.js";
+import { categoryListIssues } from "./prototype-filter-validation.js";
 
 const MAX_INPUT_BYTES = 2_000_000;
 const MAX_OUTPUT_BYTES = 65_536;
@@ -79,7 +79,8 @@ async function main() {
     if ("artifacts" in parsed.data) {
       const issues = parsed.data.artifacts.flatMap((draft, index) => (
         draft.kind === "prototype"
-          ? categoryFilterIssues(draft.content).map((issue) => ({ ...issue, path: ["artifacts", index, ...issue.path] }))
+          ? categoryListIssues(draft.content, draft.operation.kind === "revise" ? draft.operation.target.screenIds : [])
+              .map((issue) => ({ ...issue, path: ["artifacts", index, ...issue.path] }))
           : []
       )).slice(0, MAX_ISSUES);
       if (issues.length) {
