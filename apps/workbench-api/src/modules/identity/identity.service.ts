@@ -7,24 +7,45 @@ export class IdentityService {
   constructor(private readonly db: WorkbenchDbService) {}
 
   async resolvePrincipal(claims: ExternalPrincipalClaims): Promise<AuthenticatedPrincipal> {
+    const where = { issuer_subject: { issuer: claims.issuer, subject: claims.subject } };
+    const email = claims.email ?? null;
+    const existing = await this.db.principal.findUnique({
+      where,
+      select: {
+        id: true,
+        issuer: true,
+        subject: true,
+        email: true,
+        displayName: true,
+        status: true,
+        memberships: { orderBy: { createdAt: "asc" }, take: 1, select: { workspaceId: true } },
+      },
+    });
+    if (existing) {
+      const { status, memberships, ...principal } = existing;
+      if (status !== "active") throw new UnauthorizedException("Principal access is disabled");
+      const defaultWorkspaceId = memberships[0]?.workspaceId;
+      // Parallel Studio requests normally carry the same claims. Avoid
+      // taking a write lock on the Principal row for each such request.
+      if (defaultWorkspaceId && principal.email === email
+          && (claims.displayName === undefined || principal.displayName === claims.displayName)) {
+        return { ...principal, defaultWorkspaceId };
+      }
+    }
+
     return this.db.$transaction(async (tx) => {
       const principal = await tx.principal.upsert({
-        where: {
-          issuer_subject: {
-            issuer: claims.issuer,
-            subject: claims.subject,
-          },
-        },
+        where,
         create: {
           issuer: claims.issuer,
           subject: claims.subject,
-          email: claims.email ?? null,
+          email,
           displayName: claims.displayName,
         },
         update: {
           // Clear a previously trusted email when the current identity token
           // no longer carries a verified address.
-          email: claims.email ?? null,
+          email,
           displayName: claims.displayName,
         },
       });
