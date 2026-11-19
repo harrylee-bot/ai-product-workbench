@@ -184,6 +184,10 @@ def workbench_artifact_draft_publish(
                 "include the next small complete pieces in the same repair before acceptance. Never replace /content. "
                 + response["repairInstruction"]
             )
+        prototype_assembly = _prototype_graph_assembly(draft, validation["issues"])
+        if prototype_assembly:
+            response["prototypeAssembly"] = prototype_assembly
+            response["repairInstruction"] = prototype_assembly["instruction"] + " " + response["repairInstruction"]
         assembly = _prd_assembly_progress(draft, validation["issues"])
         if assembly:
             response["prdAssembly"] = assembly
@@ -342,6 +346,60 @@ def _prototype_graph_link_repairs(candidate: dict[str, Any], issues: list[dict[s
                 if child not in index_by_id:
                     operations.append({"op": "remove", "path": f"/content/nodes/{index}/childIds/{offset}"})
     return operations[:MAX_REPAIR_OPERATIONS]
+
+
+def _prototype_graph_assembly(candidate: dict[str, Any], issues: list[dict[str, Any]]) -> dict[str, Any] | None:
+    content = candidate.get("content")
+    if candidate.get("kind") != "prototype" or not isinstance(content, dict):
+        return None
+    nodes = content.get("nodes")
+    if not isinstance(nodes, list):
+        return None
+
+    duplicate_prefix = "IR id must be globally unique: "
+    duplicate_ids = {
+        issue["message"].removeprefix(duplicate_prefix)
+        for issue in issues
+        if issue.get("path") == ["content"] and issue.get("code") == "custom"
+        and issue.get("message", "").startswith(duplicate_prefix)
+    }
+    collisions = [
+        {"id": node["id"], "path": ["content", "nodes", index, "id"], "kind": node.get("kind")}
+        for index, node in enumerate(nodes)
+        if isinstance(node, dict) and isinstance(node.get("id"), str) and node["id"] in duplicate_ids
+    ]
+    missing_references = {
+        ("screens", "rootNodeId"): "unknown root node: ",
+        ("nodes", "parentId"): "unknown parent node: ",
+        ("actions", "nodeId"): "unknown node: ",
+    }
+    missing: dict[str, list[list[str | int]]] = {}
+    for issue in issues:
+        path = issue.get("path")
+        if (issue.get("code") != "custom" or not isinstance(path, list) or len(path) != 4
+                or path[0] != "content" or type(path[2]) is not int):
+            continue
+        prefix = missing_references.get((path[1], path[3]))
+        message = issue.get("message", "")
+        if prefix and message.startswith(prefix):
+            missing.setdefault(message.removeprefix(prefix), []).append(path)
+    if not collisions and not missing:
+        return None
+    return {
+        "duplicateNodeIds": collisions[:12],
+        "missingNodes": [
+            {"id": node_id, "referencedAt": paths[:4]} for node_id, paths in list(missing.items())[:12]
+        ],
+        "addNodePath": "/content/nodes/-",
+        "instruction": (
+            "Resolve the duplicate node IDs and missing nodes listed in prototypeAssembly before their "
+            "downstream link errors. Keep one instance of an identical duplicate. For distinct nodes sharing "
+            "an ID, give one a new globally unique ID and update only references intended for that node. Append each "
+            "required missing node with its already referenced ID, owning screen and reciprocal parent/child "
+            "links. Start with missing roots and parents. Add missing action targets with the confirmed row or "
+            "control they belong to. Keep the confirmed screens and interactions."
+        ),
+    }
 
 
 def _prd_assembly_progress(candidate: dict[str, Any], issues: list[Any]) -> dict[str, Any] | None:

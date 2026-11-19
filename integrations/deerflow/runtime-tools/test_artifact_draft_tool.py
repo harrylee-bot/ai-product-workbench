@@ -198,7 +198,29 @@ class ArtifactDraftToolTests(unittest.TestCase):
         draft["content"]["nodes"].append(copy.deepcopy(form))
         json_ack, receipt = workbench_artifact_draft_publish.func(self.runtime, 0, draft)
         self.assertFalse(receipt["ok"])
-        self.assertNotIn("prototypeGraphRepair", json.loads(json_ack))
+        ack = json.loads(json_ack)
+        self.assertNotIn("prototypeGraphRepair", ack)
+        self.assertEqual(ack["prototypeAssembly"]["duplicateNodeIds"], [
+            {"id": form["id"], "path": ["content", "nodes", 1, "id"], "kind": "form"},
+            {"id": form["id"], "path": ["content", "nodes", 4, "id"], "kind": "form"},
+        ])
+
+    def test_prototype_graph_ack_groups_missing_node_references(self) -> None:
+        draft = copy.deepcopy(self.draft)
+        draft["content"]["screens"][0]["rootNodeId"] = "missing-root"
+        draft["content"]["nodes"][2]["parentId"] = "missing-form"
+        draft["content"]["actions"][0]["nodeId"] = "missing-form"
+        json_ack, receipt = workbench_artifact_draft_publish.func(self.runtime, 0, draft)
+        ack = json.loads(json_ack)
+        self.assertFalse(receipt["ok"])
+        self.assertEqual(ack["prototypeAssembly"]["addNodePath"], "/content/nodes/-")
+        self.assertEqual(ack["prototypeAssembly"]["missingNodes"], [
+            {"id": "missing-root", "referencedAt": [["content", "screens", 0, "rootNodeId"]]},
+            {"id": "missing-form", "referencedAt": [
+                ["content", "nodes", 2, "parentId"], ["content", "actions", 0, "nodeId"],
+            ]},
+        ])
+        self.assertEqual(ack["issues"], receipt["issues"])
 
     def test_prototype_graph_ack_restores_missing_frame_clip_flag(self) -> None:
         draft = copy.deepcopy(self.draft)
