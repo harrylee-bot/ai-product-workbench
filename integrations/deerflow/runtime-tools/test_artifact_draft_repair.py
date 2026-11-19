@@ -245,6 +245,33 @@ class ArtifactDraftRepairTests(unittest.TestCase):
                     run_id="run_1", runtime_attempt_id="attempt_1", tool_call_id="forged",
                     artifact_index=0, repair=self.repair(ack, [{"op": "restoreCitation", "path": path}]),
                 )
+    def test_citation_mirror_hint_locates_unmatched_authored_references_without_altering_the_draft(self):
+        receipt = self.install_retrieval()
+        draft = copy.deepcopy(self.draft)
+        unmatched = {**draft["citations"][0], "id": "c-other", "quote": "An unsupported statement"}
+        draft["content"]["citations"].append(unmatched)
+        paragraph = draft["content"]["sections"]["introduction"]["background"]["blocks"][0]["content"]
+        position = len(paragraph)
+        paragraph.append({"type": "citation", "citationId": "c-other", "label": "Evidence"})
+        draft["content"]["assumptions"][0]["citationIds"] = ["c-other"]
+        original = copy.deepcopy(draft)
+
+        content, artifact = workbench_artifact_draft_publish.func(self.runtime, 0, draft=draft)
+        ack = json.loads(content)
+        self.assertFalse(ack["ok"])
+        self.assertNotIn("draft", artifact)
+        self.assertNotIn("citationMirrorRepair", ack)
+        self.assertEqual(draft, original)
+        self.assertEqual(ack["citationMirrorReferences"], [{
+            "path": "/content/citations/1",
+            "references": [
+                f"/content/sections/introduction/background/blocks/0/content/{position}",
+                "/content/assumptions/0/citationIds/0",
+            ],
+        }])
+        with patch.dict(receipt, {"runtimeAttemptId": "another-attempt"}):
+            content, _ = workbench_artifact_draft_publish.func(self.runtime, 0, draft=draft)
+            self.assertNotIn("citationMirrorReferences", json.loads(content))
 
     def test_prd_assembles_small_repairs_without_publishing_partial_content(self):
         baseline = copy.deepcopy(self.draft)

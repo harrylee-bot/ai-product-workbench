@@ -31,6 +31,11 @@ _ROOT_MOVE_SOURCES = frozenset({
     "businessRequirements", "functionSections", "sections",
 })
 _IDENTITY_FIELDS = ("kind", "schemaVersion", "operation")
+_PRD_CITATION_MIRROR_ISSUE = {
+    "code": "custom",
+    "path": ["citations"],
+    "message": "PRD draft citations must exactly match content citations",
+}
 
 
 class ArtifactDraftRepairPathError(ValueError):
@@ -202,10 +207,7 @@ def prd_citation_mirror_repair(
 ) -> dict[str, Any] | None:
     """Offer a local quote correction proven by the current retrieval receipt."""
     if (
-        validation["issues"] != [{
-            "code": "custom", "path": ["citations"],
-            "message": "PRD draft citations must exactly match content citations",
-        }]
+        validation["issues"] != [_PRD_CITATION_MIRROR_ISSUE]
         or candidate.get("kind") != "prd" or candidate.get("schemaVersion") != 3
         or not isinstance(operation := candidate.get("operation"), dict)
         or operation.get("kind") != "create"
@@ -236,6 +238,54 @@ def prd_citation_mirror_repair(
     if 1 <= len(operations) <= MAX_REPAIR_OPERATIONS and len(_json(repair).encode("utf-8")) <= MAX_REPAIR_BYTES:
         return repair
     return None
+
+
+def prd_citation_mirror_references(
+    candidate: dict[str, Any], validation: dict[str, Any], state: Any,
+    run_id: str, runtime_attempt_id: str,
+) -> list[dict[str, Any]]:
+    """Locate the authored references that prevent dropping an unmatched citation."""
+    if (
+        validation["issues"] != [_PRD_CITATION_MIRROR_ISSUE]
+        or candidate.get("kind") != "prd" or candidate.get("schemaVersion") != 3
+        or not isinstance(operation := candidate.get("operation"), dict)
+        or operation.get("kind") != "create"
+    ):
+        return []
+    retrieved = _retrieved_citations(state, run_id, runtime_attempt_id)
+    if not retrieved:
+        return []
+    document = candidate["content"]
+    unmatched = {
+        citation["id"]: {"path": f"/content/citations/{index}", "references": []}
+        for index, citation in enumerate(document["citations"])
+        if citation not in retrieved.get(citation["id"], [])
+        and _unique_retrieved_source(citation, retrieved) is None
+    }
+    if not unmatched:
+        return []
+
+    def record(citation_id: str, path: str) -> None:
+        if citation_id in unmatched and len(unmatched[citation_id]["references"]) < 4:
+            unmatched[citation_id]["references"].append(path)
+
+    def walk(value: Any, path: str) -> None:
+        if isinstance(value, list):
+            for index, child in enumerate(value):
+                walk(child, f"{path}/{index}")
+        elif isinstance(value, dict):
+            if value.get("type") == "citation" and isinstance(value.get("citationId"), str):
+                record(value["citationId"], path)
+            for key, child in value.items():
+                if isinstance(child, (list, dict)):
+                    token = key.replace("~", "~0").replace("/", "~1")
+                    walk(child, f"{path}/{token}")
+
+    walk(document["sections"], "/content/sections")
+    for index, assumption in enumerate(document["assumptions"]):
+        for index_in_assumption, citation_id in enumerate(assumption["citationIds"]):
+            record(citation_id, f"/content/assumptions/{index}/citationIds/{index_in_assumption}")
+    return [entry for entry in unmatched.values() if entry["references"]][:4]
 
 
 def validate_retrieved_citations(validation: dict[str, Any], state: Any, run_id: str,

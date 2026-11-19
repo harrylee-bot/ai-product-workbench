@@ -12,6 +12,7 @@ from deerflow.tools.types import Runtime
 from .artifact_draft_repair import (
     MAX_REPAIR_OPERATIONS,
     prd_citation_mirror_repair,
+    prd_citation_mirror_references,
     prd_envelope_duplicate_removals,
     resolve_artifact_draft_candidate,
     template_restore_operation,
@@ -226,6 +227,21 @@ def workbench_artifact_draft_publish(
                 "Knowledge tool. Follow the next ACK for any remaining citation validation. "
                 + response["repairInstruction"]
             )
+        else:
+            mirror_references = prd_citation_mirror_references(
+                draft, validation, getattr(runtime, "state", None), run_id, runtime_attempt_id,
+            )
+            if mirror_references:
+                response["citationMirrorReferences"] = mirror_references
+                response["repairInstruction"] = (
+                    "An unmatched citation still has authored references listed in citationMirrorReferences. "
+                    "Read each referenced passage and use authorized Knowledge retrieval for its exact claim. "
+                    "If evidence supports it, replace both citation entries and update the listed references with the "
+                    "authorized ID. If evidence is unavailable, revise or exclude the unsupported assertion and remove "
+                    "its references and citation together. Keep other verified citations and their references unchanged. "
+                    "Correct the document and envelope together before retrying. "
+                    + response["repairInstruction"]
+                )
         if template_operations:
             response["templateRepair"] = {
                 "baseCandidateChecksum": validation["candidateChecksum"],
