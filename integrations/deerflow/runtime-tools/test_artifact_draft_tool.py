@@ -122,6 +122,42 @@ class ArtifactDraftToolTests(unittest.TestCase):
         self.assertTrue(any(issue["path"] == ["title"] for issue in response["issues"]))
         self.assertNotIn("draft", artifact)
 
+    def test_repairs_identical_duplicate_citations_without_replacing_verified_objects(self) -> None:
+        draft = copy.deepcopy(self.draft)
+        index = len(draft["citations"])
+        draft["citations"].extend([copy.deepcopy(draft["citations"][0]), copy.deepcopy(draft["citations"][0])])
+        content, artifact = workbench_artifact_draft_publish.func(self.runtime, 0, draft)
+        ack = json.loads(content)
+        self.assertFalse(ack["ok"])
+        self.assertNotIn("draft", artifact)
+        self.assertEqual([issue["path"] for issue in ack["issues"]],
+                         [["citations", index, "id"], ["citations", index + 1, "id"]])
+        repair = ack["duplicateCitationRepair"]
+        self.assertEqual(repair, {
+            "baseCandidateChecksum": ack["candidateChecksum"],
+            "operations": [{"op": "remove", "path": f"/citations/{position}"} for position in (index + 1, index)],
+        })
+        self.runtime.tool_call_id = "remove_duplicate_citations"
+        self.runtime.state = {"messages": [
+            {"type": "human"},
+            {"type": "ai", "tool_calls": [{"name": "workbench_artifact_draft_publish",
+              "id": "call_1", "args": {"artifact_index": 0, "draft": draft}}]},
+            {"type": "tool", "name": "workbench_artifact_draft_publish", "tool_call_id": "call_1",
+              "status": "success", "content": content, "artifact": artifact},
+            {"type": "ai", "tool_calls": [{"name": "workbench_artifact_draft_publish",
+              "id": self.runtime.tool_call_id, "args": {"artifact_index": 0, "repair": repair}}]},
+        ]}
+        _, accepted = workbench_artifact_draft_publish.func(self.runtime, 0, repair=repair)
+        self.assertTrue(accepted["ok"])
+        self.assertEqual(accepted["draft"], self.draft)
+
+    def test_duplicate_citation_id_with_conflicting_content_still_requires_review(self) -> None:
+        draft = copy.deepcopy(self.draft)
+        draft["citations"].append({**draft["citations"][0], "quote": "Different passage"})
+        content, receipt = workbench_artifact_draft_publish.func(self.runtime, 0, draft)
+        self.assertFalse(receipt["ok"])
+        self.assertNotIn("duplicateCitationRepair", json.loads(content))
+
     def test_prototype_graph_ack_repairs_only_the_reported_links(self) -> None:
         draft = copy.deepcopy(self.draft)
         root, form, *_ = draft["content"]["nodes"]

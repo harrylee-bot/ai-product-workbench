@@ -216,6 +216,18 @@ def workbench_artifact_draft_publish(
                 "citation objects and their linked PRD citation IDs from the current retrieval. "
                 + response["repairInstruction"]
             )
+        if draft_kind == "prototype":
+            duplicate_operations = _duplicate_citation_removals(draft, validation["issues"])
+            if duplicate_operations:
+                response["duplicateCitationRepair"] = {
+                    "baseCandidateChecksum": validation["candidateChecksum"],
+                    "operations": duplicate_operations,
+                }
+                response["repairInstruction"] = (
+                    "Copy duplicateCitationRepair to remove only exact duplicate citation objects. "
+                    "Keep one original object per verified source ID. "
+                    + response["repairInstruction"]
+                )
         mirror_repair = prd_citation_mirror_repair(
             draft, validation, getattr(runtime, "state", None), run_id, runtime_attempt_id,
         )
@@ -254,6 +266,25 @@ def workbench_artifact_draft_publish(
                 + response["repairInstruction"]
             )
     return json.dumps(response, ensure_ascii=False, separators=(",", ":")), artifact
+
+
+def _duplicate_citation_removals(draft: dict[str, Any], issues: list[dict[str, Any]]) -> list[dict[str, str]]:
+    citations = draft.get("citations")
+    if not isinstance(citations, list):
+        return []
+    duplicates = set()
+    for issue in issues:
+        path = issue.get("path")
+        if (
+            issue.get("code") != "custom" or issue.get("message") != "Artifact citation IDs must be unique"
+            or not isinstance(path, list) or len(path) != 3 or path[0] != "citations" or path[2] != "id"
+            or type(path[1]) is not int or not 0 < path[1] < len(citations)
+        ):
+            continue
+        index = path[1]
+        if citations[index] in citations[:index]:
+            duplicates.add(index)
+    return [{"op": "remove", "path": f"/citations/{index}"} for index in sorted(duplicates, reverse=True)[:MAX_REPAIR_OPERATIONS]]
 
 
 def _prototype_graph_link_repairs(candidate: dict[str, Any], issues: list[dict[str, Any]]) -> list[dict[str, Any]]:

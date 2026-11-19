@@ -145,6 +145,17 @@ export const runtimeArtifactDraftSchema: z.ZodType<RuntimeArtifactDraft, unknown
   runtimeArtifactDraftDocumentSchema,
   runtimeArtifactDraftDataSchema,
 ]).superRefine((draft, context) => {
+  const seen = new Set<string>();
+  for (const [index, citation] of draft.citations.entries()) {
+    if (seen.has(citation.id)) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["citations", index, "id"],
+        message: "Artifact citation IDs must be unique",
+      });
+    }
+    seen.add(citation.id);
+  }
   if (draft.kind !== "prd") return;
   refineRuntimePrdDraft(draft, context);
 });
