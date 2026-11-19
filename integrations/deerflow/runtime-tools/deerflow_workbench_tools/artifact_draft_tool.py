@@ -11,6 +11,7 @@ from deerflow.tools.types import Runtime
 
 from .artifact_draft_repair import (
     MAX_REPAIR_OPERATIONS,
+    prd_citation_mirror_repair,
     prd_envelope_duplicate_removals,
     resolve_artifact_draft_candidate,
     template_restore_operation,
@@ -206,6 +207,17 @@ def workbench_artifact_draft_publish(
             response["repairInstruction"] = (
                 "Copy citationRepair exactly as the repair argument. It restores verified "
                 "citation objects and their linked PRD citation IDs from the current retrieval. "
+                + response["repairInstruction"]
+            )
+        mirror_repair = prd_citation_mirror_repair(
+            draft, validation, getattr(runtime, "state", None), run_id, runtime_attempt_id,
+        )
+        if mirror_repair:
+            response["citationMirrorRepair"] = mirror_repair
+            response["repairInstruction"] = (
+                "Copy citationMirrorRepair exactly as the repair argument. It replaces only the differing "
+                "quote with the exact value already present in one mirror and verified by this attempt's "
+                "Knowledge tool. Follow the next ACK for any remaining citation validation. "
                 + response["repairInstruction"]
             )
         if template_operations:

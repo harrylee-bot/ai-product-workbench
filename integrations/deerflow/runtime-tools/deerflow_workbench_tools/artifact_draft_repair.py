@@ -191,6 +191,47 @@ def _unique_retrieved_source(citation: dict, retrieved: dict[str, list[dict]], *
     return next(iter(matches.values())) if len(matches) == 1 else None
 
 
+def prd_citation_mirror_repair(
+    candidate: dict[str, Any], validation: dict[str, Any], state: Any,
+    run_id: str, runtime_attempt_id: str,
+) -> dict[str, Any] | None:
+    """Offer a local quote correction proven by the current retrieval receipt."""
+    if (
+        candidate.get("kind") != "prd" or candidate.get("schemaVersion") != 3
+        or candidate.get("operation", {}).get("kind") != "create"
+        or validation["issues"] != [{
+            "code": "custom", "path": ["citations"],
+            "message": "PRD draft citations must exactly match content citations",
+        }]
+        or not _checksum(checksum := validation.get("candidateChecksum"))
+    ):
+        return None
+    outer, inner = candidate["citations"], candidate["content"]["citations"]
+    if len(outer) != len(inner):
+        return None
+    retrieved = _retrieved_citations(state, run_id, runtime_attempt_id)
+    operations = []
+    for index, (envelope, document) in enumerate(zip(outer, inner)):
+        if envelope == document:
+            continue
+        if {k: v for k, v in envelope.items() if k != "quote"} != {
+            k: v for k, v in document.items() if k != "quote"
+        }:
+            return None
+        source = _unique_retrieved_source(envelope, retrieved, exact_quote=False)
+        if source is None:
+            return None
+        quote = source.get("quote")
+        if not isinstance(quote, str) or not quote or quote not in (envelope["quote"], document["quote"]):
+            return None
+        prefix = "/content/citations" if quote == envelope["quote"] else "/citations"
+        operations.append({"op": "replace", "path": f"{prefix}/{index}/quote", "value": quote})
+    repair = {"baseCandidateChecksum": checksum, "operations": operations}
+    if 1 <= len(operations) <= MAX_REPAIR_OPERATIONS and len(_json(repair).encode("utf-8")) <= MAX_REPAIR_BYTES:
+        return repair
+    return None
+
+
 def validate_retrieved_citations(validation: dict[str, Any], state: Any, run_id: str,
                                 runtime_attempt_id: str, candidate: dict[str, Any], *,
                                 envelope: bool = False) -> dict[str, Any]:

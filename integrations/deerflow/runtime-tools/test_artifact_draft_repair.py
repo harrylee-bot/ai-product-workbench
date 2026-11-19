@@ -145,15 +145,50 @@ class ArtifactDraftRepairTests(unittest.TestCase):
             citations[0]["locator"]["heading"] = "Changed by the model"
         draft["content"]["sections"]["introduction"]["background"]["blocks"][0]["content"][-1]["citationId"] = alias
         draft["content"]["assumptions"][0]["citationIds"] = [alias]
+        draft["content"]["citations"][0]["quote"] = "A transcribed quote"
 
         ack, _ = self.publish("initial", draft=draft)
         self.assertFalse(ack["ok"])
+        mirror = ack["citationMirrorRepair"]
+        self.assertEqual(mirror, self.repair(ack, [{
+            "op": "replace", "path": "/content/citations/0/quote", "value": expected["citations"][0]["quote"],
+        }]))
+        ack, artifact = self.publish("mirror", repair=mirror)
+        self.assertFalse(ack["ok"])
+        self.assertNotIn("draft", artifact)
+        self.assertNotIn("citationMirrorRepair", ack)
         self.assertEqual(ack["citationRepair"]["operations"], [{"op": "restoreCitation", "path": "/citations/0"}])
         repaired, _ = self.publish("repair1", repair=ack["citationRepair"])
         self.assertTrue(repaired["ok"], repaired["issues"])
         self.assertEqual(latest_accepted_artifact_draft(
             self.runtime.state, run_id="run_1", runtime_attempt_id="attempt_1", artifact_index=0,
         ), expected)
+
+    def test_citation_mirror_requires_same_facts_and_exact_current_quote(self):
+        receipt = self.install_retrieval()
+        draft = copy.deepcopy(self.draft)
+        draft["citations"][0]["quote"] = "An unverified transcription."
+        for key in ("runtimeAttemptId", "contentSha256"):
+            with self.subTest(untrusted=key), patch.dict(receipt, {key: "unrelated"}):
+                content, _ = workbench_artifact_draft_publish.func(self.runtime, 0, draft=draft)
+                self.assertNotIn("citationMirrorRepair", json.loads(content))
+        for changed_field, value in (
+            ("quote", "A second unverified transcription."),
+            ("documentId", "a-different-source"),
+        ):
+            conflicting = copy.deepcopy(draft)
+            conflicting["content"]["citations"][0][changed_field] = value
+            with self.subTest(changed_field=changed_field):
+                content, _ = workbench_artifact_draft_publish.func(self.runtime, 0, draft=conflicting)
+                self.assertNotIn("citationMirrorRepair", json.loads(content))
+        ack, _ = self.publish("initial", draft=draft)
+        repair = ack["citationMirrorRepair"]
+        self.assertEqual(repair, self.repair(ack, [{
+            "op": "replace", "path": "/citations/0/quote", "value": self.draft["citations"][0]["quote"],
+        }]))
+        accepted, artifact = self.publish("mirror", repair=repair)
+        self.assertTrue(accepted["ok"])
+        self.assertEqual(artifact["draft"], self.draft)
 
     def test_citation_restore_refuses_a_different_quote_or_unrelated_path(self):
         self.install_retrieval()
