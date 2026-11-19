@@ -20,7 +20,7 @@ DRAFT_PROTOCOL = "workbench.runtime.artifact-draft.v1"
 ACK_PROTOCOL = "workbench.runtime.artifact-draft-ack.v1"
 MAX_REPAIR_OPERATIONS = 24
 MAX_REPAIR_BYTES = 65_536
-MAX_HISTORY_DRAFTS = 32
+MAX_HISTORY_DRAFTS = 48
 PRD_DIRECTORY_PATH = ("content", "tableOfContents", "entries")
 _ROOT_MOVE_SOURCES = frozenset({
     "degradation", "safetyBaseline", "introduction",
@@ -334,7 +334,7 @@ def _unexecuted_response(message: Any) -> bool:
             and content.startswith("Error:"))
 
 
-@lru_cache(maxsize=32)
+@lru_cache(maxsize=MAX_HISTORY_DRAFTS + 1)
 def _validate_history_json(run_id: str, runtime_attempt_id: str, body: str) -> dict[str, Any]:
     # Replays revisit the same earlier candidates for every incremental repair.
     # The bundled schema is immutable. The IDs keep reuse within one attempt.

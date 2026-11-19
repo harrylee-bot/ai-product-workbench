@@ -181,9 +181,9 @@ def workbench_artifact_draft_publish(
         if assembly:
             response["prdAssembly"] = assembly
             response["repairInstruction"] = (
-                "Continue assembling this PRD with separate, small repairs. Use one JSON Pointer "
-                "operation from prdAssembly.nextOperation with the latest candidateChecksum. Copy the "
-                "supplied value exactly. Otherwise write one small complete value at that path. "
+                "Use prdAssembly.nextOperation with the latest candidateChecksum. Copy its supplied value "
+                "exactly when present. Group small, related complete blocks or table rows into one repair "
+                "using ordered JSON Pointer operations. Wait for the ACK before starting the next repair. "
                 + assembly.get("instruction", "")
             )
         envelope_operations = prd_envelope_duplicate_removals(draft, validation["issues"])
