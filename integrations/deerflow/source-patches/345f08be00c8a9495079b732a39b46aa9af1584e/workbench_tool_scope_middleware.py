@@ -220,6 +220,7 @@ class WorkbenchToolScopeState(AgentState, total=False):
     # it would reset the current-turn stage and reference evidence.
     workbench_linked_draft_recovery: Annotated[dict[str, Any], PrivateStateAttr]
     workbench_prd_tool_json_retry: Annotated[dict[str, Any], PrivateStateAttr]
+    workbench_result_retry: Annotated[dict[str, str], PrivateStateAttr]
 
 
 def _ordinary_model_stop(message: Any) -> bool:
@@ -1720,6 +1721,35 @@ class WorkbenchToolScopeMiddleware(AgentMiddleware[AgentState]):
         rejected = _unrepaired_draft(request.state, self._run_id, self._runtime_attempt_id)
         if rejected is None or rejected["toolCallId"] != marker["toolCallId"]:
             return None
+        semantic_guidance = ""
+        if rejected["candidate"].get("kind") == "prd":
+            for issue in rejected["issues"]:
+                if not isinstance(issue, Mapping):
+                    continue
+                path, message = issue.get("path"), issue.get("message")
+                if (
+                    isinstance(path, list) and len(path) == 6
+                    and path[:4] == ["content", "sections", "safetyBaseline", "rows"]
+                    and path[-1] == "applicability"
+                    and message == "a safety row marked 否 requires a concrete remediation for the same safety topic in the requirement body"
+                ):
+                    semantic_guidance += (
+                        "For the reported safety row, recheck whether the existing requirement body supports its current "
+                        "applicability. A 否 row needs a concrete remediation for that same topic in the requirement "
+                        "body, not just in remarks. If the body instead supports 是 or 不涉及, correct applicability "
+                        "and remarks together. Do not invent a safety fact or new remediation. "
+                    )
+                if (
+                    path == ["content", "sections", "businessRequirements", "functionSections"]
+                    and message == "acceptance dimensions must be represented by distinct rows"
+                ):
+                    semantic_guidance += (
+                        "Use the latest ACK's acceptanceCoverage conflict to find the dimensions sharing too few "
+                        "rows. Split an existing combined check into separate verifiable rows for those dimensions, "
+                        "using only confirmed conditions and observable results. Preserve existing IDs and links, "
+                        "and update both directions for any new criterion ID. A mirrored table and typed check count "
+                        "once. Do not add unrelated cases. "
+                    )
         return (
             "<workbench_linked_draft_repair>\n"
             f"The Draft at artifact_index {marker['artifactIndex']} was rejected, and no complete Result exists. "
@@ -1729,65 +1759,92 @@ class WorkbenchToolScopeMiddleware(AgentMiddleware[AgentState]):
             "sections with move instead of rewriting them. Call repair alone in its tool-call batch. "
             "Do not repeat completed generation stages or read_file calls. read_file accepts only the four PRD "
             "references during collecting-prd-context; use their already-read contract, not a new reference read. "
-            "Do not ask the user to retry or end with a prose summary. After validation succeeds, continue the "
+            "Do not ask the user to retry or end with a prose summary. "
+            + semantic_guidance +
+            "After validation succeeds, continue the "
             "remaining linked workflow and submit both accepted ACKs' finalSubmissionArtifact references "
             "through workbench_runtime_result_submit without rewriting either Draft.\n"
             "</workbench_linked_draft_repair>"
         )
 
-    def _linked_result_reference_policy(self, request: ModelRequest) -> str | None:
-        """Offer only checksum-bound references after both causal Drafts are ready."""
-        if not self._linked_recovery_scope(request.runtime) or not self._prototype_transport_ready(request.state, request.runtime):
+    def _result_reference_candidate(self, state: Any, runtime: Any) -> dict[str, Any] | None:
+        if not self._prototype_transport_ready(state, runtime):
             return None
+        linked = self._linked_recovery_scope(runtime)
         stage_count, stage_invalid = _prototype_stage_progress(
-            request.state, self._run_id, self._runtime_attempt_id, allow_prd_stages=True,
+            state, self._run_id, self._runtime_attempt_id, allow_prd_stages=linked,
         )
-        prd, prd_index, prd_invalid = _successful_prd_draft(request.state, self._run_id, self._runtime_attempt_id)
-        prototype, prototype_index, prototype_invalid = _successful_prototype_draft(
-            request.state, self._run_id, self._runtime_attempt_id,
-        )
-        completed, completed_invalid = _completed_tool_calls(request.state)
-        if (
-            stage_invalid or stage_count != len(PROTOTYPE_STAGE_SEQUENCE)
-            or prd_invalid or prd is None or prd_index != 0
-            or prototype_invalid or prototype is None or prototype_index != 1
-            or completed_invalid or _has_pending_tool_call(request.state, name=RUNTIME_RESULT_TOOL_NAME)
-        ):
+        if stage_invalid or stage_count != len(PROTOTYPE_STAGE_SEQUENCE):
             return None
+        if any(_has_pending_tool_call(state, name=name)
+               for name in (RUNTIME_RESULT_TOOL_NAME, ARTIFACT_DRAFT_TOOL_NAME, *PROTOTYPE_ONLY_TOOL_NAMES)):
+            return None
+        completed, invalid = _completed_tool_calls(state)
+        if invalid:
+            return None
+        kinds = ["prd", "prototype"] if linked else ["prototype"]
+        drafts = []
         references = []
-        for index, draft in enumerate((prd, prototype)):
+        for index, kind in enumerate(kinds):
             receipts = [
-                _value(call["response"], "artifact") for call in completed
+                (call["response_index"], receipt)
+                for call in completed
                 if call["name"] == ARTIFACT_DRAFT_TOOL_NAME and _tool_succeeded(call["response"])
-                and _value(_value(call["response"], "artifact"), "ok") is True
-                and _value(_value(call["response"], "artifact"), "artifactIndex") == index
-                and _value(_value(call["response"], "artifact"), "draft") == draft
-                and _workbench_call_is_bound(
-                    _value(call["response"], "artifact"), call["id"], self._run_id, self._runtime_attempt_id,
-                )
+                and isinstance(receipt := _value(call["response"], "artifact"), Mapping)
+                and receipt.get("protocol") == _PRD_DRAFT_PROTOCOL and receipt.get("ok") is True
+                and receipt.get("artifactIndex") == index and call["args"].get("artifact_index") == index
+                and _value(receipt.get("draft"), "kind") == kind
+                and _workbench_call_is_bound(receipt, call["id"], self._run_id, self._runtime_attempt_id)
             ]
-            if len(receipts) != 1:
+            if not receipts or (linked and len(receipts) != 1):
                 return None
-            checksum = _value(receipts[0], "draftChecksum")
+            position, receipt = receipts[-1]
+            if kind == "prototype" and any(
+                call["name"] in _PROTOTYPE_ONLY_TOOL_NAME_SET and call["response_index"] > position
+                and _tool_succeeded(call["response"])
+                and _value(_value(call["response"], "artifact"), "ok") is True
+                for call in completed
+            ):
+                # A complete checkpoint must incorporate subsequent screen patches.
+                return None
+            checksum = receipt.get("draftChecksum")
             if not isinstance(checksum, str) or re.fullmatch(r"[0-9a-f]{64}", checksum) is None:
                 return None
+            drafts.append(receipt["draft"])
             references.append({"draftReference": {"artifactIndex": index, "draftChecksum": checksum}})
         candidate = {
             "protocol": _RUNTIME_RESULT_PROTOCOL,
-            "message": "需求文档与原型已生成。",
+            "message": "需求文档与原型已生成。" if linked else "原型已生成。",
             "artifacts": references,
         }
         try:
             from deerflow_workbench_tools.artifact_draft_repair import resolve_runtime_result_draft_references
 
             resolved, _normalizations = resolve_runtime_result_draft_references(
-                request.state, candidate, run_id=self._run_id,
-                runtime_attempt_id=self._runtime_attempt_id, requested_artifact_kinds=["prd", "prototype"],
+                state, candidate, run_id=self._run_id,
+                runtime_attempt_id=self._runtime_attempt_id, requested_artifact_kinds=kinds,
             )
         except (ValueError, RuntimeError, ImportError):
             return None
-        if not isinstance(resolved, Mapping) or resolved.get("artifacts") != [prd, prototype]:
+        if not isinstance(resolved, Mapping) or resolved.get("artifacts") != drafts:
             return None
+        return candidate
+
+    def _result_reference_policy(self, request: ModelRequest) -> str | None:
+        candidate = self._result_reference_candidate(request.state, request.runtime)
+        if candidate is None:
+            return None
+        if not self._linked_draft_recovery_enabled:
+            return (
+                "<workbench_prototype_result_submission>\n"
+                "The latest Prototype checkpoint is accepted. Its checksum is for Result submission, "
+                "and cannot be used for repair. If the checkpoint covers the confirmed interactions, "
+                "call workbench_runtime_result_submit alone using the exact reference below. "
+                "For unfinished interactions, use screen patches and publish a new complete checkpoint "
+                "before submitting. A prose response does not submit the result.\n"
+                + json.dumps({"candidate": candidate}, ensure_ascii=False, separators=(",", ":"))
+                + "\n</workbench_prototype_result_submission>"
+            )
         return (
             "<workbench_linked_result_submission>\n"
             "Both exact Drafts are accepted in this Run. Call workbench_runtime_result_submit alone next "
@@ -1797,6 +1854,31 @@ class WorkbenchToolScopeMiddleware(AgentMiddleware[AgentState]):
             + json.dumps({"candidate": candidate}, ensure_ascii=False, separators=(",", ":"))
             + "\n</workbench_linked_result_submission>"
         )
+
+    def _recover_result_stop(self, state: AgentState, runtime: Any) -> dict[str, Any] | None:
+        if (
+            not self._prototype_enabled or state.get("jump_to") is not None
+            or state.get("__interrupt__") or state.get("interrupts")
+            or _value(_value(runtime, "control"), "drain_requested")
+        ):
+            return None
+        messages = _state_messages(state)
+        task_id = _value(_value(runtime, "execution_info"), "task_id")
+        if not messages or not _ordinary_model_stop(messages[-1]) or not isinstance(task_id, str) or not task_id:
+            return None
+        marker = state.get("workbench_result_retry")
+        if isinstance(marker, Mapping) and (
+            marker.get("runId"), marker.get("runtimeAttemptId")
+        ) == (self._run_id, self._runtime_attempt_id):
+            return {"jump_to": "model"} if marker.get("taskId") == task_id else None
+        if self._result_reference_candidate(state, runtime) is None:
+            return None
+        return {
+            "jump_to": "model",
+            "workbench_result_retry": {
+                "runId": self._run_id, "runtimeAttemptId": self._runtime_attempt_id, "taskId": task_id,
+            },
+        }
 
     def _filter_tools(self, request: ModelRequest) -> ModelRequest:
         visible = []
@@ -1846,7 +1928,7 @@ class WorkbenchToolScopeMiddleware(AgentMiddleware[AgentState]):
             system_text = system_message.text if system_message is not None else ""
             if transport_context not in system_text:
                 overrides["system_message"] = SystemMessage(content=f"{system_text.rstrip()}\n\n{transport_context}".strip())
-        result_policy = self._linked_result_reference_policy(request)
+        result_policy = self._result_reference_policy(request)
         if result_policy is not None:
             system_message = overrides.get("system_message", request.system_message)
             system_text = system_message.text if system_message is not None else ""
@@ -2015,6 +2097,13 @@ class WorkbenchToolScopeMiddleware(AgentMiddleware[AgentState]):
                 request.state, request.tool_call, self._run_id, self._runtime_attempt_id,
             )
         except (ValueError, RuntimeError, ImportError) as error:
+            if str(error) == "WORKBENCH_ARTIFACT_DRAFT_REPAIR_DRAFT_ALREADY_ACCEPTED":
+                return _error_tool_message(
+                    request, "WORKBENCH_ARTIFACT_DRAFT_ALREADY_ACCEPTED",
+                    "The current checkpoint already passed validation. Reuse its accepted ACK's "
+                    "finalSubmissionArtifact in workbench_runtime_result_submit when the requested "
+                    "work is complete. A repair requires a rejected candidate.",
+                )
             try:
                 from deerflow_workbench_tools.artifact_draft_repair import repair_error_feedback
 
@@ -2456,7 +2545,11 @@ class WorkbenchToolScopeMiddleware(AgentMiddleware[AgentState]):
     def after_model(self, state: AgentState, runtime: Any = None) -> dict[str, Any] | None:
         if self._workbench_run_enabled and _contains_llm_error_fallback(state.get("messages")):
             return {"jump_to": "end"}
-        return self._recover_draft_tool_json(state, runtime) or self._recover_linked_draft_stop(state, runtime)
+        return (
+            self._recover_draft_tool_json(state, runtime)
+            or self._recover_linked_draft_stop(state, runtime)
+            or self._recover_result_stop(state, runtime)
+        )
 
     @override
     def wrap_tool_call(
@@ -2523,7 +2616,11 @@ class WorkbenchToolScopeMiddleware(AgentMiddleware[AgentState]):
     ) -> dict[str, Any] | None:
         if self._workbench_run_enabled and _contains_llm_error_fallback(state.get("messages")):
             return {"jump_to": "end"}
-        return self._recover_draft_tool_json(state, runtime) or self._recover_linked_draft_stop(state, runtime)
+        return (
+            self._recover_draft_tool_json(state, runtime)
+            or self._recover_linked_draft_stop(state, runtime)
+            or self._recover_result_stop(state, runtime)
+        )
 
     @override
     async def awrap_tool_call(

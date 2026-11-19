@@ -232,9 +232,12 @@ test("Web production type checking excludes test-only workspaces while full type
 test("the Web and CI builds pin native dependencies for production x64 and the ARM64 runner", async () => {
   const manifest = JSON.parse(await readFile(path.join(root, "package.json"), "utf8"));
   const lockfile = JSON.parse(await readFile(path.join(root, "package-lock.json"), "utf8"));
+  const web = JSON.parse(await readFile(path.join(root, "apps/web/package.json"), "utf8"));
+  const nextVersion = web.dependencies.next;
+  assert.match(nextVersion, /^\d+\.\d+\.\d+$/u, "Next.js must be pinned to an exact release");
   const nativePins = {
     "@esbuild/linux-x64": "0.28.1",
-    "@next/swc-linux-x64-musl": "16.4.1",
+    "@next/swc-linux-x64-musl": nextVersion,
     "@rolldown/binding-linux-x64-gnu": "1.1.4",
     "@rolldown/binding-linux-x64-musl": "1.1.4",
     "@tailwindcss/oxide-linux-arm64-gnu": "4.3.1",

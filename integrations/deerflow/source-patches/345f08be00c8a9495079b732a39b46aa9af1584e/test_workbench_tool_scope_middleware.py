@@ -2574,6 +2574,43 @@ class LinkedFinalReferenceTests(unittest.IsolatedAsyncioTestCase):
                 else:
                     self.assertNotIn(self.marker, scoped.system_message.text)
 
+    def test_prototype_checkpoint_guides_explicit_submission_and_allows_one_redrive(self):
+        from deerflow_workbench_tools import artifact_draft_repair
+
+        for changed_after_checkpoint in (False, True):
+            with self.subTest(changed_after_checkpoint=changed_after_checkpoint):
+                request, drafts, candidate = self.ready()
+                messages = request.state["messages"]
+                messages[:] = messages[:1] + messages[-10:]
+                messages[-2]["tool_calls"][0]["args"]["artifact_index"] = 0
+                messages[-1]["artifact"]["artifactIndex"] = 0
+                request.runtime.context["workbench"]["requestedArtifactKinds"] = ["prototype"]
+                request.runtime.execution_info = types.SimpleNamespace(task_id="first-stop")
+                if changed_after_checkpoint:
+                    name = "workbench_prototype_patch_publish"
+                    append_tool_batch(messages, [call(name, "new-patch")], [
+                        tool_message(name, "new-patch", artifact={"ok": True}),
+                    ])
+                middleware = WorkbenchToolScopeMiddleware(None, ["prototype"], run_scope=("run-auto", "attempt-auto"))
+                marker = "<workbench_prototype_result_submission>"
+                with patch.object(artifact_draft_repair, "resolve_runtime_result_draft_references",
+                                  return_value=({**candidate, "artifacts": drafts[1:]}, [])):
+                    scoped = middleware.wrap_model_call(request, lambda actual: actual)
+                    self.assertEqual(marker in scoped.system_message.text, not changed_after_checkpoint)
+                    self.assertIn("workbench_prototype_patch_publish", middleware_module.PROTOTYPE_ONLY_TOOL_NAMES)
+                    messages.append({"type": "ai", "id": "stop", "content": "Done", "tool_calls": [],
+                                     "response_metadata": {"finish_reason": "stop"}})
+                    update = middleware.after_model(request.state, request.runtime)
+                    if changed_after_checkpoint:
+                        self.assertIsNone(update)
+                        continue
+                    self.assertEqual(update["jump_to"], "model")
+                    self.assertNotIn("messages", update)
+                    request.state["workbench_result_retry"] = update["workbench_result_retry"]
+                    self.assertEqual(middleware.after_model(request.state, request.runtime), {"jump_to": "model"})
+                    request.runtime.execution_info.task_id = "second-stop"
+                    self.assertIsNone(middleware.after_model(request.state, request.runtime))
+
 
 class LinkedDraftRecoveryTests(unittest.IsolatedAsyncioTestCase):
     scope = {"runId": "run-auto", "runtimeAttemptId": "attempt-auto", "requestedArtifactKinds": ["prd", "prototype"]}
