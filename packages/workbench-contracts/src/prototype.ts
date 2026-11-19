@@ -551,6 +551,7 @@ export const prototypeNavigateActionSchema = z.object({
   ...actionBaseShape,
   kind: z.literal("navigate"),
   targetScreenId: artifactIrIdSchema,
+  resetVariablePaths: z.array(prototypeRuntimePathSchema).min(1).max(32).optional(),
 }).strict();
 
 export const prototypeSetStateActionSchema = z.object({
@@ -1139,7 +1140,20 @@ function refinePrototypeDocument(
     if (["change", "focus", "blur"].includes(action.event) && node?.kind !== "input") {
       addIssue(context, ["actions", actionIndex, "event"], `${action.event} actions require an input node`);
     }
-    if (action.kind === "navigate" && !screens.has(action.targetScreenId)) addIssue(context, ["actions", actionIndex, "targetScreenId"], `unknown screen: ${action.targetScreenId}`);
+    if (action.kind === "navigate") {
+      if (!screens.has(action.targetScreenId)) {
+        addIssue(context, ["actions", actionIndex, "targetScreenId"], `unknown screen: ${action.targetScreenId}`);
+      }
+      const resetPaths = action.resetVariablePaths ?? [];
+      for (const duplicate of duplicateValues(resetPaths)) {
+        addIssue(context, ["actions", actionIndex, "resetVariablePaths"], `duplicate reset variable: ${duplicate}`);
+      }
+      for (const [index, path] of resetPaths.entries()) {
+        if (!variables.has(path)) {
+          addIssue(context, ["actions", actionIndex, "resetVariablePaths", index], `unknown variable: ${path}`);
+        }
+      }
+    }
     if (action.kind === "setState") {
       const state = states.get(action.targetStateId);
       if (!state) addIssue(context, ["actions", actionIndex, "targetStateId"], `unknown state: ${action.targetStateId}`);

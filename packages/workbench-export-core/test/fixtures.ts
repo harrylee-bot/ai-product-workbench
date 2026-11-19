@@ -354,6 +354,30 @@ export function interactiveExportRequest(
   return request;
 }
 
+export function navigationResetExportRequest(format: ExportBuildRequest["format"]): ExportBuildRequest {
+  const request = interactiveExportRequest(format);
+  const document = request.source.artifacts[0]!.content as PrototypeDocument;
+  const destination = document.nodes.find((node) => node.id === "root-success");
+  if (destination?.kind !== "frame") throw new Error("Navigation fixture destination is missing");
+  for (const [id, label, y] of [["back-preserve", "Keep filters", 70], ["back-reset", "Reset filters", 116]] as const) {
+    const node = base(id, "screen-success", destination.id, 180, 36);
+    const actionId = `action-${id}`;
+    document.nodes.push({
+      ...node, layout: { ...node.layout, y: literal(y) }, kind: "button", label,
+      buttonType: "button", childIds: [], disabled: false, actionIds: [actionId],
+    });
+    destination.childIds.push(id);
+    document.actions.push({
+      id: actionId, nodeId: id, event: "click", kind: "navigate", targetScreenId: "screen-home",
+      ...(id === "back-reset" ? { resetVariablePaths: ["form.email", "form.plan"] } : {}),
+    });
+  }
+  const checksum = createHash("sha256").update(canonicalJson(document)).digest("hex");
+  request.source.artifacts[0]!.checksum = checksum;
+  request.source.manifest.artifacts[0]!.checksum = checksum;
+  return request;
+}
+
 export function numericExpressionExportRequest(
   format: ExportBuildRequest["format"] = "html",
 ): ExportBuildRequest {

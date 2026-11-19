@@ -3187,6 +3187,7 @@ export interface components {
              */
             kind: "navigate";
             targetScreenId: string;
+            resetVariablePaths?: string[];
         };
         /**
          * Format: uri

@@ -95,7 +95,7 @@ PROTOTYPE_REFERENCE_FILES = (
     ),
     (
         "/mnt/skills/public/workbench/references/runtime-result-contract.md",
-        "864f37398e06e59db8f8f7497eaf297da963d1ce75e0efe1208e660da25bdcbd",
+        "919b004a0a9acd107529c74635f3ca1397946a72352c1ee7551d4ce407f0d41d",
     ),
 )
 _PROTOTYPE_REFERENCE_DIRECTORY = Path("/app/skills/public/workbench/references")
@@ -143,6 +143,17 @@ def _prototype_transport_reference_context() -> str:
         "accepted content without rewriting it. The example's single-Prototype Result does not "
         "replace that linked contract.\n"
         + "\n".join(references)
+        + "\n<confirmed_prototype_interaction>\n"
+        "Before the first Prototype draft, map each confirmed interaction to its concrete screen, control, "
+        "input variable, visibility binding or action. Use the exact approved control labels, placeholder text, "
+        "and named example data when the requirement specifies them. Build the actual initial view with every "
+        "confirmed example row. If each row opens details, give each row its own accessible control and bind "
+        "its action to the required destination and selection. A filter form without the result rows and "
+        "their row-level visibility bindings is unfinished. Exercise the default data, filter and search "
+        "separately and together, the empty state, and the detail return behavior defined by the baseline. "
+        "Keep required labels and sample records in the rendered nodes. Check the complete confirmed behavior "
+        "before accepting draftReference as ready to submit, including when the schema tool accepts it.\n"
+        "</confirmed_prototype_interaction>"
         + "\n</workbench_prototype_transport_context>"
     )
 

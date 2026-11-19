@@ -978,6 +978,11 @@ class PrototypeTransportContextTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("ignore their generic instructions to read files", text)
         self.assertIn("keep the accepted PRD immutable", text)
         self.assertIn("both exact accepted Drafts in PRD/Prototype order", text)
+        interaction = text.split("<confirmed_prototype_interaction>", 1)[1].split("</confirmed_prototype_interaction>", 1)[0]
+        self.assertEqual(text.count("<confirmed_prototype_interaction>"), 1)
+        for requirement in ("exact approved control labels", "confirmed example row", "its own accessible control",
+                            "row-level visibility bindings", "detail return behavior"):
+            self.assertIn(requirement, interaction)
 
     def test_exact_prototype_injects_only_system_context_without_expanding_capabilities(self):
         request = self.request(["prototype"])

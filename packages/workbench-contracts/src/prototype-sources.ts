@@ -116,6 +116,10 @@ export function projectPrototypeSourceScreens(
         ? prototypeExpressionVariablePaths(binding.source.expression)
         : []
   )));
+  for (const action of actions) {
+    if (action.kind !== "navigate") continue;
+    for (const path of action.resetVariablePaths ?? []) variablePaths.add(path);
+  }
   const variables = document.variables
     .filter((variable) => variablePaths.has(variable.path))
     .sort((left, right) => compareText(left.path, right.path));

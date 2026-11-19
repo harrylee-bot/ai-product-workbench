@@ -99,6 +99,8 @@ For search and category filtering of a finite demonstration list, use a row-leve
 
 Place a `buttonType:"reset"` button inside that same explicit form to clear the input variables back to their declared initial values. If an existing visual state also needs resetting, it may additionally use a `setState` action; a state switch alone does not clear inputs. A search submit action may report input values with `successStateId:null`, but must not force a fixed result/empty state regardless of the submitted values. If there are no visual states, use `states:[]` and `initialStateId:null`; do not create states with empty `overrides`.
 
+When the accepted requirement resets inputs on a specific transition, put their exact declared variable paths in that `navigate` action's `resetVariablePaths`. For example, a return-to-list action may reset `["form.category","form.query","form.page"]` if those paths are declared and their initial values are the required defaults. The destination opens using the reset values and recomputes its result and empty-state bindings. Omit `resetVariablePaths` on other transitions to preserve their current values.
+
 Before declaring an interactive filter complete, verify a matching value, a different category, combined conditions, an unmatched value, and reset against the actual predicates. Fixed demonstration state changes do not satisfy arbitrary input filtering.
 
 ## Revise An Artifact

@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs";
-import type { PrototypeDocument } from "@workbench/workbench-contracts";
+import { projectPrototypeSourceScreens, prototypeDocumentSchema, type PrototypeDocument } from "@workbench/workbench-contracts";
 import { unzipSync } from "fflate";
 import { JSDOM } from "jsdom";
 import { chromium, type Page } from "playwright-core";
@@ -7,7 +7,7 @@ import { describe, expect, it } from "vitest";
 
 import { buildExport, renderExportHtml } from "../src/index.js";
 import type { ExportBuildRequest } from "../src/types.js";
-import { catalogueExportRequest, interactiveExportRequest, numericExpressionExportRequest } from "./fixtures.js";
+import { catalogueExportRequest, interactiveExportRequest, navigationResetExportRequest, numericExpressionExportRequest } from "./fixtures.js";
 
 const executablePath = process.env.WORKBENCH_EXPORT_CHROMIUM_PATH ?? chromium.executablePath();
 const chromiumAvailable = existsSync(executablePath);
@@ -64,7 +64,43 @@ describe("computed Prototype export bindings", () => {
     }
   });
 
+  it("requires unique, declared reset paths and retains them in a selected source screen", () => {
+    const artifact = navigationResetExportRequest("html").source.artifacts[0]!;
+    const document = artifact.content as PrototypeDocument;
+    const projection = projectPrototypeSourceScreens(document, ["screen-success"], artifact.checksum);
+    expect(projection.variables.map((variable) => variable.path)).toEqual(["form.email", "form.plan"]);
+    const action = document.actions.find((candidate) => candidate.id === "action-back-reset");
+    if (action?.kind !== "navigate") throw new Error("Navigation fixture action is missing");
+    action.resetVariablePaths = ["form.email", "form.email", "form.missing"];
+    const validated = prototypeDocumentSchema.safeParse(document);
+    expect(validated.success).toBe(false);
+    expect(validated.error?.issues.map(({ path, message }) => ({ path: path.at(-1), message }))).toEqual([
+      { path: "resetVariablePaths", message: "duplicate reset variable: form.email" },
+      { path: 2, message: "unknown variable: form.missing" },
+    ]);
+  });
+
   for (const format of ["html", "react"] as const) {
+    it.runIf(chromiumAvailable)(`resets only the specified controls on return in the ${format} export`, async () => {
+      await withOfflineExportPage(navigationResetExportRequest(format), async (page) => {
+        const node = (id: string) => page.locator(`[data-wb-node="${id}"]`);
+        await node("input-email").fill("filtered@example.test");
+        await node("input-plan").selectOption("basic");
+        await node("input-notes").fill("Preserve this note");
+        await node("button-navigate").click();
+        await node("back-preserve").click();
+        await expect.poll(() => node("input-email").inputValue()).toBe("filtered@example.test");
+        expect(await node("input-plan").inputValue()).toBe("basic");
+
+        await node("button-navigate").click();
+        await node("back-reset").click();
+        await expect.poll(() => node("input-email").inputValue()).toBe("initial@example.test");
+        expect(await node("input-plan").inputValue()).toBe("pro");
+        expect(await node("input-notes").inputValue()).toBe("Preserve this note");
+        expect(await node("text-mirror").textContent()).toBe("initial@example.test");
+      });
+    }, 30_000);
+
     it.runIf(chromiumAvailable)(`filters, combines conditions, shows empty results and resets in the offline ${format} export`, async () => {
       await withOfflineExportPage(catalogueExportRequest(format), async (page) => {
         const node = (id: string) => page.locator(`[data-wb-node="${id}"]`);

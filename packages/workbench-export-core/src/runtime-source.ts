@@ -157,12 +157,15 @@ export const browserRuntimeSource = String.raw`(() => {
       applyBindings(null);
     };
 
-    const showScreenNow = async (screenId) => {
+    const showScreenNow = async (screenId, resetVariablePaths) => {
       const next = screens.get(screenId);
       if (!next) return;
       const previousId = activeScreenId;
       if (previousId && previousId !== screenId) {
         await runMotions("exit", { screenId: previousId });
+      }
+      for (const path of resetVariablePaths) {
+        if (initialVariables.has(path)) variables.set(path, initialVariables.get(path));
       }
       for (const screen of host.querySelectorAll("[data-wb-screen]")) {
         screen.hidden = screen.dataset.wbScreen !== screenId;
@@ -179,8 +182,8 @@ export const browserRuntimeSource = String.raw`(() => {
       await runMotions("enter", { screenId });
     };
 
-    const showScreen = (screenId) => {
-      transition = transition.catch(() => {}).then(() => showScreenNow(screenId));
+    const showScreen = (screenId, resetVariablePaths = []) => {
+      transition = transition.catch(() => {}).then(() => showScreenNow(screenId, resetVariablePaths));
       return transition;
     };
 
@@ -244,7 +247,7 @@ export const browserRuntimeSource = String.raw`(() => {
         if (action.successStateId) await applyState(action.successStateId);
         return;
       }
-      if (action.kind === "navigate") await showScreen(action.targetScreenId);
+      if (action.kind === "navigate") await showScreen(action.targetScreenId, action.resetVariablePaths);
       if (action.kind === "setState") await applyState(action.targetStateId);
     };
 
