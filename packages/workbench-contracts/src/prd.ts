@@ -451,6 +451,15 @@ function hasExplicitNoFunctionalChangeEvidence(segments: readonly string[]): boo
   ));
 }
 
+const prdPublicAudiencePositivePattern = /(?:面向|开放给|提供给)\s*(?:(?:所有|全部|全体|已登录|未登录)\s*的?\s*)?(?:公众用户|公众|外部用户|游客|未登录用户|消费者|个人用户|C端用户)|支持\s*(?:已登录\s*的?\s*)?(?:公众用户|公众|外部用户|游客|未登录用户|消费者|个人用户|C端用户)(?:可|可以|能够|能|通过|从|在|访问|使用|查看|进入|配置)|(?:目标用户|适用用户|服务对象)\s*(?:是|为|包括|包含|[:：])\s*(?:(?:所有|全部|全体|已登录|未登录)\s*的?\s*)?(?:公众用户|公众|外部用户|游客|未登录用户|消费者|个人用户|C端用户)|(?:公众用户|游客|未登录用户|消费者|个人用户|C端用户)(?!可(?:以)?[由被]|能(?:够)?[由被])(?:(?:可|可以|能够|能|通过|从|在).{0,16}(?:访问|使用|查看|进入|配置)|(?:访问|使用|查看|进入|配置))/iu;
+const prdPublicAudienceNegativePattern = /(?:不面向|非公众|不对公众|仅限?(?:内部|员工|登录业务用户))|(?:不属于|不包含|不包括|不涉及|不涵盖)[^，,；;]{0,20}(?:公众用户|公众|外部用户|游客|未登录用户|消费者|个人用户|C端用户)|(?:不再|尚未)\s*(?:面向|开放给|提供给).{0,16}(?:公众用户|公众|外部用户|游客|未登录用户|消费者|个人用户|C端用户)|(?:不再|尚不|暂不|没有|不|未)支持.{0,16}(?:公众用户|公众|外部用户|游客|未登录用户|消费者|个人用户|C端用户)/u;
+
+function hasAffirmativePublicAudienceEvidence(segment: string): boolean {
+  return segment.split(/[，,；;]|但(?:是)?|而(?:是)?|同时|并且|且/u).some((clause) => (
+    prdPublicAudiencePositivePattern.test(clause) && !prdPublicAudienceNegativePattern.test(clause)
+  ));
+}
+
 const prdSafetyEvidenceRules: Record<number, PrdEvidenceRule> = {
   1: {
     positive: prdFunctionalChangePositivePattern,
@@ -458,8 +467,9 @@ const prdSafetyEvidenceRules: Record<number, PrdEvidenceRule> = {
     isAffirmative: hasAffirmativeFunctionalChangeEvidence,
   },
   2: {
-    positive: /(?:面向|开放给|提供给)\s*(?:(?:所有|全部|全体|已登录|未登录)\s*的?\s*)?(?:公众用户|公众|外部用户|游客|未登录用户|消费者|个人用户|C端用户)|支持\s*(?:已登录\s*的?\s*)?(?:公众用户|公众|外部用户|游客|未登录用户|消费者|个人用户|C端用户)(?:可|可以|能够|能|通过|从|在|访问|使用|查看|进入|配置)|(?:目标用户|适用用户|服务对象)\s*(?:是|为|包括|包含|[:：])\s*(?:(?:所有|全部|全体|已登录|未登录)\s*的?\s*)?(?:公众用户|公众|外部用户|游客|未登录用户|消费者|个人用户|C端用户)|(?:公众用户|游客|未登录用户|消费者|个人用户|C端用户)(?!可(?:以)?[由被]|能(?:够)?[由被])(?:(?:可|可以|能够|能|通过|从|在).{0,16}(?:访问|使用|查看|进入|配置)|(?:访问|使用|查看|进入|配置))/iu,
-    negative: /(?:不面向|非公众|不对公众|仅限?(?:内部|员工|登录业务用户))|(?:不再|尚未)\s*(?:面向|开放给|提供给).{0,16}(?:公众用户|公众|外部用户|游客|未登录用户|消费者|个人用户|C端用户)|(?:不再|尚不|暂不|没有|不|未)支持.{0,16}(?:公众用户|公众|外部用户|游客|未登录用户|消费者|个人用户|C端用户)/u,
+    positive: prdPublicAudiencePositivePattern,
+    negative: prdPublicAudienceNegativePattern,
+    isAffirmative: hasAffirmativePublicAudienceEvidence,
   },
   3: {
     positive: /(?:新增|开通|开放|暴露).{0,12}(?:公网|互联网|外网)(?:入口|域名|地址|服务|页面|接口|暴露面)?/u,
