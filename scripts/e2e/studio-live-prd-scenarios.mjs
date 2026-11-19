@@ -342,7 +342,6 @@ export async function runStudioPrd({
     outDir,
     project,
     artifact,
-    post,
     query,
     waitUntil,
     prd,

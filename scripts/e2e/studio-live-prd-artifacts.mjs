@@ -21,7 +21,6 @@ export async function publishPrd({
   outDir,
   project,
   artifact,
-  post,
   query,
   waitUntil,
   prd,
@@ -32,7 +31,14 @@ export async function publishPrd({
     "Publish the generated PRD in Studio, download its DOCX and PDF, and render every page",
   );
   await page.goto(webOrigin + "/studio/" + project + "?view=publishing");
-  const created = post(/\/releases$/);
+  const post = (action) =>
+    page.waitForResponse(
+      (reply) =>
+        reply.request().method() === "POST" &&
+        new URL(reply.url()).pathname === `/api/v1/projects/${project}/${action}`,
+      { timeout: 120000 },
+    );
+  const created = post("releases");
   await page.getByRole("button", { name: "创建项目发布", exact: true }).click();
   const response = await created;
   assert.ok(response.ok(), "Publish HTTP " + response.status());
@@ -41,6 +47,7 @@ export async function publishPrd({
     release.artifactPins.some(
       (pin) =>
         pin.artifactVersionId === artifact.id &&
+        pin.artifactId === artifact.artifact_id &&
         pin.checksum === artifact.checksum,
     ),
   );
@@ -49,7 +56,7 @@ export async function publishPrd({
   const render = path.join(outDir, "render");
   await mkdir(render, { recursive: true });
   for (const format of ["docx", "pdf"]) {
-    const queued = post(/\/exports$/);
+    const queued = post("exports");
     await page
       .getByRole("article", { name: "发布 " + release.version, exact: true })
       .getByRole("button", {
@@ -60,10 +67,10 @@ export async function publishPrd({
     const queuedResponse = await queued;
     assert.ok(queuedResponse.ok(), "Export HTTP " + queuedResponse.status());
     const job = await queuedResponse.json();
-    assert.equal(
-      queuedResponse.request().postDataJSON().selection.artifactVersionId,
-      artifact.id,
-    );
+    const request = queuedResponse.request().postDataJSON();
+    assert.equal(request.releaseId, release.id);
+    assert.equal(request.selection.artifactId, artifact.artifact_id);
+    assert.equal(request.selection.artifactVersionId, artifact.id);
     const row = await waitUntil(
       async () => {
         const [r] = await query(

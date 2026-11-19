@@ -2,8 +2,6 @@ import assert from "node:assert/strict";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { readFile, writeFile, mkdir, mkdtemp, rm, stat } from "node:fs/promises";
 import http from "node:http";
-import { execFileSync } from "node:child_process";
-import { readFileSync } from "node:fs";
 import path from "node:path";
 import { tmpdir } from "node:os";
 import { unzipSync } from "fflate";
@@ -419,77 +417,21 @@ export async function runStudioLiveScenarios({ page, browser, webOrigin, outDir,
 
   async function verifyDocumentDelivery(projectId, scenario) {
     const { label, outputs } = scenario;
-    step(`${label}: publish exact PRD version and download actual DOCX/PDF`);
-    await page.goto(`${webOrigin}/studio/${projectId}?view=publishing`);
-    const created = page.waitForResponse(r => r.request().method() === "POST" && new URL(r.url()).pathname === `/api/v1/projects/${projectId}/releases`);
-    await page.getByRole("button", { name: "创建项目发布", exact: true }).click();
-    const releaseResponse = await created;
-    assert.equal(releaseResponse.status(), 201);
-    const release = await releaseResponse.json();
     const readyPrd = outputs.find(output => output.kind === "prd" && output.status === "ready");
     assert.ok(readyPrd, "The generated PRD must be ready before delivery");
-    const artifactPin = release.artifactPins.find(pin => pin.artifactVersionId === readyPrd.id);
-    assert.equal(artifactPin?.artifactId, readyPrd.artifact_id);
-    scenario.documentRelease = { id: release.id, artifactVersionId: artifactPin.artifactVersionId };
-    const releaseCard = page.getByRole("article", { name: `发布 ${release.version}`, exact: true });
-    const files = [];
-    for (const format of ["docx", "pdf"]) {
-      const reply = page.waitForResponse(r => r.request().method() === "POST" && new URL(r.url()).pathname === `/api/v1/projects/${projectId}/exports`);
-      await releaseCard.getByRole("button", { name: `导出 ${format.toUpperCase()}`, exact: true }).click();
-      const response = await reply;
-      const request = response.request().postDataJSON();
-      assert.equal(request.releaseId, release.id);
-      assert.equal(request.selection.artifactVersionId, readyPrd.id);
-      const job = await response.json();
-      const row = await waitUntil(async () => {
-        const [record] = await query("SELECT e.status,e.failure_code,b.sha256,b.byte_size FROM workbench.export_jobs e LEFT JOIN workbench.blobs b ON b.id=e.output_blob_id WHERE e.id=$1", [job.id]);
-        if (record?.status === "failed") throw Object.assign(new Error(`${format} failed: ${record.failure_code}`), { fatal: true });
-        return record?.status === "succeeded" ? record : false;
-      }, `${label} ${format} export`, 180000, 1000);
-      const downloaded = page.waitForEvent("download");
-      await page.getByRole("article", { name: `导出 ${job.id}`, exact: true }).getByRole("button", { name: "下载并校验", exact: true }).click();
-      const target = path.join(outDir, `${label}.${format}`); await (await downloaded).saveAs(target);
-      const bytes = await readFile(target); assert.equal(bytes.length, Number(row.byte_size)); assert.equal(digest(bytes), row.sha256);
-      if (format === "docx") {
-        const document = unzipSync(bytes)["word/document.xml"]; assert.ok(document); assert.match(Buffer.from(document).toString("utf8"), /渠道|活动/);
-        const officeBin = process.env.WORKBENCH_STUDIO_LIVE_OFFICE_BIN;
-        assert.ok(officeBin, "Provide LibreOffice/soffice for DOCX visual rendering");
-        const renderDir = await mkdtemp(path.join(tmpdir(), "studio-docx-render-"));
-        try {
-          execFileSync(officeBin, ["--headless", "--convert-to", "pdf", "--outdir", renderDir, target], { stdio: "pipe" });
-          const renderedPdf = path.join(renderDir, `${label}.pdf`);
-          const renderedBytes = await readFile(renderedPdf);
-          const renderedCopy = path.join(outDir, `${label}.docx-rendered.pdf`);
-          await writeFile(renderedCopy, renderedBytes);
-          files.push({ format: "docx-rendered-pdf", ...renderPdfEvidence(renderedCopy, outDir, `${label}-docx`) });
-        } finally {
-          await rm(renderDir, { recursive: true, force: true });
-        }
-      } else {
-        assert.equal(bytes.subarray(0, 5).toString(), "%PDF-");
-        files.push({ format, path: target, sha256: digest(bytes), byteSize: bytes.length, ...renderPdfEvidence(target, outDir, `${label}-pdf`) });
-      }
-      if (format === "docx") files.push({ format, path: target, sha256: digest(bytes), byteSize: bytes.length });
-    }
-    evidence[`${label}DocumentDownloads`] = files;
-    await checkpoint();
+    const [artifact] = await query(
+      "SELECT id,artifact_id,checksum FROM workbench.artifact_versions WHERE id=$1 AND artifact_id=$2",
+      [readyPrd.id, readyPrd.artifact_id],
+    );
+    assert.ok(artifact?.checksum);
+    const { publishPrd } = await import("./studio-live-prd-artifacts.mjs");
+    const prd = { artifactVersionId: artifact.id, checksum: artifact.checksum };
+    scenario.documentDelivery = prd;
+    await publishPrd({
+      page, webOrigin, outDir: path.join(outDir, `${label}-document`),
+      project: projectId, artifact, query, waitUntil, prd, step, checkpoint,
+    });
   }
-}
-
-function renderPdfEvidence(pdfPath, outDir, prefix) {
-  const pdfInfoBin = process.env.WORKBENCH_STUDIO_LIVE_PDFINFO_BIN ?? "pdfinfo";
-  const pdfToPpmBin = process.env.WORKBENCH_STUDIO_LIVE_PDFTOPPM_BIN ?? "pdftoppm";
-  const info = execFileSync(pdfInfoBin, [pdfPath], { encoding: "utf8" });
-  const pageMatch = info.match(/^Pages:\s+(\d+)/mu);
-  assert.ok(pageMatch, "PDF must expose a page count");
-  const pageCount = Number(pageMatch[1]);
-  assert.ok(Number.isInteger(pageCount) && pageCount > 0, "PDF must render at least one page");
-  const outputPrefix = path.join(outDir, `${prefix}-page-1`);
-  execFileSync(pdfToPpmBin, ["-f", "1", "-l", "1", "-singlefile", "-png", pdfPath, outputPrefix], { stdio: "pipe" });
-  const renderedPath = `${outputPrefix}.png`;
-  const renderedBytes = readFileSync(renderedPath);
-  assert.ok(renderedBytes.length > 1_000, "Rendered PDF page must contain visible output");
-  return { pageCount, renderedPage: renderedPath, renderedPageBytes: renderedBytes.length };
 }
 
 export async function verifyActivityInteraction(frame) {
