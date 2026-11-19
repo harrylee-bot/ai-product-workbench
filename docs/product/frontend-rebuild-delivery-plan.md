@@ -32,7 +32,7 @@
 | FR-14 | B · 停止、运行详情及重试 | C/workspace.tsx、S/run.ts、S/use-requirement-discussion.ts | 正式取消与原冻结计划重试已连通，计划抽屉及需求区采用权威终态 | 分别停止排队与执行中的 Run，等待终态，再由原请求重试 | 核对 provider 确认、原 Run 写入指纹和冻结输入。实际回执见现行审计 |
 | FR-15 | C · 页面总览、搜索及缩略图 | C/page-stage.tsx | 待验收，懒加载缩略图与单页入口 | 综合浏览器 50 页及切换指标 | 冻结页面列表 · 核对失效缩略图和总览位置 |
 | FR-16 | C · 适应、缩放、设备尺寸及平移 | C/page-stage.tsx、C/onlook/canvas.tsx、C/onlook/device-selector.tsx | 待验收，Onlook 指针/键盘平移与缩放已接 | 综合浏览器尺寸、DPR 及页面切换 | 预览文档 · 实测触摸与四角可达 |
-| FR-17 | C · 最终原型浏览模式 | C/page-stage.tsx、C/preview.ts | 待接入，独立沙箱内交互已接 | visual-workspace 表单与保存；swarm-public 页内交互 | 冻结 HTML 与预览协议 · 验真实生成样本的完整交互 |
+| FR-17 | C · 最终原型浏览模式 | C/page-stage.tsx、C/preview.ts | 浏览模式读取固定版本并在隔离 iframe 内运行实际控件、输入绑定与页间导航 | 用[Flash 浏览器验收](../../scripts/e2e/workbench-studio-live-flash-acceptance.mjs)重跑筛选、搜索空态及详情往返。表单提交和导出渲染可用[受控 Chromium 用例](../../packages/workbench-export-core/test/prototype-runtime.chromium.spec.ts)复核 | 冻结 HTML 与预览协议。最新候选逐项复核完整交互及原生浏览器边界，运行结果见现行审计 |
 | FR-18 | C · 选择元素、图层、父级与 Esc | C/page-stage.tsx、C/geometry-bridge.ts、C/onlook/base-rect.tsx | 待验收，双向定位已接 | visual-workspace 与综合浏览器的元素、图层操作 | 节点 ID 及沙箱协议 · 复核键盘及选择退出 |
 | FR-19 | C · 蓝色轮廓、尺寸、定位失效 | C/geometry-bridge.ts、C/page-stage.tsx、C/preview.ts | 选区按 iframe 当前真实坐标投影，目标隐藏、删除或失效时清理覆盖层 | 在 Chromium/WebKit 跨 DPR、滚动、缩放及 resize 比对 DOM 与选区，阈值为 2 CSS px | 另核对原生 Safari 缩放和键盘图层流程 |
 | FR-20 | C · 批注当前版本、页面、所选元素 | C/workspace.tsx、C/page-stage.tsx | 待验收，绑定、幂等和缺失锚点提示已接 | visual-workspace 锚点与断线恢复；实际迭代待验证 | 批注与位置解析 · 使用新的真实生成版本核对 |
@@ -40,8 +40,8 @@
 | FR-22 | C · 版本历史、相对源版本差异 | C/workspace.tsx、C/page-stage.tsx | 待验收，固定选择、版本到达提示及页面变更 | lifecycle / visual-workspace 的版本操作 | 历史版本、diff、来源 · 真实迭代与历史不抢切 |
 | FR-23 | C · 版本确认、驳回及生成完成状态 | C/workspace.tsx、C/actions.tsx | 待验收，独立审核动作和冲突恢复 | lifecycle 受控审核；真实内容 hash 待测 | CAS、版本审核及冻结 · 确认、驳回后复核 hash |
 | FR-24 | D · 文档视图、来源关系及继续生成 | C/document-view.tsx、C/relations.tsx、C/artifact-links.tsx | 待接入，文档、PRD 与原型导航及分项状态已接 | requirement-workflow、document-recovery、variants | Run 产物、固定关系、文档导出 · 真三输出与分项失败 |
-| FR-25 | D · 资料、设计、知识及 Composer 引用 | C/content.tsx、C/context-library.tsx、C/composer.tsx | 待接入，来源目录分页与按 ID 核验已实现 | 综合浏览器的解析失败，input/media 与分页专项 | S3、导入、知识授权 · 验真实失败、删除、权限、替换 |
-| FR-26 | D · 交付面板分享与公开页 | C/workspace.tsx、C/project-publishing.tsx、C/public-prototype.tsx、C/public-release.tsx | 待接入，版本固定、撤销与到期处理已接 | swarm-public 匿名交互与失效，7/30 天同键恢复专项 | 分享持久化与公共读取 · 真实创建、撤销、自然到期 |
+| FR-25 | D · 资料、设计、知识及 Composer 引用 | C/content.tsx、C/context-library.tsx、C/composer.tsx | 资料目录和 Composer 消费正式来源、上传状态及按 ID 授权核验；模型目录和固定设计版本沿正式接口选择 | 以正式上传和本机上游夹具验证来源状态、对象回读与 Composer 引用；模型和预设降级用受控界面场景复核 | 核对删除、越权和替换，再以同一真实确认验证多种资料组合 |
+| FR-26 | D · 交付面板分享与公开页 | C/workspace.tsx、C/project-publishing.tsx、C/public-prototype.tsx、C/public-release.tsx | 分享从固定版本创建，匿名预览按服务状态切换可访问、撤销、过期及无效提示 | 用[匿名浏览器用例](../../scripts/e2e/workbench-studio-public-smoke.mjs)操作受控的链接与预览状态，并用实际 PostgreSQL 核对授权和撤销 | 同一真实生成版本仍须核对正式创建、匿名访问、撤销和自然到期 |
 | FR-27 | D · 交付面板 HTML/React 及发布页导出 | C/workspace.tsx、C/project-publishing.tsx、C/actions.tsx | 从正式交付入口固定历史版本，按大小和 SHA-256 校验下载，并保留已确认的导出终态 | 实际下载 HTML/React 并独立打开或构建，再模拟取消期间的迟到列表并创建新任务 | 定位 FE-L015 及后端 BE-012 至 BE-014 |
 | FR-28 | D · 首页、登录/注册、邀请、项目菜单和运行发布 | C/home.tsx、C/project-members.tsx、C/project-views.tsx、C/project-publishing.tsx | 待验收，已具新入口和局部真实权限证据 | studio-live-flash/1794930509434 真账户、邀请、撤权。邮件验证使用测试前置状态 | Auth、邮件、角色、运行发布 · 核对完整导航与实际邮件边界 |
 | FR-29 | E · 各主视图中的提示及原位恢复 | C/project-route.tsx、S/project-access.ts、C/workspace.tsx、C/document-view.tsx | 待验收，撤权、并发及丢响应状态分离 | document-recovery、真实成员撤权专项 | 401/403/404/409/412、网络 · 同一候选逐域核对 |
@@ -79,15 +79,15 @@
 | AC-12 | 迟到或重复事件并切项目 · S/run.ts | 待验收。综合浏览器双项目、事件专项 | 相同候选的 Run 事件 · 缺口及旧 attempt 实验 |
 | AC-13 | 停止、失败、从原输入重试 · C/workspace.tsx | 在排队和运行中停止并从原冻结请求重试 | 核对取消终态、provider 确认、重试产物和原 Run 无迟到写入 |
 | AC-14 | 总览搜索并进入 50 页 · C/page-stage.tsx | 待验收。综合浏览器已有 50 页样本与 P95 | 冻结样本 · 当前构建复跑及视图恢复 |
-| AC-15 | 在最终 iframe 输入、提交、切页 · C/page-stage.tsx | 待接入。受控表单、公开页实际浏览器交互 | 生成出的完整有效 HTML · 真场景录屏 |
+| AC-15 | 在最终 iframe 输入、提交、切页 · C/page-stage.tsx | 早期真实生成的冻结 iframe 已按正式流程执行筛选、搜索空态和详情往返；表单提交另由受控导出用例覆盖 | 最新真实产物逐项核对输入、提交、下拉、复选、弹层与跳转，并保留原生浏览器结果 |
 | AC-16 | 选择、图层、父级及 Esc · C/page-stage.tsx | 待验收。综合浏览器 Escape，visual-workspace 锚点选择 | 节点协议 · 当前候选全键盘 |
 | AC-17 | 尺寸、滚动、缩放与 DPR · C/geometry-bridge.ts | 比较 Chromium/WebKit 页内 DOM 和选区，覆盖 DPR、滚动、缩放、resize 及目标失效 | 阈值 ≤2 CSS px。复核 Safari 原生缩放 |
 | AC-18 | 版本/元素批注及丢响应后重试 · C/workspace.tsx | 待验收。有固定锚点和受控恢复 | 批注与冻结节点 · 真新版本删节点 |
 | AC-19 | 部分批注修订与并发 · C/workspace.tsx | 待接入。有上限与冲突处理 | 权威批注状态、冻结引用 · 真并发、源内容 hash |
 | AC-20 | 查看差异、确认/驳回与历史页 · C/workspace.tsx | 待验收。lifecycle 与差异局部检查 | 版本审核、冻结 · 实际迭代及查看不抢切 |
 | AC-21 | 三种输出与文档/原型关联 · C/project-views.tsx | 待接入。requirement-workflow 三种路由 | Flash、产物、冻结关系 · 验分项失败 |
-| AC-22 | 失效资料、模型或设计选项 · C/context-library.tsx | 待接入。资料失败、来源分页、模型/设计恢复 | 解析、授权、模型目录 · 真实故障 |
-| AC-23 | 创建、访问、撤销、到期和无效链接 · C/public-prototype.tsx | 待接入。swarm-public 有受控匿名与失效操作 | 分享实际凭据 · 真自然到期及无私人读取 |
+| AC-22 | 失效资料、模型或设计选项 · C/context-library.tsx | 实际资料链核对文件解析失败及查看者写入拒绝；来源分页、失效模型和预设恢复使用受控界面场景 | 解析、授权和模型目录。固定候选串联已删除/无权限来源、失效预设、模型故障和历史切换 |
+| AC-23 | 创建、访问、撤销、到期和无效链接 · C/public-prototype.tsx | 受控匿名浏览器验证可访问、撤销、过期、无效和局部故障；真实 PostgreSQL 单独核对服务端授权 | 同一真实生成版本从分享创建走到匿名访问、撤销和自然到期，检查私人资源隔离 |
 | AC-24 | 交付面板下载 HTML/React · C/actions.tsx | 通过正式交付入口下载固定版本 HTML/React | S3/Export Worker · 校验字节和 SHA-256，再独立构建并检查交互 |
 | AC-25 | 交付面板 · C/project-publishing.tsx | 按 FE-L015 操作取消、延迟列表、重新进入面板和新任务 | 结合 BE-012 至 BE-014 核对 Worker 清理回执、导出重试及历史升级 |
 | AC-26 | 新登录/邀请/分享与回退 · C/project-route.tsx | 待验收。真实注册与邀请接受（验证邮箱用测试前置状态） | Auth/邮件/公开路由 · 补真实登录及历史导航 |
@@ -102,7 +102,7 @@
 | AC-35 | 完成新入口全路径 · app/(workbench)/、S/api.ts | 待验收。退役路由与架构已有检查 | 真实全流程 · 发布树依赖核对 |
 | AC-36 | 舞台、选择与 Swarm · C/onlook/、C/swarm/ | 已验证开源上游、署名、派生与运行 | 同树来源校验 · 发布前复查 |
 | AC-37 | 各发一条简短及充分需求 · C/requirement-discussion.tsx | 以实际 Flash 讨论核对普通发送后仍为零 Run，比较关键澄清及充分需求就绪 | Flash/检索 · 对照授权依据和结构化状态 |
-| AC-38 | 活动字段和规则局部扩展 · C/requirement-discussion.tsx | 待接入。固定依据与改动分组已渲染 | 已发布知识 · 真局部改造及无关能力保留 |
+| AC-38 | 活动字段和规则局部扩展 · C/requirement-discussion.tsx | 正式 Flash 讨论已在已发布知识约束下形成真实确认卡，描述授权区域内的渠道筛选、搜索和分页 | 按[真实验收入口](../../scripts/e2e/workbench-studio-live-flash-acceptance.mjs)对照确认卡与实际 PRD、原型，逐条核对新增、复用和既有模块 |
 | AC-39 | 新功能与平台成本提案 · C/requirement-discussion.tsx | 待接入。平台范围显式授权门禁已接 | 平台能力检索 · 真新增模块归属 |
 | AC-40 | 缺失/冲突/区域/受限依据 · S/requirement-view-adapter.ts | 以已发布知识构造缺失、冲突、地域限制与受限样本 | 逐项核对引用范围、权限遮蔽和确认门禁 |
 | AC-41 | 修改描述、切换输出或追加资料后核对旧卡 · C/workspace.tsx | 待验收。dirty 输入与 CAS 受控回归 | 真实摘要版本 · 验新卡差异与旧确认失效 |
