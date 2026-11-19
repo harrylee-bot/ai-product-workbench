@@ -197,12 +197,13 @@ def prd_citation_mirror_repair(
 ) -> dict[str, Any] | None:
     """Offer a local quote correction proven by the current retrieval receipt."""
     if (
-        candidate.get("kind") != "prd" or candidate.get("schemaVersion") != 3
-        or candidate.get("operation", {}).get("kind") != "create"
-        or validation["issues"] != [{
+        validation["issues"] != [{
             "code": "custom", "path": ["citations"],
             "message": "PRD draft citations must exactly match content citations",
         }]
+        or candidate.get("kind") != "prd" or candidate.get("schemaVersion") != 3
+        or not isinstance(operation := candidate.get("operation"), dict)
+        or operation.get("kind") != "create"
         or not _checksum(checksum := validation.get("candidateChecksum"))
     ):
         return None

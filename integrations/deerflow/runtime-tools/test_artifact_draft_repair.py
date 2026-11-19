@@ -181,6 +181,10 @@ class ArtifactDraftRepairTests(unittest.TestCase):
             with self.subTest(changed_field=changed_field):
                 content, _ = workbench_artifact_draft_publish.func(self.runtime, 0, draft=conflicting)
                 self.assertNotIn("citationMirrorRepair", json.loads(content))
+        malformed = {**draft, "operation": "create"}
+        content, _ = workbench_artifact_draft_publish.func(self.runtime, 0, draft=malformed)
+        self.assertFalse(json.loads(content)["ok"])
+        self.assertNotIn("citationMirrorRepair", json.loads(content))
         ack, _ = self.publish("initial", draft=draft)
         repair = ack["citationMirrorRepair"]
         self.assertEqual(repair, self.repair(ack, [{
