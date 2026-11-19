@@ -92,6 +92,37 @@ describe("ready-object secure staging", () => {
     ]);
   });
 
+  it.each([
+    "text/html;charset=utf-8",
+    "Text/HTML; Charset=\"UTF-8\"",
+  ])("accepts equivalent UTF-8 HTML provider media type %s", async (mediaType) => {
+    const htmlManifest = { ...manifest, mediaType: "text/html; charset=utf-8" };
+    const recordIntegrityFailure = vi.fn(async () => undefined);
+    const staged = await stageReadyObject(htmlManifest, async () => ({
+      ...source(trustedBytes),
+      mediaType,
+    }), { recordIntegrityFailure });
+
+    await expect(consumeVerifiedReadyObjectBody(staged.body, staged.byteSize)).resolves.toEqual(trustedBytes);
+    expect(staged.manifest.mediaType).toBe(htmlManifest.mediaType);
+    expect(recordIntegrityFailure).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    "text/html",
+    "text/html;charset=iso-8859-1",
+    "text/html;charset=utf-8;charset=iso-8859-1",
+    "text/html;charset=utf-8, text/plain",
+  ])("rejects a different or ambiguous HTML provider media type %s", async (mediaType) => {
+    const htmlManifest = { ...manifest, mediaType: "text/html; charset=utf-8" };
+    const recordIntegrityFailure = vi.fn(async () => undefined);
+    await expect(stageReadyObject(htmlManifest, async () => ({
+      ...source(trustedBytes),
+      mediaType,
+    }), { recordIntegrityFailure })).rejects.toThrow("OBJECT_STORAGE_MEDIA_TYPE_MISMATCH");
+    expect(recordIntegrityFailure).toHaveBeenCalledOnce();
+  });
+
   it("fails closed when durable incident persistence does not commit", async () => {
     const recordIntegrityFailure = vi.fn(async () => {
       throw new Error("database unavailable");

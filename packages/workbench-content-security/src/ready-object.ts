@@ -10,6 +10,8 @@ const DEFAULT_MAXIMUM_OBJECT_BYTES = 512 * MEBIBYTE;
 const DEFAULT_MAXIMUM_IN_FLIGHT_BYTES = 2 * DEFAULT_MAXIMUM_OBJECT_BYTES;
 const DEFAULT_SPOOL_DIRECTORY = join(tmpdir(), "workbench-ready-object-spool");
 const inFlightBytesBySpoolDirectory = new Map<string, number>();
+// Object stores can reserialize the UTF-8 HTML media type (RFC 9110 §8.3.1).
+const UTF8_HTML_MEDIA_TYPE = /^text\/html[ \t]*;[ \t]*charset=(?:utf-8|"utf-8")$/iu;
 declare const verifiedReadyObjectBodyBrand: unique symbol;
 
 export type ReadyObjectManifest = {
@@ -215,7 +217,10 @@ function assertSourceMetadata(source: ReadyObjectSource, manifest: ReadyObjectMa
   if (source.byteSize !== manifest.byteSize) {
     throw integrityError(manifest, "OBJECT_STORAGE_BYTE_SIZE_MISMATCH", observed);
   }
-  if (source.mediaType !== manifest.mediaType) {
+  const equivalentHtmlMediaType = source.mediaType !== null
+    && UTF8_HTML_MEDIA_TYPE.test(manifest.mediaType)
+    && UTF8_HTML_MEDIA_TYPE.test(source.mediaType);
+  if (source.mediaType !== manifest.mediaType && !equivalentHtmlMediaType) {
     throw integrityError(manifest, "OBJECT_STORAGE_MEDIA_TYPE_MISMATCH", observed);
   }
   if (source.contentRange !== null) {
