@@ -35,7 +35,7 @@ afterEach(()=>{cleanup();clients.splice(0).forEach(c=>c.clear());vi.useRealTimer
 
 it('clears private previews and project queries after explicit access revocation, then verifies permission',async()=>{
  const client=await mount(); const initial=m.api.getProjectBootstrap.mock.calls.length;
- fireEvent.click(screen.getByRole('button',{name:'计划',exact:true}));
+ fireEvent.click(screen.getByRole('button',{name:'计划'}));
  expect(screen.getByRole('complementary',{name:'计划'})).toBeTruthy();
  const denied=new WorkbenchApiError({status:403,code:'PROJECT_FORBIDDEN',title:'access revoked',type:'about:blank'});
  m.api.getProjectBootstrap.mockRejectedValue(denied);
@@ -50,7 +50,7 @@ it('clears private previews and project queries after explicit access revocation
 it('restores an expanded panel on refresh without changing the deep link or explicit keyboard focus',async()=>{
  await mount();
  const initialUrl=window.location.href;
- const planButton=screen.getByRole('button',{name:'计划',exact:true});
+ const planButton=screen.getByRole('button',{name:'计划'});
  fireEvent.click(planButton);
  const close=screen.getByRole('button',{name:'关闭面板'});
  expect(document.activeElement).toBe(close);
@@ -84,7 +84,7 @@ it('restores an expanded panel on refresh without changing the deep link or expl
 
 it('scopes the restored panel to the authorized account and project and clears it on logout',async()=>{
  await mount();
- fireEvent.click(screen.getByRole('button',{name:'计划',exact:true}));
+ fireEvent.click(screen.getByRole('button',{name:'计划'}));
  const key=studioRecordKey('audit-actor','project-one','expanded-panel-v1')!;
  expect(JSON.parse(sessionStorage.getItem(key)!)).toBe('plan');
 
@@ -103,7 +103,7 @@ it('scopes the restored panel to the authorized account and project and clears i
  const client=new QueryClient({defaultOptions:{queries:{retry:false}}});
  clients.push(client);
  render(<QueryClientProvider client={client}><StudioProject projectId="project-two"/></QueryClientProvider>);
- await screen.findByRole('button',{name:'计划',exact:true});
+ await screen.findByRole('button',{name:'计划'});
  expect(screen.queryByRole('complementary',{name:'计划'})).toBeNull();
 
  cleanup();
@@ -113,7 +113,7 @@ it('scopes the restored panel to the authorized account and project and clears i
  act(()=>window.dispatchEvent(new Event('workbench:logout')));
  expect(screen.queryByRole('complementary',{name:'计划'})).toBeNull();
  expect(sessionStorage.getItem(key)).toBeNull();
- fireEvent.click(screen.getByRole('button',{name:'计划',exact:true}));
+ fireEvent.click(screen.getByRole('button',{name:'计划'}));
  expect(screen.queryByRole('complementary',{name:'计划'})).toBeNull();
  expect(sessionStorage.getItem(key)).toBeNull();
 });
