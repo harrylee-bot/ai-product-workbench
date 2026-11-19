@@ -255,7 +255,12 @@ function prdDirectoryEntries(issue: ValidationIssue, candidate: unknown): string
   const sections = draft.content.sections;
   const business = isRecord(sections) ? sections.businessRequirements : undefined;
   const functions = isRecord(business) ? business.functionSections : undefined;
-  if (!Array.isArray(functions) || !functions.every((section) => isRecord(section) && typeof section.title === "string")) return undefined;
+  // Zod can reach the directory refinement while the staged body still
+  // contains zero functions or an invalid title. Keep its ordinary issues and
+  // wait to offer a whole-directory restore until its headings are usable.
+  if (!Array.isArray(functions) || functions.length < 1 || functions.length > 50 || !functions.every((section) =>
+    isRecord(section) && typeof section.title === "string" && section.title.length > 0 && section.title.length <= 240,
+  )) return undefined;
   return prdTableOfContentsEntriesForV3(functions.map((section) => section.title));
 }
 

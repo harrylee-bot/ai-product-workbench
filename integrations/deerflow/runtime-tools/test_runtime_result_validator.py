@@ -179,6 +179,17 @@ class RuntimeResultValidatorTests(unittest.TestCase):
         self.assertFalse(result["ok"])
         self.assertTrue(all("expectedValue" not in issue for issue in result["issues"]))
 
+    def test_keeps_staged_empty_function_list_repairable(self) -> None:
+        draft = json.loads(PRD_EXAMPLE_PATH.read_text(encoding="utf-8"))["artifacts"][0]
+        draft["content"]["sections"]["businessRequirements"]["functionSections"] = []
+        result = validate_runtime_artifact_draft(draft)
+        self.assertFalse(result["ok"])
+        self.assertTrue(any(
+            issue["path"] == ["content", "sections", "businessRequirements", "functionSections"]
+            for issue in result["issues"]
+        ))
+        self.assertFalse(any("directoryEntries" in hint for hint in result.get("repairHints", [])))
+
     def test_rejects_vague_acceptance_text_before_publishing_a_prd(self) -> None:
         candidate = json.loads(PRD_EXAMPLE_PATH.read_text(encoding="utf-8"))
         section = candidate["artifacts"][0]["content"]["sections"]["businessRequirements"]["functionSections"][2]
