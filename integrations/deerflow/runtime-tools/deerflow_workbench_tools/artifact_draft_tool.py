@@ -592,12 +592,17 @@ def _artifact_draft_repair_hints(
         ):
             continue
         code = issue.get("code")
-        if code == "custom" and len(path) == 6 and path[:4] == ["content", "sections", "safetyBaseline", "rows"] and path[-1] == "applicability":
+        message = issue.get("message")
+        if (code == "custom" and isinstance(message, str) and message.startswith("a safety row marked ")
+                and len(path) == 6 and path[:4] == ["content", "sections", "safetyBaseline", "rows"]
+                and path[-1] == "applicability"):
             append({
                 "path": path,
                 "instruction": "Recheck this topic against the existing requirement body. Use 是 with an evidence note for an established safeguard, 否 only with concrete same-topic remediation already specified in the body, or 不涉及 with null remarks when the topic has no applicable behavior. Update applicability and remarks together without adding unsupported requirements.",
             })
-        if code == "custom" and len(path) == 8 and path[:6] == ["content", "sections", "introduction", "usageScenarios", "channelTable", "rows"] and path[-1] == "enabled":
+        if (code == "custom" and isinstance(message, str) and message.startswith(("enabled channel ", "disabled channel "))
+                and len(path) == 8 and path[:6] == ["content", "sections", "introduction", "usageScenarios", "channelTable", "rows"]
+                and path[-1] == "enabled"):
             append({
                 "path": path,
                 "instruction": "Reconcile the channel row with the confirmed distribution scope and the usage-scenario body. Describe an internal Web management surface separately from user-facing distribution channels. Keep the confirmed scope unchanged.",
