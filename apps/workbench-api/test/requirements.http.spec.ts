@@ -2,8 +2,10 @@ import 'reflect-metadata';
 import { ConfigService } from '@nestjs/config';
 import { IdentityService } from '../src/modules/identity/identity.service.js';
 import { Module } from '@nestjs/common';
+import { HTTP_CODE_METADATA } from '@nestjs/common/constants';
 import { NestFactory } from '@nestjs/core';
 import type { NestExpressApplication } from '@nestjs/platform-express';
+import { workbenchHttpRoutes } from '@workbench/workbench-contracts';
 import { afterEach,describe,it,expect,vi } from 'vitest';
 import { PrototypeV2Controller } from '../src/modules/prototypes/prototype-v2.controller.js';
 import { PrototypeV2Service } from '../src/modules/prototypes/prototype-v2.service.js';
@@ -31,4 +33,22 @@ describe('Requirement HTTP metadata, validation and authentication boundary (fix
  it('rejects injected or incomplete confirmation data',async()=>{const h=await harness();const r=await fetch(h.origin+'/confirm',{method:'POST',headers:{'x-workbench-dev-subject':'owner','content-type':'application/json','idempotency-key':'confirm-1234','if-match':'"6"'},body:JSON.stringify({summaryVersion:1,modelSaysConfirmed:true})});expect(r.status).toBe(400);expect(h.service.confirm).not.toHaveBeenCalled();});
  it('dispatch retry binds the confirmation, new command key and current ETag',async()=>{const h=await harness();const r=await fetch(h.origin+'/confirmations/confirmation-1/retry',{method:'POST',headers:{'x-workbench-dev-subject':'owner','idempotency-key':'retry-dispatch-1234','if-match':'"6"'}});expect(r.status).toBe(202);expect(r.headers.get('cache-control')).toBe('private, no-store');expect(h.service.retryConfirmation).toHaveBeenCalledWith('owner','session-1','confirmation-1','retry-dispatch-1234',6);});
  it('validates the session page limit and keeps the list private',async()=>{const h=await harness(),url=h.origin.replace('/requirement-sessions/session-1','/threads/thread-1/requirement-sessions');const invalid=await fetch(url+'?limit=101',{headers:{'x-workbench-dev-subject':'owner'}});expect(invalid.status).toBe(400);expect(h.service.list).not.toHaveBeenCalled();const page=await fetch(url+'?limit=2&cursor=opaque',{headers:{'x-workbench-dev-subject':'owner'}});expect(page.status).toBe(200);expect(page.headers.get('cache-control')).toBe('private, no-store');expect(h.service.list).toHaveBeenCalledWith('owner','thread-1','opaque',2);});
+});
+
+describe('Prototype action HTTP status contract', () => {
+  it.each([
+    ['confirmRevision', 'confirmPrototypeRevision'],
+    ['rejectRevision', 'rejectPrototypeRevision'],
+    ['createPreviewToken', 'createPrototypePreviewToken'],
+    ['resolveFeedback', 'resolvePrototypeFeedback'],
+    ['revokeShare', 'revokePrototypeShare'],
+    ['createShare', 'createPrototypeShare'],
+    ['createFeedback', 'createPrototypeFeedback'],
+  ] as const)('%s returns the published POST status', (method, operationId) => {
+    const route = workbenchHttpRoutes.find((entry) => entry.operationId === operationId);
+    expect(route?.method).toBe('post');
+    const handler = PrototypeV2Controller.prototype[method];
+    const status = Reflect.getMetadata(HTTP_CODE_METADATA, handler) ?? 201;
+    expect(status).toBe(route?.response.status);
+  });
 });

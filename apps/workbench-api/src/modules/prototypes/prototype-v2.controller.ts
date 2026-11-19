@@ -109,6 +109,7 @@ export class PrototypeV2Controller {
   }
 
   @Post("revisions/:revisionId/confirm")
+  @HttpCode(200)
   async confirmRevision(@CurrentPrincipal() principal: AuthenticatedPrincipal, @Param("projectId") projectId: string, @Param("revisionId") revisionId: string, @Headers("idempotency-key") key: string | undefined, @Headers("if-match") ifMatch: string | undefined, @Body(body(prototypeWorkflowActionRequestSchema)) request: z.infer<typeof prototypeWorkflowActionRequestSchema>, @Res({ passthrough: true }) response: Response) {
     const result = await this.service.confirmRevision(principal, projectId, revisionId, requireHeader(key, "Idempotency-Key"), ifMatch, request);
     response.setHeader("ETag", revisionEtag(result.revision));
@@ -116,6 +117,7 @@ export class PrototypeV2Controller {
   }
 
   @Post("revisions/:revisionId/reject")
+  @HttpCode(200)
   async rejectRevision(@CurrentPrincipal() principal: AuthenticatedPrincipal, @Param("projectId") projectId: string, @Param("revisionId") revisionId: string, @Headers("idempotency-key") key: string | undefined, @Headers("if-match") ifMatch: string | undefined, @Body(body(prototypeWorkflowActionRequestSchema)) request: z.infer<typeof prototypeWorkflowActionRequestSchema>, @Res({ passthrough: true }) response: Response) {
     const result = await this.service.rejectRevision(principal, projectId, revisionId, requireHeader(key, "Idempotency-Key"), ifMatch, request);
     response.setHeader("ETag", revisionEtag(result.revision));
@@ -130,6 +132,7 @@ export class PrototypeV2Controller {
   }
 
   @Post("feedback/:feedbackId/resolve")
+  @HttpCode(200)
   async resolveFeedback(@CurrentPrincipal() principal: AuthenticatedPrincipal, @Param("projectId") projectId: string, @Param("feedbackId") feedbackId: string, @Headers("idempotency-key") key: string | undefined, @Headers("if-match") ifMatch: string | undefined, @Body(body(prototypeWorkflowActionRequestSchema)) request: z.infer<typeof prototypeWorkflowActionRequestSchema>, @Res({ passthrough: true }) response: Response) {
     const result = await this.service.resolveFeedback(principal, projectId, feedbackId, requireHeader(key, "Idempotency-Key"), ifMatch, request);
     response.setHeader("ETag", revisionEtag(result.revision));
@@ -145,6 +148,7 @@ export class PrototypeV2Controller {
   }
 
   @Post("shares/:shareId/revoke")
+  @HttpCode(200)
   async revokeShare(@CurrentPrincipal() principal: AuthenticatedPrincipal, @Param("projectId") projectId: string, @Param("shareId") shareId: string, @Headers("idempotency-key") key: string | undefined, @Headers("if-match") ifMatch: string | undefined, @Body(body(prototypeWorkflowActionRequestSchema)) request: z.infer<typeof prototypeWorkflowActionRequestSchema>, @Res({ passthrough: true }) response: Response) {
     const result = await this.service.revokeShare(principal, projectId, shareId, requireHeader(key, "Idempotency-Key"), ifMatch, request);
     response.setHeader("ETag", revisionEtag(result.revision));
@@ -152,6 +156,7 @@ export class PrototypeV2Controller {
   }
 
   @Post("revisions/:revisionId/preview-token")
+  @HttpCode(200)
   async createPreviewToken(@CurrentPrincipal() principal: AuthenticatedPrincipal, @Param("projectId") projectId: string, @Param("revisionId") revisionId: string) {
     return this.service.createPreviewToken(principal, projectId, revisionId);
   }
